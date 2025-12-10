@@ -604,33 +604,49 @@
     async function loadAllData() {
       try {
         const menuSnapshot = await getDocs(collection(db, 'menu'));
-        const categoryMap = new Map();
+        const categoryInfo = new Map();
 
 menuSnapshot.forEach(doc => {
   const data = doc.data();
-  if (!data.category || !data.id) return;
-
   const cat = data.category;
-  const itemId = data.id; // "M0004" など
 
-  // まだカテゴリが登録されていなければ登録
-  if (!categoryMap.has(cat)) {
-    categoryMap.set(cat, itemId);
+  if (!cat) return;
+
+  // note が「店内のみ」ならテイクアウト非表示
+  const isDineInOnly = data.note === "店内のみ";
+
+  // 初回カテゴリ登録
+  if (!categoryInfo.has(cat)) {
+    categoryInfo.set(cat, {
+      order: data.categoryOrder || 999,
+      hasTakeoutItems: !isDineInOnly   // 「店内のみ」ではない商品が1つでもあればテイクアウトに表示
+    });
   } else {
-    // すでにある場合は、より小さいIDを保存
-    if (itemId < categoryMap.get(cat)) {
-      categoryMap.set(cat, itemId);
+    // 既存カテゴリに対して、「店内のみ」でない商品があれば true にする
+    const info = categoryInfo.get(cat);
+    if (!isDineInOnly) {
+      info.hasTakeoutItems = true;
     }
   }
 });
 
-// 商品ID（文字列）が小さい順にソート
-const sortedCategories = Array.from(categoryMap.entries())
-  .sort((a, b) => a[1].localeCompare(b[1]))
+// 🍀 テイクアウトで表示するカテゴリだけ残す ＆ categoryOrder 順に並べる
+const sortedCategories = Array.from(categoryInfo.entries())
+  .filter(([name, info]) => info.hasTakeoutItems)      // ← 店内のみカテゴリは消える
+  .sort((a, b) => a[1].order - b[1].order)
   .map(entry => entry[0]);
 
-// セレクトへ反映
+// セレクトボックスに入れる
 const sel = document.getElementById('category-select');
+sel.innerHTML = ""; // いったんクリア
+
+// 「全ての商品」を最初に追加
+const allOpt = document.createElement('option');
+allOpt.value = "all";
+allOpt.textContent = "全ての商品";
+sel.appendChild(allOpt);
+
+// カテゴリを追加
 sortedCategories.forEach(cat => {
   const opt = document.createElement('option');
   opt.value = cat;
