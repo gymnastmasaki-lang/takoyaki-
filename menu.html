@@ -605,10 +605,18 @@
       try {
         const menuSnapshot = await getDocs(collection(db, 'menu'));
         const urlParams = new URLSearchParams(window.location.search);
-const table = urlParams.get("table") || "";
-const isTakeout = (table.toLowerCase() === "takeout");
+let tableParam = urlParams.get('table');
 
-// --- カテゴリ情報を作成 ---
+// ★ ?table= が無い → menu.html → テイクアウト扱い
+if (!tableParam) {
+    tableParam = 'takeout';
+}
+
+// テイクアウト判定
+const isTakeout = (tableParam === 'takeout');
+
+
+// --- カテゴリ読み込み ---
 const categoryMap = new Map();
 
 menuSnapshot.forEach(doc => {
@@ -616,41 +624,28 @@ menuSnapshot.forEach(doc => {
   if (!data.category || !data.id) return;
 
   const cat = data.category;
-  const itemId = data.id;
+  const itemId = data.id; // "M0004" など
 
-  // 「店内のみ」判定
-  const isDineInOnly = data.note === "店内のみ";
+  // ★ テイクアウト中は「店内のみ」カテゴリを非表示
+  if (isTakeout && cat.includes('店内のみ')) return;
 
-  // ★ テイクアウトだけ “店内のみ” を非表示
-  const showThisItem = isTakeout ? !isDineInOnly : true;
-
+  // まだカテゴリが登録されていなければ登録
   if (!categoryMap.has(cat)) {
-    categoryMap.set(cat, {
-      minId: itemId,
-      hasVisibleItem: showThisItem
-    });
+    categoryMap.set(cat, itemId);
   } else {
-    const info = categoryMap.get(cat);
-
-    if (itemId < info.minId) {
-      info.minId = itemId;
-    }
-
-    if (showThisItem) {
-      info.hasVisibleItem = true;
+    // すでにある場合は、より小さいIDを保存
+    if (itemId < categoryMap.get(cat)) {
+      categoryMap.set(cat, itemId);
     }
   }
 });
 
-// --- カテゴリの並び替え（店内のみカテゴリはテイクアウトだけ非表示） ---
-let sortedCategories = Array.from(categoryMap.entries())
-  .filter(([cat, info]) =>
-    isTakeout ? info.hasVisibleItem : true
-  )
-  .sort((a, b) => a[1].minId.localeCompare(b[1].minId))
+// 商品ID（文字列）が小さい順にソート
+const sortedCategories = Array.from(categoryMap.entries())
+  .sort((a, b) => a[1].localeCompare(b[1]))
   .map(entry => entry[0]);
 
-// --- セレクトに反映 ---
+// セレクトへ反映
 const sel = document.getElementById('category-select');
 sortedCategories.forEach(cat => {
   const opt = document.createElement('option');
