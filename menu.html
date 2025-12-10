@@ -604,17 +604,24 @@
     async function loadAllData() {
       try {
         const menuSnapshot = await getDocs(collection(db, 'menu'));
-        const categories = new Set();
+        const categories = new Map();
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
           if (data.category) {
-            categories.add(data.category);
+            if (!categories.has(data.category)) {
+              categories.set(data.category, data.categoryOrder || 99);
+            }
           }
         });
         
+        // カテゴリを順番でソート
+        const sortedCategories = Array.from(categories.entries())
+          .sort((a, b) => a[1] - b[1])
+          .map(entry => entry[0]);
+        
         const sel = document.getElementById('category-select');
-        Array.from(categories).sort().forEach(cat => {
+        sortedCategories.forEach(cat => {
           const opt = document.createElement('option');
           opt.value = cat;
           opt.textContent = cat;
@@ -918,17 +925,19 @@
         validOrders.sort((a, b) => a - b);
         const myPosition = validOrders.indexOf(orderNumber) + 1;
         
-        // Firestoreに保存時はmyPositionを保存
+        // 実際の順番 + 1 を表示（1番目なら2、2番目なら3）
+        const displayPosition = myPosition + 1;
+        
+        // Firestoreに保存時はdisplayPositionを保存
         await updateDoc(docRef, {
-          myPosition: myPosition
+          myPosition: displayPosition
         });
         
-        // メール送信
-        await sendOrderEmail(orderNumber, tableNumber, cart, totalAmount);
+        // メール送信を削除（不要）
         
         // UIを更新
         document.getElementById('order-num').textContent = orderNumber;
-        document.getElementById('waiting').textContent = myPosition;
+        document.getElementById('waiting').textContent = displayPosition; // 実際の順番+1
         document.getElementById('order-total').textContent = '¥' + totalAmount.toLocaleString();
         document.getElementById('eat-style').textContent = tableNumber;
         
@@ -983,40 +992,7 @@
       }
     }
 
-    async function sendOrderEmail(orderNumber, tableNumber, items, totalAmount) {
-      try {
-        const emailData = {
-          to: "self-order@eay.jp",
-          subject: `【新規注文】#${orderNumber} [${tableNumber}] - 粉もん屋 八`,
-          body: `
-新しい注文が入りました
-
-━━━━━━━━━━━━━━━━━━━━
-【注文番号】 ${orderNumber}
-【テーブル】 ${tableNumber}
-【注文日時】 ${new Date().toLocaleString('ja-JP')}
-━━━━━━━━━━━━━━━━━━━━
-
-【注文内容】
-${items.map(item => `
-━━━━━━━━━━━━━━━━━━━━
-【商品】 ${item.name}
-【単価】 ¥${item.price.toLocaleString()}
-【トッピング】 ${item.toppings}
-【数量】 ${item.quantity}個
-【小計】 ¥${((item.price + item.toppingPrice) * item.quantity).toLocaleString()}
-`).join('\n')}
-━━━━━━━━━━━━━━━━━━━━
-【合計金額】 ¥${totalAmount.toLocaleString()}
-━━━━━━━━━━━━━━━━━━━━
-          `
-        };
-        
-        console.log('メール送信:', emailData);
-      } catch (e) {
-        console.error('メール送信エラー:', e);
-      }
-    }
+    // メール送信関数を削除（不要）
 
     function watchOrderStatus(orderId, orderNumber) {
       const orderRef = doc(db, 'orders', orderId);
@@ -1061,7 +1037,7 @@ ${items.map(item => `
         console.error('監視エラー:', error);
       });
       
-      // 定期的に待ち順番を更新
+      // 定期的に待ち順番を更新（5秒ごと）
       const intervalId = setInterval(async () => {
         try {
           const ordersSnapshot = await getDocs(collection(db, 'orders'));
@@ -1081,11 +1057,12 @@ ${items.map(item => `
           // 自分がまだリストにいる場合のみ更新
           if (myIndex !== -1) {
             const myPosition = myIndex + 1;
-            document.getElementById('waiting').textContent = myPosition;
+            const displayPosition = myPosition + 1; // 実際の順番+1
+            document.getElementById('waiting').textContent = displayPosition;
             
             // Firestoreも更新
             await updateDoc(orderRef, {
-              myPosition: myPosition
+              myPosition: displayPosition
             });
           }
         } catch (e) {
