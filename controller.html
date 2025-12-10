@@ -231,6 +231,35 @@
       color: white;
       font-weight: bold;
     }
+    
+    .staff-call-card {
+      background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+      color: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 15px;
+      box-shadow: 0 4px 15px rgba(255, 152, 0, 0.4);
+      animation: pulse 1s infinite;
+    }
+    
+    .staff-call-table {
+      font-size: 48px;
+      font-weight: bold;
+      text-align: center;
+      margin: 10px 0;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    .staff-call-label {
+      font-size: 24px;
+      text-align: center;
+      font-weight: bold;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+    }
   </style>
 </head>
 <body>
@@ -249,6 +278,9 @@
     <button class="btn-reset" onclick="resetWaiting()">リセット</button>
   </div>
   
+  <!-- 店員呼び出し通知 -->
+  <div id="staff-calls-container"></div>
+  
   <div id="orders-container">
     <div class="loading">読み込み中...</div>
   </div>
@@ -256,7 +288,7 @@
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, getDocs, doc, updateDoc, deleteDoc, setDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getFirestore, collection, getDocs, doc, updateDoc, deleteDoc, setDoc, Timestamp, onSnapshot, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
     // Firebase設定
     const firebaseConfig = {
@@ -270,15 +302,106 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
+    
+    let lastOrderCount = 0;
 
     window.onload = async function() {
       await loadOrders();
       await updateManualCount();
+      watchStaffCalls();
+      watchNewOrders();
       // 30秒ごとに自動更新
       setInterval(loadOrders, 30000);
       // 自動削除チェック
       setInterval(autoDeleteExpiredOrders, 60000);
     };
+
+    // 新規注文を監視して音声通知
+    function watchNewOrders() {
+      const ordersRef = collection(db, 'orders');
+      
+      onSnapshot(ordersRef, (snapshot) => {
+        const currentOrderCount = snapshot.size;
+        
+        if (lastOrderCount > 0 && currentOrderCount > lastOrderCount) {
+          // 新規注文が入った
+          console.log('🔔 新規注文検出!');
+          playOrderSound();
+          showToast('🔔 新しい注文が入りました！');
+        }
+        
+        lastOrderCount = currentOrderCount;
+      });
+    }
+    
+    // 店員呼び出しを監視
+    function watchStaffCalls() {
+      const callsRef = collection(db, 'staff_calls');
+      
+      onSnapshot(callsRef, (snapshot) => {
+        const callsContainer = document.getElementById('staff-calls-container');
+        callsContainer.innerHTML = '';
+        
+        const calls = [];
+        snapshot.forEach(doc => {
+          calls.push({
+            id: doc.id,
+            ...doc.data()
+          });
+        });
+        
+        // 最新順にソート
+        calls.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+        
+        calls.forEach(call => {
+          const card = document.createElement('div');
+          card.className = 'staff-call-card';
+          card.innerHTML = `
+            <div class="staff-call-label">🔔 お客様が呼んでいます</div>
+            <div class="staff-call-table">${call.tableNumber}</div>
+            <button class="btn-reset" style="width: 100%; margin-top: 10px;" onclick="dismissCall('${call.id}')">
+              対応完了
+            </button>
+          `;
+          callsContainer.appendChild(card);
+        });
+        
+        // 新しい呼び出しがあれば音を鳴らす
+        if (calls.length > 0) {
+          playCallSound();
+        }
+      });
+    }
+    
+    // 呼び出しを削除
+    window.dismissCall = async function(callId) {
+      try {
+        await deleteDoc(doc(db, 'staff_calls', callId));
+        showToast('✓ 対応完了にしました');
+      } catch (e) {
+        console.error('削除エラー:', e);
+      }
+    };
+    
+    // 新規注文の音声
+    function playOrderSound() {
+      try {
+        const audio = new Audio('./order.wav');
+        audio.play().catch(e => console.error('注文音再生エラー:', e));
+      } catch (e) {
+        console.error('注文音処理エラー:', e);
+      }
+    }
+    
+    // 呼び出し音声
+    function playCallSound() {
+      try {
+        const audio = new Audio('./call.wav');
+        audio.play().catch(e => console.error('呼び出し音再生エラー:', e));
+      } catch (e) {
+        console.error('呼び出し音処理エラー:', e);
+      }
+    }
 
     // 期限切れ注文を自動削除
     async function autoDeleteExpiredOrders() {
