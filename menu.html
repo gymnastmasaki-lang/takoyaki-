@@ -605,51 +605,72 @@
       try {
         const menuSnapshot = await getDocs(collection(db, 'menu'));
         const urlParams = new URLSearchParams(window.location.search);
-const tableParam = urlParams.get('table');
+const tableParam = urlParams.get('table'); // null なら menu.html
+const isTakeout = !tableParam; // menu.html のとき true
 
-// ★ menu.html（?table なし）のとき＝テイクアウト
-const isTakeout = !tableParam;
-
-
-// --- カテゴリ読み込み ---
-const categoryMap = new Map();
+// --- カテゴリごとの情報を集める ---
+// 値は { minId: "M0001", hasTakeoutVisibleItem: true/false }
+const categoryInfo = new Map();
 
 menuSnapshot.forEach(doc => {
   const data = doc.data();
-  if (!data.category || !data.id) return;
+  if (!data || !data.category || !data.id) return;
 
   const cat = data.category;
   const itemId = data.id; // "M0004" など
 
-  // ★ テイクアウト（menu.html）だけ「店内のみ」を非表示
-  if (isTakeout && cat.includes("店内のみ")) {
-    return; // ← これだけでOK（他は表示される）
-  }
+  // note が文字列で "店内のみ" を含むか（部分一致で安全に判定）
+  const isDineInOnly = typeof data.note === 'string' && data.note.includes('店内のみ');
 
-  // まだカテゴリが登録されていなければ登録
-  if (!categoryMap.has(cat)) {
-    categoryMap.set(cat, itemId);
+  // テイクアウト（menu.html）の時は「店内のみ」商品は表示対象外
+  // それ以外のページでは全て表示対象
+  const showThisItemInThisMode = isTakeout ? !isDineInOnly : true;
+
+  // カテゴリ情報を初期化または更新
+  if (!categoryInfo.has(cat)) {
+    categoryInfo.set(cat, {
+      minId: itemId,
+      hasTakeoutVisibleItem: showThisItemInThisMode  // テイクアウトで見せられる商品があるか
+    });
   } else {
-    if (itemId < categoryMap.get(cat)) {
-      categoryMap.set(cat, itemId);
-    }
+    const info = categoryInfo.get(cat);
+
+    // 最小IDを維持
+    if (itemId < info.minId) info.minId = itemId;
+
+    // 1つでも表示可能な商品があれば true にする
+    if (showThisItemInThisMode) info.hasTakeoutVisibleItem = true;
   }
 });
 
+// --- menu.html のときだけ「店内のみカテゴリ」を除外してソート ---
+const sortedCategories = Array.from(categoryInfo.entries())
+  .filter(([cat, info]) => {
+    // テイクアウト（menu.html）なら hasTakeoutVisibleItem が true のカテゴリだけ残す
+    // それ以外のページは全カテゴリを残す
+    return isTakeout ? info.hasTakeoutVisibleItem : true;
+  })
+  .sort((a, b) => a[1].minId.localeCompare(b[1].minId)) // minId の昇順
+  .map(entry => entry[0]); // カテゴリ名リストに
 
-// 商品ID（文字列）が小さい順にソート
-const sortedCategories = Array.from(categoryMap.entries())
-  .sort((a, b) => a[1].localeCompare(b[1]))
-  .map(entry => entry[0]);
-
-// セレクトへ反映
+// --- セレクトへ反映（念のためクリアしてから入れる） ---
 const sel = document.getElementById('category-select');
-sortedCategories.forEach(cat => {
-  const opt = document.createElement('option');
-  opt.value = cat;
-  opt.textContent = cat;
-  sel.appendChild(opt);
-});
+if (sel) {
+  sel.innerHTML = "";
+
+  // 必要なら「全ての商品」を先頭に入れる
+  const allOpt = document.createElement('option');
+  allOpt.value = "all";
+  allOpt.textContent = "全ての商品";
+  sel.appendChild(allOpt);
+
+  sortedCategories.forEach(cat => {
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = cat;
+    sel.appendChild(opt);
+  });
+}
         
         
         
