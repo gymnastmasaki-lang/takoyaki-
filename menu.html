@@ -604,49 +604,64 @@
     async function loadAllData() {
       try {
         const menuSnapshot = await getDocs(collection(db, 'menu'));
-        const categoryInfo = new Map();
+        // --- モード取得（takeout / th / tm / c1 / c2） ---
+const urlParams = new URLSearchParams(window.location.search);
+const mode = urlParams.get("mode") || "takeout";
+
+// --- カテゴリ → 最小商品ID & テイクアウト表示フラグ をまとめる ---
+const categoryMap = new Map();
 
 menuSnapshot.forEach(doc => {
   const data = doc.data();
+  if (!data.category || !data.id) return;
+
   const cat = data.category;
+  const itemId = data.id;  // "M0004" など
 
-  if (!cat) return;
-
-  // note が「店内のみ」ならテイクアウト非表示
+  // この商品が「店内のみ」かどうか
   const isDineInOnly = data.note === "店内のみ";
 
-  // 初回カテゴリ登録
-  if (!categoryInfo.has(cat)) {
-    categoryInfo.set(cat, {
-      order: data.categoryOrder || 999,
-      hasTakeoutItems: !isDineInOnly   // 「店内のみ」ではない商品が1つでもあればテイクアウトに表示
+  // モード別に「この商品を表示対象にするか」決定
+  // テイクアウトだけ非表示ルールを適用
+  const showThisItem =
+    mode === "takeout"
+      ? !isDineInOnly
+      : true;
+
+  // --- カテゴリ情報がまだなければ初期化 ---
+  if (!categoryMap.has(cat)) {
+    categoryMap.set(cat, {
+      minId: itemId,
+      hasVisibleItem: showThisItem   // テイクアウトで表示できる商品があるか
     });
   } else {
-    // 既存カテゴリに対して、「店内のみ」でない商品があれば true にする
-    const info = categoryInfo.get(cat);
-    if (!isDineInOnly) {
-      info.hasTakeoutItems = true;
+    const info = categoryMap.get(cat);
+
+    // 最小ID更新
+    if (itemId < info.minId) {
+      info.minId = itemId;
+    }
+
+    // テイクアウトで表示できる商品が1つでもあればOK
+    if (showThisItem) {
+      info.hasVisibleItem = true;
     }
   }
 });
 
-// 🍀 テイクアウトで表示するカテゴリだけ残す ＆ categoryOrder 順に並べる
-const sortedCategories = Array.from(categoryInfo.entries())
-  .filter(([name, info]) => info.hasTakeoutItems)      // ← 店内のみカテゴリは消える
-  .sort((a, b) => a[1].order - b[1].order)
+// --- テイクアウトは「店内のみカテゴリ」を除外する ---
+let sortedCategories = Array.from(categoryMap.entries())
+  .filter(([cat, info]) =>
+    mode === "takeout"
+      ? info.hasVisibleItem   // takeout → 可視商品があるカテゴリだけ
+      : true                   // 他モード → 全カテゴリ表示
+  )
+  .sort((a, b) => a[1].minId.localeCompare(b[1].minId))
   .map(entry => entry[0]);
 
-// セレクトボックスに入れる
+// --- セレクトへ反映 ---
 const sel = document.getElementById('category-select');
-sel.innerHTML = ""; // いったんクリア
 
-// 「全ての商品」を最初に追加
-const allOpt = document.createElement('option');
-allOpt.value = "all";
-allOpt.textContent = "全ての商品";
-sel.appendChild(allOpt);
-
-// カテゴリを追加
 sortedCategories.forEach(cat => {
   const opt = document.createElement('option');
   opt.value = cat;
