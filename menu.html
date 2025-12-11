@@ -572,20 +572,7 @@
       }
     }
 
-    async function updateTopWaitingCount() {
-  try {
-    const ordersSnapshot = await getDocs(collection(db, 'orders'));
-    const now = new Date();
-    const validOrders = new Set();
-    
-    ordersSnapshot.forEach(doc => {
-      const data = doc.data();
-      if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
-        validOrders.add(data.orderNumber);
-      }
-    });
-        
-        // ■■■ ただ今のお待ち人数（生きている注文数 + 水増し） ■■■
+    // ■■■ ただ今のお待ち人数（生きている注文数 + 水増し） ■■■
 async function updateTopWaitingCount() {
   try {
     const now = new Date();
@@ -611,7 +598,7 @@ async function updateTopWaitingCount() {
       }
     });
 
-    // 合計（あなた仕様）
+    // 合計
     const totalWaiting = aliveOrders + manualCount;
 
     // 表示反映
@@ -621,7 +608,6 @@ async function updateTopWaitingCount() {
     console.error("待ち人数取得エラー:", error);
   }
 }
-
     async function loadAllData() {
       try {
         const menuSnapshot = await getDocs(collection(db, 'menu'));
@@ -989,12 +975,18 @@ ordersSnapshot.forEach(doc => {
   }
 });
 
-// wait ドキュメントの値（初期値）を取得
-const waitDoc = await getDoc(doc(db, 'wait', '2'));
-const baseWait = waitDoc.exists() ? (waitDoc.data().number || 0) : 0;
+// 手動水増し（manualCount）を取得
+const settingsSnapshot = await getDocs(collection(db, 'settings'));
+let manualCount = 0;
 
-// 初期順位（注文前の “お客様は◯番目” と同じ数字）
-const initialPosition = aliveOrders.length + baseWait;
+settingsSnapshot.forEach(doc => {
+  if (doc.id === 'waiting') {
+    manualCount = doc.data().manualCount || 0;
+  }
+});
+
+// 初期順位（＝ただ今のお待ち人数 と 同じ数字）
+const initialPosition = aliveOrders.length + manualCount;
 
 // Firestore に保存
 await updateDoc(docRef, {
