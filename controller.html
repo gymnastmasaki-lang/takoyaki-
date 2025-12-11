@@ -64,6 +64,10 @@
       background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
     }
     
+    .btn-soldout {
+      background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%);
+    }
+    
     .manual-waiting-card {
       background: white;
       padding: 15px;
@@ -231,6 +235,105 @@
       color: white;
       font-weight: bold;
     }
+    
+    .hidden {
+      display: none;
+    }
+    
+    /* 品切れ管理ページのスタイル */
+    .category-filter {
+      background: white;
+      padding: 15px;
+      border-radius: 15px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    
+    .category-filter label {
+      display: block;
+      font-size: 16px;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    
+    .category-filter select {
+      width: 100%;
+      padding: 15px;
+      font-size: 18px;
+      border: 3px solid #9C27B0;
+      border-radius: 12px;
+      background: white;
+      color: #333;
+      font-weight: 500;
+    }
+    
+    .soldout-item {
+      background: white;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .soldout-item.sold-out {
+      background: #f5f5f5;
+      opacity: 0.7;
+    }
+    
+    .soldout-item-info {
+      flex: 1;
+    }
+    
+    .soldout-item-name {
+      font-size: 16px;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 5px;
+    }
+    
+    .soldout-item-price {
+      font-size: 14px;
+      color: #666;
+    }
+    
+    .soldout-badge {
+      background: #f44336;
+      color: white;
+      padding: 5px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: bold;
+      margin-top: 5px;
+      display: inline-block;
+    }
+    
+    .soldout-toggle-btn {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s;
+      color: white;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+    }
+    
+    .soldout-toggle-btn.set-soldout {
+      background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+    }
+    
+    .soldout-toggle-btn.set-available {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    }
+    
+    .soldout-toggle-btn:active {
+      transform: scale(0.95);
+    }
   </style>
 </head>
 <body>
@@ -238,19 +341,48 @@
     <h1>🎛️ 注文管理コントローラー</h1>
   </div>
   
-  <div class="top-controls">
-    <button class="big-btn btn-refresh" onclick="loadOrders()">🔄 最新情報に更新</button>
-    <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">👥 待ち人数+1</button>
+  <!-- 注文管理ページ -->
+  <div id="page-orders">
+    <div class="top-controls">
+      <button class="big-btn btn-refresh" onclick="loadOrders()">🔄 最新情報に更新</button>
+      <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">👥 待ち人数+1</button>
+    </div>
+    
+    <div style="margin-bottom: 15px;">
+      <button class="big-btn btn-soldout" style="width: 100%;" onclick="showSoldOutPage()">
+        🚫 品切れ設定
+      </button>
+    </div>
+    
+    <div class="manual-waiting-card">
+      <div class="manual-waiting-label">手動追加の待ち人数</div>
+      <div class="manual-count" id="manual-count">0</div>
+      <button class="btn-reset" onclick="resetWaiting()">リセット</button>
+    </div>
+    
+    <div id="orders-container">
+      <div class="loading">読み込み中...</div>
+    </div>
   </div>
   
-  <div class="manual-waiting-card">
-    <div class="manual-waiting-label">手動追加の待ち人数</div>
-    <div class="manual-count" id="manual-count">0</div>
-    <button class="btn-reset" onclick="resetWaiting()">リセット</button>
-  </div>
-  
-  <div id="orders-container">
-    <div class="loading">読み込み中...</div>
+  <!-- 品切れ設定ページ -->
+  <div id="page-soldout" class="hidden">
+    <button class="big-btn btn-refresh" style="margin-bottom: 15px;" onclick="backToOrders()">
+      ← 注文管理に戻る
+    </button>
+    
+    <div class="header" style="margin-bottom: 15px;">
+      <h1>🚫 品切れ設定</h1>
+    </div>
+    
+    <div class="category-filter">
+      <label>カテゴリを選んでください</label>
+      <select id="soldout-category-select">
+        <option value="">全ての商品</option>
+      </select>
+    </div>
+    
+    <div id="soldout-menu-list"></div>
   </div>
 
   <!-- Firebase SDK -->
@@ -276,7 +408,35 @@
       await updateManualCount();
       // 10秒ごとに自動更新
       setInterval(loadOrders, 10000);
+      
+      // 品切れの自動リセットチェック（1分ごと）
+      checkAndResetSoldOut();
+      setInterval(checkAndResetSoldOut, 60000);
     };
+
+    // 深夜1時に品切れ設定を自動リセット
+    async function checkAndResetSoldOut() {
+      const now = new Date();
+      const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+      const hour = jstNow.getHours();
+      const minute = jstNow.getMinutes();
+      
+      // 深夜1時0分〜1時1分の間にリセット
+      if (hour === 1 && minute === 0) {
+        try {
+          const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
+          const promises = [];
+          soldOutSnapshot.forEach(doc => {
+            promises.push(deleteDoc(doc.ref));
+          });
+          await Promise.all(promises);
+          console.log('品切れ設定をリセットしました');
+          showToast('✅ 品切れ設定をリセットしました');
+        } catch (e) {
+          console.error('品切れリセットエラー:', e);
+        }
+      }
+    }
 
     async function loadOrders() {
       try {
@@ -488,6 +648,142 @@
         console.error('手動カウント取得エラー:', e);
       }
     }
+
+    // 品切れ管理機能
+    let allMenuItemsController = [];
+    
+    window.showSoldOutPage = async function() {
+      try {
+        // メニューデータを読み込み
+        const menuSnapshot = await getDocs(collection(db, 'menu'));
+        const categories = new Map();
+        const items = [];
+        
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.category) {
+            if (!categories.has(data.category)) {
+              categories.set(data.category, data.categoryOrder || 99);
+            }
+          }
+          items.push({
+            id: data.id,
+            category: data.category,
+            name: data.name,
+            price: data.price,
+            image: data.image || ''
+          });
+        });
+        
+        // カテゴリを順番でソート
+        const sortedCategories = Array.from(categories.entries())
+          .sort((a, b) => a[1] - b[1])
+          .map(entry => entry[0]);
+        
+        const sel = document.getElementById('soldout-category-select');
+        sel.innerHTML = '<option value="">全ての商品</option>';
+        sortedCategories.forEach(cat => {
+          const opt = document.createElement('option');
+          opt.value = cat;
+          opt.textContent = cat;
+          sel.appendChild(opt);
+        });
+        
+        // IDでソート
+        items.sort((a, b) => {
+          if (a.id < b.id) return -1;
+          if (a.id > b.id) return 1;
+          return 0;
+        });
+        
+        allMenuItemsController = items;
+        
+        // カテゴリフィルター設定
+        sel.onchange = function() {
+          if (this.value === '') {
+            displaySoldOutItems(allMenuItemsController);
+          } else {
+            const filtered = allMenuItemsController.filter(item => item.category === this.value);
+            displaySoldOutItems(filtered);
+          }
+        };
+        
+        await displaySoldOutItems(items);
+        
+        // ページ切り替え
+        document.getElementById('page-orders').style.display = 'none';
+        document.getElementById('page-soldout').classList.remove('hidden');
+      } catch (e) {
+        console.error('品切れページ表示エラー:', e);
+        showToast('エラー: ' + e.message);
+      }
+    };
+    
+    window.backToOrders = function() {
+      document.getElementById('page-soldout').classList.add('hidden');
+      document.getElementById('page-orders').style.display = 'block';
+    };
+    
+    async function displaySoldOutItems(items) {
+      const list = document.getElementById('soldout-menu-list');
+      list.innerHTML = '';
+      
+      // 品切れ情報を取得
+      const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
+      const soldOutIds = new Set();
+      soldOutSnapshot.forEach(doc => {
+        soldOutIds.add(doc.data().menuId);
+      });
+      
+      items.forEach(item => {
+        const isSoldOut = soldOutIds.has(item.id);
+        const div = document.createElement('div');
+        div.className = 'soldout-item' + (isSoldOut ? ' sold-out' : '');
+        
+        div.innerHTML = `
+          <div class="soldout-item-info">
+            <div class="soldout-item-name">${item.name}</div>
+            <div class="soldout-item-price">¥${item.price.toLocaleString()}</div>
+            ${isSoldOut ? '<span class="soldout-badge">品切れ中</span>' : ''}
+          </div>
+          <button class="soldout-toggle-btn ${isSoldOut ? 'set-available' : 'set-soldout'}" 
+                  onclick="toggleSoldOut('${item.id}', ${!isSoldOut})">
+            ${isSoldOut ? '✓ 販売再開' : '🚫 品切れ'}
+          </button>
+        `;
+        
+        list.appendChild(div);
+      });
+    }
+    
+    window.toggleSoldOut = async function(menuId, setSoldOut) {
+      try {
+        if (setSoldOut) {
+          // 品切れに設定
+          await setDoc(doc(db, 'sold_out', menuId), {
+            menuId: menuId,
+            timestamp: Timestamp.now()
+          });
+          showToast('✓ 品切れに設定しました');
+        } else {
+          // 品切れ解除
+          await deleteDoc(doc(db, 'sold_out', menuId));
+          showToast('✓ 販売を再開しました');
+        }
+        
+        // 表示を更新
+        const sel = document.getElementById('soldout-category-select');
+        if (sel.value === '') {
+          await displaySoldOutItems(allMenuItemsController);
+        } else {
+          const filtered = allMenuItemsController.filter(item => item.category === sel.value);
+          await displaySoldOutItems(filtered);
+        }
+      } catch (e) {
+        console.error('品切れ設定エラー:', e);
+        showToast('エラー: ' + e.message);
+      }
+    };
 
     function showToast(message) {
       const toast = document.createElement('div');
