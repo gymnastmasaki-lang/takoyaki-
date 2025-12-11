@@ -105,27 +105,6 @@
       align-items: center;
       text-align: left;
       gap: 15px;
-      position: relative;
-    }
-    
-    .menu-item.sold-out {
-      opacity: 0.5;
-      cursor: not-allowed;
-      background: #f5f5f5;
-    }
-    
-    .menu-item.sold-out::after {
-      content: '品切れ';
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: #f44336;
-      color: white;
-      padding: 5px 12px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: bold;
-      box-shadow: 0 2px 8px rgba(244, 67, 54, 0.4);
     }
     
     .menu-item:active {
@@ -303,25 +282,6 @@
       padding: 18px;
       margin-bottom: 15px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      position: relative;
-    }
-    
-    .cart-item.sold-out {
-      background: #ffebee;
-      border: 2px solid #f44336;
-    }
-    
-    .cart-item.sold-out::after {
-      content: '⚠️ 品切れ';
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: #f44336;
-      color: white;
-      padding: 5px 10px;
-      border-radius: 8px;
-      font-size: 12px;
-      font-weight: bold;
     }
     
     .cart-item-header {
@@ -468,7 +428,7 @@
       <div class="menu-grid" id="menu-list"></div>
     </div>
     <button id="cart-btn" class="btn-primary fixed-cart-btn hidden" onclick="showCart()">カートを見る</button>
-    <button class="btn-primary call-staff-btn" onclick="callStaff()">📞 店員を呼ぶ</button>
+    <button class="btn-primary call-staff-btn" onclick="callStaff()">🔔 店員を呼ぶ</button>
   </div>
 
   <!-- トッピング選択ページ -->
@@ -572,7 +532,6 @@
     let qty = 1;
     let allMenuItems = [];
     let currentOrderId = null;
-    let soldOutIds = new Set(); // 品切れ商品ID
     
     // URLパラメータからテーブル番号を取得
     const urlParams = new URLSearchParams(window.location.search);
@@ -588,9 +547,6 @@
       // 深夜1時の注文番号リセットチェック
       checkAndResetOrderNumber();
       setInterval(checkAndResetOrderNumber, 60000); // 1分ごとにチェック
-      
-      // 品切れ情報の監視（メニュー読み込み後に開始）
-      watchSoldOutItems();
     };
 
     // 深夜1時に注文番号をリセット
@@ -614,39 +570,6 @@
           console.error('リセットエラー:', e);
         }
       }
-    }
-
-    // 品切れ情報をリアルタイム監視
-    function watchSoldOutItems() {
-      const soldOutRef = collection(db, 'sold_out');
-      
-      onSnapshot(soldOutRef, (snapshot) => {
-        soldOutIds.clear();
-        snapshot.forEach(doc => {
-          soldOutIds.add(doc.data().menuId);
-        });
-        updateSoldOutDisplay();
-      });
-    }
-    
-    function updateSoldOutDisplay() {
-      const menuItems = document.querySelectorAll('.menu-item');
-      menuItems.forEach(item => {
-        const menuId = item.dataset.menuId;
-        if (soldOutIds.has(menuId)) {
-          item.classList.add('sold-out');
-          item.onclick = () => {
-            alert('申し訳ございません。この商品は現在品切れです。');
-          };
-        } else {
-          item.classList.remove('sold-out');
-          // 元のクリックイベントを復元
-          const itemData = allMenuItems.find(i => i.id === menuId);
-          if (itemData) {
-            item.onclick = () => selectItem(itemData);
-          }
-        }
-      });
     }
 
     async function updateTopWaitingCount() {
@@ -680,78 +603,81 @@
 
     async function loadAllData() {
       try {
-        console.log('データ読み込み開始...');
         const menuSnapshot = await getDocs(collection(db, 'menu'));
-        console.log('メニューデータ取得完了:', menuSnapshot.size, '件');
-        
         const urlParams = new URLSearchParams(window.location.search);
-        const tableParam = urlParams.get('table');
-        const isTakeout = !tableParam; // menu.html の時は true
-        console.log('テイクアウトモード:', isTakeout);
+const tableParam = urlParams.get('table'); // null なら menu.html
+const isTakeout = !tableParam; // menu.html のとき true
 
-        // カテゴリごとの情報を集める
-        const categoryInfo = new Map();
+// --- カテゴリごとの情報を集める ---
+// 値は { minId: "M0001", hasTakeoutVisibleItem: true/false }
+const categoryInfo = new Map();
 
-        menuSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (!data || !data.category || !data.id) {
-            console.warn('不完全なデータ:', doc.id, data);
-            return;
-          }
+menuSnapshot.forEach(doc => {
+  const data = doc.data();
+  if (!data || !data.category || !data.id) return;
 
-          const cat = data.category;
-          const itemId = data.id;
+  const cat = data.category;
+  const itemId = data.id; // "M0004" など
 
-          const isDineInOnly = typeof data.note === 'string' && data.note.includes('店内のみ');
-          const showThisItemInThisMode = isTakeout ? !isDineInOnly : true;
+  // note が文字列で "店内のみ" を含むか（部分一致で安全に判定）
+  const isDineInOnly = typeof data.note === 'string' && data.note.includes('店内のみ');
 
-          if (!categoryInfo.has(cat)) {
-            categoryInfo.set(cat, {
-              minId: itemId,
-              hasTakeoutVisibleItem: showThisItemInThisMode
-            });
-          } else {
-            const info = categoryInfo.get(cat);
-            if (itemId < info.minId) info.minId = itemId;
-            if (showThisItemInThisMode) info.hasTakeoutVisibleItem = true;
-          }
-        });
+  // テイクアウト（menu.html）の時は「店内のみ」商品は表示対象外
+  // それ以外のページでは全て表示対象
+  const showThisItemInThisMode = isTakeout ? !isDineInOnly : true;
 
-        const sortedCategories = Array.from(categoryInfo.entries())
-          .filter(([cat, info]) => {
-            return isTakeout ? info.hasTakeoutVisibleItem : true;
-          })
-          .sort((a, b) => a[1].minId.localeCompare(b[1].minId))
-          .map(entry => entry[0]);
+  // カテゴリ情報を初期化または更新
+  if (!categoryInfo.has(cat)) {
+    categoryInfo.set(cat, {
+      minId: itemId,
+      hasTakeoutVisibleItem: showThisItemInThisMode  // テイクアウトで見せられる商品があるか
+    });
+  } else {
+    const info = categoryInfo.get(cat);
 
-        console.log('カテゴリ:', sortedCategories);
+    // 最小IDを維持
+    if (itemId < info.minId) info.minId = itemId;
 
-        const sel = document.getElementById('category-select');
-        if (sel) {
-          sel.innerHTML = "";
+    // 1つでも表示可能な商品があれば true にする
+    if (showThisItemInThisMode) info.hasTakeoutVisibleItem = true;
+  }
+});
 
-          const allOpt = document.createElement('option');
-          allOpt.value = "all";
-          allOpt.textContent = "全ての商品";
-          sel.appendChild(allOpt);
+// --- menu.html のときだけ「店内のみカテゴリ」を除外してソート ---
+const sortedCategories = Array.from(categoryInfo.entries())
+  .filter(([cat, info]) => {
+    // テイクアウト（menu.html）なら hasTakeoutVisibleItem が true のカテゴリだけ残す
+    // それ以外のページは全カテゴリを残す
+    return isTakeout ? info.hasTakeoutVisibleItem : true;
+  })
+  .sort((a, b) => a[1].minId.localeCompare(b[1].minId)) // minId の昇順
+  .map(entry => entry[0]); // カテゴリ名リストに
 
-          sortedCategories.forEach(cat => {
-            const opt = document.createElement('option');
-            opt.value = cat;
-            opt.textContent = cat;
-            sel.appendChild(opt);
-          });
-          
-          console.log('カテゴリセレクト設定完了');
-        } else {
-          console.error('category-select要素が見つかりません');
-        }
+// --- セレクトへ反映（念のためクリアしてから入れる） ---
+const sel = document.getElementById('category-select');
+if (sel) {
+  sel.innerHTML = "";
+
+  // 必要なら「全ての商品」を先頭に入れる
+  const allOpt = document.createElement('option');
+  allOpt.value = "all";
+  allOpt.textContent = "全ての商品";
+  sel.appendChild(allOpt);
+
+  sortedCategories.forEach(cat => {
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = cat;
+    sel.appendChild(opt);
+  });
+}
+        
+        
         
         await loadAllMenu();
-        console.log('全データ読み込み完了');
       } catch (e) {
         console.error('データ読み込みエラー:', e);
-        alert('データの読み込みに失敗しました: ' + e.message);
+        alert('データの読み込みに失敗しました');
       }
     }
 
@@ -789,63 +715,33 @@
         
         allMenuItems = items;
         displayMenuItems(items);
-        
-        // メニュー表示後に品切れ情報を取得して反映
-        await loadSoldOutItems();
       } catch (e) {
         console.error('メニュー読み込みエラー:', e);
       }
     }
 
-    // 品切れ情報を読み込み
-    async function loadSoldOutItems() {
-      try {
-        const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
-        soldOutIds.clear();
-        soldOutSnapshot.forEach(doc => {
-          soldOutIds.add(doc.data().menuId);
-        });
-        updateSoldOutDisplay();
-      } catch (e) {
-        console.error('品切れ情報取得エラー:', e);
-      }
-    }
-
     document.addEventListener('DOMContentLoaded', function() {
       const sel = document.getElementById('category-select');
-      if (sel) {
-        sel.addEventListener('change', function() {
-          if (this.value === '' || this.value === 'all') {
-            displayMenuItems(allMenuItems);
-          } else {
-            const filtered = allMenuItems.filter(item => item.category === this.value);
-            displayMenuItems(filtered);
-          }
-        });
-      }
+      sel.addEventListener('change', function() {
+        if (this.value === '') {
+          displayMenuItems(allMenuItems);
+        } else {
+          const filtered = allMenuItems.filter(item => item.category === this.value);
+          displayMenuItems(filtered);
+        }
+      });
     });
 
     function displayMenuItems(items) {
       const list = document.getElementById('menu-list');
-      if (!list) {
-        console.error('menu-list要素が見つかりません');
-        return;
-      }
-      
       list.innerHTML = '';
-      
-      if (!items || items.length === 0) {
-        list.innerHTML = '<div style="text-align:center;color:#666;padding:40px;">商品が見つかりませんでした</div>';
-        return;
-      }
-      
       items.forEach(item => {
         const div = document.createElement('div');
         div.className = 'menu-item';
-        div.dataset.menuId = item.id;
         
         let imageHtml = '';
         if (item.image) {
+          // GitHubの画像ファイル名の場合
           const imageSrc = item.image.includes('http') ? item.image : `./${item.image}`;
           imageHtml = `<img src="${imageSrc}" class="menu-item-image" onerror="this.style.display='none'">`;
         }
@@ -861,30 +757,406 @@
         div.onclick = () => selectItem(item);
         list.appendChild(div);
       });
-      
-      console.log(`${items.length}個の商品を表示しました`);
     }
 
     async function selectItem(item) {
-  // 品切れチェック
-  if (soldOutIds.has(item.id)) {
-    alert('申し訳ございません。この商品は現在品切れです。');
-    return; // ここで止める
-  }
+      currentItem = item;
+      selectedToppings = [];
+      qty = 1;
+      
+      document.getElementById('item-info').innerHTML = `
+        <div class="menu-item-name" style="font-size: 20px;">${item.name}</div>
+        <div class="menu-item-price" style="font-size: 24px; margin-top: 10px;">¥${item.price.toLocaleString()}</div>
+      `;
+      
+      if (item.toppingsId) {
+        const toppingIds = item.toppingsId.split(',').map(id => id.trim());
+        const toppingsSnapshot = await getDocs(collection(db, 'toppings'));
+        const toppings = [];
+        const seenIds = new Set();
+        
+        toppingsSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (toppingIds.includes(data.id) && !seenIds.has(data.id)) {
+            toppings.push({
+              ...data,
+              order: data.order || 99
+            });
+            seenIds.add(data.id);
+          }
+        });
+        
+        // 順番でソート
+        toppings.sort((a, b) => a.order - b.order);
+        
+        const list = document.getElementById('topping-list');
+        list.innerHTML = '';
+        if (toppings.length > 0) {
+          toppings.forEach(t => {
+            const div = document.createElement('div');
+            div.className = 'topping-item';
+            div.innerHTML = `
+              <span>${t.name}</span>
+              <span style="color: #4CAF50; font-weight: bold;">${t.price > 0 ? '+¥' + t.price.toLocaleString() : '無料'}</span>
+            `;
+            div.onclick = () => {
+              div.classList.toggle('selected');
+              const idx = selectedToppings.findIndex(x => x.id === t.id);
+              if (idx > -1) selectedToppings.splice(idx, 1);
+              else selectedToppings.push(t);
+              updateSubtotal();
+            };
+            list.appendChild(div);
+          });
+        } else {
+          list.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">トッピングはありません</div>';
+        }
+      } else {
+        document.getElementById('topping-list').innerHTML = '<div style="text-align:center;color:#999;padding:20px;">トッピングはありません</div>';
+      }
+      
+      updateSubtotal();
+      showPage('page-topping');
+    }
 
-  // ▼ここから元の処理（商品選択処理）
-  selectedItem = item;
+    window.changeQty = function(d) {
+      qty = Math.max(1, qty + d);
+      document.getElementById('qty').textContent = qty;
+      updateSubtotal();
+    };
 
-  // トッピングページを表示
-  document.getElementById('page-menu').classList.add('hidden');
-  document.getElementById('page-topping').classList.remove('hidden');
+    function updateSubtotal() {
+      let total = currentItem.price;
+      selectedToppings.forEach(t => total += t.price || 0);
+      document.getElementById('subtotal').textContent = '¥' + (total * qty).toLocaleString();
+    }
 
-  // トッピングの表示
-  displayToppings(item);
+    window.addToCart = function() {
+      let toppingPrice = 0;
+      const toppingNames = selectedToppings.map(t => {
+        toppingPrice += t.price || 0;
+        return t.name;
+      }).join(', ') || 'なし';
+      
+      cart.push({
+        id: currentItem.id,
+        name: currentItem.name,
+        price: currentItem.price,
+        toppings: toppingNames,
+        toppingPrice: toppingPrice,
+        quantity: qty
+      });
+      
+      backToMenu();
+    };
 
-  // 注文数量の初期化
-  document.getElementById('quantity').value = 1;
+    window.backToMenu = function() {
+      showPage('page-menu');
+      updateCartButton();
+    };
 
-  // トッピングをリセット
-  selectedToppings = [];
-}
+    window.continueShopping = function() {
+      backToMenu();
+    };
+
+    function updateCartButton() {
+      const btn = document.getElementById('cart-btn');
+      if (cart.length > 0) {
+        btn.classList.remove('hidden');
+        btn.textContent = `カートを見る (${cart.length}点)`;
+        btn.onclick = showCart;
+      } else {
+        btn.classList.add('hidden');
+      }
+    }
+
+    window.showCart = function() {
+      if (cart.length === 0) {
+        alert('カートが空です');
+        return;
+      }
+      
+      const list = document.getElementById('cart-items');
+      list.innerHTML = '';
+      let total = 0;
+      
+      cart.forEach(item => {
+        const subtotal = (item.price + item.toppingPrice) * item.quantity;
+        total += subtotal;
+        const div = document.createElement('div');
+        div.className = 'cart-item';
+        div.innerHTML = `
+          <div class="cart-item-header">
+            <div class="cart-item-name">${item.name}</div>
+            <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
+          </div>
+          <div class="cart-item-details">
+            単価: ¥${item.price.toLocaleString()} × ${item.quantity}個
+          </div>
+          <div class="cart-item-details" style="color: #4CAF50;">
+            トッピング: ${item.toppings}
+          </div>
+        `;
+        list.appendChild(div);
+      });
+      
+      document.getElementById('cart-total').textContent = '¥' + total.toLocaleString();
+      showPage('page-cart');
+    };
+
+    window.confirmOrder = async function() {
+      if (cart.length === 0) {
+        alert('カートが空です');
+        return;
+      }
+      
+      try {
+        // 今日の最大注文番号を取得（深夜1時以降の注文）
+        const now = new Date();
+        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        
+        const todayStart = new Date(jstNow);
+        todayStart.setHours(1, 0, 0, 0);
+        if (jstNow < todayStart) {
+          todayStart.setDate(todayStart.getDate() - 1);
+        }
+        
+        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        let maxOrderNumber = 618;
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          const orderDate = data.timestamp.toDate();
+          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+          
+          if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
+            maxOrderNumber = data.orderNumber;
+          }
+        });
+        
+        const orderNumber = maxOrderNumber + 1;
+        
+        // 合計金額を計算
+        let totalAmount = 0;
+        cart.forEach(item => {
+          totalAmount += (item.price + item.toppingPrice) * item.quantity;
+        });
+        
+        // Firestoreに保存
+        const deleteAt = new Date(now.getTime() + 10 * 60 * 1000); // 10分後
+        
+        const orderData = {
+          orderNumber: orderNumber,
+          timestamp: Timestamp.fromDate(now),
+          tableNumber: tableNumber,
+          items: cart,
+          totalAmount: totalAmount,
+          status: 'pending',
+          deleteAt: Timestamp.fromDate(deleteAt),
+          cancelledAt: null
+        };
+        
+        const docRef = await addDoc(collection(db, 'orders'), orderData);
+        currentOrderId = docRef.id;
+        
+        // 自分の順番を計算（自分より前の注文数 + 1）
+        const validOrders = [];
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
+            validOrders.push(data.orderNumber);
+          }
+        });
+        validOrders.push(orderNumber);
+        validOrders.sort((a, b) => a - b);
+        const myPosition = validOrders.indexOf(orderNumber) + 1;
+        
+        // 実際の順番 + 1 を表示（1番目なら2、2番目なら3）
+        const displayPosition = myPosition + 1;
+        
+        // Firestoreに保存時はdisplayPositionを保存
+        await updateDoc(docRef, {
+          myPosition: displayPosition
+        });
+
+
+        
+        // メール送信を削除（不要）
+        
+        // UIを更新
+        document.getElementById('order-num').textContent = orderNumber;
+        document.getElementById('waiting').textContent = displayPosition; // 実際の順番+1
+        document.getElementById('order-total').textContent = '¥' + totalAmount.toLocaleString();
+        document.getElementById('eat-style').textContent = tableNumber;
+        
+        const list = document.getElementById('order-items');
+        list.innerHTML = '';
+        cart.forEach(item => {
+          const subtotal = (item.price + item.toppingPrice) * item.quantity;
+          const div = document.createElement('div');
+          div.className = 'cart-item';
+          div.innerHTML = `
+            <div class="cart-item-header">
+              <div class="cart-item-name">${item.name}</div>
+              <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
+            </div>
+            <div class="cart-item-details">
+              数量: ${item.quantity}個
+            </div>
+            <div class="cart-item-details" style="color: #4CAF50;">
+              トッピング: ${item.toppings}
+            </div>
+          `;
+          list.appendChild(div);
+        });
+        
+        cart = [];
+        showPage('page-complete');
+        
+        // リアルタイムでステータス監視
+        watchOrderStatus(docRef.id, orderNumber);
+        
+        
+        
+      } catch (e) {
+        console.error('注文エラー:', e);
+        alert('注文に失敗しました: ' + e.message);
+      }
+    };
+
+    
+    // メール送信関数を削除（不要）
+
+
+
+    function watchOrderStatus(orderId, orderNumber) {
+      const orderRef = doc(db, 'orders', orderId);
+      
+      const unsubscribe = onSnapshot(orderRef, (docSnap) => {
+        if (!docSnap.exists()) {
+          // 注文が削除された = 完了
+          console.log('✅ 注文完了を検出!');
+          const statusDiv = document.getElementById('order-status');
+          statusDiv.style.background = 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)';
+          statusDiv.style.borderColor = '#fcb69f';
+          statusDiv.style.color = 'white';
+          statusDiv.innerHTML = '✅ 商品が出来上がりました<br>画面の注文番号を店員に見せて商品を受け取ってください';
+          
+          // 完了したら1番目
+          document.getElementById('waiting').textContent = '1';
+          
+          playCompletionSound();
+          unsubscribe();
+        } else {
+          const data = docSnap.data();
+          if (data.cancelledAt) {
+            // キャンセルされた
+            console.log('❌ キャンセル検出');
+            const statusDiv = document.getElementById('order-status');
+            statusDiv.style.background = '#f44336';
+            statusDiv.style.borderColor = '#d32f2f';
+            statusDiv.style.color = 'white';
+            statusDiv.innerHTML = '❌ 番号をお呼びしましたがご不在でしたので<br>注文をキャンセルさせて頂きました';
+            
+            // キャンセルされたら1番目
+            document.getElementById('waiting').textContent = '1';
+            
+            playCancelSound();
+            unsubscribe();
+          } else if (data.myPosition) {
+            // 保存されている順番を表示
+            document.getElementById('waiting').textContent = data.myPosition;
+          }
+        }
+      }, (error) => {
+        console.error('監視エラー:', error);
+      });
+      
+      // 定期的に待ち順番を更新（5秒ごと）
+      const intervalId = setInterval(async () => {
+        try {
+          const ordersSnapshot = await getDocs(collection(db, 'orders'));
+          const now = new Date();
+          const validOrders = [];
+          
+          ordersSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
+              validOrders.push(data.orderNumber);
+            }
+          });
+          
+          validOrders.sort((a, b) => a - b);
+          const myIndex = validOrders.indexOf(orderNumber);
+          
+          // 自分がまだリストにいる場合のみ更新
+          if (myIndex !== -1) {
+            const myPosition = myIndex + 1;
+            const displayPosition = myPosition + 1; // 実際の順番+1
+            document.getElementById('waiting').textContent = displayPosition;
+            
+            // Firestoreも更新
+            await updateDoc(orderRef, {
+              myPosition: displayPosition
+            });
+          }
+        } catch (e) {
+          console.error('待ち順番更新エラー:', e);
+        }
+      }, 5000);
+    }
+
+    function showPage(id) {
+      ['page-menu', 'page-topping', 'page-cart', 'page-complete'].forEach(p => {
+        document.getElementById(p).classList.add('hidden');
+      });
+      document.getElementById(id).classList.remove('hidden');
+      
+      if (id === 'page-menu') {
+        updateCartButton();
+      }
+    }
+
+    function playCompletionSound() {
+      try {
+        const audio = new Audio('./done.wav');
+        audio.play().catch(e => {
+          console.error('完成音再生エラー:', e);
+        });
+      } catch (e) {
+        console.error('完成音処理エラー:', e);
+      }
+    }
+
+    function playCancelSound() {
+      try {
+        const audio = new Audio('./cancel.wav');
+        audio.play().catch(e => {
+          console.error('キャンセル音再生エラー:', e);
+        });
+      } catch (e) {
+        console.error('キャンセル音処理エラー:', e);
+      }
+    }
+
+    // 店員呼び出し機能
+    window.callStaff = async function() {
+      try {
+        const callData = {
+          tableNumber: tableNumber,
+          timestamp: Timestamp.now()
+        };
+        
+        await addDoc(collection(db, 'staff_calls'), callData);
+        alert('店員を呼びました！');
+      } catch (e) {
+        console.error('呼び出しエラー:', e);
+        alert('呼び出しに失敗しました');
+      }
+    };
+
+    window.loadAllMenu = loadAllMenu;
+    window.selectItem = selectItem;
+  </script>
+</body>
+</html>
