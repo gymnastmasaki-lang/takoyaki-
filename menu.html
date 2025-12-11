@@ -572,34 +572,38 @@
       }
     }
 
-    async function updateTopWaitingCount() {
-      try {
-        const ordersSnapshot = await getDocs(collection(db, 'orders'));
-        const now = new Date();
-        const validOrders = new Set();
-        
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
-            validOrders.add(data.orderNumber);
-          }
-        });
-        
-        // 手動待ち人数を取得
-        const settingsSnapshot = await getDocs(collection(db, 'settings'));
-        let manualCount = 0;
-        settingsSnapshot.forEach(doc => {
-          if (doc.id === 'waiting') {
-            manualCount = doc.data().manualCount || 0;
-          }
-        });
-        
-        const totalWaiting = 1 + validOrders.size + manualCount;
-        document.getElementById('top-waiting').textContent = totalWaiting;
-      } catch (e) {
-        console.error('待ち人数取得エラー:', e);
+    // ■■■ ただ今のお待ち人数（生きている注文数 + 水増し） ■■■
+async function updateTopWaitingCount() {
+  try {
+    const now = new Date();
+    const snapshot = await getDocs(collection(db, "orders"));
+    let aliveOrders = 0;
+
+    snapshot.forEach((doc) => {
+      const d = doc.data();
+      if (d.deleteAt && d.deleteAt.toDate() > now && !d.cancelledAt) {
+        aliveOrders++;
       }
-    }
+    });
+
+    const settingsSnapshot = await getDocs(collection(db, "settings"));
+    let manualCount = 0;
+
+    settingsSnapshot.forEach((doc) => {
+      if (doc.id === "waiting") {
+        manualCount = doc.data().manualCount || 0;
+      }
+    });
+
+    const totalWaiting = aliveOrders + manualCount + 1;
+document.getElementById("top-waiting").textContent = totalWaiting;
+
+    document.getElementById("top-waiting").textContent = totalWaiting;
+
+  } catch (error) {
+    console.error("待ち人数取得エラー:", error);
+  }
+}
 
     async function loadAllData() {
       try {
@@ -904,204 +908,166 @@ if (sel) {
       showPage('page-cart');
     };
 
-    window.confirmOrder = async function() {
-      if (cart.length === 0) {
-        alert('カートが空です');
-        return;
+    window.confirmOrder = async function () {
+  if (cart.length === 0) {
+    alert('カートが空です');
+    return;
+  }
+
+  try {
+    const now = new Date();
+    const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+
+    const todayStart = new Date(jstNow);
+    todayStart.setHours(1, 0, 0, 0);
+    if (jstNow < todayStart) {
+      todayStart.setDate(todayStart.getDate() - 1);
+    }
+
+    const ordersSnapshot = await getDocs(collection(db, 'orders'));
+    let maxOrderNumber = 618;
+
+    ordersSnapshot.forEach(doc => {
+      const data = doc.data();
+      const orderDate = data.timestamp.toDate();
+      const jstOrderDate = new Date(orderDate.getTime() + 9 * 60 * 60 * 1000);
+
+      if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
+        maxOrderNumber = data.orderNumber;
       }
-      
-      try {
-        // 今日の最大注文番号を取得（深夜1時以降の注文）
-        const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        
-        const todayStart = new Date(jstNow);
-        todayStart.setHours(1, 0, 0, 0);
-        if (jstNow < todayStart) {
-          todayStart.setDate(todayStart.getDate() - 1);
-        }
-        
-        const ordersSnapshot = await getDocs(collection(db, 'orders'));
-        let maxOrderNumber = 618;
-        
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          const orderDate = data.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-          
-          if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
-            maxOrderNumber = data.orderNumber;
-          }
-        });
-        
-        const orderNumber = maxOrderNumber + 1;
-        
-        // 合計金額を計算
-        let totalAmount = 0;
-        cart.forEach(item => {
-          totalAmount += (item.price + item.toppingPrice) * item.quantity;
-        });
-        
-        // Firestoreに保存
-        const deleteAt = new Date(now.getTime() + 10 * 60 * 1000); // 10分後
-        
-        const orderData = {
-          orderNumber: orderNumber,
-          timestamp: Timestamp.fromDate(now),
-          tableNumber: tableNumber,
-          items: cart,
-          totalAmount: totalAmount,
-          status: 'pending',
-          deleteAt: Timestamp.fromDate(deleteAt),
-          cancelledAt: null
-        };
-        
-        const docRef = await addDoc(collection(db, 'orders'), orderData);
-        currentOrderId = docRef.id;
-        
-        // 自分の順番を計算（自分より前の注文数 + 1）
-        const validOrders = [];
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
-            validOrders.push(data.orderNumber);
-          }
-        });
-        validOrders.push(orderNumber);
-        validOrders.sort((a, b) => a - b);
-        const myPosition = validOrders.indexOf(orderNumber) + 1;
-        
-        // 実際の順番 + 1 を表示（1番目なら2、2番目なら3）
-        const displayPosition = myPosition + 1;
-        
-        // Firestoreに保存時はdisplayPositionを保存
-        await updateDoc(docRef, {
-          myPosition: displayPosition
-        });
-        
-        // メール送信を削除（不要）
-        
-        // UIを更新
-        document.getElementById('order-num').textContent = orderNumber;
-        document.getElementById('waiting').textContent = displayPosition; // 実際の順番+1
-        document.getElementById('order-total').textContent = '¥' + totalAmount.toLocaleString();
-        document.getElementById('eat-style').textContent = tableNumber;
-        
-        const list = document.getElementById('order-items');
-        list.innerHTML = '';
-        cart.forEach(item => {
-          const subtotal = (item.price + item.toppingPrice) * item.quantity;
-          const div = document.createElement('div');
-          div.className = 'cart-item';
-          div.innerHTML = `
-            <div class="cart-item-header">
-              <div class="cart-item-name">${item.name}</div>
-              <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
-            </div>
-            <div class="cart-item-details">
-              数量: ${item.quantity}個
-            </div>
-            <div class="cart-item-details" style="color: #4CAF50;">
-              トッピング: ${item.toppings}
-            </div>
-          `;
-          list.appendChild(div);
-        });
-        
-        cart = [];
-        showPage('page-complete');
-        
-        // リアルタイムでステータス監視
-        watchOrderStatus(docRef.id, orderNumber);
-        
-        
-        
-      } catch (e) {
-        console.error('注文エラー:', e);
-        alert('注文に失敗しました: ' + e.message);
-      }
+    });
+
+    const orderNumber = maxOrderNumber + 1;
+
+    // 合計金額
+    let totalAmount = 0;
+    cart.forEach(item => {
+      totalAmount += (item.price + item.toppingPrice) * item.quantity;
+    });
+
+    const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
+
+    const orderData = {
+      orderNumber,
+      timestamp: Timestamp.fromDate(now),
+      tableNumber,
+      items: cart,
+      totalAmount,
+      status: 'pending',
+      deleteAt: Timestamp.fromDate(deleteAt),
+      cancelledAt: null
     };
+
+    const docRef = await addDoc(collection(db, 'orders'), orderData);
+    currentOrderId = docRef.id;
+
+    // 生きている注文
+    const aliveOrders = [];
+    ordersSnapshot.forEach(doc => {
+      const d = doc.data();
+      if (d.deleteAt && d.deleteAt.toDate() > now && !d.cancelledAt) {
+        aliveOrders.push(d.orderNumber);
+      }
+    });
+
+    // 水増し
+    const settingsSnapshot = await getDocs(collection(db, 'settings'));
+    let manualCount = 0;
+    settingsSnapshot.forEach(doc => {
+      if (doc.id === 'waiting') {
+        manualCount = doc.data().manualCount || 0;
+      }
+    });
+
+    // 初期順位（注文前の待ち人数）
+    const initialPosition = aliveOrders.length + manualCount;
+
+    await updateDoc(docRef, {
+      initialPosition: initialPosition
+    });
+
+    document.getElementById("waiting").textContent = initialPosition;
+
+    // 正しい引数で監視開始
+    watchOrderStatus(docRef.id, orderNumber);
+// 注文番号ページへ移動
+window.location.href = "order-status.html?orderId=" + docRef.id + "&orderNumber=" + orderNumber;
+
+  } catch (e) {
+    console.error("注文エラー:", e);
+    alert("注文に失敗しました: " + e.message);
+  }
+};
+// 注文番号ページへ移動
+window.location.href = "order-status.html?id=" + docRef.id + "&num=" + orderNumber;
 
     
     // メール送信関数を削除（不要）
 
-    function watchOrderStatus(orderId, orderNumber) {
-      const orderRef = doc(db, 'orders', orderId);
-      
-      const unsubscribe = onSnapshot(orderRef, (docSnap) => {
-        if (!docSnap.exists()) {
-          // 注文が削除された = 完了
-          console.log('✅ 注文完了を検出!');
-          const statusDiv = document.getElementById('order-status');
-          statusDiv.style.background = 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)';
-          statusDiv.style.borderColor = '#fcb69f';
-          statusDiv.style.color = 'white';
-          statusDiv.innerHTML = '✅ 商品が出来上がりました<br>画面の注文番号を店員に見せて商品を受け取ってください';
-          
-          // 完了したら1番目
-          document.getElementById('waiting').textContent = '1';
-          
-          playCompletionSound();
-          unsubscribe();
-        } else {
-          const data = docSnap.data();
-          if (data.cancelledAt) {
-            // キャンセルされた
-            console.log('❌ キャンセル検出');
-            const statusDiv = document.getElementById('order-status');
-            statusDiv.style.background = '#f44336';
-            statusDiv.style.borderColor = '#d32f2f';
-            statusDiv.style.color = 'white';
-            statusDiv.innerHTML = '❌ 番号をお呼びしましたがご不在でしたので<br>注文をキャンセルさせて頂きました';
-            
-            // キャンセルされたら1番目
-            document.getElementById('waiting').textContent = '1';
-            
-            playCancelSound();
-            unsubscribe();
-          } else if (data.myPosition) {
-            // 保存されている順番を表示
-            document.getElementById('waiting').textContent = data.myPosition;
-          }
-        }
-      }, (error) => {
-        console.error('監視エラー:', error);
-      });
-      
-      // 定期的に待ち順番を更新（5秒ごと）
-      const intervalId = setInterval(async () => {
-        try {
-          const ordersSnapshot = await getDocs(collection(db, 'orders'));
-          const now = new Date();
-          const validOrders = [];
-          
-          ordersSnapshot.forEach(doc => {
-            const data = doc.data();
-            if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
-              validOrders.push(data.orderNumber);
-            }
-          });
-          
-          validOrders.sort((a, b) => a - b);
-          const myIndex = validOrders.indexOf(orderNumber);
-          
-          // 自分がまだリストにいる場合のみ更新
-          if (myIndex !== -1) {
-            const myPosition = myIndex + 1;
-            const displayPosition = myPosition + 1; // 実際の順番+1
-            document.getElementById('waiting').textContent = displayPosition;
-            
-            // Firestoreも更新
-            await updateDoc(orderRef, {
-              myPosition: displayPosition
-            });
-          }
-        } catch (e) {
-          console.error('待ち順番更新エラー:', e);
-        }
-      }, 5000);
+    // ■■■ 注文確定後の監視（順位は減るだけ） ■■■
+async function watchOrderStatus(orderId, orderNumber) {
+  const orderRef = doc(db, "orders", orderId);
+  const unsubscribe = onSnapshot(orderRef, (docSnap) => {
+    if (!docSnap.exists()) {
+      document.getElementById("waiting").textContent = "1";
+      playCompletionSound();
+      unsubscribe();
+      return;
     }
 
+    const data = docSnap.data();
+
+    if (data.cancelledAt) {
+      document.getElementById("waiting").textContent = "1";
+      playCancelSound();
+      unsubscribe();
+      return;
+    }
+
+    // 初期順位は固定（増えない）
+    if (data.initialPosition) {
+      document.getElementById("waiting").textContent = data.initialPosition;
+    }
+  });
+
+  // 5秒ごとに減る方向だけ更新
+  const intervalId = setInterval(async () => {
+    try {
+      const now = new Date();
+      const mySnap = await getDoc(orderRef);
+
+      if (!mySnap.exists()) {
+        clearInterval(intervalId);
+        return;
+      }
+
+      const myData = mySnap.data();
+      const initialPosition = myData.initialPosition;
+
+      // 生きている注文
+      const snapshot = await getDocs(collection(db, "orders"));
+      let currentAlive = [];
+
+      snapshot.forEach((doc) => {
+        const d = doc.data();
+        if (d.deleteAt && d.deleteAt.toDate() > now && !d.cancelledAt) {
+          currentAlive.push(d.orderNumber);
+        }
+      });
+
+      // 自分より前の注文
+      const frontCount = currentAlive.filter(num => num < orderNumber).length;
+
+      // 減るだけの順位
+      const currentPosition = initialPosition - frontCount;
+
+      document.getElementById("waiting").textContent = currentPosition;
+
+    } catch (error) {
+      console.error("待ち順番更新エラー:", error);
+    }
+  }, 5000);
+}
     function showPage(id) {
       ['page-menu', 'page-topping', 'page-cart', 'page-complete'].forEach(p => {
         document.getElementById(p).classList.add('hidden');
