@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="robots" content="noindex, nofollow">
   <title>粉もん屋 八 下赤塚店</title>
   <style>
     * {
@@ -22,8 +23,8 @@
     }
     
     .header {
-      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-      color: white;
+      background: #FFD700;
+      color: #000;
       padding: 20px;
       text-align: center;
       box-shadow: 0 2px 15px rgba(0,0,0,0.1);
@@ -35,7 +36,8 @@
     .header h1 {
       font-size: 28px;
       margin-bottom: 5px;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+      -webkit-text-stroke: 1px #FF0000;
     }
     
     .container {
@@ -368,10 +370,16 @@
     
     .waiting-info {
       font-size: 22px;
-      color: white;
+      color: #FFD700;
       margin: 25px 0;
       font-weight: bold;
       text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
+      -webkit-text-stroke: 1px #FF0000;
+    }
+    
+    .waiting-info span {
+      font-size: 66px;
+      display: inline-block;
     }
     
     .warning-box {
@@ -410,10 +418,11 @@
     .page-title {
       font-size: 24px;
       font-weight: bold;
-      color: white;
+      color: #FFD700;
       margin-bottom: 20px;
       text-align: center;
       text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+      -webkit-text-stroke: 1px #FF0000;
     }
     
     .top-waiting-info {
@@ -449,7 +458,7 @@
 </head>
 <body>
   <div class="header">
-    <h1>🍱 粉もん屋 八 下赤塚店</h1>
+    <h1>粉もん屋 八 下赤塚店</h1>
   </div>
 
   <!-- メニュー一覧ページ -->
@@ -468,7 +477,7 @@
       <div class="menu-grid" id="menu-list"></div>
     </div>
     <button id="cart-btn" class="btn-primary fixed-cart-btn hidden" onclick="showCart()">カートを見る</button>
-    <button class="btn-primary call-staff-btn" onclick="callStaff()">📞 店員を呼ぶ</button>
+    <button class="btn-primary call-staff-btn" onclick="callStaff()">📞 店員を呼ぶ / お会計</button>
   </div>
 
   <!-- トッピング選択ページ -->
@@ -509,19 +518,19 @@
   <div id="page-complete" class="hidden">
     <div class="container">
       <div class="order-complete">
-        <h2 style="color: white; font-size: 28px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">✅ ご注文ありがとうございます</h2>
+        <h2 style="color: #000; font-size: 24px; text-shadow: 2px 2px 4px rgba(0,0,0,0.1);">✅ ご注文ありがとうございます</h2>
         <div style="background: white; padding: 15px; border-radius: 10px; margin: 20px 0;">
           <div style="font-size: 18px; color: #666; margin-bottom: 5px;">ご利用スタイル</div>
           <div style="font-size: 28px; font-weight: bold; color: #ff6b9d;" id="eat-style">-</div>
         </div>
         
-        <div class="waiting-info">お客様は <span id="waiting">1</span>番目にお待ち頂いてます</div>
+        <div class="waiting-info">お客様は <span id="waiting">1</span>番目に<br>お待ち頂いてます</div>
         
-        <div style="color: white; font-size: 22px; margin: 15px 0;">注文番号</div>
+        <div style="color: #000; font-size: 22px; margin: 15px 0;">注文番号</div>
         <div class="order-number-display" id="order-num">000</div>
         
         <!-- 注文ステータス表示 -->
-        <div id="order-status" class="warning-box" style="background: linear-gradient(135deg, #a8edea 0%, #89d4cf 100%); color: white; border-color: #89d4cf;">
+        <div id="order-status" class="warning-box" style="background: linear-gradient(135deg, #a8edea 0%, #89d4cf 100%); color: #000; border-color: #89d4cf;">
           ⏳ ただ今準備しています、しばらくお待ちください
         </div>
         
@@ -625,8 +634,17 @@
         snapshot.forEach(doc => {
           soldOutIds.add(doc.data().menuId);
         });
+        
+        // 時間帯による自動品切れを適用
+        applyTimeBasedSoldOut();
+        
         updateSoldOutDisplay();
       });
+      
+      // 1分ごとに時間チェック（時間が変わったら自動品切れを再適用）
+      setInterval(() => {
+        loadSoldOutItems();
+      }, 60000);
     }
     
     function updateSoldOutDisplay() {
@@ -636,7 +654,7 @@
         if (soldOutIds.has(menuId)) {
           item.classList.add('sold-out');
           item.onclick = () => {
-            alert('申し訳ございません。この商品は現在品切れです。');
+            alert('申し訳ございません。\nこの商品は現在品切れです。');
           };
         } else {
           item.classList.remove('sold-out');
@@ -805,9 +823,42 @@
         soldOutSnapshot.forEach(doc => {
           soldOutIds.add(doc.data().menuId);
         });
+        
+        // 時間帯による自動品切れチェック
+        applyTimeBasedSoldOut();
+        
         updateSoldOutDisplay();
       } catch (e) {
         console.error('品切れ情報取得エラー:', e);
+      }
+    }
+    
+    // 時間帯による自動品切れ設定
+    function applyTimeBasedSoldOut() {
+      const now = new Date();
+      const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+      const hour = jstNow.getHours();
+      const minute = jstNow.getMinutes();
+      
+      // テーブル番号を確認（店内かテイクアウトか）
+      const isEatIn = tableNumber !== 'テイクアウト';
+      
+      // 時間を分単位で計算（22:30 = 22.5時間）
+      const currentTime = hour + (minute / 60);
+      
+      // 店内: 22:00〜翌朝7:00で全商品品切れ
+      // テイクアウト: 22:30〜翌朝7:00で全商品品切れ
+      const eatInCutoff = (hour >= 22 || hour < 7);
+      const takeoutCutoff = (currentTime >= 22.5 || hour < 7);
+      
+      if ((isEatIn && eatInCutoff) || (!isEatIn && takeoutCutoff)) {
+        // 全商品を品切れにする
+        allMenuItems.forEach(item => {
+          soldOutIds.add(item.id);
+        });
+        console.log(`時刻: ${hour}:${minute} - ${isEatIn ? '店内' : 'テイクアウト'}: 全商品品切れ`);
+      } else {
+        console.log(`時刻: ${hour}:${minute} - ${isEatIn ? '店内' : 'テイクアウト'}: 営業中`);
       }
     }
 
@@ -868,7 +919,7 @@
     async function selectItem(item) {
       // 品切れチェック
       if (soldOutIds.has(item.id)) {
-        alert('申し訳ございません。この商品は現在品切れです。');
+        alert('申し訳ございません。\nこの商品は現在品切れです。');
         return;
       }
       
@@ -944,7 +995,7 @@
 
     window.addToCart = async function() {
       if (soldOutIds.has(currentItem.id)) {
-        alert('申し訳ございません。この商品は現在品切れになりました。');
+        alert('申し訳ございません。\nこの商品は現在品切れになりました。');
         backToMenu();
         return;
       }
@@ -1164,10 +1215,12 @@
           const statusDiv = document.getElementById('order-status');
           statusDiv.style.background = 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)';
           statusDiv.style.borderColor = '#fcb69f';
-          statusDiv.style.color = 'white';
+          statusDiv.style.color = '#FFD700';
+          statusDiv.style.webkitTextStroke = '1px #FF0000';
           statusDiv.innerHTML = '✅ 商品が出来上がりました<br>画面の注文番号を店員に見せて商品を受け取ってください';
           document.getElementById('waiting').textContent = '1';
           playCompletionSound();
+          showUserNotification('商品が出来上がりました', '画面の注文番号を店員に見せて商品を受け取ってください');
           unsubscribe();
         } else {
           const data = docSnap.data();
@@ -1179,6 +1232,7 @@
             statusDiv.innerHTML = '❌ 番号をお呼びしましたがご不在でしたので<br>注文をキャンセルさせて頂きました';
             document.getElementById('waiting').textContent = '1';
             playCancelSound();
+            showUserNotification('注文をキャンセルしました', '番号をお呼びしましたがご不在でしたので注文をキャンセルさせて頂きました');
             unsubscribe();
           } else if (data.myPosition) {
             document.getElementById('waiting').textContent = data.myPosition;
@@ -1212,6 +1266,27 @@
           console.error('待ち順番更新エラー:', e);
         }
       }, 5000);
+    }
+    
+    // ユーザー向け通知を表示
+    function showUserNotification(title, body) {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        const notification = new Notification(title, {
+          body: body,
+          icon: '/favicon.ico',
+          badge: '/favicon.ico',
+          tag: 'user-notification',
+          requireInteraction: true,
+          vibrate: [200, 100, 200]
+        });
+        
+        notification.onclick = function() {
+          window.focus();
+          // 注文完了ページに移動
+          showPage('page-complete');
+          notification.close();
+        };
+      }
     }
 
     function showPage(id) {

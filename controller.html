@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
   <title>注文管理コントローラー</title>
   <style>
     * {
@@ -21,7 +22,7 @@
     .header {
       background: white;
       color: #667eea;
-      padding: 20px;
+      padding: 15px 20px;
       border-radius: 15px;
       margin-bottom: 15px;
       text-align: center;
@@ -29,8 +30,9 @@
     }
     
     .header h1 {
-      font-size: 24px;
+      font-size: 20px;
       font-weight: bold;
+      line-height: 1.2;
     }
     
     .top-controls {
@@ -240,6 +242,35 @@
       display: none;
     }
     
+    .staff-call-card {
+      background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+      color: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 15px;
+      box-shadow: 0 4px 15px rgba(255, 152, 0, 0.4);
+      animation: pulse 1s infinite;
+    }
+    
+    .staff-call-table {
+      font-size: 48px;
+      font-weight: bold;
+      text-align: center;
+      margin: 10px 0;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    .staff-call-label {
+      font-size: 24px;
+      text-align: center;
+      font-weight: bold;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+    }
+    
     /* 品切れ管理ページのスタイル */
     .category-filter {
       background: white;
@@ -338,7 +369,7 @@
 </head>
 <body>
   <div class="header">
-    <h1>🎛️ 注文管理コントローラー</h1>
+    <h1>高田の注文管理コントローラー</h1>
   </div>
   
   <!-- 注文管理ページ -->
@@ -348,9 +379,12 @@
       <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">👥 待ち人数+1</button>
     </div>
     
-    <div style="margin-bottom: 15px;">
-      <button class="big-btn btn-soldout" style="width: 100%;" onclick="showSoldOutPage()">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+      <button class="big-btn btn-soldout" onclick="showSoldOutPage()">
         🚫 品切れ設定
+      </button>
+      <button class="big-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="bulkSoldOut()">
+        🚫 一括品切れ
       </button>
     </div>
     
@@ -359,6 +393,9 @@
       <div class="manual-count" id="manual-count">0</div>
       <button class="btn-reset" onclick="resetWaiting()">リセット</button>
     </div>
+    
+    <!-- 店員呼び出し通知 -->
+    <div id="staff-calls-container"></div>
     
     <div id="orders-container">
       <div class="loading">読み込み中...</div>
@@ -412,7 +449,197 @@
       // 品切れの自動リセットチェック（1分ごと）
       checkAndResetSoldOut();
       setInterval(checkAndResetSoldOut, 60000);
+      
+      // 通知とオーディオの許可を取得
+      await requestNotificationPermission();
+      
+      // 新規注文と店員呼び出しの監視
+      watchNewOrders();
+      watchStaffCalls();
     };
+    
+    let lastOrderCount = 0;
+    let audioEnabled = false;
+    
+    // 通知許可をリクエスト
+    async function requestNotificationPermission() {
+      if ('Notification' in window) {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          console.log('通知が許可されました');
+        }
+      }
+      
+      // 音声再生を有効化
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+      `;
+      
+      const button = document.createElement('button');
+      button.textContent = '🔊 音声通知を有効にする';
+      button.style.cssText = `
+        padding: 30px 50px;
+        font-size: 24px;
+        font-weight: bold;
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        color: white;
+        border: none;
+        border-radius: 15px;
+        cursor: pointer;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+      `;
+      
+      button.onclick = () => {
+        audioEnabled = true;
+        overlay.remove();
+        // テスト音を再生
+        const testAudio = new Audio('./order.wav');
+        testAudio.volume = 0.1;
+        testAudio.play().catch(e => console.log('テスト音再生:', e));
+      };
+      
+      overlay.appendChild(button);
+      document.body.appendChild(overlay);
+    }
+    
+    // 新規注文を監視
+    function watchNewOrders() {
+      const ordersRef = collection(db, 'orders');
+      
+      onSnapshot(ordersRef, (snapshot) => {
+        const currentOrderCount = snapshot.size;
+        
+        if (lastOrderCount > 0 && currentOrderCount > lastOrderCount) {
+          console.log('🔔 新規注文検出!');
+          playOrderSound();
+          showNotification('注文が入りました', '新しい注文が入りました！');
+          showToast('🔔 新しい注文が入りました！');
+        }
+        
+        lastOrderCount = currentOrderCount;
+      });
+    }
+    
+    // 店員呼び出しを監視
+    function watchStaffCalls() {
+      const callsRef = collection(db, 'staff_calls');
+      let isFirstLoad = true;
+      
+      onSnapshot(callsRef, (snapshot) => {
+        const callsContainer = document.getElementById('staff-calls-container');
+        if (!callsContainer) return;
+        
+        callsContainer.innerHTML = '';
+        
+        const calls = [];
+        snapshot.forEach(doc => {
+          calls.push({
+            id: doc.id,
+            ...doc.data()
+          });
+        });
+        
+        calls.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+        
+        calls.forEach(call => {
+          const card = document.createElement('div');
+          card.className = 'staff-call-card';
+          card.innerHTML = `
+            <div class="staff-call-label">🔔 お客様が呼んでいます</div>
+            <div class="staff-call-table">${call.tableNumber}</div>
+            <button class="btn-reset" style="width: 100%; margin-top: 10px;" onclick="dismissCall('${call.id}')">
+              対応完了
+            </button>
+          `;
+          callsContainer.appendChild(card);
+        });
+        
+        if (!isFirstLoad && calls.length > 0) {
+          console.log('🔔 店員呼び出し検出!');
+          playCallSound();
+          showNotification('お客様がお呼びです', `${calls[0].tableNumber}のお客様が店員を呼んでいます`);
+        }
+        isFirstLoad = false;
+      });
+    }
+    
+    // 呼び出しを削除
+    window.dismissCall = async function(callId) {
+      try {
+        await deleteDoc(doc(db, 'staff_calls', callId));
+        showToast('✓ 対応完了にしました');
+      } catch (e) {
+        console.error('削除エラー:', e);
+      }
+    };
+    
+    // 注文音を再生
+    function playOrderSound() {
+      if (!audioEnabled) {
+        console.log('音声未有効化');
+        return;
+      }
+      
+      try {
+        console.log('🔊 注文音再生を試行中...');
+        const audio = new Audio('./order.wav');
+        audio.volume = 1.0;
+        
+        audio.play()
+          .then(() => console.log('✅ order.wav 再生成功'))
+          .catch(e => console.error('❌ order.wav 再生エラー:', e));
+      } catch (e) {
+        console.error('❌ order.wav 処理エラー:', e);
+      }
+    }
+    
+    // 呼び出し音を再生
+    function playCallSound() {
+      if (!audioEnabled) {
+        console.log('音声未有効化');
+        return;
+      }
+      
+      try {
+        console.log('🔊 呼び出し音再生を試行中...');
+        const audio = new Audio('./call.wav');
+        audio.volume = 1.0;
+        
+        audio.play()
+          .then(() => console.log('✅ call.wav 再生成功'))
+          .catch(e => console.error('❌ call.wav 再生エラー:', e));
+      } catch (e) {
+        console.error('❌ call.wav 処理エラー:', e);
+      }
+    }
+    
+    // ブラウザ通知を表示
+    function showNotification(title, body) {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        const notification = new Notification(title, {
+          body: body,
+          icon: '/favicon.ico',
+          badge: '/favicon.ico',
+          tag: 'order-notification',
+          requireInteraction: true
+        });
+        
+        notification.onclick = function() {
+          window.focus();
+          notification.close();
+        };
+      }
+    }
 
     // 深夜1時に品切れ設定を自動リセット
     async function checkAndResetSoldOut() {
@@ -735,6 +962,13 @@
         soldOutIds.add(doc.data().menuId);
       });
       
+      // 商品IDでソート（M0001, M0002...の順）
+      items.sort((a, b) => {
+        if (a.id < b.id) return -1;
+        if (a.id > b.id) return 1;
+        return 0;
+      });
+      
       items.forEach(item => {
         const isSoldOut = soldOutIds.has(item.id);
         const div = document.createElement('div');
@@ -781,6 +1015,37 @@
         }
       } catch (e) {
         console.error('品切れ設定エラー:', e);
+        showToast('エラー: ' + e.message);
+      }
+    };
+    
+    // 一括品切れ機能
+    window.bulkSoldOut = async function() {
+      if (!confirm('全商品を品切れに設定しますか？')) {
+        return;
+      }
+      
+      try {
+        // メニューを取得
+        const menuSnapshot = await getDocs(collection(db, 'menu'));
+        const promises = [];
+        
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.id) {
+            promises.push(
+              setDoc(doc(db, 'sold_out', data.id), {
+                menuId: data.id,
+                timestamp: Timestamp.now()
+              })
+            );
+          }
+        });
+        
+        await Promise.all(promises);
+        showToast('✓ 全商品を品切れに設定しました');
+      } catch (e) {
+        console.error('一括品切れエラー:', e);
         showToast('エラー: ' + e.message);
       }
     };
