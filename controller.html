@@ -383,7 +383,7 @@
       <button class="big-btn btn-soldout" onclick="showSoldOutPage()">
         🚫 品切れ設定
       </button>
-      <button class="big-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="bulkSoldOut()">
+      <button class="big-btn" id="bulk-soldout-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="toggleBulkSoldOut()">
         🚫 一括品切れ
       </button>
     </div>
@@ -460,6 +460,7 @@
     
     let lastOrderCount = 0;
     let audioEnabled = false;
+    let isFirstOrderLoad = true; // 初回読み込みフラグ
     
     // 通知許可をリクエスト
     async function requestNotificationPermission() {
@@ -519,7 +520,16 @@
       onSnapshot(ordersRef, (snapshot) => {
         const currentOrderCount = snapshot.size;
         
-        if (lastOrderCount > 0 && currentOrderCount > lastOrderCount) {
+        // 初回読み込み時はスキップ
+        if (isFirstOrderLoad) {
+          lastOrderCount = currentOrderCount;
+          isFirstOrderLoad = false;
+          console.log('初回注文数:', currentOrderCount);
+          return;
+        }
+        
+        // 2回目以降で注文が増えた場合のみ通知
+        if (currentOrderCount > lastOrderCount) {
           console.log('🔔 新規注文検出!');
           playOrderSound();
           showNotification('注文が入りました', '新しい注文が入りました！');
@@ -628,8 +638,6 @@
       if ('Notification' in window && Notification.permission === 'granted') {
         const notification = new Notification(title, {
           body: body,
-          icon: '/favicon.ico',
-          badge: '/favicon.ico',
           tag: 'order-notification',
           requireInteraction: true
         });
@@ -1019,34 +1027,66 @@
       }
     };
     
-    // 一括品切れ機能
-    window.bulkSoldOut = async function() {
-      if (!confirm('全商品を品切れに設定しますか？')) {
-        return;
-      }
+    // 一括品切れ/再販スイッチ
+    let isBulkSoldOut = false;
+    
+    window.toggleBulkSoldOut = async function() {
+      const btn = document.getElementById('bulk-soldout-btn');
       
-      try {
-        // メニューを取得
-        const menuSnapshot = await getDocs(collection(db, 'menu'));
-        const promises = [];
+      if (!isBulkSoldOut) {
+        // 一括品切れ
+        if (!confirm('全商品を品切れに設定しますか？')) {
+          return;
+        }
         
-        menuSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.id) {
-            promises.push(
-              setDoc(doc(db, 'sold_out', data.id), {
-                menuId: data.id,
-                timestamp: Timestamp.now()
-              })
-            );
-          }
-        });
+        try {
+          const menuSnapshot = await getDocs(collection(db, 'menu'));
+          const promises = [];
+          
+          menuSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data.id) {
+              promises.push(
+                setDoc(doc(db, 'sold_out', data.id), {
+                  menuId: data.id,
+                  timestamp: Timestamp.now()
+                })
+              );
+            }
+          });
+          
+          await Promise.all(promises);
+          isBulkSoldOut = true;
+          btn.textContent = '✓ 一括再販';
+          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          showToast('✓ 全商品を品切れに設定しました');
+        } catch (e) {
+          console.error('一括品切れエラー:', e);
+          showToast('エラー: ' + e.message);
+        }
+      } else {
+        // 一括再販
+        if (!confirm('全商品を販売再開しますか？')) {
+          return;
+        }
         
-        await Promise.all(promises);
-        showToast('✓ 全商品を品切れに設定しました');
-      } catch (e) {
-        console.error('一括品切れエラー:', e);
-        showToast('エラー: ' + e.message);
+        try {
+          const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
+          const promises = [];
+          
+          soldOutSnapshot.forEach(docSnap => {
+            promises.push(deleteDoc(docSnap.ref));
+          });
+          
+          await Promise.all(promises);
+          isBulkSoldOut = false;
+          btn.textContent = '🚫 一括品切れ';
+          btn.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
+          showToast('✓ 全商品を販売再開しました');
+        } catch (e) {
+          console.error('一括再販エラー:', e);
+          showToast('エラー: ' + e.message);
+        }
       }
     };
 
