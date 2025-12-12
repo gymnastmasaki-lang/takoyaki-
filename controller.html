@@ -271,7 +271,6 @@
       50% { transform: scale(1.02); }
     }
     
-    /* 品切れ管理ページのスタイル */
     .category-filter {
       background: white;
       padding: 15px;
@@ -372,7 +371,6 @@
     <h1>高田の注文管理コントローラー</h1>
   </div>
   
-  <!-- 注文管理ページ -->
   <div id="page-orders">
     <div class="top-controls">
       <button class="big-btn btn-refresh" onclick="loadOrders()">🔄 最新情報に更新</button>
@@ -383,7 +381,7 @@
       <button class="big-btn btn-soldout" onclick="showSoldOutPage()">
         🚫 品切れ設定
       </button>
-      <button class="big-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="bulkSoldOut()">
+      <button id="bulk-soldout-btn" class="big-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="toggleBulkSoldOut()">
         🚫 一括品切れ
       </button>
     </div>
@@ -394,7 +392,6 @@
       <button class="btn-reset" onclick="resetWaiting()">リセット</button>
     </div>
     
-    <!-- 店員呼び出し通知 -->
     <div id="staff-calls-container"></div>
     
     <div id="orders-container">
@@ -402,7 +399,6 @@
     </div>
   </div>
   
-  <!-- 品切れ設定ページ -->
   <div id="page-soldout" class="hidden">
     <button class="big-btn btn-refresh" style="margin-bottom: 15px;" onclick="backToOrders()">
       ← 注文管理に戻る
@@ -422,12 +418,10 @@
     <div id="soldout-menu-list"></div>
   </div>
 
-  <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, getDocs, doc, updateDoc, deleteDoc, setDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getFirestore, collection, getDocs, doc, updateDoc, deleteDoc, setDoc, Timestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-    // Firebase設定
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
       authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
@@ -440,28 +434,28 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
+    let lastOrderCount = 0;
+    let audioEnabled = false;
+    let allMenuItemsController = [];
+    let isBulkSoldOut = false;
+
     window.onload = async function() {
       await loadOrders();
       await updateManualCount();
-      // 10秒ごとに自動更新
-      setInterval(loadOrders, 10000);
+      await checkBulkSoldOutStatus();
       
-      // 品切れの自動リセットチェック（1分ごと）
+      setInterval(loadOrders, 10000);
+      setInterval(checkBulkSoldOutStatus, 10000);
+      
       checkAndResetSoldOut();
       setInterval(checkAndResetSoldOut, 60000);
       
-      // 通知とオーディオの許可を取得
       await requestNotificationPermission();
       
-      // 新規注文と店員呼び出しの監視
       watchNewOrders();
       watchStaffCalls();
     };
-    
-    let lastOrderCount = 0;
-    let audioEnabled = false;
-    
-    // 通知許可をリクエスト
+
     async function requestNotificationPermission() {
       if ('Notification' in window) {
         const permission = await Notification.requestPermission();
@@ -470,7 +464,6 @@
         }
       }
       
-      // 音声再生を有効化
       const overlay = document.createElement('div');
       overlay.style.cssText = `
         position: fixed;
@@ -502,7 +495,6 @@
       button.onclick = () => {
         audioEnabled = true;
         overlay.remove();
-        // テスト音を再生
         const testAudio = new Audio('./order.wav');
         testAudio.volume = 0.1;
         testAudio.play().catch(e => console.log('テスト音再生:', e));
@@ -511,8 +503,7 @@
       overlay.appendChild(button);
       document.body.appendChild(overlay);
     }
-    
-    // 新規注文を監視
+
     function watchNewOrders() {
       const ordersRef = collection(db, 'orders');
       
@@ -524,13 +515,13 @@
           playOrderSound();
           showNotification('注文が入りました', '新しい注文が入りました！');
           showToast('🔔 新しい注文が入りました！');
+          loadOrders();
         }
         
         lastOrderCount = currentOrderCount;
       });
     }
-    
-    // 店員呼び出しを監視
+
     function watchStaffCalls() {
       const callsRef = collection(db, 'staff_calls');
       let isFirstLoad = true;
@@ -572,18 +563,16 @@
         isFirstLoad = false;
       });
     }
-    
-    // 呼び出しを削除
+
     window.dismissCall = async function(callId) {
       try {
         await deleteDoc(doc(db, 'staff_calls', callId));
-        showToast('✓ 対応完了にしました');
+        showToast('✔ 対応完了にしました');
       } catch (e) {
         console.error('削除エラー:', e);
       }
     };
-    
-    // 注文音を再生
+
     function playOrderSound() {
       if (!audioEnabled) {
         console.log('音声未有効化');
@@ -602,8 +591,7 @@
         console.error('❌ order.wav 処理エラー:', e);
       }
     }
-    
-    // 呼び出し音を再生
+
     function playCallSound() {
       if (!audioEnabled) {
         console.log('音声未有効化');
@@ -622,8 +610,7 @@
         console.error('❌ call.wav 処理エラー:', e);
       }
     }
-    
-    // ブラウザ通知を表示
+
     function showNotification(title, body) {
       if ('Notification' in window && Notification.permission === 'granted') {
         const notification = new Notification(title, {
@@ -641,14 +628,12 @@
       }
     }
 
-    // 深夜1時に品切れ設定を自動リセット
     async function checkAndResetSoldOut() {
       const now = new Date();
       const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
       const hour = jstNow.getHours();
       const minute = jstNow.getMinutes();
       
-      // 深夜1時0分〜1時1分の間にリセット
       if (hour === 1 && minute === 0) {
         try {
           const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
@@ -664,6 +649,94 @@
         }
       }
     }
+
+    async function checkBulkSoldOutStatus() {
+      try {
+        const menuSnapshot = await getDocs(collection(db, 'menu'));
+        const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
+        
+        const menuIds = new Set();
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.id) menuIds.add(data.id);
+        });
+        
+        const soldOutIds = new Set();
+        soldOutSnapshot.forEach(doc => {
+          soldOutIds.add(doc.data().menuId);
+        });
+        
+        isBulkSoldOut = menuIds.size > 0 && menuIds.size === soldOutIds.size;
+        updateBulkSoldOutButton();
+      } catch (e) {
+        console.error('一括品切れ状態確認エラー:', e);
+      }
+    }
+
+    function updateBulkSoldOutButton() {
+      const btn = document.getElementById('bulk-soldout-btn');
+      if (isBulkSoldOut) {
+        btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+        btn.innerHTML = '✅ 一括再販';
+      } else {
+        btn.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
+        btn.innerHTML = '🚫 一括品切れ';
+      }
+    }
+
+    window.toggleBulkSoldOut = async function() {
+      if (isBulkSoldOut) {
+        if (!confirm('全商品を再販しますか？')) {
+          return;
+        }
+        
+        try {
+          const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
+          const promises = [];
+          
+          soldOutSnapshot.forEach(doc => {
+            promises.push(deleteDoc(doc.ref));
+          });
+          
+          await Promise.all(promises);
+          isBulkSoldOut = false;
+          updateBulkSoldOutButton();
+          showToast('✅ 全商品を再販しました');
+        } catch (e) {
+          console.error('一括再販エラー:', e);
+          showToast('エラー: ' + e.message);
+        }
+      } else {
+        if (!confirm('全商品を品切れにしますか？')) {
+          return;
+        }
+        
+        try {
+          const menuSnapshot = await getDocs(collection(db, 'menu'));
+          const promises = [];
+          
+          menuSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.id) {
+              promises.push(
+                setDoc(doc(db, 'sold_out', data.id), {
+                  menuId: data.id,
+                  timestamp: Timestamp.now()
+                })
+              );
+            }
+          });
+          
+          await Promise.all(promises);
+          isBulkSoldOut = true;
+          updateBulkSoldOutButton();
+          showToast('✅ 全商品を品切れにしました');
+        } catch (e) {
+          console.error('一括品切れエラー:', e);
+          showToast('エラー: ' + e.message);
+        }
+      }
+    };
 
     async function loadOrders() {
       try {
@@ -683,7 +756,6 @@
           });
         });
         
-        // 注文番号でソート
         orders.sort((a, b) => a.orderNumber - b.orderNumber);
         
         displayOrders(orders);
@@ -766,7 +838,7 @@
           deleteAt: Timestamp.fromDate(newDeleteAt)
         });
         
-        showToast('✓ 10分延長しました');
+        showToast('✔ 10分延長しました');
         await loadOrders();
       } catch (e) {
         console.error('延長エラー:', e);
@@ -777,7 +849,7 @@
     window.completeOrder = async function(orderId) {
       try {
         await deleteDoc(doc(db, 'orders', orderId));
-        showToast('✓ 注文を完了しました');
+        showToast('✔ 注文を完了しました');
         await loadOrders();
       } catch (e) {
         console.error('完了エラー:', e);
@@ -792,7 +864,6 @@
           cancelledAt: Timestamp.now()
         });
         
-        // 1分後に自動削除
         setTimeout(async () => {
           try {
             await deleteDoc(orderRef);
@@ -800,8 +871,8 @@
             console.error('キャンセル記録削除エラー:', e);
           }
         }, 60000);
-        
-        showToast('✓ 注文をキャンセルしました');
+
+showToast('✓ 注文をキャンセルしました');
         await loadOrders();
       } catch (e) {
         console.error('キャンセルエラー:', e);
@@ -962,13 +1033,6 @@
         soldOutIds.add(doc.data().menuId);
       });
       
-      // 商品IDでソート（M0001, M0002...の順）
-      items.sort((a, b) => {
-        if (a.id < b.id) return -1;
-        if (a.id > b.id) return 1;
-        return 0;
-      });
-      
       items.forEach(item => {
         const isSoldOut = soldOutIds.has(item.id);
         const div = document.createElement('div');
@@ -1015,37 +1079,6 @@
         }
       } catch (e) {
         console.error('品切れ設定エラー:', e);
-        showToast('エラー: ' + e.message);
-      }
-    };
-    
-    // 一括品切れ機能
-    window.bulkSoldOut = async function() {
-      if (!confirm('全商品を品切れに設定しますか？')) {
-        return;
-      }
-      
-      try {
-        // メニューを取得
-        const menuSnapshot = await getDocs(collection(db, 'menu'));
-        const promises = [];
-        
-        menuSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.id) {
-            promises.push(
-              setDoc(doc(db, 'sold_out', data.id), {
-                menuId: data.id,
-                timestamp: Timestamp.now()
-              })
-            );
-          }
-        });
-        
-        await Promise.all(promises);
-        showToast('✓ 全商品を品切れに設定しました');
-      } catch (e) {
-        console.error('一括品切れエラー:', e);
         showToast('エラー: ' + e.message);
       }
     };
