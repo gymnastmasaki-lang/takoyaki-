@@ -654,7 +654,7 @@
         if (soldOutIds.has(menuId)) {
           item.classList.add('sold-out');
           item.onclick = () => {
-            alert('申し訳ございません。\nこの商品は現在品切れです。');
+            showCustomAlert('申し訳ございません。\nこの商品は現在品切れです。');
           };
         } else {
           item.classList.remove('sold-out');
@@ -919,7 +919,7 @@
     async function selectItem(item) {
       // 品切れチェック
       if (soldOutIds.has(item.id)) {
-        alert('申し訳ございません。\nこの商品は現在品切れです。');
+        showCustomAlert('申し訳ございません。\nこの商品は現在品切れです。');
         return;
       }
       
@@ -995,7 +995,7 @@
 
     window.addToCart = async function() {
       if (soldOutIds.has(currentItem.id)) {
-        alert('申し訳ございません。\nこの商品は現在品切れになりました。');
+        showCustomAlert('申し訳ございません。\nこの商品は現在品切れになりました。');
         backToMenu();
         return;
       }
@@ -1040,7 +1040,7 @@
 
     window.showCart = function() {
       if (cart.length === 0) {
-        alert('カートが空です');
+        showCustomAlert('カートが空です');
         return;
       }
       
@@ -1089,7 +1089,7 @@
 
     window.confirmOrder = async function() {
       if (cart.length === 0) {
-        alert('カートが空です');
+        showCustomAlert('カートが空です');
         return;
       }
       
@@ -1101,15 +1101,68 @@
       }
       
       if (soldOutItems.length > 0) {
-        alert(`申し訳ございません。以下の商品が品切れになりました：\n\n${soldOutItems.join('\n')}\n\nカートから削除してください。`);
-        cart = cart.filter(item => !soldOutIds.has(item.id));
+        // カスタムダイアログで複数行表示
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0,0,0,0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10000;
+        `;
         
-        if (cart.length === 0) {
-          alert('全ての商品が品切れになったため、カートが空になりました。');
-          backToMenu();
-        } else {
-          showCart();
-        }
+        const dialog = document.createElement('div');
+        dialog.style.cssText = `
+          background: white;
+          border-radius: 15px;
+          padding: 30px;
+          max-width: 80%;
+          text-align: center;
+          box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        `;
+        
+        const text = document.createElement('div');
+        text.innerHTML = `申し訳ございません。<br>以下の商品が品切れになりました：<br><br>${soldOutItems.join('<br>')}<br><br>カートから削除してください。`;
+        text.style.cssText = `
+          font-size: 16px;
+          margin-bottom: 20px;
+          color: #333;
+          line-height: 1.6;
+        `;
+        
+        const button = document.createElement('button');
+        button.textContent = 'OK';
+        button.style.cssText = `
+          padding: 12px 40px;
+          background: #2196F3;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+        `;
+        button.onclick = () => {
+          overlay.remove();
+          cart = cart.filter(item => !soldOutIds.has(item.id));
+          
+          if (cart.length === 0) {
+            showCustomAlert('全ての商品が品切れになったため、カートが空になりました。');
+            backToMenu();
+          } else {
+            showCart();
+          }
+        };
+        
+        dialog.appendChild(text);
+        dialog.appendChild(button);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
         return;
       }
       
@@ -1203,7 +1256,7 @@
         
       } catch (e) {
         console.error('注文エラー:', e);
-        alert('注文に失敗しました: ' + e.message);
+        showCustomAlert('注文に失敗しました: ' + e.message);
       }
     };
 
@@ -1270,20 +1323,40 @@
     
     // ユーザー向け通知を表示
     function showUserNotification(title, body) {
-      if ('Notification' in window && Notification.permission === 'granted') {
-        const notification = new Notification(title, {
-          body: body,
-          tag: 'user-notification',
-          requireInteraction: true,
-          vibrate: [200, 100, 200]
-        });
-        
-        notification.onclick = function() {
-          window.focus();
-          // 注文完了ページに移動
-          showPage('page-complete');
-          notification.close();
-        };
+      console.log('通知を試行:', title, body);
+      console.log('Notification permission:', Notification.permission);
+      
+      if (!('Notification' in window)) {
+        console.error('このブラウザは通知をサポートしていません');
+        return;
+      }
+      
+      if (Notification.permission === 'granted') {
+        try {
+          const notification = new Notification(title, {
+            body: body,
+            tag: 'user-notification',
+            requireInteraction: true,
+            vibrate: [200, 100, 200]
+          });
+          
+          console.log('通知を作成しました:', notification);
+          
+          notification.onclick = function() {
+            console.log('通知がクリックされました');
+            window.focus();
+            showPage('page-complete');
+            notification.close();
+          };
+          
+          notification.onerror = function(error) {
+            console.error('通知エラー:', error);
+          };
+        } catch (e) {
+          console.error('通知作成エラー:', e);
+        }
+      } else {
+        console.log('通知が許可されていません。permission:', Notification.permission);
       }
     }
 
