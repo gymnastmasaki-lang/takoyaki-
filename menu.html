@@ -35,9 +35,9 @@
     
     .header h1 {
       font-size: 28px;
-      margin-bottom: 5px;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
-      -webkit-text-stroke: 1px #FF0000;
+      margin-bottom: 0;
+      font-weight: bold;
+      color: #000;
     }
     
     .container {
@@ -370,16 +370,15 @@
     
     .waiting-info {
       font-size: 22px;
-      color: #FFD700;
+      color: #000;
       margin: 25px 0;
       font-weight: bold;
-      text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
-      -webkit-text-stroke: 1px #FF0000;
     }
     
     .waiting-info span {
       font-size: 66px;
       display: inline-block;
+      color: #FF0000;
     }
     
     .warning-box {
@@ -418,11 +417,10 @@
     .page-title {
       font-size: 24px;
       font-weight: bold;
-      color: #FFD700;
+      color: #000;
       margin-bottom: 20px;
       text-align: center;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-      -webkit-text-stroke: 1px #FF0000;
+      font-family: 'Hiragino Maru Gothic ProN', 'Rounded Mplus 1c', sans-serif;
     }
     
     .top-waiting-info {
@@ -458,7 +456,10 @@
 </head>
 <body>
   <div class="header">
-    <h1>粉もん屋 八 下赤塚店</h1>
+    <h1>
+      <span style="font-family: 'Hiragino Kaku Gothic ProN', 'メイリオ', sans-serif; font-weight: 600;">粉もん屋 八</span>
+      <span style="font-family: 'Hiragino Kaku Gothic ProN', 'メイリオ', sans-serif; font-weight: normal;">下赤塚店</span>
+    </h1>
   </div>
 
   <!-- メニュー一覧ページ -->
@@ -524,7 +525,7 @@
           <div style="font-size: 28px; font-weight: bold; color: #ff6b9d;" id="eat-style">-</div>
         </div>
         
-        <div class="waiting-info">お客様は <span id="waiting">1</span>番目に<br>お待ち頂いてます</div>
+        <div class="waiting-info">お客様は<span id="waiting">1</span>番目に<br>お待ち頂いてます</div>
         
         <div style="color: #000; font-size: 22px; margin: 15px 0;">注文番号</div>
         <div class="order-number-display" id="order-num">000</div>
@@ -841,24 +842,31 @@
       const minute = jstNow.getMinutes();
       
       // テーブル番号を確認（店内かテイクアウトか）
-      const isEatIn = tableNumber !== 'テイクアウト';
+      const isTakeout = tableNumber === 'テイクアウト';
       
       // 時間を分単位で計算（22:30 = 22.5時間）
       const currentTime = hour + (minute / 60);
       
-      // 店内: 22:00〜翌朝7:00で全商品品切れ
       // テイクアウト: 22:30〜翌朝7:00で全商品品切れ
-      const eatInCutoff = (hour >= 22 || hour < 7);
-      const takeoutCutoff = (currentTime >= 22.5 || hour < 7);
+      // 店内: 22:00〜翌朝7:00で全商品品切れ
+      let shouldSoldOut = false;
       
-      if ((isEatIn && eatInCutoff) || (!isEatIn && takeoutCutoff)) {
+      if (isTakeout) {
+        // テイクアウト: 22:30以降または7:00前
+        shouldSoldOut = (currentTime >= 22.5 || hour < 7);
+      } else {
+        // 店内: 22:00以降または7:00前
+        shouldSoldOut = (hour >= 22 || hour < 7);
+      }
+      
+      if (shouldSoldOut) {
         // 全商品を品切れにする
         allMenuItems.forEach(item => {
           soldOutIds.add(item.id);
         });
-        console.log(`時刻: ${hour}:${minute} - ${isEatIn ? '店内' : 'テイクアウト'}: 全商品品切れ`);
+        console.log(`時刻: ${hour}:${minute.toString().padStart(2, '0')} - ${isTakeout ? 'テイクアウト' : '店内'}: 全商品品切れ`);
       } else {
-        console.log(`時刻: ${hour}:${minute} - ${isEatIn ? '店内' : 'テイクアウト'}: 営業中`);
+        console.log(`時刻: ${hour}:${minute.toString().padStart(2, '0')} - ${isTakeout ? 'テイクアウト' : '店内'}: 営業中`);
       }
     }
 
@@ -872,6 +880,10 @@
             const filtered = allMenuItems.filter(item => item.category === this.value);
             displayMenuItems(filtered);
           }
+          // フィルター後も品切れ状態を再適用
+          setTimeout(() => {
+            loadSoldOutItems();
+          }, 100);
         });
       }
     });
@@ -1262,6 +1274,13 @@
 
     function watchOrderStatus(orderId, orderNumber) {
       const orderRef = doc(db, 'orders', orderId);
+      
+      // 最初に通知許可をリクエスト
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().then(permission => {
+          console.log('通知許可:', permission);
+        });
+      }
       
       const unsubscribe = onSnapshot(orderRef, (docSnap) => {
         if (!docSnap.exists()) {
