@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>注文管理コントローラー</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    
+    .header h1 {
+      font-size: 24px;
+    }
+    
+    .refresh-btn {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      font-size: 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-bottom: 20px;
+      font-weight: bold;
+    }
+    
+    .refresh-btn:hover {
+      background: #45a049;
+    }
+    
+    .order-card {
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .order-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+    
+    .order-number {
+      font-size: 32px;
+      font-weight: bold;
+      color: #4CAF50;
+    }
+    
+    .order-info {
+      font-size: 14px;
+      color: #666;
+    }
+    
+    .order-table {
+      display: inline-block;
+      background: #2196F3;
+      color: white;
+      padding: 5px 15px;
+      border-radius: 20px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    
+    .order-items {
+      margin: 15px 0;
+    }
+    
+    .item {
+      padding: 10px;
+      background: #f9f9f9;
+      border-radius: 5px;
+      margin-bottom: 8px;
+    }
+    
+    .item-name {
+      font-weight: bold;
+      font-size: 16px;
+    }
+    
+    .item-details {
+      font-size: 14px;
+      color: #666;
+      margin-top: 5px;
+    }
+    
+    .order-total {
+      font-size: 24px;
+      font-weight: bold;
+      color: #4CAF50;
+      text-align: right;
+      margin: 15px 0;
+    }
+    
+    .delete-time {
+      font-size: 14px;
+      color: #ff6b6b;
+      font-weight: bold;
+      text-align: right;
+    }
+    
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 15px;
+    }
+    
+    .btn {
+      padding: 15px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    
+    .btn-extend {
+      background: #FF9800;
+      color: white;
+    }
+    
+    .btn-extend:hover {
+      background: #F57C00;
+    }
+    
+    .btn-complete {
+      background: #4CAF50;
+      color: white;
+    }
+    
+    .btn-complete:hover {
+      background: #45a049;
+    }
+    
+    .btn-cancel {
+      background: #f44336;
+      color: white;
+    }
+    
+    .btn-cancel:hover {
+      background: #d32f2f;
+    }
+    
+    .no-orders {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+      font-size: 18px;
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 40px;
+      font-size: 18px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎛️ 注文管理コントローラー</h1>
+  </div>
+  
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+    <button class="refresh-btn" onclick="loadOrders()">🔄 最新情報に更新</button>
+    <button class="refresh-btn" style="background: #FF9800;" onclick="increaseWaiting()">👥 待ち人数+1</button>
+  </div>
+  
+  <div id="manual-waiting-display" style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
+    <div style="font-size: 16px; color: #666;">手動追加の待ち人数</div>
+    <div style="font-size: 32px; font-weight: bold; color: #FF9800;" id="manual-count">0</div>
+    <button style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 10px;" onclick="resetWaiting()">リセット</button>
+  </div>
+  
+  <div id="orders-container">
+    <div class="loading">読み込み中...</div>
+  </div>
+
+  <script>
+    window.onload = function() {
+      loadOrders();
+      // 5秒ごとに自動更新
+      setInterval(loadOrders, 5000);
+    };
+
+    function loadOrders() {
+      google.script.run
+        .withSuccessHandler(displayOrders)
+        .withFailureHandler(e => {
+          document.getElementById('orders-container').innerHTML = 
+            '<div class="no-orders">エラー: ' + e + '</div>';
+        })
+        .getAllOrders();
+    }
+
+    function displayOrders(orders) {
+      const container = document.getElementById('orders-container');
+      
+      if (orders.length === 0) {
+        container.innerHTML = '<div class="no-orders">現在注文はありません</div>';
+        return;
+      }
+      
+      container.innerHTML = '';
+      
+      orders.forEach(order => {
+        const card = document.createElement('div');
+        card.className = 'order-card';
+        
+        let itemsHtml = '';
+        order.items.forEach(item => {
+          itemsHtml += `
+            <div class="item">
+              <div class="item-name">${item.name}</div>
+              <div class="item-details">
+                トッピング: ${item.toppings} | 数量: ${item.quantity}個
+              </div>
+            </div>
+          `;
+        });
+        
+        card.innerHTML = `
+          <div class="order-header">
+            <div>
+              <div class="order-number">#${order.orderNumber}</div>
+              <div class="order-table">${order.tableNumber}</div>
+              <div class="order-info">${order.timestamp}</div>
+            </div>
+          </div>
+          <div class="order-items">${itemsHtml}</div>
+          <div class="order-total">合計: ¥${order.totalAmount.toLocaleString()}</div>
+          <div class="delete-time">⏰ 削除予定: ${order.deleteTime}</div>
+          <div class="controls">
+            <button class="btn btn-extend" onclick="extendTime(${order.orderNumber})">
+              +10分延長
+            </button>
+            <button class="btn btn-complete" onclick="completeOrder(${order.orderNumber})">
+              ✓ 完了
+            </button>
+            <button class="btn btn-cancel" onclick="cancelOrder(${order.orderNumber})">
+              ✕ キャンセル
+            </button>
+          </div>
+        `;
+        
+        container.appendChild(card);
+      });
+    }
+
+    function extendTime(orderNumber) {
+      if (!confirm(`注文番号 ${orderNumber} の時間を10分延長しますか？`)) {
+        return;
+      }
+      
+      google.script.run
+        .withSuccessHandler(result => {
+          alert(result.message);
+          if (result.success) loadOrders();
+        })
+        .withFailureHandler(e => alert('エラー: ' + e))
+        .extendOrderTime(orderNumber);
+    }
+
+    function completeOrder(orderNumber) {
+      if (!confirm(`注文番号 ${orderNumber} を完了しますか？`)) {
+        return;
+      }
+      
+      google.script.run
+        .withSuccessHandler(result => {
+          alert(result.message);
+          if (result.success) loadOrders();
+        })
+        .withFailureHandler(e => alert('エラー: ' + e))
+        .completeOrder(orderNumber);
+    }
+
+    function cancelOrder(orderNumber) {
+      if (!confirm(`注文番号 ${orderNumber} をキャンセルしますか？\n（お客様の画面にキャンセル通知が表示されます）`)) {
+        return;
+      }
+      
+      google.script.run
+        .withSuccessHandler(result => {
+          alert(result.message);
+          if (result.success) loadOrders();
+        })
+        .withFailureHandler(e => alert('エラー: ' + e))
+        .cancelOrder(orderNumber);
+    }
+
+    function increaseWaiting() {
+      google.script.run
+        .withSuccessHandler(result => {
+          alert(result.message);
+          updateManualCount();
+        })
+        .withFailureHandler(e => alert('エラー: ' + e))
+        .increaseWaitingCount();
+    }
+
+    function resetWaiting() {
+      if (!confirm('手動追加の待ち人数をリセットしますか？')) {
+        return;
+      }
+      
+      google.script.run
+        .withSuccessHandler(result => {
+          alert(result.message);
+          updateManualCount();
+        })
+        .withFailureHandler(e => alert('エラー: ' + e))
+        .resetManualWaiting();
+    }
+
+    function updateManualCount() {
+      google.script.run
+        .withSuccessHandler(count => {
+          document.getElementById('manual-count').textContent = count;
+        })
+        .withFailureHandler(e => console.error('手動カウント取得エラー:', e))
+        .getWaitingCountWithManual();
+    }
+  </script>
+</body>
+</html>

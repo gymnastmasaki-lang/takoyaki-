@@ -1,0 +1,783 @@
+// スプレッドシートID
+const SHEET_ID = "1BvQLJitHjtqLmOFPQz7kwm0su2FTIuKIunT8yz85B8I";
+const ORDER_START_NUMBER = 619; // 注文番号の開始番号（待ち人数1の場合619から）
+
+// メインHTML表示（QRコードパラメータ対応）
+function doGet(e) {
+  e = e || {};
+  const params = e.parameter || {};
+
+  // コントローラー画面
+  if (params.controller === 'true') {
+    return HtmlService.createHtmlOutputFromFile("controller")
+      .setTitle("注文管理コントローラー")
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
+  // ▼▼ 通常ページ（index.html）を返す ▼▼
+  const template = HtmlService.createTemplateFromFile("index");
+  template.tableNumber = params.table || 'テイクアウト';
+
+  return template.evaluate()
+    .setTitle("粉もん屋 八 下赤塚店")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// カテゴリ一覧を取得
+function getCategories() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheets()[0];
+    const data = sheet.getDataRange().getValues();
+    
+    const categories = [];
+    const seen = new Set();
+    
+    for (let i = 1; i < data.length; i++) {
+      const category = data[i][1];
+      if (category && !seen.has(category)) {
+        categories.push(category);
+        seen.add(category);
+      }
+    }
+    
+    return categories;
+  } catch (e) {
+    Logger.log('getCategories エラー: ' + e.toString());
+    throw new Error('カテゴリの取得に失敗: ' + e.message);
+  }
+}
+
+// 全ての商品を取得（テーブル番号でフィルタリング）
+function getAllMenu(tableNumber) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheets()[0];
+    const data = sheet.getDataRange().getValues();
+    
+    const items = [];
+    const isEatIn = tableNumber && tableNumber !== 'テイクアウト';
+    
+    Logger.log('getAllMenu - テーブル番号: ' + tableNumber);
+    Logger.log('イートイン判定: ' + isEatIn);
+    
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][1] && data[i][2]) {
+        const note = (data[i][18] || '').toString().trim();
+        
+        // テイクアウトの場合のみ、「店内のみ」商品を除外
+        if (!isEatIn && note.includes('店内のみ')) {
+          Logger.log(`除外: ${data[i][2]} (理由: 店内のみ商品、テイクアウト注文)`);
+          continue;
+        }
+        
+        items.push({
+          id: data[i][0] || '',
+          category: data[i][1] || '',
+          name: data[i][2] || '',
+          price: data[i][3] || 0,
+          toppingsId: data[i][4] || '',
+          image: data[i][5] || '',
+          note: note
+        });
+      }
+    }
+    
+    Logger.log('取得した商品数: ' + items.length);
+    return items;
+  } catch (e) {
+    Logger.log('getAllMenu エラー: ' + e.toString());
+    throw new Error('メニュー取得失敗: ' + e.message);
+  }
+}
+
+// トッピング情報を取得
+function getToppings(toppingsIdStr) {
+  try {
+    if (!toppingsIdStr) return [];
+    
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    
+    let toppingSheet = null;
+    const sheets = ss.getSheets();
+    for (let sheet of sheets) {
+      if (sheet.getName().toLowerCase() === "toppings") {
+        toppingSheet = sheet;
+        break;
+      }
+    }
+    
+    if (!toppingSheet) {
+      Logger.log('toppingsシートが見つかりません');
+      return [];
+    }
+    
+    const data = toppingSheet.getDataRange().getValues();
+    const toppingIds = toppingsIdStr.split(",").map(id => id.trim());
+    const toppings = [];
+    
+    for (let i = 1; i < data.length; i++) {
+      const id = String(data[i][0]).trim();
+      if (toppingIds.includes(id)) {
+        toppings.push({
+          id: id,
+          name: data[i][1] || '',
+          price: data[i][2] || 0
+        });
+      }
+    }
+    
+    return toppings;
+  } catch (e) {
+    Logger.log('getToppings エラー: ' + e.toString());
+    return [];
+  }
+}
+
+// 今日の注文番号を取得（618から開始、深夜1時リセット）
+function getTodaysOrderNumber(orderSheet) {
+  try {
+    const now = new Date();
+    const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+    
+    const todayStart = new Date(jstNow);
+    todayStart.setHours(1, 0, 0, 0);
+    
+    if (jstNow < todayStart) {
+      todayStart.setDate(todayStart.getDate() - 1);
+    }
+    
+    const lastRow = orderSheet.getLastRow();
+    Logger.log('ordersシート最終行: ' + lastRow);
+    
+    if (lastRow <= 1) {
+      Logger.log('最初の注文: ' + ORDER_START_NUMBER);
+      return ORDER_START_NUMBER;
+    }
+    
+    // 今日の最大注文番号を取得
+    const orderData = orderSheet.getRange(2, 1, lastRow - 1, 2).getValues();
+    let maxOrderNumber = ORDER_START_NUMBER - 1;
+    
+    for (let i = 0; i < orderData.length; i++) {
+      const orderNum = Number(orderData[i][0]);
+      const orderDate = new Date(orderData[i][1]);
+      const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+      
+      const orderDayStart = new Date(jstOrderDate);
+      orderDayStart.setHours(1, 0, 0, 0);
+      
+      if (jstOrderDate < orderDayStart) {
+        orderDayStart.setDate(orderDayStart.getDate() - 1);
+      }
+      
+      // 今日の注文で最大番号を更新
+      if (orderDayStart.getTime() === todayStart.getTime() && orderNum > maxOrderNumber) {
+        maxOrderNumber = orderNum;
+      }
+    }
+    
+    const nextNumber = maxOrderNumber + 1;
+    Logger.log('次の注文番号: ' + nextNumber);
+    return nextNumber;
+    
+  } catch (e) {
+    Logger.log('getTodaysOrderNumber エラー: ' + e.toString());
+    return ORDER_START_NUMBER;
+  }
+}
+
+// 注文を保存
+function saveOrder(orderData) {
+  const lock = LockService.getScriptLock();
+  
+  try {
+    // 5秒待ってロック取得（同時注文対策）
+    lock.waitLock(5000);
+    
+    Logger.log('=== saveOrder 開始 ===');
+    Logger.log('受信データ: ' + JSON.stringify(orderData));
+    
+    if (!orderData || !orderData.items || orderData.items.length === 0) {
+      throw new Error('注文データが空です');
+    }
+    
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    
+    let orderSheet = ss.getSheetByName("orders");
+    if (!orderSheet) {
+      Logger.log('ordersシート新規作成');
+      orderSheet = ss.insertSheet("orders");
+      orderSheet.getRange(1, 1, 1, 11).setValues([[
+        "注文番号", "日時", "テーブル", "商品ID", "商品名", "価格", "トッピング", "数量", "小計", "合計金額", "削除予定時刻"
+      ]]);
+      orderSheet.getRange(1, 1, 1, 11).setFontWeight("bold").setBackground("#f3f3f3");
+    }
+    
+    const orderNumber = getTodaysOrderNumber(orderSheet);
+    Logger.log('確定注文番号: ' + orderNumber);
+    
+    const now = new Date();
+    const timestamp = Utilities.formatDate(now, "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss");
+    
+    // 削除予定時刻（10分後）- 修正版
+    const deleteTime = new Date(now.getTime() + 10 * 60 * 1000);
+    const deleteTimeStr = Utilities.formatDate(deleteTime, "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss");
+    
+    Logger.log('現在時刻: ' + timestamp);
+    Logger.log('削除予定時刻: ' + deleteTimeStr);
+    
+    const tableNumber = orderData.tableNumber || 'テイクアウト';
+    Logger.log('テーブル番号: ' + tableNumber);
+    
+    // 注文データを保存
+    let totalAmount = 0;
+    const rowsToAdd = [];
+    
+    orderData.items.forEach((item, index) => {
+      const price = Number(item.price) || 0;
+      const toppingPrice = Number(item.toppingPrice) || 0;
+      const quantity = Number(item.quantity) || 1;
+      const subtotal = (price + toppingPrice) * quantity;
+      totalAmount += subtotal;
+      
+      const row = [
+        orderNumber,
+        now,  // Dateオブジェクトをそのまま保存
+        tableNumber,
+        item.id || '',
+        item.name || '',
+        price,
+        item.toppings || '',
+        quantity,
+        subtotal,
+        index === 0 ? totalAmount : '',
+        deleteTime  // Dateオブジェクトをそのまま保存（文字列ではなく）
+      ];
+      
+      rowsToAdd.push(row);
+    });
+    
+    const startRow = orderSheet.getLastRow() + 1;
+    orderSheet.getRange(startRow, 1, rowsToAdd.length, 11).setValues(rowsToAdd);
+    orderSheet.getRange(startRow, 10).setValue(totalAmount);
+    
+    Logger.log('データ保存完了: 行' + startRow);
+    
+    // 待ち人数を計算
+    const waitingCount = getWaitingCount();
+    Logger.log('待ち人数: ' + waitingCount);
+    
+    // メール送信
+    try {
+      sendOrderEmail(orderNumber, tableNumber, orderData.items, totalAmount, timestamp);
+      Logger.log('メール送信完了');
+    } catch (e) {
+      Logger.log('メール送信エラー（無視）: ' + e.toString());
+    }
+    
+
+    const myPosition = getMyPosition(orderNumber);
+
+    const result = {
+      orderNumber: orderNumber,
+      waitingCount: myPosition, // 🔥 最終ページ用: 自分の順番
+      totalAmount: totalAmount,
+      timestamp: timestamp,
+      tableNumber: tableNumber
+    };
+    
+    Logger.log('返却データ: ' + JSON.stringify(result));
+    Logger.log('=== saveOrder 完了 ===');
+    
+    return result;
+    
+  } catch (e) {
+    Logger.log('saveOrder エラー: ' + e.toString());
+    Logger.log('スタックトレース: ' + e.stack);
+    throw new Error('注文保存失敗: ' + e.message);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// メール送信
+function sendOrderEmail(orderNumber, tableNumber, items, totalAmount, timestamp) {
+  try {
+    const email = "hachi.shimoaka@gmail.com";
+    const subject = `【新規注文】#${orderNumber} [${tableNumber}] - 粉もん屋 八`;
+    
+    let itemList = '';
+    items.forEach(item => {
+      const subtotal = (item.price + item.toppingPrice) * item.quantity;
+      itemList += `
+━━━━━━━━━━━━━━━━━━━━
+【商品】 ${item.name}
+【単価】 ¥${item.price.toLocaleString()}
+【トッピング】 ${item.toppings}
+【数量】 ${item.quantity}個
+【小計】 ¥${subtotal.toLocaleString()}
+`;
+    });
+    
+    const body = `
+粉もん屋 八 下赤塚店
+新しい注文が入りました
+
+━━━━━━━━━━━━━━━━━━━━
+【注文番号】 ${orderNumber}
+【テーブル】 ${tableNumber}
+【注文日時】 ${timestamp}
+━━━━━━━━━━━━━━━━━━━━
+
+【注文内容】
+${itemList}
+━━━━━━━━━━━━━━━━━━━━
+【合計金額】 ¥${totalAmount.toLocaleString()}
+━━━━━━━━━━━━━━━━━━━━
+    `;
+    
+    MailApp.sendEmail({
+      to: email,
+      subject: subject,
+      body: body
+    });
+    
+    Logger.log('メール送信成功: ' + email);
+  } catch (e) {
+    Logger.log('sendOrderEmail エラー: ' + e.toString());
+    throw e;
+  }
+}
+
+// 自動削除（削除予定時刻を過ぎた注文を削除）
+function deleteOldOrders() {
+  try {
+    Logger.log('=== deleteOldOrders 開始 ===');
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const orderSheet = ss.getSheetByName("orders");
+    
+    if (!orderSheet || orderSheet.getLastRow() <= 1) {
+      Logger.log('削除する注文がありません');
+      return;
+    }
+    
+    const now = new Date();
+    Logger.log('現在時刻: ' + Utilities.formatDate(now, "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss"));
+    
+    const lastRow = orderSheet.getLastRow();
+    let deletedCount = 0;
+    
+    for (let i = lastRow; i >= 2; i--) {
+      const deleteTime = orderSheet.getRange(i, 11).getValue();
+      
+      if (deleteTime) {
+        const deleteDate = new Date(deleteTime);
+        Logger.log(`行${i}: 削除予定 ${Utilities.formatDate(deleteDate, "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss")}`);
+        
+        if (deleteDate <= now) {
+          const orderNum = orderSheet.getRange(i, 1).getValue();
+          orderSheet.deleteRow(i);
+          deletedCount++;
+          Logger.log(`行 ${i} (注文番号${orderNum})を削除しました`);
+        }
+      }
+    }
+    
+    Logger.log(`合計 ${deletedCount} 行を削除しました`);
+    Logger.log('=== deleteOldOrders 完了 ===');
+    
+  } catch (e) {
+    Logger.log('deleteOldOrders エラー: ' + e.toString());
+  }
+}
+
+// 🔥 新規追加: キャンセル表示の自動削除（1分毎）
+function deleteOldCancelRecords() {
+  try {
+    Logger.log('=== deleteOldCancelRecords 開始 ===');
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const cancelSheet = ss.getSheetByName("cancelled_orders");
+    
+    if (!cancelSheet || cancelSheet.getLastRow() <= 1) {
+      Logger.log('削除するキャンセル記録がありません');
+      return;
+    }
+    
+    const now = new Date();
+    Logger.log('現在時刻: ' + Utilities.formatDate(now, "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss"));
+    
+    const lastRow = cancelSheet.getLastRow();
+    let deletedCount = 0;
+    
+    // 1分（60秒）以上前のキャンセル記録を削除
+    for (let i = lastRow; i >= 2; i--) {
+      const cancelTime = cancelSheet.getRange(i, 2).getValue();
+      
+      if (cancelTime) {
+        const cancelDate = new Date(cancelTime);
+        const timeDiff = (now - cancelDate) / 1000; // 秒単位
+        
+        Logger.log(`行${i}: キャンセル時刻 ${Utilities.formatDate(cancelDate, "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss")} (${Math.floor(timeDiff)}秒前)`);
+        
+        if (timeDiff >= 60) { // 🔥 1分以上経過
+          const orderNum = cancelSheet.getRange(i, 1).getValue();
+          cancelSheet.deleteRow(i);
+          deletedCount++;
+          Logger.log(`行 ${i} (注文番号${orderNum})のキャンセル記録を削除しました`);
+        }
+      }
+    }
+    
+    Logger.log(`合計 ${deletedCount} 行のキャンセル記録を削除しました`);
+    Logger.log('=== deleteOldCancelRecords 完了 ===');
+    
+  } catch (e) {
+    Logger.log('deleteOldCancelRecords エラー: ' + e.toString());
+  }
+}
+
+// 注文存在チェック
+function checkOrderExists(orderNumber) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const orderSheet = ss.getSheetByName("orders");
+    
+    if (!orderSheet || orderSheet.getLastRow() <= 1) {
+      return false;
+    }
+    
+    const lastRow = orderSheet.getLastRow();
+    const orderNumbers = orderSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    
+    for (let i = 0; i < orderNumbers.length; i++) {
+      if (orderNumbers[i][0] == orderNumber) {
+        return true;
+      }
+    }
+    
+    return false;
+    
+  } catch (e) {
+    Logger.log('checkOrderExists エラー: ' + e.toString());
+    return true;
+  }
+}
+
+// リアルタイムで待ち人数を取得
+function getWaitingCount() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const orderSheet = ss.getSheetByName("orders");
+    
+    if (!orderSheet || orderSheet.getLastRow() <= 1) {
+      return 1; // ordersシートが空でも基本の+1
+    }
+    
+    const now = new Date();
+    const lastRow = orderSheet.getLastRow();
+    const deleteTimeColumn = orderSheet.getRange(2, 11, lastRow - 1, 1).getValues();
+    const orderNumberColumn = orderSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    const uniqueOrders = new Set();
+    
+    for (let i = 0; i < deleteTimeColumn.length; i++) {
+      const scheduledDelete = deleteTimeColumn[i][0];
+      if (scheduledDelete && new Date(scheduledDelete) > now) {
+        const orderNum = orderNumberColumn[i][0];
+        uniqueOrders.add(orderNum);
+      }
+    }
+    
+    // 基本+1 + 現在の注文数
+    return 1 + uniqueOrders.size;
+    
+  } catch (e) {
+    Logger.log('getWaitingCount エラー: ' + e.toString());
+    return 1;
+  }
+}
+
+// コントローラー用：全注文取得
+function getAllOrders() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const orderSheet = ss.getSheetByName("orders");
+    
+    if (!orderSheet || orderSheet.getLastRow() <= 1) {
+      return [];
+    }
+    
+    const lastRow = orderSheet.getLastRow();
+    const data = orderSheet.getRange(2, 1, lastRow - 1, 11).getValues();
+    
+    const orders = {};
+    
+    data.forEach(row => {
+      const orderNum = row[0];
+      const deleteTime = new Date(row[10]);
+      
+      if (!orders[orderNum]) {
+        orders[orderNum] = {
+          orderNumber: orderNum,
+          timestamp: Utilities.formatDate(new Date(row[1]), "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss"),
+          tableNumber: row[2],
+          items: [],
+          totalAmount: row[9] || 0,
+          deleteTime: Utilities.formatDate(deleteTime, "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss")
+        };
+      }
+      
+      orders[orderNum].items.push({
+        name: row[4],
+        toppings: row[6],
+        quantity: row[7]
+      });
+    });
+    
+    return Object.values(orders);
+    
+  } catch (e) {
+    Logger.log('getAllOrders エラー: ' + e.toString());
+    return [];
+  }
+}
+
+// コントローラー用：時間延長（+10分）
+function extendOrderTime(orderNumber) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const orderSheet = ss.getSheetByName("orders");
+    
+    if (!orderSheet) return { success: false, message: 'シートが見つかりません' };
+    
+    const lastRow = orderSheet.getLastRow();
+    let updated = 0;
+    
+    for (let i = 2; i <= lastRow; i++) {
+      const orderNum = orderSheet.getRange(i, 1).getValue();
+      
+      if (orderNum == orderNumber) {
+        const currentDeleteTime = orderSheet.getRange(i, 11).getValue();
+        const currentDate = new Date(currentDeleteTime);
+        const newDeleteTime = new Date(currentDate.getTime() + 10 * 60 * 1000);
+        
+        orderSheet.getRange(i, 11).setValue(newDeleteTime);  // Dateオブジェクトとして保存
+        updated++;
+        
+        Logger.log(`延長: ${Utilities.formatDate(currentDate, "Asia/Tokyo", "HH:mm:ss")} → ${Utilities.formatDate(newDeleteTime, "Asia/Tokyo", "HH:mm:ss")}`);
+      }
+    }
+    
+    return { 
+      success: updated > 0, 
+      message: updated > 0 ? `10分延長しました (${updated}行更新)` : '注文が見つかりません' 
+    };
+    
+  } catch (e) {
+    Logger.log('extendOrderTime エラー: ' + e.toString());
+    return { success: false, message: 'エラー: ' + e.message };
+  }
+}
+
+// コントローラー用：完了（削除）
+function completeOrder(orderNumber) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const orderSheet = ss.getSheetByName("orders");
+    
+    if (!orderSheet) return { success: false, message: 'シートが見つかりません' };
+    
+    const lastRow = orderSheet.getLastRow();
+    let deletedCount = 0;
+    
+    for (let i = lastRow; i >= 2; i--) {
+      const orderNum = orderSheet.getRange(i, 1).getValue();
+      
+      if (orderNum == orderNumber) {
+        orderSheet.deleteRow(i);
+        deletedCount++;
+      }
+    }
+    
+    return { 
+      success: deletedCount > 0, 
+      message: deletedCount > 0 ? `注文を完了しました (${deletedCount}行削除)` : '注文が見つかりません' 
+    };
+    
+  } catch (e) {
+    Logger.log('completeOrder エラー: ' + e.toString());
+    return { success: false, message: 'エラー: ' + e.message };
+  }
+}
+
+// コントローラー用：キャンセル
+function cancelOrder(orderNumber) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const orderSheet = ss.getSheetByName("orders");
+    const cancelSheet = ss.getSheetByName("cancelled_orders") || ss.insertSheet("cancelled_orders");
+    
+    if (!orderSheet) return { success: false, message: 'シートが見つかりません' };
+    
+    if (cancelSheet.getLastRow() === 0) {
+      cancelSheet.appendRow(["注文番号", "キャンセル日時"]);
+      cancelSheet.getRange(1, 1, 1, 2).setFontWeight("bold").setBackground("#f3f3f3");
+    }
+    
+    const lastRow = orderSheet.getLastRow();
+    let found = false;
+    
+    for (let i = lastRow; i >= 2; i--) {
+      const orderNum = orderSheet.getRange(i, 1).getValue();
+      
+      if (orderNum == orderNumber) {
+        orderSheet.deleteRow(i);
+        found = true;
+      }
+    }
+    
+    if (found) {
+      const now = new Date();
+      const cancelTime = Utilities.formatDate(now, "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss");
+      cancelSheet.appendRow([orderNumber, cancelTime]);
+    }
+    
+    return { 
+      success: found, 
+      message: found ? '注文をキャンセルしました' : '注文が見つかりません' 
+    };
+    
+  } catch (e) {
+    Logger.log('cancelOrder エラー: ' + e.toString());
+    return { success: false, message: 'エラー: ' + e.message };
+  }
+}
+
+// コントローラー用：待ち人数を手動で増やす
+function increaseWaitingCount() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let manualSheet = ss.getSheetByName("manual_waiting");
+    
+    if (!manualSheet) {
+      manualSheet = ss.insertSheet("manual_waiting");
+      manualSheet.appendRow(["追加待ち人数"]);
+      manualSheet.getRange(2, 1).setValue(0);
+    }
+    
+    const currentCount = manualSheet.getRange(2, 1).getValue() || 0;
+    manualSheet.getRange(2, 1).setValue(currentCount + 1);
+    
+    return { success: true, message: '待ち人数を1組増やしました', newCount: currentCount + 1 };
+    
+  } catch (e) {
+    Logger.log('increaseWaitingCount エラー: ' + e.toString());
+    return { success: false, message: 'エラー: ' + e.message };
+  }
+}
+
+// コントローラー用：手動待ち人数をリセット
+function resetManualWaiting() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const manualSheet = ss.getSheetByName("manual_waiting");
+    
+    if (manualSheet) {
+      manualSheet.getRange(2, 1).setValue(0);
+    }
+    
+    return { success: true, message: '手動待ち人数をリセットしました' };
+    
+  } catch (e) {
+    Logger.log('resetManualWaiting エラー: ' + e.toString());
+    return { success: false, message: 'エラー: ' + e.message };
+  }
+}
+
+// 待ち人数取得（手動追加分を含む）
+function getWaitingCountWithManual() {
+  const baseCount = getWaitingCount();
+  
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const manualSheet = ss.getSheetByName("manual_waiting");
+    
+    if (manualSheet && manualSheet.getLastRow() >= 2) {
+      const manualCount = manualSheet.getRange(2, 1).getValue() || 0;
+      return baseCount + manualCount;
+    }
+  } catch (e) {
+    Logger.log('手動待ち人数取得エラー: ' + e.toString());
+  }
+  
+  return baseCount;
+}
+
+// キャンセルされたかチェック
+function checkIfCancelled(orderNumber) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const cancelSheet = ss.getSheetByName("cancelled_orders");
+    
+    if (!cancelSheet || cancelSheet.getLastRow() <= 1) {
+      return false;
+    }
+    
+    const lastRow = cancelSheet.getLastRow();
+    const cancelledNumbers = cancelSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    
+    for (let i = 0; i < cancelledNumbers.length; i++) {
+      if (cancelledNumbers[i][0] == orderNumber) {
+        return true;
+      }
+    }
+    
+    return false;
+    
+  } catch (e) {
+    Logger.log('checkIfCancelled エラー: ' + e.toString());
+    return false;
+  }
+}
+
+// 🔥 修正版: トリガー設定（既存のトリガーを全削除してから追加）
+function setupTriggers() {
+  // 既存のトリガーを全削除
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(trigger => ScriptApp.deleteTrigger(trigger));
+  
+  // 10分ごとに注文削除
+  ScriptApp.newTrigger('deleteOldOrders')
+    .timeBased()
+    .everyMinutes(10)
+    .create();
+  
+  // 🔥 1分ごとにキャンセル記録削除
+  ScriptApp.newTrigger('deleteOldCancelRecords')
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+  
+  Logger.log('トリガー設定完了:');
+  Logger.log('- 10分ごとに deleteOldOrders を実行');
+  Logger.log('- 1分ごとに deleteOldCancelRecords を実行');
+}
+
+// トリガーのテスト実行
+function testDeleteOldOrders() {
+  Logger.log('=== deleteOldOrders テスト実行開始 ===');
+  deleteOldOrders();
+  Logger.log('=== deleteOldOrders テスト実行完了 ===');
+}
+
+// キャンセル削除のテスト実行
+function testDeleteOldCancelRecords() {
+  Logger.log('=== deleteOldCancelRecords テスト実行開始 ===');
+  deleteOldCancelRecords();
+  Logger.log('=== deleteOldCancelRecords テスト実行完了 ===');
+}
+// 🔥 自分の順番を計算する（注文番号から現在の順番を取得）
+function getMyPosition(orderNumber) {
+  const count = getWaitingCountWithManual();
+  return count;
+}
