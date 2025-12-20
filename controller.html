@@ -225,17 +225,22 @@
       showAudioEnablePopup();
     };
 
-async function getFCMTokenByTableNumber(tableNumber) {
-  const tokenSnap = await getDoc(
-    doc(db, 'fcm_tokens', tableNumber)
-  );
-
-  if (!tokenSnap.exists()) {
-    return null;
-  }
-
-  return tokenSnap.data().token || null;
-}
+    // ★ FCMトークン取得関数（テーブル番号から）
+    async function getFCMTokenByTableNumber(tableNumber) {
+      try {
+        const tokenSnap = await getDoc(doc(db, 'fcm_tokens', tableNumber));
+        if (!tokenSnap.exists()) {
+          console.log('FCMトークンが見つかりません:', tableNumber);
+          return null;
+        }
+        const token = tokenSnap.data().token || null;
+        console.log('FCMトークン取得成功:', token);
+        return token;
+      } catch (error) {
+        console.error('FCMトークン取得エラー:', error);
+        return null;
+      }
+    }
 
     function showAudioEnablePopup() {
       const overlay = document.createElement('div');
@@ -385,7 +390,6 @@ async function getFCMTokenByTableNumber(tableNumber) {
           tableNumber: d.tableNumber,
           items: d.items,
           totalAmount: d.totalAmount,
-          fcmToken: d.fcmToken || null,
           memo: d.memo || {},
           completedAt: d.completedAt || null,
           cancelledAt: d.cancelledAt || null,
@@ -438,13 +442,13 @@ async function getFCMTokenByTableNumber(tableNumber) {
           ${itemsHtml}
           <div style="font-size:20px;font-weight:bold;color:#4CAF50;margin-top:10px;">¥${order.totalAmount.toLocaleString()}</div>
           <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-            <button class="control-btn btn-complete" style="font-size:11px;" data-order-id="${order.id}">✔完了</button>
-            <button class="control-btn btn-cancel" style="font-size:11px;" data-order-id="${order.id}">✕キャンセル</button>
+            <button class="control-btn btn-complete" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✔完了</button>
+            <button class="control-btn btn-cancel" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✕キャンセル</button>
             <button class="control-btn" style="background:linear-gradient(135deg,#9C27B0 0%,#7B1FA2 100%);font-size:11px;" data-order-id="${order.id}">📋詳細</button>
           </div>
           <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-            <button class="control-btn" style="background:linear-gradient(135deg,#FF5722 0%,#E64A19 100%);font-size:11px;" data-order-id="${order.id}">🔔再通知</button>
-            <button class="control-btn" id="paid-btn-${order.id}" style="background:linear-gradient(135deg,${order.paidAt ? '#2196F3' : '#FFC107'} 0%,${order.paidAt ? '#1976D2' : '#FFA000'} 100%);font-size:11px;" data-order-id="${order.id}">${order.paidAt ? '💳 済' : '💳 未'}</button>
+            <button class="control-btn" style="background:linear-gradient(135deg,#FF5722 0%,#E64A19 100%);font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">🔔再通知</button>
+            <button class="control-btn" id="paid-btn-${order.id}" style="background:linear-gradient(135deg,${order.paidAt ? '#2196F3' : '#FFC107'} 0%,${order.paidAt ? '#1976D2' : '#FFA000'} 100%);font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}" data-paid="${order.paidAt ? 'true' : 'false'}">${order.paidAt ? '💳 済' : '💳 未'}</button>
             <button class="control-btn" style="background:linear-gradient(135deg,#757575 0%,#616161 100%);font-size:11px;" data-order-id="${order.id}">🗑️削除</button>
           </div>
         `;
@@ -456,8 +460,8 @@ async function getFCMTokenByTableNumber(tableNumber) {
         const paidBtn = card.querySelectorAll('.control-btn')[4];
         const deleteBtn = card.querySelectorAll('.control-btn')[5];
         
-        completeBtn.onclick = () => completeOrder(order.id, order.fcmToken);
-        cancelBtn.onclick = () => cancelOrder(order.id, order.fcmToken);
+        completeBtn.onclick = () => completeOrder(order.id, order.tableNumber, order.orderNumber);
+        cancelBtn.onclick = () => cancelOrder(order.id, order.tableNumber, order.orderNumber);
         detailBtn.onclick = () => showOrderDetail(order);
         renotifyBtn.onclick = () => renotifyOrder(order);
         paidBtn.onclick = () => togglePaidStatus(order);
@@ -569,36 +573,17 @@ async function getFCMTokenByTableNumber(tableNumber) {
       document.getElementById('close-detail-btn').onclick = () => overlay.remove();
     }
 
-    async function completeOrder(orderId, fcmToken) {
+    // ★ 修正：completeOrder - FCMトークンを動的に取得
+    async function completeOrder(orderId, tableNumber, orderNumber) {
       const confirmed = await showConfirmDialog('この注文を完了しますか?');
       if (!confirmed) return;
       
       try {
+        // ★ ステータスをcompletedに更新
         await updateDoc(doc(db, 'orders', orderId), {
+          status: 'completed',
           completedAt: Timestamp.now()
         });
-        
-        if (fcmToken) {
-          await fetch('https://fcm.googleapis.com/fcm/send', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'key=AAAAyUW-Lxc:APA91bEh9vqN7Z0KqZ5Yd_jN7kLWJqLpxSGKxQsI9Rji8iB6IJ7z8vBcYYhKyDZQPKZh8MqN7kLWJqLpxSGKxQsI9Rji8iB6IJ7z8vBcYYhKyDZQPKZh8MqN7kLWJqLpxSGKxQsI9Rji8iB6'
-            },
-            body: JSON.stringify({
-              to: fcmToken,
-              notification: {
-                title: '🎉 商品が出来上がりました！',
-                body: '画面の注文番号を店員にお見せください',
-                icon: '/icon.png'
-              },
-              data: {
-                url: `/menu.html?orderId=${orderId}#complete`,
-                orderId: orderId
-              }
-            })
-          });
-        }
         
         showToast('✔ 完了しました');
         loadOrders();
@@ -608,7 +593,8 @@ async function getFCMTokenByTableNumber(tableNumber) {
       }
     }
 
-    async function cancelOrder(orderId, fcmToken) {
+    // ★ 修正：cancelOrder - FCMトークンを動的に取得
+    async function cancelOrder(orderId, tableNumber, orderNumber) {
       const confirmed = await showConfirmDialog('この注文をキャンセルしますか?');
       if (!confirmed) return;
       
@@ -616,28 +602,6 @@ async function getFCMTokenByTableNumber(tableNumber) {
         await updateDoc(doc(db, 'orders', orderId), {
           cancelledAt: Timestamp.now()
         });
-        
-        if (fcmToken) {
-          await fetch('https://fcm.googleapis.com/fcm/send', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'key=AAAAyUW-Lxc:APA91bEh9vqN7Z0KqZ5Yd_jN7kLWJqLpxSGKxQsI9Rji8iB6IJ7z8vBcYYhKyDZQPKZh8MqN7kLWJqLpxSGKxQsI9Rji8iB6IJ7z8vBcYYhKyDZQPKZh8MqN7kLWJqLpxSGKxQsI9Rji8iB6'
-            },
-            body: JSON.stringify({
-              to: fcmToken,
-              notification: {
-                title: '❌ 注文がキャンセルされました',
-                body: '番号をお呼びしましたがご不在でしたので注文をキャンセルさせて頂きました',
-                icon: '/icon.png'
-              },
-              data: {
-                url: `/menu.html?orderId=${orderId}#complete`,
-                orderId: orderId
-              }
-            })
-          });
-        }
         
         showToast('✔ キャンセルしました');
         loadOrders();
@@ -647,44 +611,44 @@ async function getFCMTokenByTableNumber(tableNumber) {
       }
     }
 
+    // ★ 修正：renotifyOrder - FCMトークンを動的に取得
     async function renotifyOrder(order) {
-  try {
-    const fcmToken = await getFCMTokenByTableNumber(order.tableNumber);
+      try {
+        const fcmToken = await getFCMTokenByTableNumber(order.tableNumber);
 
-    if (!fcmToken) {
-      showToast('プッシュ通知トークンがありません');
-      return;
-    }
-
-    let title = '粉もん屋 八 下赤塚店';
-    let body = 'ステータスが更新されました。画面をご確認ください';
-
-    await fetch('https://fcm.googleapis.com/fcm/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'key=AAAAyUW-Lxc:APA91bEh9vqN7Z0KqZ5Yd_jN7kLWJqLpxSGKxQsI9Rji8iB6IJ7z8vBcYYhKyDZQPKZh8MqN7kLWJqLpxSGKxQsI9Rji8iB6'
-      },
-      body: JSON.stringify({
-        to: fcmToken, // ← ★ここが最重要
-        notification: {
-          title,
-          body,
-          icon: '/icon.png'
-        },
-        data: {
-          orderId: order.id
+        if (!fcmToken) {
+          showToast('プッシュ通知トークンがありません');
+          return;
         }
-      })
-    });
 
-    showToast('✔ 再通知を送信しました');
-  } catch (e) {
-    console.error(e);
-    showToast('通知エラー');
-  }
-}
+        let title = '粉もん屋 八 下赤塚店';
+        let body = 'ステータスが更新されました。画面をご確認ください';
 
+        await fetch('https://fcm.googleapis.com/fcm/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'key=AAAAyUW-Lxc:APA91bEh9vqN7Z0KqZ5Yd_jN7kLWJqLpxSGKxQsI9Rji8iB6IJ7z8vBcYYhKyDZQPKZh8MqN7kLWJqLpxSGKxQsI9Rji8iB6IJ7z8vBcYYhKyDZQPKZh8MqN7kLWJqLpxSGKxQsI9Rji8iB6'
+          },
+          body: JSON.stringify({
+            to: fcmToken,
+            notification: {
+              title,
+              body,
+              icon: '/icon.png'
+            },
+            data: {
+              orderId: order.id
+            }
+          })
+        });
+
+        showToast('✔ 再通知を送信しました');
+      } catch (e) {
+        console.error(e);
+        showToast('通知エラー');
+      }
+    }
 
     async function deleteOrder(orderId) {
       const confirmed = await showConfirmDialog('この注文を削除しますか?\n削除すると復元できません。');
@@ -700,6 +664,7 @@ async function getFCMTokenByTableNumber(tableNumber) {
       }
     }
 
+    // ★ 修正：togglePaidStatus - FCMトークンを動的に取得
     async function togglePaidStatus(order) {
       try {
         if (order.paidAt) {
@@ -718,29 +683,6 @@ async function getFCMTokenByTableNumber(tableNumber) {
           await updateDoc(doc(db, 'orders', order.id), {
             paidAt: Timestamp.now()
           });
-          
-          // プッシュ通知を送信
-          if (order.fcmToken) {
-            await fetch('https://fcm.googleapis.com/fcm/send', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'key=AAAAyUW-Lxc:APA91bEh9vqN7Z0KqZ5Yd_jN7kLWJqLpxSGKxQsI9Rji8iB6IJ7z8vBcYYhKyDZQPKZh8MqN7kLWJqLpxSGKxQsI9Rji8iB6IJ7z8vBcYYhKyDZQPKZh8MqN7kLWJqLpxSGKxQsI9Rji8iB6'
-              },
-              body: JSON.stringify({
-                to: order.fcmToken,
-                notification: {
-                  title: '粉もん屋 八 下赤塚店',
-                  body: 'お会計が完了しました\n商品が出来上がりましたらお呼びしますので、しばらくお待ちください',
-                  icon: '/icon.png'
-                },
-                data: {
-                  url: `/menu.html?orderId=${order.id}#complete`,
-                  orderId: order.id
-                }
-              })
-            });
-          }
           
           showToast('✔ 会計済みにしました');
           loadOrders();
