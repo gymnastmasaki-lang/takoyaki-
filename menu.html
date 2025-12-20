@@ -603,51 +603,963 @@
 
   <!-- Firebase SDK -->
   <script type="module">
-  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-  import { getFirestore, doc, setDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-  import { getMessaging, getToken } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging.js';
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+    import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, deleteDoc, doc, Timestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getMessaging, getToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging.js';
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
-    authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
-    projectId: "takoyaki-order-system-bacd7",
-    storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
-    messagingSenderId: "104494752890",
-    appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
-  };
+    const firebaseConfig = {
+      apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+      authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+      projectId: "takoyaki-order-system-bacd7",
+      storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+      messagingSenderId: "104494752890",
+      appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+    };
 
-  // Firebase 初期化
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-  const messaging = getMessaging(app);
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const messaging = getMessaging(app);
 
-  const tableNumber = localStorage.getItem('tableNumber') || 'C1';
+    let cart = [];
+    let currentItem = null;
+    let selectedToppings = [];
+    let qty = 1;
+    let allMenuItems = [];
+    let soldOutIds = new Set();
+    let currentOrderId = null;
+    let orderStatusUnsubscribe = null;
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const tableNumber = urlParams.get('table') || 'テイクアウト';
 
-  // Service Worker 登録（GitHub Pages対応）
-  const registration = await navigator.serviceWorker.register(
-    '/takoyaki/firebase-messaging-sw.js'
-  );
 
-  // FCMトークン取得
-  const token = await getToken(messaging, {
-    vapidKey: '【あなたのVAPIDキー】',
-    serviceWorkerRegistration: registration
-  });
 
-  if (!token) {
-    console.error('❌ FCMトークン取得失敗');
-  } else {
-    console.log('✅ FCMトークン取得:', token);
+    window.onload = async function() {
+      console.log('ページ読み込み開始');
+      await loadAllData();
+      await updateTopWaitingCount();
+      setInterval(updateTopWaitingCount, 10000);
+      watchSoldOutItems();
+      
+      // プッシュ通知の許可をリクエスト
+      await requestNotificationPermission();
+      
+      // Service Workerを登録してFCMトークンを取得
+      await setupPushNotifications();
+      
+      console.log('初期化完了');
+    };
 
-    // Firestore保存
-    await setDoc(doc(db, 'fcm_tokens', tableNumber), {
-      token,
-      tableNumber,
-      updatedAt: Timestamp.now()
+    // プッシュ通知の許可をリクエスト
+    async function requestNotificationPermission() {
+      if (!('Notification' in window)) {
+        console.log('このブラウザはプッシュ通知をサポートしていません');
+        showCustomAlert('このブラウザはプッシュ通知をサポートしていません');
+        return;
+      }
+      
+      console.log('現在の通知許可状態:', Notification.permission);
+      
+      if (Notification.permission === 'default') {
+        const permission = await Notification.requestPermission();
+        console.log('通知許可結果:', permission);
+        
+        if (permission === 'granted') {
+          console.log('✅ プッシュ通知が許可されました');
+          // テスト通知を送信
+          showBrowserNotification('通知設定完了', '注文の完成をお知らせします');
+        } else if (permission === 'denied') {
+          console.log('❌ プッシュ通知が拒否されました');
+          showCustomAlert('通知が拒否されています。\n\nブラウザの設定から通知を許可してください。\n\n商品完成時に通知が届かない可能性があります。');
+        }
+      } else if (Notification.permission === 'denied') {
+        console.log('⚠️ 通知は既に拒否されています');
+        showCustomAlert('通知が拒否されています。\n\nブラウザの設定から通知を許可してください。\n\n商品完成時に通知が届きません。');
+      } else if (Notification.permission === 'granted') {
+        console.log('✅ 通知は既に許可されています');
+      }
+    }
+
+    // FCMのセットアップ（Service Worker登録とトークン取得）
+    async function setupPushNotifications() {
+      try {
+        // Service Workerを登録
+        console.log('Service Workerを登録中...');
+        const registration = await navigator.serviceWorker.register('./firebase-messaging-sw.js');
+        console.log('✅ Service Worker登録成功:', registration);
+        
+        // 通知が許可されている場合のみトークンを取得
+        if (Notification.permission === 'granted') {
+          console.log('FCMトークンを取得中...');
+          
+          const currentToken = await getToken(messaging, {
+            vapidKey: 'BEZ4kEyOYUN7kVO4mgKJOwnbV7HEVaEJYob-7sz345FF82cyK0QRNera8hM-Vxn7DKRAelcA8egrYtZJT7pRlMtY',
+            serviceWorkerRegistration: registration
+          });
+          
+          if (currentToken) {
+            console.log('✅ FCMトークン取得成功:', currentToken);
+            
+            // トークンをFirestoreに保存
+            await saveFCMToken(currentToken);
+          } else {
+            console.log('トークンを取得できませんでした');
+          }
+        } else {
+          console.log('通知が許可されていないため、トークンを取得しません');
+        }
+        
+        // フォアグラウンドメッセージを受信
+        onMessage(messaging, (payload) => {
+          console.log('フォアグラウンドメッセージ受信:', payload);
+          
+          const title = payload.notification?.title || '通知';
+          const body = payload.notification?.body || '';
+          
+          // 音声を再生
+          if (payload.data?.type === 'completed') {
+            playNotificationSound('done');
+          } else if (payload.data?.type === 'cancelled') {
+            playNotificationSound('cancel');
+          } else {
+            playNotificationSound();
+          }
+          
+          // 通知を表示
+          showBrowserNotification(title, body);
+          
+          // アラートも表示
+          showCustomAlert(body);
+        });
+        
+      } catch (error) {
+        console.error('FCMセットアップエラー:', error);
+      }
+    }
+
+    // FCMトークンをFirestoreに保存
+    async function saveFCMToken(token) {
+      try {
+        const tokenRef = doc(db, 'fcm_tokens', tableNumber);
+        await setDoc(tokenRef, {
+          token: token,
+          tableNumber: tableNumber,
+          updatedAt: Timestamp.now()
+        });
+        console.log('✅ FCMトークンをFirestoreに保存しました');
+      } catch (error) {
+        console.error('FCMトークン保存エラー:', error);
+      }
+    }
+
+    // 注文のステータスを監視
+    function watchOrderStatus(orderId) {
+      if (orderStatusUnsubscribe) {
+        orderStatusUnsubscribe();
+      }
+      
+      currentOrderId = orderId;
+      const orderRef = doc(db, 'orders', orderId);
+      
+      orderStatusUnsubscribe = onSnapshot(orderRef, (docSnap) => {
+        if (!docSnap.exists()) {
+          console.log('注文が削除されました');
+          return;
+        }
+        
+        const data = docSnap.data();
+        updateOrderStatusDisplay(data);
+        
+        // ステータスが変更されたら通知を表示
+        if (data.completedAt && !data.notifiedComplete) {
+          showBrowserNotification('🎉 商品が出来上がりました!', '画面の注文番号を店員にお見せください');
+          playNotificationSound('done');
+          
+          // アラートも表示
+          showCustomAlert('商品が出来上がりました！\n\n注文番号 #' + data.orderNumber + '\n\n画面の注文番号を店員にお見せください');
+          
+          // 通知済みフラグを立てる（次回の監視で再度通知しないように）
+          updateDoc(orderRef, { notifiedComplete: true }).catch(e => console.error(e));
+        }
+        
+        if (data.cancelledAt && !data.notifiedCancel) {
+          showBrowserNotification('❌ 注文がキャンセルされました', '番号をお呼びしましたがご不在でしたので注文をキャンセルさせて頂きました');
+          playNotificationSound('cancel');
+          
+          // アラートも表示
+          showCustomAlert('注文がキャンセルされました\n\n注文番号 #' + data.orderNumber + '\n\n番号をお呼びしましたがご不在でしたので\n注文をキャンセルさせて頂きました');
+          
+          updateDoc(orderRef, { notifiedCancel: true }).catch(e => console.error(e));
+        }
+        
+        if (data.paidAt && !data.notifiedPaid) {
+          showBrowserNotification('粉もん屋 八 下赤塚店', 'お会計が完了しました\n商品が出来上がりましたらお呼びしますので、しばらくお待ちください');
+          playNotificationSound(); // notification.mp3を再生
+          
+          updateDoc(orderRef, { notifiedPaid: true }).catch(e => console.error(e));
+        }
+      });
+    }
+
+    // 注文ステータス表示の更新
+    function updateOrderStatusDisplay(orderData) {
+      const statusBox = document.getElementById('order-status');
+      if (!statusBox) return;
+      
+      if (orderData.completedAt) {
+        statusBox.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+        statusBox.style.borderColor = '#4CAF50';
+        statusBox.style.color = 'white';
+        statusBox.innerHTML = '✅ 商品が出来上がりました!<br>画面の注文番号を店員にお見せください';
+      } else if (orderData.cancelledAt) {
+        statusBox.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
+        statusBox.style.borderColor = '#f44336';
+        statusBox.style.color = 'white';
+        statusBox.innerHTML = '❌ 注文がキャンセルされました<br>番号をお呼びしましたがご不在でしたので<br>注文をキャンセルさせて頂きました';
+      } else if (orderData.paidAt) {
+        statusBox.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
+        statusBox.style.borderColor = '#2196F3';
+        statusBox.style.color = 'white';
+        statusBox.innerHTML = '💳 お会計完了<br>商品が出来上がりましたらお呼びします<br>しばらくお待ちください';
+      } else {
+        statusBox.style.background = 'linear-gradient(135deg, #a8edea 0%, #89d4cf 100%)';
+        statusBox.style.borderColor = '#89d4cf';
+        statusBox.style.color = '#000';
+        statusBox.innerHTML = '⏳ ただ今準備しています、<br>しばらくお待ちください';
+      }
+    }
+
+    // ブラウザ通知を表示
+    function showBrowserNotification(title, body) {
+      if (Notification.permission === 'granted') {
+        const notification = new Notification(title, {
+          body: body,
+          icon: 'https://img.icons8.com/color/96/000000/Tako.png',
+          badge: 'https://img.icons8.com/color/96/000000/Tako.png',
+          vibrate: [200, 100, 200],
+          requireInteraction: true, // 通知が自動で消えないようにする
+          tag: 'order-notification-' + Date.now() // 一意のタグ
+        });
+        
+        // 通知をクリックしたらウィンドウにフォーカス
+        notification.onclick = function() {
+          window.focus();
+          notification.close();
+        };
+      } else {
+        console.log('通知の許可がありません。現在の許可状態:', Notification.permission);
+      }
+    }
+
+    // 通知音を再生
+    function playNotificationSound(soundType) {
+      try {
+        let soundFile = 'https://gymnastmasaki-lang.github.io/takoyaki-/notification.mp3'; // デフォルト
+        if (soundType === 'done') {
+          soundFile = 'https://gymnastmasaki-lang.github.io/takoyaki-/done.wav';
+        } else if (soundType === 'cancel') {
+          soundFile = 'https://gymnastmasaki-lang.github.io/takoyaki-/cancel.wav';
+        }
+        const audio = new Audio(soundFile);
+        audio.volume = 1.0; // 音量最大
+        audio.play().catch(e => console.log('音声再生エラー:', e));
+      } catch (e) {
+        console.log('音声ファイルが見つかりません:', e);
+      }
+    }
+
+    function watchSoldOutItems() {
+      const soldOutRef = collection(db, 'sold_out');
+      
+      onSnapshot(soldOutRef, (snapshot) => {
+        soldOutIds.clear();
+        snapshot.forEach(doc => {
+          soldOutIds.add(doc.data().menuId);
+        });
+        
+        // applyTimeBasedSoldOut(); // 🔴 自動品切れ設定を一時的に無効化
+        updateSoldOutDisplay();
+      });
+    }
+    
+    function updateSoldOutDisplay() {
+      const menuItems = document.querySelectorAll('.menu-item');
+      menuItems.forEach(item => {
+        const menuId = item.dataset.menuId;
+        if (soldOutIds.has(menuId)) {
+          item.classList.add('sold-out');
+          item.onclick = () => {
+            showCustomAlert('申し訳ございません。\nこの商品は現在品切れです。');
+          };
+        } else {
+          item.classList.remove('sold-out');
+          const itemData = allMenuItems.find(i => i.id === menuId);
+          if (itemData) {
+            item.onclick = () => selectItem(itemData);
+          }
+        }
+      });
+    }
+
+    async function updateTopWaitingCount() {
+      try {
+        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        const now = new Date();
+        const validOrders = new Set();
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
+            validOrders.add(data.orderNumber);
+          }
+        });
+        
+        const settingsSnapshot = await getDocs(collection(db, 'settings'));
+        let manualCount = 0;
+        settingsSnapshot.forEach(doc => {
+          if (doc.id === 'waiting') {
+            manualCount = doc.data().manualCount || 0;
+          }
+        });
+        
+        const totalWaiting = 1 + validOrders.size + manualCount;
+        const waitingElem = document.getElementById('top-waiting');
+        if (waitingElem) {
+          waitingElem.textContent = totalWaiting;
+        }
+        console.log('待ち人数更新:', totalWaiting);
+      } catch (e) {
+        console.error('待ち人数取得エラー:', e);
+      }
+    }
+
+    async function loadAllData() {
+      try {
+        console.log('データ読み込み開始');
+        const menuSnapshot = await getDocs(collection(db, 'menu'));
+        const isEatIn = tableNumber !== 'テイクアウト';
+        
+        console.log('メニューアイテム数:', menuSnapshot.size);
+
+        const categoryInfo = new Map();
+
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (!data || !data.category || !data.id) return;
+
+          const cat = data.category;
+          const itemId = data.id;
+
+          const isDineInOnly = typeof data.note === 'string' && data.note.includes('店内のみ');
+          const showThisItemInThisMode = isEatIn || !isDineInOnly;
+
+          if (!categoryInfo.has(cat)) {
+            categoryInfo.set(cat, {
+              minId: itemId,
+              hasTakeoutVisibleItem: showThisItemInThisMode
+            });
+          } else {
+            const info = categoryInfo.get(cat);
+            if (itemId < info.minId) info.minId = itemId;
+            if (showThisItemInThisMode) info.hasTakeoutVisibleItem = true;
+          }
+        });
+
+        const sortedCategories = Array.from(categoryInfo.entries())
+          .filter(([cat, info]) => {
+            return isEatIn || info.hasTakeoutVisibleItem;
+          })
+          .sort((a, b) => a[1].minId.localeCompare(b[1].minId))
+          .map(entry => entry[0]);
+
+        const sel = document.getElementById('category-select');
+        if (sel) {
+          sel.innerHTML = "";
+
+          const allOpt = document.createElement('option');
+          allOpt.value = "all";
+          allOpt.textContent = "全ての商品";
+          sel.appendChild(allOpt);
+
+          sortedCategories.forEach(cat => {
+            const opt = document.createElement('option');
+            opt.value = cat;
+            opt.textContent = cat;
+            sel.appendChild(opt);
+          });
+        }
+        
+        await loadAllMenu();
+      } catch (e) {
+        console.error('データ読み込みエラー:', e);
+        alert('データの読み込みに失敗しました: ' + e.message);
+      }
+    }
+
+    async function loadAllMenu() {
+      try {
+        const menuSnapshot = await getDocs(collection(db, 'menu'));
+        const items = [];
+        const isEatIn = tableNumber !== 'テイクアウト';
+        
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          const note = data.note || '';
+          
+          if (!isEatIn && note.includes('店内のみ')) {
+            return;
+          }
+          
+          items.push({
+            id: data.id,
+            category: data.category,
+            name: data.name,
+            price: data.price,
+            toppingsId: data.toppingsId,
+            image: data.image || '',
+            note: note
+          });
+        });
+        
+        items.sort((a, b) => {
+          if (a.id < b.id) return -1;
+          if (a.id > b.id) return 1;
+          return 0;
+        });
+        
+        allMenuItems = items;
+        console.log('メニュー表示アイテム数:', items.length);
+        displayMenuItems(items);
+        await loadSoldOutItems();
+      } catch (e) {
+        console.error('メニュー読み込みエラー:', e);
+      }
+    }
+
+    async function loadSoldOutItems() {
+      try {
+        const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
+        soldOutIds.clear();
+
+        soldOutSnapshot.forEach(doc => {
+          soldOutIds.add(doc.data().menuId);
+        });
+
+        // applyTimeBasedSoldOut(); // 🔴 自動品切れ設定を一時的に無効化
+        updateSoldOutDisplay();
+      } catch (e) {
+        console.error('品切れ情報取得エラー:', e);
+      }
+    }
+
+    function applyTimeBasedSoldOut() {
+      // 🔴 自動品切れ設定を一時的に無効化
+      // const now = new Date();
+      // const hour = now.getHours();
+      // const minute = now.getMinutes();
+
+      // const isTakeout = tableNumber === 'テイクアウト';
+      // const currentTime = hour + (minute / 60);
+
+      // let shouldSoldOut = false;
+
+      // if (isTakeout) {
+      //   shouldSoldOut = (currentTime >= 22.5 || hour < 11);
+      // } else {
+      //   shouldSoldOut = (hour >= 22 || hour < 11);
+      // }
+
+      // if (shouldSoldOut) {
+      //   allMenuItems.forEach(item => {
+      //     soldOutIds.add(item.id);
+      //   });
+      // }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      const sel = document.getElementById('category-select');
+      if (sel) {
+        sel.addEventListener('change', function() {
+          if (this.value === '' || this.value === 'all') {
+            displayMenuItems(allMenuItems);
+          } else {
+            const filtered = allMenuItems.filter(item => item.category === this.value);
+            displayMenuItems(filtered);
+          }
+          setTimeout(() => {
+            loadSoldOutItems();
+          }, 100);
+        });
+      }
     });
 
-    console.log('✅ FCMトークンをFirestoreに保存しました');
-  }
-</script>
+    function displayMenuItems(items) {
+      const list = document.getElementById('menu-list');
+      if (!list) return;
+      
+      list.innerHTML = '';
+      
+      if (!items || items.length === 0) {
+        list.innerHTML = '<div style="text-align:center;color:#666;padding:40px;">商品が見つかりませんでした</div>';
+        return;
+      }
+      
+      console.log('表示する商品数:', items.length);
+      
+      items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'menu-item';
+        div.dataset.menuId = item.id;
+        
+        let imageHtml = '';
+        if (item.image) {
+          const imageSrc = item.image.includes('http') ? item.image : `./${item.image}`;
+          imageHtml = `<img src="${imageSrc}" class="menu-item-image" onerror="this.style.display='none'">`;
+        }
+        
+        div.innerHTML = `
+          ${imageHtml}
+          <div class="menu-item-content">
+            <div class="menu-item-name">${item.name}</div>
+            <div class="menu-item-price">¥${item.price.toLocaleString()}</div>
+            ${item.note ? `<div class="menu-item-note">${item.note}</div>` : ''}
+          </div>
+        `;
+        div.onclick = () => selectItem(item);
+        list.appendChild(div);
+      });
+    }
+
+    async function selectItem(item) {
+      if (soldOutIds.has(item.id)) {
+        showCustomAlert('申し訳ございません。\nこの商品は現在品切れです。');
+        return;
+      }
+      
+      currentItem = item;
+      selectedToppings = [];
+      qty = 1;
+      
+      document.getElementById('item-info').innerHTML = `
+        <div class="menu-item-name" style="font-size: 20px;">${item.name}</div>
+        <div class="menu-item-price" style="font-size: 24px; margin-top: 10px;">¥${item.price.toLocaleString()}</div>
+      `;
+      
+      if (item.toppingsId) {
+        const toppingIds = item.toppingsId.split(',').map(id => id.trim());
+        const toppingsSnapshot = await getDocs(collection(db, 'toppings'));
+        const toppings = [];
+        const seenIds = new Set();
+        
+        toppingsSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (toppingIds.includes(data.id) && !seenIds.has(data.id)) {
+            toppings.push({
+              ...data,
+              order: data.order || 99
+            });
+            seenIds.add(data.id);
+          }
+        });
+        
+        toppings.sort((a, b) => a.order - b.order);
+        
+        const list = document.getElementById('topping-list');
+        list.innerHTML = '';
+        if (toppings.length > 0) {
+          toppings.forEach(t => {
+            const div = document.createElement('div');
+            div.className = 'topping-item';
+            div.innerHTML = `
+              <span>${t.name}</span>
+              <span style="color: #4CAF50; font-weight: bold;">${t.price > 0 ? '+¥' + t.price.toLocaleString() : '無料'}</span>
+            `;
+            div.onclick = () => {
+              div.classList.toggle('selected');
+              const idx = selectedToppings.findIndex(x => x.id === t.id);
+              if (idx > -1) selectedToppings.splice(idx, 1);
+              else selectedToppings.push(t);
+              updateSubtotal();
+            };
+            list.appendChild(div);
+          });
+        } else {
+          list.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">トッピングはありません</div>';
+        }
+      } else {
+        document.getElementById('topping-list').innerHTML = '<div style="text-align:center;color:#999;padding:20px;">トッピングはありません</div>';
+      }
+      
+      document.getElementById('qty').textContent = '1';
+      
+      updateSubtotal();
+      showPage('page-topping');
+      window.scrollTo(0, 0);
+    }
+
+    window.changeQty = function(d) {
+      qty = Math.max(1, qty + d);
+      document.getElementById('qty').textContent = qty;
+      updateSubtotal();
+    };
+
+    function updateSubtotal() {
+      let total = currentItem.price;
+      selectedToppings.forEach(t => total += t.price || 0);
+      document.getElementById('subtotal').textContent = '¥' + (total * qty).toLocaleString();
+    }
+
+    window.addToCart = async function() {
+      if (soldOutIds.has(currentItem.id)) {
+        showCustomAlert('申し訳ございません。\nこの商品は現在品切れになりました。');
+        backToMenu();
+        return;
+      }
+      
+      let toppingPrice = 0;
+      const toppingNames = selectedToppings.map(t => {
+        toppingPrice += t.price || 0;
+        return t.name;
+      }).join(', ') || 'なし';
+      
+      cart.push({
+        id: currentItem.id,
+        name: currentItem.name,
+        price: currentItem.price,
+        toppings: toppingNames,
+        toppingPrice: toppingPrice,
+        quantity: qty
+      });
+      
+      backToMenu();
+    };
+
+    window.backToMenu = function() {
+      showPage('page-menu');
+      updateCartButton();
+      window.scrollTo(0, 0);
+    };
+
+    window.continueShopping = function() {
+      backToMenu();
+    };
+
+    function updateCartButton() {
+      const btn = document.getElementById('cart-btn');
+      if (cart.length > 0) {
+        btn.classList.remove('hidden');
+        btn.textContent = `カートを見る (${cart.length}点)`;
+        btn.onclick = showCart;
+      } else {
+        btn.classList.add('hidden');
+      }
+    }
+
+    window.showCart = function() {
+      if (cart.length === 0) {
+        showCustomAlert('カートが空です');
+        return;
+      }
+      
+      const list = document.getElementById('cart-items');
+      list.innerHTML = '';
+      let total = 0;
+      let hasSoldOut = false;
+      
+      cart.forEach((item, index) => {
+        const subtotal = (item.price + item.toppingPrice) * item.quantity;
+        total += subtotal;
+        const div = document.createElement('div');
+        div.className = 'cart-item';
+        
+        if (soldOutIds.has(item.id)) {
+          div.classList.add('sold-out');
+          hasSoldOut = true;
+        }
+        
+        div.innerHTML = `
+          <button class="cart-item-delete-btn" onclick="removeFromCart(${index})">×</button>
+          <div class="cart-item-header">
+            <div class="cart-item-name">${item.name}</div>
+            <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
+          </div>
+          <div class="cart-item-details">
+            単価: ¥${item.price.toLocaleString()} × ${item.quantity}個
+          </div>
+          <div class="cart-item-details" style="color: #4CAF50;">
+            トッピング: ${item.toppings}
+          </div>
+        `;
+        list.appendChild(div);
+      });
+      
+      if (hasSoldOut) {
+        const warning = document.createElement('div');
+        warning.className = 'warning-box';
+        warning.style.marginBottom = '15px';
+        warning.innerHTML = '⚠️ 品切れ商品が含まれています<br>注文を確定する前に削除されます';
+        list.insertBefore(warning, list.firstChild);
+      }
+      
+      document.getElementById('cart-total').textContent = '¥' + total.toLocaleString();
+      showPage('page-cart');
+    };
+    
+    window.removeFromCart = function(index) {
+      cart.splice(index, 1);
+      if (cart.length === 0) {
+        showCustomAlert('カートが空になりました');
+        backToMenu();
+      } else {
+        showCart();
+      }
+      updateCartButton();
+    };
+
+    window.confirmOrder = async function() {
+      if (cart.length === 0) {
+        showCustomAlert('カートが空です');
+        return;
+      }
+      
+      const soldOutItems = [];
+      for (const item of cart) {
+        if (soldOutIds.has(item.id)) {
+          soldOutItems.push(item.name);
+        }
+      }
+      
+      if (soldOutItems.length > 0) {
+        showCustomAlert('申し訳ございません。\n以下の商品が品切れになりました:\n\n' + soldOutItems.join('\n') + '\n\nカートから削除してください。');
+        cart = cart.filter(item => !soldOutIds.has(item.id));
+        
+        if (cart.length === 0) {
+          showCustomAlert('全ての商品が品切れになったため、カートが空になりました。');
+          backToMenu();
+        } else {
+          showCart();
+        }
+        return;
+      }
+      
+      try {
+        const now = new Date();
+        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        
+        const todayStart = new Date(jstNow);
+        todayStart.setHours(1, 0, 0, 0);
+        if (jstNow < todayStart) {
+          todayStart.setDate(todayStart.getDate() - 1);
+        }
+        
+        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        let maxOrderNumber = 618;
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          const orderDate = data.timestamp.toDate();
+          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+          
+          if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
+            maxOrderNumber = data.orderNumber;
+          }
+        });
+        
+        const orderNumber = maxOrderNumber + 1;
+        
+        let totalAmount = 0;
+        cart.forEach(item => {
+          totalAmount += (item.price + item.toppingPrice) * item.quantity;
+        });
+        
+        const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
+        
+        const orderData = {
+          orderNumber: orderNumber,
+          timestamp: Timestamp.fromDate(now),
+          tableNumber: tableNumber,
+          items: cart,
+          totalAmount: totalAmount,
+          status: 'pending',
+          deleteAt: Timestamp.fromDate(deleteAt),
+          cancelledAt: null,
+          completedAt: null,
+          paidAt: null,
+          notifiedComplete: false,
+          notifiedCancel: false,
+          notifiedPaid: false
+        };
+        
+        const docRef = await addDoc(collection(db, 'orders'), orderData);
+        
+        await updateDoc(docRef, {
+          orderId: docRef.id
+        });
+        
+        const validOrders = [];
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
+            validOrders.push(data.orderNumber);
+          }
+        });
+        validOrders.push(orderNumber);
+        validOrders.sort((a, b) => a - b);
+        const myPosition = validOrders.indexOf(orderNumber) + 1;
+        const displayPosition = myPosition + 1;
+        
+        await updateDoc(docRef, {
+          myPosition: displayPosition
+        });
+        
+        document.getElementById('order-num').textContent = orderNumber;
+        document.getElementById('waiting').textContent = displayPosition;
+        document.getElementById('order-total').textContent = '¥' + totalAmount.toLocaleString();
+        document.getElementById('eat-style').textContent = tableNumber;
+        
+        const list = document.getElementById('order-items');
+        list.innerHTML = '';
+        cart.forEach(item => {
+          const subtotal = (item.price + item.toppingPrice) * item.quantity;
+          const div = document.createElement('div');
+          div.className = 'cart-item';
+          div.innerHTML = `
+            <div class="cart-item-header">
+              <div class="cart-item-name">${item.name}</div>
+              <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
+            </div>
+            <div class="cart-item-details">数量: ${item.quantity}個</div>
+            <div class="cart-item-details" style="color: #4CAF50;">トッピング: ${item.toppings}</div>
+          `;
+          list.appendChild(div);
+        });
+        
+        // 注文のステータスを監視開始
+        watchOrderStatus(docRef.id);
+        
+        cart = [];
+        showPage('page-complete');
+        
+      } catch (e) {
+        console.error('注文エラー:', e);
+        showCustomAlert('注文に失敗しました: ' + e.message);
+      }
+    };
+
+    function showPage(id) {
+      ['page-menu', 'page-topping', 'page-cart', 'page-complete'].forEach(p => {
+        document.getElementById(p).classList.add('hidden');
+      });
+      document.getElementById(id).classList.remove('hidden');
+      
+      if (id === 'page-menu') {
+        updateCartButton();
+      }
+    }
+
+    window.callStaff = async function() {
+      try {
+        const callData = {
+          tableNumber: tableNumber,
+          timestamp: Timestamp.now(),
+          type: 'call'
+        };
+        await addDoc(collection(db, 'staff_calls'), callData);
+        
+        showCustomAlert('店員を呼びました!');
+      } catch (e) {
+        console.error('呼び出しエラー:', e);
+        showCustomAlert('呼び出しに失敗しました');
+      }
+    };
+    
+    window.callStaffFromComplete = async function() {
+      try {
+        const callData = {
+          tableNumber: tableNumber,
+          timestamp: Timestamp.now(),
+          type: 'call'
+        };
+        await addDoc(collection(db, 'staff_calls'), callData);
+        
+        showCustomAlert('店員を呼びました!\n\n注文の変更・キャンセルなど\nお気軽にお申し付けください');
+      } catch (e) {
+        console.error('呼び出しエラー:', e);
+        showCustomAlert('呼び出しに失敗しました');
+      }
+    };
+    
+    window.requestBillFromComplete = async function() {
+      try {
+        const billData = {
+          tableNumber: tableNumber,
+          timestamp: Timestamp.now(),
+          type: 'bill'
+        };
+        await addDoc(collection(db, 'staff_calls'), billData);
+        
+        showCustomAlert('お会計を呼びました!\n\n先にお会計を済ませておくと\n商品受取後スムーズに退店できます');
+      } catch (e) {
+        console.error('お会計エラー:', e);
+        showCustomAlert('お会計呼び出しに失敗しました');
+      }
+    };
+    
+    function showCustomAlert(message) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+      `;
+      
+      const dialog = document.createElement('div');
+      dialog.style.cssText = `
+        background: white;
+        border-radius: 15px;
+        padding: 30px;
+        max-width: 80%;
+        text-align: center;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+      `;
+      
+      const text = document.createElement('div');
+      text.textContent = message;
+      text.style.cssText = `
+        font-size: 18px;
+        margin-bottom: 20px;
+        color: #333;
+        white-space: pre-line;
+      `;
+      
+      const button = document.createElement('button');
+      button.textContent = 'OK';
+      button.style.cssText = `
+        padding: 12px 40px;
+        background: #2196F3;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: bold;
+        cursor: pointer;
+      `;
+      button.onclick = () => overlay.remove();
+      
+      dialog.appendChild(text);
+      dialog.appendChild(button);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+    }
+
+
+  </script>
 </body>
 </html>
