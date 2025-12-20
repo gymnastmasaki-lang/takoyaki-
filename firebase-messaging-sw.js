@@ -12,44 +12,43 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// バックグラウンドメッセージを受信
 messaging.onBackgroundMessage((payload) => {
   console.log('バックグラウンドメッセージ受信:', payload);
   
-  const notificationTitle = payload.notification?.title || '粉もん屋 八 下赤塚店';
+  const notificationTitle = payload.notification.title;
   const notificationOptions = {
-    body: payload.notification?.body || '新しい通知があります',
-    icon: 'https://img.icons8.com/color/96/000000/Tako.png',
-    badge: 'https://img.icons8.com/color/96/000000/Tako.png',
-    vibrate: [200, 100, 200],
-    requireInteraction: true,
-    tag: 'order-notification-' + Date.now(),
-    data: payload.data || {}
+    body: payload.notification.body,
+    icon: payload.notification.icon || '/icon.png',
+    data: {
+      url: payload.data?.url || '/'
+    }
   };
 
-  return self.registration.showNotification(notificationTitle, notificationOptions);
+  self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
-// 通知をクリックしたときの処理
-self.addEventListener('notificationclick', (event) => {
-  console.log('通知クリック:', event);
+// 通知をクリックした時の処理
+self.addEventListener('notificationclick', function(event) {
+  console.log('通知がクリックされました:', event);
   event.notification.close();
   
-  const urlToOpen = event.notification.data?.url || '/menu.html';
+  // 通知に含まれるURLを取得（なければルートページ）
+  const urlToOpen = event.notification.data?.url || '/';
   
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // 既に開いているウィンドウがあればフォーカス
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
+      // 既に開いているタブがあるか確認
       for (let i = 0; i < clientList.length; i++) {
         const client = clientList[i];
-        if (client.url.includes('menu.html') && 'focus' in client) {
+        if (client.url.includes(urlToOpen.split('?')[0]) && 'focus' in client) {
           return client.focus();
         }
       }
-      // なければ新しいウィンドウを開く
+      // 開いているタブがなければ新しいタブで開く
       if (clients.openWindow) {
         return clients.openWindow(urlToOpen);
       }
     })
   );
 });
+
