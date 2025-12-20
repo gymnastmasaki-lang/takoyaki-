@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>粉もん屋 八 下赤塚店</title>
+<style>
+/* 画像を画面幅に合わせて縮小するようにする */
+img {
+    max-width: 100%; 
+    height: auto;
+    display: block;
+}
+
+/* 全体を中央揃えにし、余度な余白をなくす */
+body {
+    margin: 0;
+    padding: 0 0 100px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.content-area {
+    width: 90%;
+    max-width: 420px;
+    margin-top: 80px;
+    text-align: center;
+}
+
+.container {
+    max-width: 600px;
+    height: auto;
+    margin: 0 auto;
+}
+
+.top-image, .bottom-image {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.content-area {
+    background-color: #FFFF00;
+    padding: 30px 330px;
+}
+
+.welcome-text {
+    font-size: 2em;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 20px;
+}
+
+.start-button {
+    display: inline-block;
+    background-color: #C0C0C0;
+    color: white;
+    padding: 15px 40px;
+    text-decoration: none;
+    border-radius: 5px;
+    font-size: 1.2em;
+    font-weight: bold;
+    box-shadow: 0 4px #cc5200;
+}
+
+.start-button:active {
+    box-shadow: 0 1px #cc5200;
+    transform: translateY(3px);
+}
+</style>
+</head>
+<body>
+<div class="container" align="center">
+    <img src="takoyaki.jpg" class="top-image" width="600" height="300" alt="粉もんのイメージ">
+    <img src="irassyaimase.jpg" width="600" height="204" usemap="#irassyaimase" alt="いらっしゃいませ">
+    <button onclick="startOrder();" style="border:none;background:none;padding:0;cursor:pointer;">
+      <img src="botan.jpg" width="250" height="80" alt="注文開始" style="display:block;">
+    </button>
+    <img src="tyuumonnkaisi.jpg" width="600" height="201" alt="注文開始">
+</div>
+
+<!-- 呼び出しとお会計ボタン -->
+<div style="position: fixed; bottom: 20px; left: 20px; right: 20px; z-index: 1000; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 600px; margin: 0 auto;">
+  <button style="padding: 18px; font-size: 20px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; box-shadow: 0 8px 20px rgba(0,0,0,0.3);" onclick="callStaff()">📞 呼出</button>
+  <button style="padding: 18px; font-size: 20px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; box-shadow: 0 8px 20px rgba(0,0,0,0.3);" onclick="requestBill()">💵 お会計</button>
+</div>
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getFirestore, collection, addDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+  authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+  projectId: "takoyaki-order-system-bacd7",
+  storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+  messagingSenderId: "104494752890",
+  appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// URLパラメータからテーブル番号を取得
+const urlParams = new URLSearchParams(window.location.search);
+const tableNumber = urlParams.get('table') || 'テイクアウト';
+
+// 注文開始ボタンをクリックした時の処理
+function startOrder() {
+  if (urlParams.get('table')) {
+    // テーブル番号がある場合（店内飲食）
+    window.location.href = 'menu.html?table=' + encodeURIComponent(tableNumber) + '&fromIndex=1';
+  } else {
+    // テーブル番号がない場合（テイクアウト）
+    window.location.href = 'menu.html';
+  }
+}
+
+// 呼び出しボタン
+window.callStaff = async function() {
+  try {
+    const callData = {
+      tableNumber: tableNumber,
+      timestamp: Timestamp.now(),
+      type: 'call'
+    };
+    await addDoc(collection(db, 'staff_calls'), callData);
+    showCustomAlert('店員を呼びました!');
+  } catch (e) {
+    console.error('呼び出しエラー:', e);
+    showCustomAlert('呼び出しに失敗しました');
+  }
+};
+
+// お会計ボタン
+window.requestBill = async function() {
+  try {
+    const billData = {
+      tableNumber: tableNumber,
+      timestamp: Timestamp.now(),
+      type: 'bill'
+    };
+    await addDoc(collection(db, 'staff_calls'), billData);
+    showCustomAlert('お会計です。');
+  } catch (e) {
+    console.error('お会計エラー:', e);
+    showCustomAlert('お会計呼び出しに失敗しました');
+  }
+};
+
+// カスタムアラート表示
+function showCustomAlert(message) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+  `;
+  
+  const dialog = document.createElement('div');
+  dialog.style.cssText = `
+    background: white;
+    border-radius: 15px;
+    padding: 30px;
+    max-width: 80%;
+    text-align: center;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  `;
+  
+  const text = document.createElement('div');
+  text.textContent = message;
+  text.style.cssText = `
+    font-size: 18px;
+    margin-bottom: 20px;
+    color: #333;
+    white-space: pre-line;
+  `;
+  
+  const button = document.createElement('button');
+  button.textContent = 'OK';
+  button.style.cssText = `
+    padding: 12px 40px;
+    background: #2196F3;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+  `;
+  button.onclick = () => overlay.remove();
+  
+  dialog.appendChild(text);
+  dialog.appendChild(button);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+}
+
+window.startOrder = startOrder;
+</script>
+</body>
+</html>
