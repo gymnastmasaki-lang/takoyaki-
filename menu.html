@@ -612,7 +612,7 @@
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, getDocs, addDoc, onSnapshot, updateDoc, doc, Timestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, doc, Timestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -634,6 +634,7 @@
     let soldOutIds = new Set();
     let currentOrderId = null;
     let orderStatusUnsubscribe = null;
+    let positionUpdateInterval = null;
     let wakeLock = null;
     let titleBlinkInterval = null;
     
@@ -650,6 +651,49 @@
     };
 
     // 注文のステータスを監視
+    // 現在の待ち順番を計算する関数
+    async function calculateCurrentPosition(myOrderNumber) {
+      try {
+        const now = new Date();
+        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        
+        // 有効な注文（自分より前の注文）を計算
+        let ordersAhead = 0;
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          // 自分より注文番号が小さく、まだキャンセルされておらず、有効期限内の注文
+          if (data.orderNumber < myOrderNumber && 
+              data.deleteAt && data.deleteAt.toDate() > now && 
+              !data.cancelledAt &&
+              !data.completedAt) {
+            ordersAhead++;
+          }
+        });
+        
+        // 手動待ち人数を取得
+        const settingsSnapshot = await getDocs(collection(db, 'settings'));
+        let manualCount = 0;
+        settingsSnapshot.forEach(doc => {
+          if (doc.id === 'waiting') {
+            manualCount = doc.data().manualCount || 0;
+          }
+        });
+        
+        // 待ち順番 = 手動待ち人数 + 自分より前の注文数 + 2（ダミー1 + 自分1）
+        const position = manualCount + ordersAhead + 2;
+        
+        console.log('🔢 待ち順番再計算:');
+        console.log('  - 手動待ち人数:', manualCount);
+        console.log('  - 自分より前の注文:', ordersAhead);
+        console.log('  - 現在の順番:', position);
+        
+        return position;
+      } catch (e) {
+        console.error('待ち順番計算エラー:', e);
+        return null;
+      }
+    }
+
     function watchOrderStatus(orderId) {
       if (orderStatusUnsubscribe) {
         orderStatusUnsubscribe();
@@ -658,7 +702,7 @@
       currentOrderId = orderId;
       const orderRef = doc(db, 'orders', orderId);
       
-      orderStatusUnsubscribe = onSnapshot(orderRef, (docSnap) => {
+      orderStatusUnsubscribe = onSnapshot(orderRef, async (docSnap) => {
         if (!docSnap.exists()) {
           console.log('注文が削除されました');
           return;
@@ -667,6 +711,17 @@
         const data = docSnap.data();
         console.log('📋 注文ステータス更新:', data);
         updateOrderStatusDisplay(data);
+        
+        // 待ち順番を再計算して表示を更新
+        if (!data.completedAt && !data.cancelledAt) {
+          const currentPosition = await calculateCurrentPosition(data.orderNumber);
+          if (currentPosition !== null) {
+            const waitingElement = document.getElementById('waiting');
+            if (waitingElement) {
+              waitingElement.textContent = currentPosition;
+            }
+          }
+        }
         
         // ステータスが変更されたら通知を表示
         if (data.completedAt && !data.notifiedComplete) {
@@ -696,6 +751,35 @@
           updateDoc(orderRef, { notifiedPaid: true }).catch(e => console.error(e));
         }
       });
+      
+      // 待ち順番を30秒ごとに更新（他の注文の削除を反映するため）
+      if (positionUpdateInterval) {
+        clearInterval(positionUpdateInterval);
+      }
+      
+      positionUpdateInterval = setInterval(async () => {
+        const docSnap = await getDoc(orderRef);
+        if (!docSnap.exists()) {
+          clearInterval(positionUpdateInterval);
+          return;
+        }
+        
+        const data = docSnap.data();
+        // 完了またはキャンセルされていない場合のみ更新
+        if (!data.completedAt && !data.cancelledAt) {
+          const currentPosition = await calculateCurrentPosition(data.orderNumber);
+          if (currentPosition !== null) {
+            const waitingElement = document.getElementById('waiting');
+            if (waitingElement) {
+              waitingElement.textContent = currentPosition;
+              console.log('⏰ 待ち順番を定期更新:', currentPosition);
+            }
+          }
+        } else {
+          // 完了/キャンセル済みなら定期更新を停止
+          clearInterval(positionUpdateInterval);
+        }
+      }, 30000); // 30秒ごと
     }
 
     // 注文ステータス表示の更新
@@ -1281,12 +1365,16 @@
         
         const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
         
-        // 有効な注文を計算（現在の注文前の状態）
-        const validOrders = [];
+        // 有効な注文を計算（自分より前の注文のみ）
+        let ordersAhead = 0;
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
-          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
-            validOrders.push(data.orderNumber);
+          // 自分より注文番号が小さく、まだ有効な注文のみカウント
+          if (data.orderNumber < orderNumber && 
+              data.deleteAt && data.deleteAt.toDate() > now && 
+              !data.cancelledAt &&
+              !data.completedAt) {
+            ordersAhead++;
           }
         });
         
@@ -1299,12 +1387,13 @@
           }
         });
         
-        // 待ち順番を計算：自分の前にいる人数 + 手動待ち人数 + 1（自分）
-        const myPosition = validOrders.length + manualCount + 1;
+        // 待ち順番を計算：手動待ち人数 + 自分より前の注文 + 2（ダミー1 + 自分1）
+        const myPosition = manualCount + ordersAhead + 2;
         
         console.log('📊 待ち順番計算:');
-        console.log('  - 有効な注文数:', validOrders.length);
         console.log('  - 手動待ち人数:', manualCount);
+        console.log('  - 自分より前の注文:', ordersAhead);
+        console.log('  - 自分の順番:', myPosition);
         console.log('  - 自分の順番:', myPosition);
         
         const orderData = {
