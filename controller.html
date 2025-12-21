@@ -22,7 +22,7 @@
       box-shadow: 0 4px 20px rgba(0,0,0,0.2);
     }
     .header h1 { font-size: 20px; font-weight: bold; }
-    .top-controls { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+    .top-controls { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; }
     .big-btn {
       padding: 15px;
       font-size: 18px;
@@ -231,10 +231,11 @@
   
   <div id="page-orders">
     <div class="top-controls">
-      <button class="big-btn btn-refresh" onclick="loadOrders()">🔄 更新</button>
-      <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">👥 待ち+1</button>
-      <button class="big-btn btn-soldout" onclick="showSoldOutPage()">🚫 品切れ設定</button>
-      <button class="big-btn" id="bulk-soldout-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="toggleBulkSoldOut()">🚫 一括品切れ</button>
+      <button class="big-btn btn-refresh" onclick="loadOrders()">更新</button>
+      <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">待1</button>
+      <button class="big-btn btn-soldout" onclick="showSoldOutPage()">品切</button>
+      <button class="big-btn" id="bulk-soldout-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="toggleBulkSoldOut()">一括</button>
+      <button class="big-btn" id="time-override-btn" style="background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%);" onclick="toggleTimeOverride()">時外</button>
     </div>
     
     <div class="manual-waiting-card">
@@ -398,6 +399,7 @@
         audioEnabled = true;
         overlay.remove();
         loadOrders();
+        loadTimeOverrideStatus();
         watchWaiting();
         watchStaffCalls();
         watchOrders();
@@ -924,7 +926,7 @@
           
           await Promise.all(promises);
           isBulkSoldOut = true;
-          btn.textContent = '✓ 一括再販';
+          btn.textContent = '再販';
           btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
           showToast('✓ 全商品を品切れに設定');
         } catch (e) {
@@ -942,7 +944,7 @@
           
           await Promise.all(promises);
           isBulkSoldOut = false;
-          btn.textContent = '🚫 一括品切れ';
+          btn.textContent = '一括';
           btn.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
           showToast('✓ 全商品を販売再開');
         } catch (e) {
@@ -951,6 +953,52 @@
         }
       }
     };
+
+    window.toggleTimeOverride = async function() {
+      const btn = document.getElementById('time-override-btn');
+      
+      try {
+        const settingsRef = doc(db, 'settings', 'timeOverride');
+        const settingsSnap = await getDoc(settingsRef);
+        const currentOverride = settingsSnap.exists() ? settingsSnap.data().enabled : false;
+        
+        const newOverride = !currentOverride;
+        
+        await setDoc(settingsRef, {
+          enabled: newOverride,
+          timestamp: Timestamp.now()
+        });
+        
+        if (newOverride) {
+          btn.textContent = '営業';
+          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          showToast('✓ 営業時間外でも注文可能にしました');
+        } else {
+          btn.textContent = '時外';
+          btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
+          showToast('✓ 営業時間外チェックを有効にしました');
+        }
+      } catch (e) {
+        console.error(e);
+        showToast('エラー: ' + e.message);
+      }
+    };
+    
+    async function loadTimeOverrideStatus() {
+      try {
+        const settingsRef = doc(db, 'settings', 'timeOverride');
+        const settingsSnap = await getDoc(settingsRef);
+        const overrideEnabled = settingsSnap.exists() ? settingsSnap.data().enabled : false;
+        
+        const btn = document.getElementById('time-override-btn');
+        if (overrideEnabled) {
+          btn.textContent = '営業';
+          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+        }
+      } catch (e) {
+        console.error('時間オーバーライド読み込みエラー:', e);
+      }
+    }
 
     function showConfirmDialog(message) {
       return new Promise((resolve) => {
