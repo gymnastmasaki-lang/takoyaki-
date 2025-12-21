@@ -740,19 +740,21 @@
 
     // 注文のステータスを監視
     // 現在の待ち順番を計算する関数
-    async function calculateCurrentPosition(myOrderNumber) {
+    async function calculateCurrentPosition(myOrderNumber, savedPosition) {
       try {
         const now = new Date();
         const ordersSnapshot = await getDocs(collection(db, 'orders'));
         
-        // 現在の有効な注文数（完了していない注文）
-        let validOrderCount = 0;
+        // 自分より前の注文で、まだ完了していない注文を数える
+        let ordersAhead = 0;
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
-          if (data.deleteAt && data.deleteAt.toDate() > now && 
-              !data.cancelledAt && 
+          // 自分より注文番号が小さく、まだ完了していない注文
+          if (data.orderNumber < myOrderNumber && 
+              data.deleteAt && data.deleteAt.toDate() > now && 
+              !data.cancelledAt &&
               !data.completedAt) {
-            validOrderCount++;
+            ordersAhead++;
           }
         });
         
@@ -765,13 +767,15 @@
           }
         });
         
-        // ただ今の待ち人数 = 自分の順番（トップ表示と同じ計算）
-        const position = 1 + validOrderCount + manualCount;
+        // 保存された初期順番から、完了した注文分を引く
+        // ordersAhead=0なら全て完了 → 1番目
+        // ordersAhead>0なら savedPosition - (元の前の人数 - 今の前の人数)
+        const position = ordersAhead === 0 ? 1 : (manualCount + ordersAhead + 2);
         
         console.log('🔢 待ち順番再計算:');
-        console.log('  - ダミー: 1');
-        console.log('  - 有効な注文数:', validOrderCount);
+        console.log('  - 保存された順番:', savedPosition);
         console.log('  - 手動待ち人数:', manualCount);
+        console.log('  - 前の待ち注文:', ordersAhead);
         console.log('  - 現在の順番:', position);
         
         return position;
@@ -805,7 +809,7 @@
         
         // 待ち順番を再計算して表示を更新
         if (!data.completedAt && !data.cancelledAt) {
-          const currentPosition = await calculateCurrentPosition(data.orderNumber);
+          const currentPosition = await calculateCurrentPosition(data.orderNumber, data.myPosition);
           if (currentPosition !== null) {
             const waitingElement = document.getElementById('waiting');
             if (waitingElement) {
@@ -862,7 +866,7 @@
         
         // 完了またはキャンセルされていない場合のみ更新
         if (!data.completedAt && !data.cancelledAt) {
-          const currentPosition = await calculateCurrentPosition(data.orderNumber);
+          const currentPosition = await calculateCurrentPosition(data.orderNumber, data.myPosition);
           if (currentPosition !== null) {
             const waitingElement = document.getElementById('waiting');
             if (waitingElement) {
@@ -891,7 +895,7 @@
         const data = docSnap.data();
         // 完了またはキャンセルされていない場合のみ更新
         if (!data.completedAt && !data.cancelledAt) {
-          const currentPosition = await calculateCurrentPosition(data.orderNumber);
+          const currentPosition = await calculateCurrentPosition(data.orderNumber, data.myPosition);
           if (currentPosition !== null) {
             const waitingElement = document.getElementById('waiting');
             if (waitingElement) {
