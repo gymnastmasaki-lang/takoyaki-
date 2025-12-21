@@ -644,12 +644,85 @@
 
     window.onload = async function() {
       console.log('ページ読み込み開始');
+      
+      // 時間帯による品切れチェック
+      checkTimeBasedAvailability();
+      
       await loadAllData();
       await updateTopWaitingCount();
       setInterval(updateTopWaitingCount, 10000);
       watchSoldOutItems();
       console.log('初期化完了');
     };
+    
+    // 時間帯による利用可否チェック
+    function checkTimeBasedAvailability() {
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
+      const currentTime = hours * 100 + minutes; // 例: 22:30 = 2230
+      
+      const hasTableParam = urlParams.has('table');
+      
+      // ?table=パラメータがある場合（店内注文全て）: 22:00～11:00は品切れ
+      if (hasTableParam) {
+        if (currentTime >= 2200 || currentTime < 1100) {
+          showTimeBasedSoldOut('店内注文の受付時間は11:00～22:00です');
+          return;
+        }
+      }
+      // パラメータなし、またはテイクアウト: 22:30～11:00は品切れ
+      else {
+        if (currentTime >= 2230 || currentTime < 1100) {
+          showTimeBasedSoldOut('テイクアウトの受付時間は11:00～22:30です');
+          return;
+        }
+      }
+    }
+    
+    // 時間外メッセージを表示
+    function showTimeBasedSoldOut(message) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+      `;
+      
+      const dialog = document.createElement('div');
+      dialog.style.cssText = `
+        background: white;
+        border-radius: 15px;
+        padding: 40px;
+        max-width: 80%;
+        text-align: center;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+      `;
+      
+      dialog.innerHTML = `
+        <div style="font-size: 48px; margin-bottom: 20px;">🙇</div>
+        <div style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #f44336;">
+          営業時間外です
+        </div>
+        <div style="font-size: 16px; color: #666; line-height: 1.6;">
+          ${message}<br><br>
+          またのご来店をお待ちしております
+        </div>
+      `;
+      
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+      
+      // メニュー画面を非表示
+      document.getElementById('page-menu').style.display = 'none';
+    }
 
     // 注文のステータスを監視
     // 現在の待ち順番を計算する関数
