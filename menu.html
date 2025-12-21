@@ -102,8 +102,8 @@
     
     select {
       width: 100%;
-      padding: 20px;
-      font-size: 22px;
+      padding: 12px;
+      font-size: 16px;
       border: 3px solid #4CAF50;
       border-radius: 12px;
       background: white;
@@ -516,7 +516,6 @@
       <div class="menu-grid" id="menu-list"></div>
     </div>
     <button id="cart-btn" class="btn-primary fixed-cart-btn hidden" onclick="showCart()">カートを見る</button>
-    <button class="btn-primary" style="position: fixed; bottom: 20px; left: 20px; right: 20px; z-index: 1000; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); box-shadow: 0 8px 20px rgba(0,0,0,0.3);" onclick="callStaff()">📞 呼出</button>
   </div>
 
   <!-- トッピング選択ページ -->
@@ -666,7 +665,7 @@
         }
         
         const data = docSnap.data();
-        console.log('📝 注文ステータス更新:', data);
+        console.log('📋 注文ステータス更新:', data);
         updateOrderStatusDisplay(data);
         
         // ステータスが変更されたら通知を表示
@@ -1282,6 +1281,32 @@
         
         const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
         
+        // 有効な注文を計算（現在の注文前の状態）
+        const validOrders = [];
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
+            validOrders.push(data.orderNumber);
+          }
+        });
+        
+        // 手動待ち人数を取得
+        const settingsSnapshot = await getDocs(collection(db, 'settings'));
+        let manualCount = 0;
+        settingsSnapshot.forEach(doc => {
+          if (doc.id === 'waiting') {
+            manualCount = doc.data().manualCount || 0;
+          }
+        });
+        
+        // 待ち順番を計算：自分の前にいる人数 + 手動待ち人数 + 1（自分）
+        const myPosition = validOrders.length + manualCount + 1;
+        
+        console.log('📊 待ち順番計算:');
+        console.log('  - 有効な注文数:', validOrders.length);
+        console.log('  - 手動待ち人数:', manualCount);
+        console.log('  - 自分の順番:', myPosition);
+        
         const orderData = {
           orderNumber: orderNumber,
           timestamp: Timestamp.fromDate(now),
@@ -1295,7 +1320,8 @@
           paidAt: null,
           notifiedComplete: false,
           notifiedCancel: false,
-          notifiedPaid: false
+          notifiedPaid: false,
+          myPosition: myPosition
         };
         
         const docRef = await addDoc(collection(db, 'orders'), orderData);
@@ -1304,24 +1330,8 @@
           orderId: docRef.id
         });
         
-        const validOrders = [];
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
-            validOrders.push(data.orderNumber);
-          }
-        });
-        validOrders.push(orderNumber);
-        validOrders.sort((a, b) => a - b);
-        const myPosition = validOrders.indexOf(orderNumber) + 1;
-        const displayPosition = myPosition + 1;
-        
-        await updateDoc(docRef, {
-          myPosition: displayPosition
-        });
-        
         document.getElementById('order-num').textContent = orderNumber;
-        document.getElementById('waiting').textContent = displayPosition;
+        document.getElementById('waiting').textContent = myPosition;
         document.getElementById('order-total').textContent = '¥' + totalAmount.toLocaleString();
         document.getElementById('eat-style').textContent = tableNumber;
         
