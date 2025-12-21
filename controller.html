@@ -4,6 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>注文管理コントローラー</title>
+  
+  <!-- Star WebPRNT SDK -->
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprint/manual/ja/sdk/starwebprintbuilder.js"></script>
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprint/manual/ja/sdk/starwebprinttraderr.js"></script>
+  
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -78,7 +83,8 @@
       border-radius: 12px; 
       padding: 15px; 
       margin-bottom: 15px; 
-      box-shadow: 0 4px 15px rgba(0,0,0,0.2); 
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      position: relative;
     }
     .order-number { font-size: 28px; font-weight: bold; color: #4CAF50; }
     .order-table {
@@ -125,6 +131,14 @@
     }
     .btn-complete { background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); }
     .btn-cancel { background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); }
+    .btn-print { 
+      background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); 
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 8px 15px;
+      font-size: 12px;
+    }
     .staff-call-card {
       background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
       color: white;
@@ -285,6 +299,8 @@
     let allMenuItems = [];
     let isBulkSoldOut = false;
     let currentAudio = null;
+    let printerUrl = 'http://192.168.244.41'; // mC-Print3のIPアドレス
+    let printedOrders = new Set(); // 印刷済み注文を記録
 
     window.onload = async function() {
       initializeAudioButtons();
@@ -415,6 +431,15 @@
         
         if (!isFirstOrderLoad && currentCount > lastOrderCount) {
           playOrderSound();
+          
+          // 新規注文を検出して自動印刷
+          snapshot.forEach(doc => {
+            const order = { id: doc.id, ...doc.data() };
+            if (!printedOrders.has(order.id) && order.status === 'pending') {
+              printOrder(order);
+              printedOrders.add(order.id);
+            }
+          });
         }
         
         lastOrderCount = currentCount;
@@ -584,6 +609,14 @@
         }).join('');
         
         card.innerHTML = `
+          <button class="control-btn btn-print" onclick="printOrder({
+            id: '${order.id}',
+            orderNumber: ${order.orderNumber},
+            tableNumber: '${order.tableNumber}',
+            items: ${JSON.stringify(order.items).replace(/'/g, "&#39;")},
+            totalAmount: ${order.totalAmount},
+            memo: ${JSON.stringify(order.memo || {}).replace(/'/g, "&#39;")}
+          })">🖨️ 印刷</button>
           <div class="order-number">#${order.orderNumber}</div>
           <div class="order-table">${order.tableNumber}</div>
           ${statusBadge}${paidBadge}
@@ -1105,6 +1138,123 @@
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 2000);
     }
+
+    // 印刷機能
+    window.printOrder = async function(order) {
+      console.log('印刷開始:', order);
+      
+      try {
+        // Star WebPRNT Builderを使用してレシートを生成
+        const builder = new StarWebPrintBuilder();
+        const request = builder.createInitializationElement();
+        
+        // ロゴ・店名
+        builder.createTextElement({
+          characterspace: 0,
+          width: 2,
+          height: 2,
+          emphasis: true,
+          alignment: 'center',
+          data: '粉もん屋 八\n'
+        });
+        
+        builder.createTextElement({
+          characterspace: 0,
+          alignment: 'center',
+          data: '下赤塚店\n'
+        });
+        
+        builder.createFeedElement({ line: 1 });
+        
+        // 注文番号
+        builder.createTextElement({
+          characterspace: 0,
+          width: 3,
+          height: 3,
+          emphasis: true,
+          alignment: 'center',
+          data: `#${order.orderNumber}\n`
+        });
+        
+        builder.createFeedElement({ line: 1 });
+        
+        // テーブル番号
+        builder.createTextElement({
+          characterspace: 0,
+          width: 2,
+          height: 2,
+          alignment: 'center',
+          data: `${order.tableNumber}\n`
+        });
+        
+        builder.createFeedElement({ line: 1 });
+        builder.createRuledLineElement({ thickness: 'medium' });
+        builder.createFeedElement({ line: 1 });
+        
+        // 注文明細
+        order.items.forEach((item, idx) => {
+          // 商品名と数量
+          builder.createTextElement({
+            characterspace: 0,
+            emphasis: true,
+            data: `${item.name} x${item.quantity}\n`
+          });
+          
+          // トッピング
+          if (item.toppings && item.toppings !== 'なし') {
+            builder.createTextElement({
+              characterspace: 0,
+              data: `  ${item.toppings}\n`
+            });
+          }
+          
+          // メモ
+          if (order.memo && order.memo[idx]) {
+            builder.createTextElement({
+              characterspace: 0,
+              data: `  【メモ】${order.memo[idx]}\n`
+            });
+          }
+          
+          builder.createFeedElement({ line: 1 });
+        });
+        
+        builder.createRuledLineElement({ thickness: 'medium' });
+        builder.createFeedElement({ line: 1 });
+        
+        // 合計金額
+        builder.createTextElement({
+          characterspace: 0,
+          width: 2,
+          height: 2,
+          emphasis: true,
+          alignment: 'right',
+          data: `合計: ¥${order.totalAmount.toLocaleString()}\n`
+        });
+        
+        builder.createFeedElement({ line: 2 });
+        
+        // カット
+        builder.createCutPaperElement({ feed: true, type: 'partial' });
+        
+        // 印刷実行
+        const trader = new StarWebPrintTrader({ url: printerUrl });
+        trader.onReceive = function(response) {
+          console.log('印刷成功:', response);
+          showToast('✓ 印刷しました');
+        };
+        trader.onError = function(response) {
+          console.error('印刷エラー:', response);
+          showToast('✗ 印刷エラー');
+        };
+        
+        trader.sendMessage({ request: request });
+        
+      } catch (e) {
+        console.error('印刷失敗:', e);
+        showToast('✗ 印刷失敗: ' + e.message);
+      }
+    };
 
     window.loadOrders = loadOrders;
   </script>
