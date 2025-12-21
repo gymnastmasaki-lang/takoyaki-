@@ -758,24 +758,27 @@
           }
         });
         
-        // 手動待ち人数を取得
-        const settingsSnapshot = await getDocs(collection(db, 'settings'));
-        let manualCount = 0;
-        settingsSnapshot.forEach(doc => {
-          if (doc.id === 'waiting') {
-            manualCount = doc.data().manualCount || 0;
-          }
-        });
+        // シンプルなロジック：
+        // 初期の前の人数 = savedPosition - 2（ダミー1 + 自分1）
+        // 1人目: 2-2=0人前, 2人目: 3-2=1人前, 3人目: 4-2=2人前
+        const initialOrdersAhead = savedPosition - 2;
         
-        // 保存された初期順番から、完了した注文分を引く
-        // ordersAhead=0なら全て完了 → 1番目
-        // ordersAhead>0なら savedPosition - (元の前の人数 - 今の前の人数)
-        const position = ordersAhead === 0 ? 1 : (manualCount + ordersAhead + 2);
+        // 完了した人数
+        const completedCount = initialOrdersAhead - ordersAhead;
+        
+        // 現在の順番 = 保存された順番 - 完了した人数
+        let position = savedPosition - completedCount;
+        
+        // ただし、前の人が全員いなくなったら1番目（商品受け取り）
+        if (ordersAhead === 0 && initialOrdersAhead > 0) {
+          position = 1;
+        }
         
         console.log('🔢 待ち順番再計算:');
-        console.log('  - 保存された順番:', savedPosition);
-        console.log('  - 手動待ち人数:', manualCount);
-        console.log('  - 前の待ち注文:', ordersAhead);
+        console.log('  - 保存された順番(固定):', savedPosition);
+        console.log('  - 初期の前の人数:', initialOrdersAhead);
+        console.log('  - 現在の前の人数:', ordersAhead);
+        console.log('  - 完了した人数:', completedCount);
         console.log('  - 現在の順番:', position);
         
         return position;
