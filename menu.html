@@ -634,6 +634,7 @@
     let soldOutIds = new Set();
     let currentOrderId = null;
     let orderStatusUnsubscribe = null;
+    let allOrdersUnsubscribe = null;
     let positionUpdateInterval = null;
     let wakeLock = null;
     let titleBlinkInterval = null;
@@ -698,10 +699,14 @@
       if (orderStatusUnsubscribe) {
         orderStatusUnsubscribe();
       }
+      if (allOrdersUnsubscribe) {
+        allOrdersUnsubscribe();
+      }
       
       currentOrderId = orderId;
       const orderRef = doc(db, 'orders', orderId);
       
+      // 自分の注文を監視
       orderStatusUnsubscribe = onSnapshot(orderRef, async (docSnap) => {
         if (!docSnap.exists()) {
           console.log('注文が削除されました');
@@ -752,6 +757,27 @@
         }
       });
       
+      // 全ての注文を監視して、他の注文が変更されたら自分の順番も更新
+      allOrdersUnsubscribe = onSnapshot(collection(db, 'orders'), async (snapshot) => {
+        const docSnap = await getDoc(orderRef);
+        if (!docSnap.exists()) {
+          return;
+        }
+        
+        const data = docSnap.data();
+        // 完了またはキャンセルされていない場合のみ更新
+        if (!data.completedAt && !data.cancelledAt) {
+          const currentPosition = await calculateCurrentPosition(data.orderNumber);
+          if (currentPosition !== null) {
+            const waitingElement = document.getElementById('waiting');
+            if (waitingElement) {
+              waitingElement.textContent = currentPosition;
+              console.log('🔄 他の注文変更により順番更新:', currentPosition);
+            }
+          }
+        }
+      });
+      
       // 待ち順番を30秒ごとに更新（他の注文の削除を反映するため）
       if (positionUpdateInterval) {
         clearInterval(positionUpdateInterval);
@@ -779,7 +805,7 @@
           // 完了/キャンセル済みなら定期更新を停止
           clearInterval(positionUpdateInterval);
         }
-      }, 30000); // 30秒ごと
+      }, 5000); // 5秒ごと
     }
 
     // 注文ステータス表示の更新
