@@ -579,10 +579,19 @@
           ⏳ ただ今準備しています、<br>しばらくお待ちください
         </div>
         
-        <div class="warning-box">
-          この番号でお呼びしますので<br>
-          商品を受け取るまで<br>
-          この画面を閉じないでください
+        <div class="warning-box" style="background: #e3f2fd; border-color: #2196F3; color: #1565c0;">
+          <strong>💡 待ち時間の過ごし方</strong><br><br>
+          別のページを見る場合は、<br>
+          <strong style="font-size: 18px;">時々このタブに戻ってきて<br>ステータスを確認してください</strong><br><br>
+          商品完成時は画面のタブタイトルが<br>
+          「🎉 商品完成!」と点滅します
+        </div>
+        
+        <div class="warning-box" style="background: #fff3cd; border-color: #ffc107; color: #856404;">
+          <strong>📱 重要なお願い</strong><br><br>
+          注文番号で管理していますので、<br>
+          <strong style="font-size: 20px; color: #d32f2f;">商品を受け取るまでこの画面を閉じないでください</strong><br><br>
+          画面を閉じると音声案内ができません
         </div>
         
         <div class="warning-box" style="background: #ffebee; border-color: #ef5350; color: #c62828;">
@@ -604,8 +613,7 @@
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, deleteDoc, doc, Timestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-    import { getMessaging, getToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging.js';
+    import { getFirestore, collection, getDocs, addDoc, onSnapshot, updateDoc, doc, Timestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -618,7 +626,6 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
-    const messaging = getMessaging(app);
 
     let cart = [];
     let currentItem = null;
@@ -628,11 +635,11 @@
     let soldOutIds = new Set();
     let currentOrderId = null;
     let orderStatusUnsubscribe = null;
+    let wakeLock = null;
+    let titleBlinkInterval = null;
     
     const urlParams = new URLSearchParams(window.location.search);
     const tableNumber = urlParams.get('table') || 'テイクアウト';
-
-
 
     window.onload = async function() {
       console.log('ページ読み込み開始');
@@ -640,117 +647,8 @@
       await updateTopWaitingCount();
       setInterval(updateTopWaitingCount, 10000);
       watchSoldOutItems();
-      
-      // プッシュ通知の許可をリクエスト
-      await requestNotificationPermission();
-      
-      // Service Workerを登録してFCMトークンを取得
-      await setupPushNotifications();
-      
       console.log('初期化完了');
     };
-
-    // プッシュ通知の許可をリクエスト
-    async function requestNotificationPermission() {
-      if (!('Notification' in window)) {
-        console.log('このブラウザはプッシュ通知をサポートしていません');
-        showCustomAlert('このブラウザはプッシュ通知をサポートしていません');
-        return;
-      }
-      
-      console.log('現在の通知許可状態:', Notification.permission);
-      
-      if (Notification.permission === 'default') {
-        const permission = await Notification.requestPermission();
-        console.log('通知許可結果:', permission);
-        
-        if (permission === 'granted') {
-          console.log('✅ プッシュ通知が許可されました');
-          // テスト通知を送信
-          showBrowserNotification('通知設定完了', '注文の完成をお知らせします');
-        } else if (permission === 'denied') {
-          console.log('❌ プッシュ通知が拒否されました');
-          showCustomAlert('通知が拒否されています。\n\nブラウザの設定から通知を許可してください。\n\n商品完成時に通知が届かない可能性があります。');
-        }
-      } else if (Notification.permission === 'denied') {
-        console.log('⚠️ 通知は既に拒否されています');
-        showCustomAlert('通知が拒否されています。\n\nブラウザの設定から通知を許可してください。\n\n商品完成時に通知が届きません。');
-      } else if (Notification.permission === 'granted') {
-        console.log('✅ 通知は既に許可されています');
-      }
-    }
-
-    // FCMのセットアップ（Service Worker登録とトークン取得）
-    async function setupPushNotifications() {
-      try {
-        // Service Workerを登録
-        console.log('Service Workerを登録中...');
-        const registration = await navigator.serviceWorker.register('./firebase-messaging-sw.js');
-        console.log('✅ Service Worker登録成功:', registration);
-        
-        // 通知が許可されている場合のみトークンを取得
-        if (Notification.permission === 'granted') {
-          console.log('FCMトークンを取得中...');
-          
-          const currentToken = await getToken(messaging, {
-            vapidKey: 'BEZ4kEv0YUN7kVO4mgKJQwnbV7HEVaEJYob-7sz345FF82cyK0QRYera8hM-Vxn7DKRAelcA8egrv1ZJ7pRIMtY',
-            serviceWorkerRegistration: registration
-          });
-          
-          if (currentToken) {
-            console.log('✅ FCMトークン取得成功:', currentToken);
-            
-            // トークンをFirestoreに保存
-            await saveFCMToken(currentToken);
-          } else {
-            console.log('トークンを取得できませんでした');
-          }
-        } else {
-          console.log('通知が許可されていないため、トークンを取得しません');
-        }
-        
-        // フォアグラウンドメッセージを受信
-        onMessage(messaging, (payload) => {
-          console.log('フォアグラウンドメッセージ受信:', payload);
-          
-          const title = payload.notification?.title || '通知';
-          const body = payload.notification?.body || '';
-          
-          // 音声を再生
-          if (payload.data?.type === 'completed') {
-            playNotificationSound('done');
-          } else if (payload.data?.type === 'cancelled') {
-            playNotificationSound('cancel');
-          } else {
-            playNotificationSound();
-          }
-          
-          // 通知を表示
-          showBrowserNotification(title, body);
-          
-          // アラートも表示
-          showCustomAlert(body);
-        });
-        
-      } catch (error) {
-        console.error('FCMセットアップエラー:', error);
-      }
-    }
-
-    // FCMトークンをFirestoreに保存
-    async function saveFCMToken(token) {
-      try {
-        const tokenRef = doc(db, 'fcm_tokens', tableNumber);
-        await setDoc(tokenRef, {
-          token: token,
-          tableNumber: tableNumber,
-          updatedAt: Timestamp.now()
-        });
-        console.log('✅ FCMトークンをFirestoreに保存しました');
-      } catch (error) {
-        console.error('FCMトークン保存エラー:', error);
-      }
-    }
 
     // 注文のステータスを監視
     function watchOrderStatus(orderId) {
@@ -768,34 +666,34 @@
         }
         
         const data = docSnap.data();
+        console.log('📝 注文ステータス更新:', data);
         updateOrderStatusDisplay(data);
         
         // ステータスが変更されたら通知を表示
         if (data.completedAt && !data.notifiedComplete) {
-          showBrowserNotification('🎉 商品が出来上がりました!', '画面の注文番号を店員にお見せください');
+          console.log('🎉 注文完了を検知 - 通知表示');
           playNotificationSound('done');
+          startTitleBlink('🎉 商品完成!');
+          vibrateDevice([500, 200, 500, 200, 500]);
+          showCustomAlert('商品が出来上がりました!\n\n注文番号 #' + data.orderNumber + '\n\n画面の注文番号を店員にお見せください');
           
-          // アラートも表示
-          showCustomAlert('商品が出来上がりました！\n\n注文番号 #' + data.orderNumber + '\n\n画面の注文番号を店員にお見せください');
-          
-          // 通知済みフラグを立てる（次回の監視で再度通知しないように）
+          // 通知済みフラグを立てる
           updateDoc(orderRef, { notifiedComplete: true }).catch(e => console.error(e));
         }
         
         if (data.cancelledAt && !data.notifiedCancel) {
-          showBrowserNotification('❌ 注文がキャンセルされました', '番号をお呼びしましたがご不在でしたので注文をキャンセルさせて頂きました');
+          console.log('❌ キャンセルを検知 - 通知表示');
           playNotificationSound('cancel');
-          
-          // アラートも表示
+          startTitleBlink('❌ キャンセル');
+          vibrateDevice([200, 100, 200]);
           showCustomAlert('注文がキャンセルされました\n\n注文番号 #' + data.orderNumber + '\n\n番号をお呼びしましたがご不在でしたので\n注文をキャンセルさせて頂きました');
           
           updateDoc(orderRef, { notifiedCancel: true }).catch(e => console.error(e));
         }
         
         if (data.paidAt && !data.notifiedPaid) {
-          showBrowserNotification('粉もん屋 八 下赤塚店', 'お会計が完了しました\n商品が出来上がりましたらお呼びしますので、しばらくお待ちください');
-          playNotificationSound(); // notification.mp3を再生
-          
+          console.log('💳 会計完了を検知');
+          playNotificationSound();
           updateDoc(orderRef, { notifiedPaid: true }).catch(e => console.error(e));
         }
       });
@@ -829,42 +727,78 @@
       }
     }
 
-    // ブラウザ通知を表示
-    function showBrowserNotification(title, body) {
-      if (Notification.permission === 'granted') {
-        const notification = new Notification(title, {
-          body: body,
-          icon: 'https://img.icons8.com/color/96/000000/Tako.png',
-          badge: 'https://img.icons8.com/color/96/000000/Tako.png',
-          vibrate: [200, 100, 200],
-          requireInteraction: true, // 通知が自動で消えないようにする
-          tag: 'order-notification-' + Date.now() // 一意のタグ
-        });
+    // 通知音を再生
+    function playNotificationSound(soundType) {
+      console.log('🔊 通知音を再生:', soundType || 'notification');
+      
+      try {
+        let soundFile = './notification.mp3';
+        if (soundType === 'done') {
+          soundFile = './done.wav';
+        } else if (soundType === 'cancel') {
+          soundFile = './cancel.wav';
+        }
         
-        // 通知をクリックしたらウィンドウにフォーカス
-        notification.onclick = function() {
-          window.focus();
-          notification.close();
-        };
-      } else {
-        console.log('通知の許可がありません。現在の許可状態:', Notification.permission);
+        const audio = new Audio(soundFile);
+        audio.volume = 1.0;
+        
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => console.log('✅ 音声再生成功'))
+            .catch(e => console.log('⚠️ 音声再生失敗:', e));
+        }
+      } catch (e) {
+        console.error('❌ 音声ファイルエラー:', e);
       }
     }
 
-    // 通知音を再生
-    function playNotificationSound(soundType) {
-      try {
-        let soundFile = 'https://gymnastmasaki-lang.github.io/takoyaki-/notification.mp3'; // デフォルト
-        if (soundType === 'done') {
-          soundFile = 'https://gymnastmasaki-lang.github.io/takoyaki-/done.wav';
-        } else if (soundType === 'cancel') {
-          soundFile = 'https://gymnastmasaki-lang.github.io/takoyaki-/cancel.wav';
+    // バイブレーション
+    function vibrateDevice(pattern) {
+      if ('vibrate' in navigator) {
+        navigator.vibrate(pattern);
+        console.log('✅ バイブレーション実行');
+      }
+    }
+
+    // タイトルを点滅させる
+    function startTitleBlink(message) {
+      if (titleBlinkInterval) {
+        clearInterval(titleBlinkInterval);
+      }
+      
+      const originalTitle = document.title;
+      let isOriginal = true;
+      
+      titleBlinkInterval = setInterval(() => {
+        document.title = isOriginal ? message : originalTitle;
+        isOriginal = !isOriginal;
+      }, 1000);
+      
+      // 10秒後に停止
+      setTimeout(() => {
+        if (titleBlinkInterval) {
+          clearInterval(titleBlinkInterval);
+          document.title = originalTitle;
         }
-        const audio = new Audio(soundFile);
-        audio.volume = 1.0; // 音量最大
-        audio.play().catch(e => console.log('音声再生エラー:', e));
-      } catch (e) {
-        console.log('音声ファイルが見つかりません:', e);
+      }, 10000);
+    }
+
+    // 画面スリープを防止
+    async function keepScreenAwake() {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+          console.log('✅ 画面スリープ防止を有効化');
+          
+          wakeLock.addEventListener('release', () => {
+            console.log('画面スリープ防止が解除されました');
+          });
+        } catch (err) {
+          console.error('❌ Wake Lock失敗:', err);
+        }
+      } else {
+        console.log('⚠️ このブラウザはWake Lockをサポートしていません');
       }
     }
 
@@ -877,7 +811,6 @@
           soldOutIds.add(doc.data().menuId);
         });
         
-        // applyTimeBasedSoldOut(); // 🔴 自動品切れ設定を一時的に無効化
         updateSoldOutDisplay();
       });
     }
@@ -1045,35 +978,10 @@
           soldOutIds.add(doc.data().menuId);
         });
 
-        // applyTimeBasedSoldOut(); // 🔴 自動品切れ設定を一時的に無効化
         updateSoldOutDisplay();
       } catch (e) {
         console.error('品切れ情報取得エラー:', e);
       }
-    }
-
-    function applyTimeBasedSoldOut() {
-      // 🔴 自動品切れ設定を一時的に無効化
-      // const now = new Date();
-      // const hour = now.getHours();
-      // const minute = now.getMinutes();
-
-      // const isTakeout = tableNumber === 'テイクアウト';
-      // const currentTime = hour + (minute / 60);
-
-      // let shouldSoldOut = false;
-
-      // if (isTakeout) {
-      //   shouldSoldOut = (currentTime >= 22.5 || hour < 11);
-      // } else {
-      //   shouldSoldOut = (hour >= 22 || hour < 11);
-      // }
-
-      // if (shouldSoldOut) {
-      //   allMenuItems.forEach(item => {
-      //     soldOutIds.add(item.id);
-      //   });
-      // }
     }
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -1437,6 +1345,9 @@
         // 注文のステータスを監視開始
         watchOrderStatus(docRef.id);
         
+        // 画面スリープを防止
+        keepScreenAwake();
+        
         cart = [];
         showPage('page-complete');
         
@@ -1558,8 +1469,6 @@
       overlay.appendChild(dialog);
       document.body.appendChild(overlay);
     }
-
-
   </script>
 </body>
 </html>
