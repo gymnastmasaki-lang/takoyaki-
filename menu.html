@@ -653,74 +653,7 @@
       setInterval(updateTopWaitingCount, 10000);
       watchSoldOutItems();
       console.log('初期化完了');
-      
-      // ブラウザの戻るボタン対策
-      setupBackButtonPrevention();
-      
-      // リロード時に注文状態を復元
-      restoreOrderStateAfterReload();
     };
-
-    // ブラウザの戻るボタン対策
-    function setupBackButtonPrevention() {
-      history.pushState(null, null, location.href);
-      
-      window.addEventListener('popstate', function(event) {
-        const isMenuPage = !document.getElementById('page-menu').classList.contains('hidden');
-        
-        if (!isMenuPage) {
-          const confirmBack = confirm('メニュー画面に戻りますか？\n\n※カート内容は保持されます');
-          if (confirmBack) {
-            showPage('menu');
-          }
-          history.pushState(null, null, location.href);
-        }
-      });
-    }
-    
-    // リロード時に注文状態を復元
-    function restoreOrderStateAfterReload() {
-      const savedOrderId = localStorage.getItem('currentOrderId');
-      if (savedOrderId) {
-        console.log('リロード検知: 注文状態を復元します', savedOrderId);
-        
-        const orderRef = doc(db, 'orders', savedOrderId);
-        getDoc(orderRef).then(docSnap => {
-          if (docSnap.exists()) {
-            const orderData = docSnap.data();
-            
-            document.getElementById('order-num').textContent = orderData.orderNumber;
-            document.getElementById('waiting').textContent = orderData.myPosition || 2;
-            document.getElementById('order-total').textContent = '¥' + orderData.totalAmount.toLocaleString();
-            document.getElementById('eat-style').textContent = orderData.tableNumber;
-            
-            const list = document.getElementById('order-items');
-            list.innerHTML = '';
-            orderData.items.forEach(item => {
-              const subtotal = (item.price + item.toppingPrice) * item.quantity;
-              const div = document.createElement('div');
-              div.className = 'cart-item';
-              div.innerHTML = `
-                <div class="cart-item-header">
-                  <div class="cart-item-name">${item.name}</div>
-                  <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
-                </div>
-                <div class="cart-item-details">
-                  ${item.toppings !== 'なし' ? `<div>🍴 ${item.toppings}</div>` : ''}
-                  <div>数量: ${item.quantity}</div>
-                </div>
-              `;
-              list.appendChild(div);
-            });
-            
-            showPage('complete');
-            watchOrderStatus(savedOrderId);
-          } else {
-            localStorage.removeItem('currentOrderId');
-          }
-        });
-      }
-    }
     
     // 時間帯による利用可否チェック
     async function checkTimeBasedAvailability() {
@@ -1472,25 +1405,7 @@
           <div class="cart-item-details" style="color: #4CAF50;">
             トッピング: ${item.toppings}
           </div>
-          <div style="margin-top: 10px;">
-            <label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px;">メモ（例：ソース少なめ）</label>
-            <textarea 
-              class="cart-memo-input" 
-              placeholder="商品への要望を入力..." 
-              data-index="${index}"
-              style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px; resize: vertical; min-height: 50px;">${item.memo || ''}</textarea>
-          </div>
         `;
-        
-        // メモ入力のイベントリスナーを追加
-        const textarea = div.querySelector('.cart-memo-input');
-        if (textarea) {
-          textarea.addEventListener('input', function() {
-            const idx = parseInt(this.getAttribute('data-index'));
-            updateCartMemo(idx, this.value);
-          });
-        }
-        
         list.appendChild(div);
       });
       
@@ -1498,14 +1413,6 @@
         const warning = document.createElement('div');
         warning.className = 'warning-box';
         warning.style.marginBottom = '15px';
-
-    // カートアイテムのメモを更新
-    window.updateCartMemo = function(index, memo) {
-      if (cart[index]) {
-        cart[index].memo = memo;
-        console.log('メモ更新:', index, memo);
-      }
-    };
         warning.innerHTML = '⚠️ 品切れ商品が含まれています<br>注文を確定する前に削除されます';
         list.insertBefore(warning, list.firstChild);
       }
@@ -1613,14 +1520,6 @@
         console.log('  - 自分より前の注文:', ordersAhead);
         console.log('  - 自分の順番:', myPosition);
         console.log('  - 自分の順番:', myPosition);
-        // メモをインデックス付きオブジェクトに変換
-        const memoObject = {};
-        cart.forEach((item, index) => {
-          if (item.memo) {
-            memoObject[index] = item.memo;
-          }
-        });
-
         
         const orderData = {
           orderNumber: orderNumber,
@@ -1636,8 +1535,7 @@
           notifiedComplete: false,
           notifiedCancel: false,
           notifiedPaid: false,
-          myPosition: myPosition,
-          memo: memoObject,
+          myPosition: myPosition
         };
         
         const docRef = await addDoc(collection(db, 'orders'), orderData);
@@ -1645,9 +1543,6 @@
         await updateDoc(docRef, {
           orderId: docRef.id
         });
-        
-        // リロード対策: 注文IDをlocalStorageに保存
-        localStorage.setItem("currentOrderId", docRef.id);
         
         document.getElementById('order-num').textContent = orderNumber;
         document.getElementById('waiting').textContent = myPosition;
