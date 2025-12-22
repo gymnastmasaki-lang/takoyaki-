@@ -6,8 +6,8 @@
   <title>注文管理コントローラー</title>
   
   <!-- Star WebPRNT SDK -->
-  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprint/manual/ja/sdk/starwebprintbuilder.js"></script>
-  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprint/manual/ja/sdk/starwebprinttraderr.js"></script>
+  <script src="http://192.168.244.41:8001/StarWebPrintBuilder.js"></script>
+  <script src="http://192.168.244.41:8001/StarWebPrintTrader.js"></script>
   
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -335,33 +335,58 @@
       });
 
       try {
-        const audio = new Audio(`./${number}.wav`);
-        audio.volume = 1.0;
-        currentAudio = audio;
-
-        audio.play()
+        // まずピンポン音を再生
+        const pinpon = new Audio('./pinpon.mp3');
+        pinpon.volume = 1.0;
+        currentAudio = pinpon;
+        
+        button.classList.add('playing');
+        
+        pinpon.play()
           .then(() => {
-            console.log(`✅ ${number}.wav 再生開始`);
-            button.classList.add('playing');
+            console.log('🔔 ピンポン音 再生開始');
           })
           .catch(err => {
-            console.error(`❌ ${number}.wav 再生失敗:`, err);
+            console.error('❌ ピンポン音 再生失敗:', err);
           });
+        
+        // ピンポン音が終わったら番号音声を再生
+        pinpon.onended = () => {
+          const audio = new Audio(`./${number}.wav`);
+          audio.volume = 1.0;
+          currentAudio = audio;
 
-        // 再生終了時
-        audio.onended = () => {
-          button.classList.remove('playing');
-          console.log(`✅ ${number}.wav 再生終了`);
+          audio.play()
+            .then(() => {
+              console.log(`✅ ${number}.wav 再生開始`);
+            })
+            .catch(err => {
+              console.error(`❌ ${number}.wav 再生失敗:`, err);
+              button.classList.remove('playing');
+            });
+
+          // 番号音声再生終了時
+          audio.onended = () => {
+            button.classList.remove('playing');
+            console.log(`✅ ${number}.wav 再生終了`);
+          };
+
+          // エラー発生時
+          audio.onerror = () => {
+            button.classList.remove('playing');
+            console.error(`❌ ${number}.wav 読み込みエラー`);
+          };
         };
-
-        // エラー発生時
-        audio.onerror = () => {
+        
+        // ピンポン音のエラー処理
+        pinpon.onerror = () => {
           button.classList.remove('playing');
-          console.error(`❌ ${number}.wav 読み込みエラー`);
+          console.error('❌ ピンポン音 読み込みエラー');
         };
 
       } catch (e) {
         console.error('エラー:', e);
+        button.classList.remove('playing');
       }
     }
 
@@ -629,7 +654,7 @@
           </div>
           <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <button class="control-btn" id="paid-btn-${order.id}" style="background:linear-gradient(135deg,${order.paidAt ? '#2196F3' : '#FFC107'} 0%,${order.paidAt ? '#1976D2' : '#FFA000'} 100%);font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}" data-paid="${order.paidAt ? 'true' : 'false'}">${order.paidAt ? '💳 済' : '💳 未'}</button>
-            <button class="control-btn" style="background:linear-gradient(135deg,#757575 0%,#616161 100%);font-size:11px;" data-order-id="${order.id}">🗑️削除</button>
+            <button class="control-btn delete-btn" style="background:linear-gradient(135deg,#757575 0%,#616161 100%);font-size:11px;${!order.completedAt && !order.cancelledAt ? 'opacity:0.5;cursor:not-allowed;' : ''}" data-order-id="${order.id}" ${!order.completedAt && !order.cancelledAt ? 'disabled' : ''}>🗑️削除</button>
           </div>
         `;
         
@@ -643,7 +668,11 @@
         cancelBtn.onclick = () => cancelOrder(order.id, order.tableNumber, order.orderNumber);
         detailBtn.onclick = () => showOrderDetail(order);
         paidBtn.onclick = () => togglePaidStatus(order);
-        deleteBtn.onclick = () => deleteOrder(order.id);
+        
+        // 削除ボタンは完了/キャンセル後のみ有効
+        if (order.completedAt || order.cancelledAt) {
+          deleteBtn.onclick = () => deleteOrder(order.id);
+        }
         
         container.appendChild(card);
       });
