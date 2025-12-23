@@ -12,7 +12,8 @@
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-    import { getFirestore, collection, query, where, getDocs, updateDoc, doc, Timestamp, onSnapshot, addDoc, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    import { getFirestore, collection, query, where, getDocs, updateDoc, doc, Timestamp, onSnapshot, addDoc, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
     
     const firebaseConfig = {
       apiKey: "AIzaSyCkL0NFOvB40TG2Ssmwp61kIcsADUxkuro",
@@ -25,6 +26,57 @@
     
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
+    const auth = getAuth(app);
+    
+    // Firebase接続テスト
+    console.log('🔥 Firebase初期化完了');
+    console.log('📦 Project ID:', firebaseConfig.projectId);
+    console.log('🌐 Auth Domain:', firebaseConfig.authDomain);
+    
+    // 匿名認証
+    let isAuthenticated = false;
+    
+    async function authenticateUser() {
+      try {
+        console.log('🔐 匿名認証を開始...');
+        const userCredential = await signInAnonymously(auth);
+        console.log('✅ 匿名認証成功:', userCredential.user.uid);
+        isAuthenticated = true;
+        return true;
+      } catch (error) {
+        console.error('❌ 認証エラー:', error);
+        console.error('エラーコード:', error.code);
+        console.error('エラーメッセージ:', error.message);
+        return false;
+      }
+    }
+    
+    // 認証状態の監視
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        console.log('👤 認証済みユーザー:', user.uid);
+        isAuthenticated = true;
+      } else {
+        console.log('❌ 未認証');
+        isAuthenticated = false;
+      }
+    });
+    
+    // 接続テスト用の簡単なクエリ
+    async function testFirebaseConnection() {
+      try {
+        console.log('🔍 Firebase接続テスト開始...');
+        const testQuery = query(collection(db, 'menu'), limit(1));
+        const testSnapshot = await getDocs(testQuery);
+        console.log('✅ Firebase接続成功！', 'ドキュメント取得:', testSnapshot.size);
+        return true;
+      } catch (e) {
+        console.error('❌ Firebase接続失敗:', e);
+        console.error('エラーコード:', e.code);
+        console.error('エラーメッセージ:', e.message);
+        return false;
+      }
+    }
     
     window.db = db;
     window.collection = collection;
@@ -1538,6 +1590,28 @@
     });
     
     async function initializeSystem() {
+      console.log('🚀 システム初期化開始...');
+      
+      // 匿名認証を実行
+      const authenticated = await authenticateUser();
+      if (!authenticated) {
+        alert('⚠️ 認証に失敗しました。ページを再読み込みしてください。');
+        return;
+      }
+      
+      // Firebase接続テスト
+      const connected = await testFirebaseConnection();
+      if (!connected) {
+        alert('⚠️ Firebaseに接続できません。インターネット接続を確認してください。');
+        const container = document.getElementById('menuItemsList');
+        if (container) {
+          container.innerHTML = '<div class="empty-state" style="color: #f44336;">❌ Firebase接続エラー<br><br>インターネット接続を確認してください</div>';
+        }
+        return;
+      }
+      
+      console.log('✅ 初期化完了 - システム起動');
+      
       // テーブルボタンを生成
       const tableGrid = document.getElementById('tableGrid');
       tableGrid.innerHTML = '';
