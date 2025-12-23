@@ -1574,15 +1574,22 @@
     
     // Firebaseからメニューとトッピングを読み込み
     async function loadMenuFromFirebase() {
+      const container = document.getElementById('menuItemsList');
+      
       try {
         console.log('Firebaseからメニュー読み込み開始');
+        container.innerHTML = '<div class="loading">Firebaseからメニューを読み込んでいます...</div>';
         
         // トッピング読み込み
+        console.log('トッピングコレクションを取得中...');
         const toppingsSnapshot = await getDocs(collection(db, 'toppings'));
         allToppings.clear();
         
+        console.log('トッピングドキュメント数:', toppingsSnapshot.size);
+        
         toppingsSnapshot.forEach(doc => {
           const data = doc.data();
+          console.log('トッピングデータ:', doc.id, data);
           allToppings.set(doc.id, {
             id: doc.id,
             name: data.name,
@@ -1590,15 +1597,25 @@
           });
         });
         
-        console.log('トッピング読み込み完了:', allToppings.size);
+        console.log('トッピング読み込み完了:', allToppings.size, '件');
         
         // メニュー読み込み
+        console.log('メニューコレクションを取得中...');
         const menuSnapshot = await getDocs(collection(db, 'menu'));
+        console.log('メニュードキュメント数:', menuSnapshot.size);
+        
+        if (menuSnapshot.empty) {
+          console.error('メニューデータが空です');
+          container.innerHTML = '<div class="empty-state">❌ メニューデータがFirebaseにありません<br><br>menu.htmlからメニューを登録してください</div>';
+          return;
+        }
+        
         const items = [];
         const categories = new Set();
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
+          console.log('メニューアイテム:', data.id, data.name, data.price);
           items.push({
             id: data.id,
             category: data.category,
@@ -1618,27 +1635,39 @@
         });
         
         allMenuItems = items;
-        console.log('メニュー読み込み完了:', items.length);
+        console.log('✅ メニュー読み込み完了:', items.length, '件');
+        console.log('カテゴリ:', Array.from(categories));
         
         // カテゴリ選択肢を生成
         const categorySelect = document.getElementById('manualCategorySelect');
-        categorySelect.innerHTML = '<option value="all">全ての商品</option>';
-        
-        const sortedCategories = Array.from(categories).sort();
-        sortedCategories.forEach(cat => {
-          const option = document.createElement('option');
-          option.value = cat;
-          option.textContent = cat;
-          categorySelect.appendChild(option);
-        });
+        if (categorySelect) {
+          categorySelect.innerHTML = '<option value="all">全ての商品</option>';
+          
+          const sortedCategories = Array.from(categories).sort();
+          sortedCategories.forEach(cat => {
+            const option = document.createElement('option');
+            option.value = cat;
+            option.textContent = cat;
+            categorySelect.appendChild(option);
+          });
+          console.log('カテゴリ選択肢を生成:', sortedCategories.length, '件');
+        }
         
         // メニュー表示
         displayManualMenuItems(items);
+        console.log('メニュー表示完了');
         
       } catch (e) {
-        console.error('メニュー読み込みエラー:', e);
-        const container = document.getElementById('menuItemsList');
-        container.innerHTML = '<div class="empty-state">メニューの読み込みに失敗しました</div>';
+        console.error('❌ メニュー読み込みエラー:', e);
+        console.error('エラー詳細:', e.message);
+        console.error('スタックトレース:', e.stack);
+        container.innerHTML = `
+          <div class="empty-state" style="color: #f44336;">
+            ❌ メニューの読み込みに失敗しました<br><br>
+            エラー: ${e.message}<br><br>
+            <small>ブラウザのコンソールを確認してください</small>
+          </div>
+        `;
       }
     }
     
@@ -1657,14 +1686,24 @@
     // メニュー項目を表示（menu.html風）
     function displayManualMenuItems(items) {
       const container = document.getElementById('menuItemsList');
+      console.log('displayManualMenuItems呼び出し - アイテム数:', items ? items.length : 0);
+      
+      if (!container) {
+        console.error('❌ menuItemsList要素が見つかりません');
+        return;
+      }
+      
       container.innerHTML = '';
       
       if (!items || items.length === 0) {
+        console.log('商品なし - 空メッセージ表示');
         container.innerHTML = '<div class="empty-state">商品が見つかりませんでした</div>';
         return;
       }
       
-      items.forEach(item => {
+      console.log('商品カード生成開始:', items.length, '件');
+      
+      items.forEach((item, index) => {
         const div = document.createElement('div');
         div.className = 'menu-item-card';
         div.dataset.menuId = item.id;
@@ -1691,7 +1730,13 @@
         
         div.onclick = () => selectManualItem(item);
         container.appendChild(div);
+        
+        if (index === 0) {
+          console.log('最初の商品カード生成:', item.name);
+        }
       });
+      
+      console.log('✅ 商品カード生成完了:', items.length, '件');
     }
     
     // 商品選択（トッピングがある場合はモーダル表示）
