@@ -6,19 +6,8 @@
   <title>注文管理コントローラー</title>
   
   <!-- Star WebPRNT SDK -->
-  <!-- 注意: Star mC-Print3のWebサーバー機能を有効にする必要があります -->
-  <script>
-    // SDKのロード状態をチェック
-    window.starSDKLoaded = false;
-    window.starSDKError = null;
-  </script>
-  <script src="http://192.168.244.41/StarWebPRNT/StarWebPrintBuilder.js" 
-          onerror="console.error('StarWebPrintBuilder.jsの読み込みに失敗しました。プリンターのWebサーバーが有効か確認してください。'); window.starSDKError = 'SDKファイルが見つかりません';">
-  </script>
-  <script src="http://192.168.244.41/StarWebPRNT/StarWebPrintTrader.js"
-          onerror="console.error('StarWebPrintTrader.jsの読み込みに失敗しました。'); window.starSDKError = 'SDKファイルが見つかりません';"
-          onload="window.starSDKLoaded = true; console.log('Star WebPRNT SDK読み込み完了');">
-  </script>
+  <script src="http://192.168.244.41:8001/StarWebPrintBuilder.js"></script>
+  <script src="http://192.168.244.41:8001/StarWebPrintTrader.js"></script>
   
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -246,55 +235,9 @@
       0%, 100% { transform: scale(1); }
       50% { transform: scale(1.05); }
     }
-    
-    /* オンライン状態インジケーター */
-    .connection-indicator {
-      position: fixed;
-      top: 10px;
-      right: 10px;
-      padding: 8px 15px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: bold;
-      z-index: 9999;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-      transition: all 0.3s;
-    }
-    .connection-indicator.online {
-      background: #4CAF50;
-      color: white;
-    }
-    .connection-indicator.offline {
-      background: #f44336;
-      color: white;
-      animation: blink 1s infinite;
-    }
-    .connection-indicator.reconnecting {
-      background: #FF9800;
-      color: white;
-    }
-    .connection-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: white;
-    }
-    @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
   </style>
 </head>
 <body>
-  <!-- 接続状態インジケーター -->
-  <div id="connection-indicator" class="connection-indicator online">
-    <div class="connection-dot"></div>
-    <span>オンライン</span>
-  </div>
-  
   <!-- 音声案内ボタンセクション -->
   <div class="audio-buttons-section">
     <div class="audio-button-grid" id="audio-button-grid"></div>
@@ -358,187 +301,11 @@
     let currentAudio = null;
     let printerUrl = 'http://192.168.244.41'; // mC-Print3のIPアドレス
     let printedOrders = new Set(); // 印刷済み注文を記録
-    
-    // ネットワーク監視用
-    let isOnline = true;
-    let reconnectCount = 0;
-    let lastReconnectTime = Date.now();
-    let connectionCheckInterval = null;
 
     window.onload = async function() {
       initializeAudioButtons();
       showAudioEnablePopup();
-      checkPrinterConnection();
-      initializeNetworkMonitoring();
     };
-    
-    // プリンター接続確認
-    function checkPrinterConnection() {
-      setTimeout(() => {
-        if (window.starSDKError) {
-          console.warn('Star WebPRNT SDK読み込みエラー:', window.starSDKError);
-          console.warn('印刷機能を使用するには、プリンターのWebサーバー設定を有効にしてください。');
-        } else if (window.starSDKLoaded) {
-          console.log('✓ Star WebPRNT SDK読み込み完了');
-          console.log('プリンターURL:', printerUrl);
-        } else {
-          console.warn('Star WebPRNT SDKの読み込み状態が不明です');
-        }
-      }, 1000);
-    }
-    
-    // ネットワーク監視機能
-    function initializeNetworkMonitoring() {
-      const indicator = document.getElementById('connection-indicator');
-      const indicatorText = indicator.querySelector('span');
-      
-      // オンライン/オフライン検知
-      window.addEventListener('online', handleOnline);
-      window.addEventListener('offline', handleOffline);
-      
-      // ページの可視性変更を検知（タブ切り替え時など）
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-      
-      // 定期的な接続チェック（30秒ごと）
-      connectionCheckInterval = setInterval(checkFirestoreConnection, 30000);
-      
-      // 初回チェック
-      checkFirestoreConnection();
-      
-      function handleVisibilityChange() {
-        if (!document.hidden) {
-          // タブがアクティブになったときにデータを再読み込み
-          console.log('🔄 タブがアクティブになりました - データを再読み込み');
-          loadOrders();
-          checkFirestoreConnection();
-        }
-      }
-      
-      function handleOnline() {
-        console.log('🟢 ネットワーク接続が復帰しました');
-        isOnline = true;
-        reconnectCount++;
-        lastReconnectTime = Date.now();
-        
-        indicator.className = 'connection-indicator reconnecting';
-        indicatorText.textContent = '再接続中...';
-        
-        // 再接続音を鳴らす
-        playReconnectSound();
-        
-        // 少し待ってから再接続ポップアップを表示
-        setTimeout(() => {
-          showReconnectPopup();
-          
-          // データを再読み込み
-          loadOrders();
-          
-          // 接続状態を更新
-          indicator.className = 'connection-indicator online';
-          indicatorText.textContent = 'オンライン';
-          
-          showToast('✓ 接続が復帰しました');
-        }, 1000);
-      }
-      
-      function handleOffline() {
-        console.log('🔴 ネットワーク接続が切断されました');
-        isOnline = false;
-        
-        indicator.className = 'connection-indicator offline';
-        indicatorText.textContent = 'オフライン';
-        
-        showToast('⚠️ ネットワーク接続が切断されました');
-      }
-      
-      async function checkFirestoreConnection() {
-        try {
-          // Firestoreに軽量なクエリを送信して接続確認
-          const testRef = doc(db, 'settings', 'waiting');
-          await getDoc(testRef);
-          
-          if (!isOnline) {
-            // オフライン状態から復帰
-            handleOnline();
-          } else {
-            // 正常にオンライン
-            indicator.className = 'connection-indicator online';
-            indicatorText.textContent = 'オンライン';
-          }
-        } catch (error) {
-          console.warn('接続チェック失敗:', error);
-          
-          if (isOnline) {
-            // オンラインからオフラインに変更
-            handleOffline();
-          }
-        }
-      }
-    }
-    
-    // 再接続音を鳴らす
-    function playReconnectSound() {
-      if (!audioEnabled) return;
-      
-      try {
-        const audio = new Audio('https://firebasestorage.googleapis.com/v0/b/takoyaki-order-system-bacd7.firebasestorage.app/o/pinpon.wav?alt=media');
-        audio.volume = 0.7;
-        audio.play().catch(e => console.log('再接続音再生失敗:', e));
-      } catch (e) {
-        console.log('再接続音エラー:', e);
-      }
-    }
-    
-    // 再接続時のポップアップ
-    function showReconnectPopup() {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.8);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-      `;
-      
-      const popup = document.createElement('div');
-      popup.style.cssText = `
-        background: white;
-        border-radius: 20px;
-        padding: 40px;
-        max-width: 90%;
-        text-align: center;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-        animation: slideIn 0.3s ease-out;
-      `;
-      
-      popup.innerHTML = `
-        <div style="font-size: 64px; margin-bottom: 20px;">🔄</div>
-        <div style="font-size: 28px; font-weight: bold; margin-bottom: 15px; color: #4CAF50;">
-          接続が復帰しました！
-        </div>
-        <div style="font-size: 18px; color: #666; margin-bottom: 15px;">
-          注文データを再読み込みしています
-        </div>
-        <div style="font-size: 14px; color: #999;">
-          再接続回数: ${reconnectCount}回
-        </div>
-      `;
-      
-      overlay.appendChild(popup);
-      document.body.appendChild(overlay);
-      
-      // 3秒後に自動で閉じる
-      setTimeout(() => {
-        overlay.style.opacity = '0';
-        overlay.style.transition = 'opacity 0.3s';
-        setTimeout(() => overlay.remove(), 300);
-      }, 3000);
-    }
     
     // 音声案内ボタンの初期化
     function initializeAudioButtons() {
@@ -684,74 +451,41 @@
     }
 
     function watchOrders() {
-      const unsubscribe = onSnapshot(
-        collection(db, 'orders'), 
-        (snapshot) => {
-          const currentCount = snapshot.size;
+      onSnapshot(collection(db, 'orders'), (snapshot) => {
+        const currentCount = snapshot.size;
+        
+        if (!isFirstOrderLoad && currentCount > lastOrderCount) {
+          playOrderSound();
           
-          if (!isFirstOrderLoad && currentCount > lastOrderCount) {
-            playOrderSound();
-            
-            // 新規注文を検出して自動印刷
-            snapshot.forEach(doc => {
-              const order = { id: doc.id, ...doc.data() };
-              if (!printedOrders.has(order.id) && order.status === 'pending') {
-                printOrder(order);
-                printedOrders.add(order.id);
-              }
-            });
-          }
-          
-          lastOrderCount = currentCount;
-          isFirstOrderLoad = false;
-          
-          loadOrders();
-        },
-        (error) => {
-          console.error('❌ Firestoreリスナーエラー (orders):', error);
-          
-          // エラー時は接続状態を更新
-          const indicator = document.getElementById('connection-indicator');
-          const indicatorText = indicator.querySelector('span');
-          indicator.className = 'connection-indicator offline';
-          indicatorText.textContent = 'エラー';
-          
-          showToast('⚠️ データベース接続エラー');
-          
-          // 5秒後に再接続を試みる
-          setTimeout(() => {
-            console.log('🔄 Firestoreリスナーを再起動します...');
-            watchOrders();
-          }, 5000);
+          // 新規注文を検出して自動印刷
+          snapshot.forEach(doc => {
+            const order = { id: doc.id, ...doc.data() };
+            if (!printedOrders.has(order.id) && order.status === 'pending') {
+              printOrder(order);
+              printedOrders.add(order.id);
+            }
+          });
         }
-      );
-      
-      return unsubscribe;
+        
+        lastOrderCount = currentCount;
+        isFirstOrderLoad = false;
+        
+        loadOrders();
+      });
     }
 
     function watchWaiting() {
-      const unsubscribe = onSnapshot(
-        doc(db, 'settings', 'waiting'), 
-        (doc) => {
-          if (doc.exists()) {
-            const count = doc.data().manualCount || 0;
-            document.getElementById('manual-count').textContent = count;
-          }
-        },
-        (error) => {
-          console.error('❌ Firestoreリスナーエラー (waiting):', error);
-          setTimeout(() => watchWaiting(), 5000);
+      onSnapshot(doc(db, 'settings', 'waiting'), (doc) => {
+        if (doc.exists()) {
+          const count = doc.data().manualCount || 0;
+          document.getElementById('manual-count').textContent = count;
         }
-      );
-      
-      return unsubscribe;
+      });
     }
 
     function watchStaffCalls() {
       let isFirstLoad = true;
-      const unsubscribe = onSnapshot(
-        collection(db, 'staff_calls'),
-        (snapshot) => {
+      onSnapshot(collection(db, 'staff_calls'), (snapshot) => {
         const container = document.getElementById('staff-calls-container');
         container.innerHTML = '';
         
@@ -787,13 +521,7 @@
           else playCallSound();
         }
         isFirstLoad = false;
-      },
-      (error) => {
-        console.error('❌ Firestoreリスナーエラー (staff_calls):', error);
-        setTimeout(() => watchStaffCalls(), 5000);
       });
-      
-      return unsubscribe;
     }
 
     window.dismissCall = async (id) => {
@@ -1444,17 +1172,6 @@
     window.printOrder = async function(order) {
       console.log('印刷開始:', order);
       
-      // SDKが読み込まれているかチェック
-      if (window.starSDKError) {
-        showToast('✗ ' + window.starSDKError + '\nプリンターのWebサーバー設定を確認してください');
-        return;
-      }
-      
-      if (typeof StarWebPrintBuilder === 'undefined' || typeof StarWebPrintTrader === 'undefined') {
-        showToast('✗ Star WebPRNT SDKが読み込まれていません\nページを再読み込みしてください');
-        return;
-      }
-      
       try {
         // Star WebPRNT Builderを使用してレシートを生成
         const builder = new StarWebPrintBuilder();
@@ -1546,35 +1263,15 @@
         
         // 印刷実行
         const trader = new StarWebPrintTrader({ url: printerUrl });
-        
         trader.onReceive = function(response) {
-          console.log('印刷レスポンス:', response);
-          const status = response.traderStatus;
-          
-          if (status && status.indexOf('Success') >= 0) {
-            console.log('印刷成功');
-            showToast('✓ 印刷しました');
-          } else {
-            console.warn('印刷完了したが状態が不明:', status);
-            showToast('✓ 印刷コマンド送信完了');
-          }
+          console.log('印刷成功:', response);
+          showToast('✓ 印刷しました');
         };
-        
         trader.onError = function(response) {
-          console.error('印刷エラー詳細:', response);
-          let errorMsg = '印刷エラー';
-          
-          if (response && response.status) {
-            errorMsg += '\nHTTPステータス: ' + response.status;
-          }
-          if (response && response.responseText) {
-            errorMsg += '\n' + response.responseText;
-          }
-          
-          showToast('✗ ' + errorMsg + '\nプリンターの接続を確認してください');
+          console.error('印刷エラー:', response);
+          showToast('✗ 印刷エラー');
         };
         
-        console.log('印刷リクエスト送信:', printerUrl);
         trader.sendMessage({ request: request });
         
       } catch (e) {
