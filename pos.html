@@ -1785,14 +1785,18 @@
     
     // 商品選択（トッピングがある場合はモーダル表示）
     window.selectManualItem = function(item) {
-      console.log('商品選択:', item);
+      console.log('🎯 商品選択:', item.name);
+      console.log('   toppingsId:', item.toppingsId);
+      console.log('   allToppings has:', item.toppingsId ? allToppings.has(item.toppingsId) : 'N/A');
       
       // トッピングがある場合
       if (item.toppingsId && allToppings.has(item.toppingsId)) {
+        console.log('✅ トッピングあり - モーダル表示');
         currentToppingSelection = item;
         selectedToppings = [];
         showToppingModal(item);
       } else {
+        console.log('➡️ トッピングなし - カートに直接追加');
         // トッピングなしの場合は直接追加
         addToManualCart(item, 'なし', 0);
       }
@@ -1800,18 +1804,30 @@
     
     // トッピングモーダルを表示
     function showToppingModal(item) {
+      console.log('🍴 トッピングモーダル表示開始');
+      
       const modal = document.getElementById('toppingModal');
       const title = document.getElementById('toppingModalTitle');
       const list = document.getElementById('toppingList');
+      
+      if (!modal || !title || !list) {
+        console.error('❌ モーダル要素が見つかりません', {modal: !!modal, title: !!title, list: !!list});
+        return;
+      }
       
       title.textContent = `${item.name} - トッピング選択`;
       list.innerHTML = '';
       
       const toppingData = allToppings.get(item.toppingsId);
+      console.log('   トッピングデータ:', toppingData);
+      
       if (!toppingData || !toppingData.options) {
+        console.log('⚠️ トッピングデータなし - カートに直接追加');
         addToManualCart(item, 'なし', 0);
         return;
       }
+      
+      console.log('   トッピング選択肢数:', toppingData.options.length);
       
       toppingData.options.forEach((option, index) => {
         const div = document.createElement('div');
@@ -1829,6 +1845,7 @@
         list.appendChild(div);
       });
       
+      console.log('✅ モーダル表示');
       modal.classList.remove('hidden');
     }
     
@@ -2499,8 +2516,7 @@
       try {
         const q = query(
           collection(db, 'orders'),
-          where('tableNumber', '==', String(tableNum)),
-          orderBy('timestamp', 'desc')
+          where('tableNumber', '==', String(tableNum))
         );
         
         const snapshot = await getDocs(q);
@@ -2516,13 +2532,25 @@
         let totalAmount = 0;
         let hasUnpaidOrders = false;
         
+        // データを配列に変換してソート
+        const orders = [];
         snapshot.forEach(doc => {
           const data = doc.data();
-          const order = { id: doc.id, ...data };
-          
-          if (!data.cancelledAt && !data.paidAt) {
+          orders.push({ id: doc.id, ...data });
+        });
+        
+        // timestampで降順ソート（新しい順）
+        orders.sort((a, b) => {
+          const timeA = a.timestamp?.toDate?.() || new Date(0);
+          const timeB = b.timestamp?.toDate?.() || new Date(0);
+          return timeB - timeA;
+        });
+        
+        // 未払いの注文のみ表示
+        orders.forEach(order => {
+          if (!order.cancelledAt && !order.paidAt) {
             currentOrders.push(order);
-            totalAmount += data.totalAmount;
+            totalAmount += order.totalAmount;
             hasUnpaidOrders = true;
             
             const card = createOrderCard(order);
