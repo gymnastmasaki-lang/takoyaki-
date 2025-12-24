@@ -811,19 +811,40 @@
         
         console.log('   トッピングドキュメント数:', toppingsSnapshot.size);
         
+        if (toppingsSnapshot.empty) {
+          console.warn('⚠ toppingsコレクションが空です！');
+        }
+        
         toppingsSnapshot.forEach(doc => {
           const data = doc.data();
-          console.log(`   - トッピングID: ${doc.id}, 名前: ${data.name}, オプション数: ${data.options?.length || 0}`);
+          const docId = doc.id;
           
-          allToppings.set(doc.id, {
-            id: doc.id,
+          console.log(`   ------------------------------`);
+          console.log(`   ドキュメントID: "${docId}"`);
+          console.log(`   ドキュメントIDの型: ${typeof docId}`);
+          console.log(`   ドキュメントIDの長さ: ${docId.length}`);
+          console.log(`   name: ${data.name}`);
+          console.log(`   options:`, data.options);
+          console.log(`   optionsの型: ${typeof data.options}`);
+          console.log(`   optionsはArray?: ${Array.isArray(data.options)}`);
+          console.log(`   optionsの長さ: ${data.options?.length || 0}`);
+          
+          allToppings.set(docId, {
+            id: docId,
             name: data.name,
             options: data.options || []
           });
+          
+          console.log(`   ✓ Mapに追加: "${docId}"`);
         });
         
+        console.log('');
         console.log('✓ トッピング読み込み完了:', allToppings.size, '件');
-        console.log('   登録されたトッピングID:', Array.from(allToppings.keys()));
+        console.log('   Mapに登録されたキー:');
+        allToppings.forEach((value, key) => {
+          console.log(`     - "${key}" (型: ${typeof key}, 長さ: ${key.length})`);
+        });
+        console.log('');
         
         // メニュー読み込み
         console.log('2. メニューを読み込みます...');
@@ -843,21 +864,32 @@
         menuSnapshot.forEach(doc => {
           const data = doc.data();
           
-          console.log(`   - 商品: ${data.name} (ID: ${data.id}, toppingsId: ${data.toppingsId || 'なし'})`);
+          // toppingsIdをそのまま保持（文字列変換しない）
+          const toppingsId = data.toppingsId || null;
+          
+          console.log(`   - 商品: ${data.name} (ID: ${data.id}, toppingsId: ${toppingsId}, 型: ${typeof toppingsId})`);
           
           items.push({
             id: data.id,
             category: data.category,
             name: data.name,
             price: data.price,
-            toppingsId: data.toppingsId,
+            toppingsId: toppingsId,
             image: data.image || '',
             note: data.note || ''
           });
           categories.add(data.category);
         });
         
-        items.sort((a, b) => a.id - b.id);
+        // M0001, M0002, M0003の順番でソート（商品コード順）
+        items.sort((a, b) => {
+          // IDが文字列の場合（M0001など）
+          if (typeof a.id === 'string' && typeof b.id === 'string') {
+            return a.id.localeCompare(b.id);
+          }
+          // IDが数値の場合
+          return a.id - b.id;
+        });
         
         allMenuItems = items;
         console.log('✓ メニュー読み込み完了:', items.length, '件');
@@ -935,36 +967,51 @@
       console.log('商品ID:', item.id);
       console.log('toppingsId:', item.toppingsId);
       console.log('toppingsIdの型:', typeof item.toppingsId);
-      console.log('allToppingsに登録されているキー:', Array.from(allToppings.keys()));
+      console.log('toppingsIdがnull?:', item.toppingsId === null);
+      console.log('toppingsIdがundefined?:', item.toppingsId === undefined);
+      console.log('toppingsIdが空文字?:', item.toppingsId === '');
+      console.log('allToppingsサイズ:', allToppings.size);
+      console.log('allToppingsのキー:', Array.from(allToppings.keys()));
       
-      // toppingsIdが存在するかチェック（null、undefined、空文字を除外）
-      if (item.toppingsId) {
-        const toppingId = String(item.toppingsId).trim();
-        console.log('トリミング後のtoppingsId:', toppingId);
-        console.log('allToppingsにキーが存在?:', allToppings.has(toppingId));
+      // toppingsIdが有効な値かチェック
+      if (item.toppingsId !== null && item.toppingsId !== undefined && item.toppingsId !== '') {
+        const toppingId = item.toppingsId;
+        console.log('有効なtoppingsId:', toppingId);
+        console.log('allToppings.has(toppingId):', allToppings.has(toppingId));
         
         if (allToppings.has(toppingId)) {
           const toppingData = allToppings.get(toppingId);
-          console.log('トッピングデータ:', toppingData);
-          console.log('オプション数:', toppingData.options?.length || 0);
+          console.log('取得したトッピングデータ:', JSON.stringify(toppingData, null, 2));
           
-          if (toppingData && toppingData.options && toppingData.options.length > 0) {
-            console.log('✓ トッピングモーダルを表示します');
+          if (toppingData && Array.isArray(toppingData.options) && toppingData.options.length > 0) {
+            console.log('✓✓✓ トッピングモーダルを表示します ✓✓✓');
             currentToppingSelection = item;
             selectedToppings = [];
             showToppingModal(item);
             return;
           } else {
-            console.log('× トッピングオプションが空です');
+            console.log('× トッピングoptionsが無効:', {
+              exists: !!toppingData,
+              isArray: Array.isArray(toppingData?.options),
+              length: toppingData?.options?.length
+            });
           }
         } else {
-          console.log('× トッピングIDがallToppingsに存在しません');
+          console.log('× allToppingsにキーが存在しません');
+          console.log('  期待されるキー:', toppingId);
+          console.log('  実際のキー:', Array.from(allToppings.keys()));
+          
+          // キーの完全一致チェック
+          allToppings.forEach((value, key) => {
+            console.log(`  比較: "${key}" === "${toppingId}" ? ${key === toppingId}`);
+          });
         }
       } else {
-        console.log('× toppingsIdがnull/undefined/空です');
+        console.log('× toppingsIdが無効（null/undefined/空）');
       }
       
       console.log('→ トッピングなし - カートに直接追加');
+      console.log('====================================');
       addToManualCart(item, 'なし', 0);
     };
     
