@@ -801,14 +801,20 @@
       const container = document.getElementById('menuItemsList');
       
       try {
-        console.log('メニュー読み込み開始');
+        console.log('========== メニュー読み込み開始 ==========');
         container.innerHTML = '<div class="loading">メニューを読み込んでいます...</div>';
         
+        // トッピング読み込み
+        console.log('1. トッピングを読み込みます...');
         const toppingsSnapshot = await getDocs(collection(db, 'toppings'));
         allToppings.clear();
         
+        console.log('   トッピングドキュメント数:', toppingsSnapshot.size);
+        
         toppingsSnapshot.forEach(doc => {
           const data = doc.data();
+          console.log(`   - トッピングID: ${doc.id}, 名前: ${data.name}, オプション数: ${data.options?.length || 0}`);
+          
           allToppings.set(doc.id, {
             id: doc.id,
             name: data.name,
@@ -816,22 +822,29 @@
           });
         });
         
-        console.log('トッピング読み込み完了:', allToppings.size, '件');
-        console.log('トッピングキー:', Array.from(allToppings.keys()));
+        console.log('✓ トッピング読み込み完了:', allToppings.size, '件');
+        console.log('   登録されたトッピングID:', Array.from(allToppings.keys()));
         
+        // メニュー読み込み
+        console.log('2. メニューを読み込みます...');
         const menuSnapshot = await getDocs(collection(db, 'menu'));
         
         if (menuSnapshot.empty) {
-          console.error('menuコレクションが空です');
+          console.error('× menuコレクションが空です');
           container.innerHTML = '<div class="empty-state">メニューデータがありません</div>';
           return;
         }
+        
+        console.log('   メニュードキュメント数:', menuSnapshot.size);
         
         const items = [];
         const categories = new Set();
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
+          
+          console.log(`   - 商品: ${data.name} (ID: ${data.id}, toppingsId: ${data.toppingsId || 'なし'})`);
+          
           items.push({
             id: data.id,
             category: data.category,
@@ -847,8 +860,9 @@
         items.sort((a, b) => a.id - b.id);
         
         allMenuItems = items;
-        console.log('メニュー読み込み完了:', items.length, '件');
+        console.log('✓ メニュー読み込み完了:', items.length, '件');
         
+        // カテゴリ選択肢を生成
         const categorySelect = document.getElementById('manualCategorySelect');
         if (categorySelect) {
           categorySelect.innerHTML = '<option value="all">全ての商品</option>';
@@ -862,10 +876,12 @@
         }
         
         displayManualMenuItems(items);
-        console.log('メニュー表示完了');
+        console.log('✓ メニュー表示完了');
+        console.log('========================================');
         
       } catch (e) {
-        console.error('メニュー読み込みエラー:', e.message);
+        console.error('× メニュー読み込みエラー:', e.message);
+        console.error('   スタックトレース:', e.stack);
         container.innerHTML = `<div class="empty-state" style="color: #f44336;">メニューの読み込みに失敗<br><br>${e.message}</div>`;
       }
     }
@@ -914,24 +930,41 @@
     }
     
     window.selectManualItem = function(item) {
-      console.log('商品選択:', item.name);
-      console.log('  toppingsId:', item.toppingsId);
-      console.log('  allToppingsキー:', Array.from(allToppings.keys()));
+      console.log('========== 商品選択 ==========');
+      console.log('商品名:', item.name);
+      console.log('商品ID:', item.id);
+      console.log('toppingsId:', item.toppingsId);
+      console.log('toppingsIdの型:', typeof item.toppingsId);
+      console.log('allToppingsに登録されているキー:', Array.from(allToppings.keys()));
       
-      if (item.toppingsId && item.toppingsId.trim() !== '' && allToppings.has(item.toppingsId)) {
-        const toppingData = allToppings.get(item.toppingsId);
-        console.log('  トッピングデータ取得:', toppingData);
+      // toppingsIdが存在するかチェック（null、undefined、空文字を除外）
+      if (item.toppingsId) {
+        const toppingId = String(item.toppingsId).trim();
+        console.log('トリミング後のtoppingsId:', toppingId);
+        console.log('allToppingsにキーが存在?:', allToppings.has(toppingId));
         
-        if (toppingData && toppingData.options && toppingData.options.length > 0) {
-          console.log('  トッピングモーダルを表示');
-          currentToppingSelection = item;
-          selectedToppings = [];
-          showToppingModal(item);
-          return;
+        if (allToppings.has(toppingId)) {
+          const toppingData = allToppings.get(toppingId);
+          console.log('トッピングデータ:', toppingData);
+          console.log('オプション数:', toppingData.options?.length || 0);
+          
+          if (toppingData && toppingData.options && toppingData.options.length > 0) {
+            console.log('✓ トッピングモーダルを表示します');
+            currentToppingSelection = item;
+            selectedToppings = [];
+            showToppingModal(item);
+            return;
+          } else {
+            console.log('× トッピングオプションが空です');
+          }
+        } else {
+          console.log('× トッピングIDがallToppingsに存在しません');
         }
+      } else {
+        console.log('× toppingsIdがnull/undefined/空です');
       }
       
-      console.log('  トッピングなし - カートに直接追加');
+      console.log('→ トッピングなし - カートに直接追加');
       addToManualCart(item, 'なし', 0);
     };
     
@@ -1097,14 +1130,43 @@
       
       try {
         const now = new Date();
+        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        
+        // 本日の開始時刻 (JST 1:00)
+        const todayStart = new Date(jstNow);
+        todayStart.setHours(1, 0, 0, 0);
+        if (jstNow < todayStart) {
+          todayStart.setDate(todayStart.getDate() - 1);
+        }
+        
+        // UTCに変換
+        const todayStartUTC = new Date(todayStart.getTime() - (9 * 60 * 60 * 1000));
+        
+        // 本日の最大注文番号を取得
+        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        let maxOrderNumber = 618;
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          const orderDate = data.timestamp.toDate();
+          
+          if (orderDate >= todayStartUTC && data.orderNumber > maxOrderNumber) {
+            maxOrderNumber = data.orderNumber;
+          }
+        });
+        
+        const orderNumber = maxOrderNumber + 1;
+        console.log('新しい注文番号:', orderNumber);
         
         let totalAmount = 0;
         manualCart.forEach(item => {
           totalAmount += (item.price + item.toppingPrice) * item.quantity;
         });
         
+        const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
+        
         const orderData = {
-          orderNumber: Math.floor(Math.random() * 1000) + 1000,
+          orderNumber: orderNumber,
           timestamp: Timestamp.fromDate(now),
           tableNumber: tableNumber,
           items: manualCart.map(item => ({
@@ -1118,12 +1180,20 @@
           })),
           totalAmount: totalAmount,
           status: 'pending',
+          deleteAt: Timestamp.fromDate(deleteAt),
+          cancelledAt: null,
+          completedAt: null,
+          paidAt: null,
           manualEntry: true
         };
         
-        await addDoc(collection(db, 'orders'), orderData);
+        const docRef = await addDoc(collection(db, 'orders'), orderData);
         
-        alert(`注文を追加しました！\nテーブル: ${tableNumber}\n合計: ¥${totalAmount.toLocaleString()}`);
+        await updateDoc(docRef, {
+          orderId: docRef.id
+        });
+        
+        alert(`注文 #${orderNumber} を追加しました！\nテーブル: ${tableNumber}\n合計: ¥${totalAmount.toLocaleString()}`);
         
         manualCart = [];
         document.getElementById('manualTable').value = '';
