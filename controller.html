@@ -3,11 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="googlebot" content="noindex, nofollow">
   <title>注文管理コントローラー</title>
   
-  <!-- Star WebPRNT SDK -->
-  <script src="http://192.168.244.41:8001/StarWebPrintBuilder.js"></script>
-  <script src="http://192.168.244.41:8001/StarWebPrintTrader.js"></script>
+  <!-- Star WebPRNT SDK - GitHubリポジトリから読み込み -->
+  <script src="./StarWebPrintBuilder.js"></script>
+  <script src="./StarWebPrintTrader.js"></script>
   
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -584,6 +586,12 @@
       const orders = [];
       (await getDocs(collection(db, 'orders'))).forEach(doc => {
         const d = doc.data();
+        
+        // 会計済み（paidAt）の注文は表示しない
+        if (d.paidAt) {
+          return;
+        }
+        
         orders.push({
           id: doc.id,
           orderNumber: d.orderNumber,
@@ -622,26 +630,32 @@
         
         const itemsHtml = order.items.map((item, idx) => {
           const memoText = order.memo?.[idx] || item.memo || '';
-          const toppingsText = item.toppings && item.toppings !== 'なし' ? item.toppings : '';
+          const unitPrice = item.price + (item.toppingPrice || 0);
+          const subtotal = unitPrice * item.quantity;
+          
+          // トッピングを改行で表示
+          let toppingsHtml = '';
+          if (item.toppings && item.toppings !== 'なし') {
+            const toppingLines = item.toppings.split('、');
+            toppingsHtml = `
+              <div style="font-size:13px;color:#888;margin-top:5px;">トッピング</div>
+              ${toppingLines.map(t => `<div style="font-size:13px;color:#888;margin-left:10px;">${t}</div>`).join('')}
+            `;
+          } else {
+            toppingsHtml = '<div style="font-size:13px;color:#888;margin-top:5px;">トッピングなし</div>';
+          }
           
           return `
-            <div class="order-item">
-              <div class="order-item-name">${item.name} × ${item.quantity}</div>
-              ${toppingsText ? `<div class="order-item-toppings">🍴 ${toppingsText}</div>` : ''}
-              ${memoText ? `<div class="order-item-memo">📝 ${memoText}</div>` : ''}
+            <div class="order-item" style="margin-bottom:15px;padding-bottom:15px;border-bottom:1px solid rgba(255,255,255,0.1);">
+              <div class="order-item-name" style="font-size:18px;font-weight:bold;margin-bottom:5px;">${item.name} × ${item.quantity}</div>
+              ${toppingsHtml}
+              ${memoText ? `<div class="order-item-memo" style="margin-top:5px;">📝 ${memoText}</div>` : ''}
+              <div style="font-size:16px;color:#4CAF50;font-weight:bold;margin-top:5px;">¥${unitPrice.toLocaleString()} × ${item.quantity} = ¥${subtotal.toLocaleString()}</div>
             </div>
           `;
         }).join('');
         
         card.innerHTML = `
-          <button class="control-btn btn-print" onclick="printOrder({
-            id: '${order.id}',
-            orderNumber: ${order.orderNumber},
-            tableNumber: '${order.tableNumber}',
-            items: ${JSON.stringify(order.items).replace(/'/g, "&#39;")},
-            totalAmount: ${order.totalAmount},
-            memo: ${JSON.stringify(order.memo || {}).replace(/'/g, "&#39;")}
-          })">🖨️ 印刷</button>
           <div class="order-number">#${order.orderNumber}</div>
           <div class="order-table">${order.tableNumber}</div>
           ${statusBadge}${paidBadge}
@@ -1169,116 +1183,6 @@
     }
 
     // 印刷機能
-    window.printOrder = async function(order) {
-      console.log('印刷開始:', order);
-      
-      try {
-        // Star WebPRNT Builderを使用してレシートを生成
-        const builder = new StarWebPrintBuilder();
-        const request = builder.createInitializationElement();
-        
-        // 58mm幅に設定
-        builder.createPeripheralElement({ channel: 1, on: 1000 });
-        
-        // 注文番号（大きく表示）
-        builder.createTextElement({
-          characterspace: 0,
-          width: 3,
-          height: 3,
-          emphasis: true,
-          alignment: 'center',
-          data: `#${order.orderNumber}\n`
-        });
-        
-        builder.createFeedElement({ line: 1 });
-        
-        // テーブル番号
-        builder.createTextElement({
-          characterspace: 0,
-          width: 2,
-          height: 2,
-          emphasis: true,
-          alignment: 'center',
-          data: `${order.tableNumber}\n`
-        });
-        
-        builder.createFeedElement({ line: 1 });
-        builder.createRuledLineElement({ thickness: 'medium' });
-        builder.createFeedElement({ line: 1 });
-        
-        // 注文明細
-        order.items.forEach((item, idx) => {
-          // 商品名と数量
-          builder.createTextElement({
-            characterspace: 0,
-            emphasis: true,
-            data: `${item.name} x${item.quantity}\n`
-          });
-          
-          // トッピング
-          if (item.toppings && item.toppings !== 'なし') {
-            builder.createTextElement({
-              characterspace: 0,
-              data: `${item.toppings}\n`
-            });
-          }
-          
-          // メモ
-          if (order.memo && order.memo?.[idx] || item.memo) {
-            builder.createTextElement({
-              characterspace: 0,
-              emphasis: true,
-              data: `[メモ] ${order.memo?.[idx] || item.memo}\n`
-            });
-          }
-          
-          // 金額
-          const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-          builder.createTextElement({
-            characterspace: 0,
-            alignment: 'right',
-            data: `¥${itemTotal.toLocaleString()}\n`
-          });
-          
-          builder.createFeedElement({ line: 1 });
-        });
-        
-        builder.createRuledLineElement({ thickness: 'medium' });
-        builder.createFeedElement({ line: 1 });
-        
-        // 合計金額
-        builder.createTextElement({
-          characterspace: 0,
-          width: 2,
-          height: 2,
-          emphasis: true,
-          alignment: 'right',
-          data: `合計 ¥${order.totalAmount.toLocaleString()}\n`
-        });
-        
-        builder.createFeedElement({ line: 3 });
-        
-        // カット
-        builder.createCutPaperElement({ feed: true, type: 'partial' });
-        
-        // 印刷実行
-        const trader = new StarWebPrintTrader({ url: printerUrl });
-        trader.onReceive = function(response) {
-          console.log('印刷成功:', response);
-          showToast('✓ 印刷しました');
-        };
-        trader.onError = function(response) {
-          console.error('印刷エラー:', response);
-          showToast('✗ 印刷エラー');
-        };
-        
-        trader.sendMessage({ request: request });
-        
-      } catch (e) {
-        console.error('印刷失敗:', e);
-        showToast('✗ 印刷失敗: ' + e.message);
-      }
-    };
 
     window.loadOrders = loadOrders;
   </script>
