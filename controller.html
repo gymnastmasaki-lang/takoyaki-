@@ -587,16 +587,30 @@
       (await getDocs(collection(db, 'orders'))).forEach(doc => {
         const d = doc.data();
         
-        // 会計済み（paidAt）・削除済み（deletedAt）・キャンセル済みの注文は表示しない
-        if (d.paidAt || d.deletedAt || d.cancelledAt) {
+        console.log('📋 注文データ確認:', {
+          id: doc.id,
+          orderNumber: d.orderNumber,
+          tableNumber: d.tableNumber,
+          itemsCount: d.items ? d.items.length : 0,
+          paidAt: d.paidAt ? 'あり' : 'なし',
+          completedAt: d.completedAt ? 'あり' : 'なし',
+          cancelledAt: d.cancelledAt ? 'あり' : 'なし'
+        });
+        
+        // 表示条件: paidAt === false (未会計)のみ
+        // deletedAtがある場合は完全に除外
+        if (d.paidAt || d.deletedAt) {
+          console.log('  → 除外（会計済みまたは削除済み）');
           return;
         }
         
-        // itemsが存在しない場合はスキップ
+        // itemsが空の注文もスキップ
         if (!d.items || !Array.isArray(d.items) || d.items.length === 0) {
-          console.warn('注文に商品がありません:', doc.id);
+          console.warn('  → 除外（商品なし）', doc.id);
           return;
         }
+        
+        console.log('  → 表示対象');
         
         orders.push({
           id: doc.id,
@@ -618,22 +632,26 @@
       }
       
       container.innerHTML = '';
+      console.log('✅ 表示する注文数:', orders.length);
+      
       orders.sort((a, b) => a.orderNumber - b.orderNumber).forEach(order => {
         const card = document.createElement('div');
         card.className = 'order-card';
         
+        // ステータスバッジ
         let statusBadge = '';
         if (order.completedAt) {
           statusBadge = '<div style="background:#4CAF50;color:white;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 0;">✓ 完了済み</div>';
         } else if (order.cancelledAt) {
           statusBadge = '<div style="background:#f44336;color:white;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 0;">✕ キャンセル済み</div>';
+        } else {
+          statusBadge = '<div style="background:#FF9800;color:white;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 0;">⏳ 調理中</div>';
         }
         
-        let paidBadge = '';
-        if (order.paidAt) {
-          paidBadge = '<div style="background:#2196F3;color:white;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 5px 5px 0;">💳 会計済</div>';
-        }
+        // 会計状態は常に表示（未会計の注文のみ表示されているので、常に「未会計」）
+        let paidBadge = '<div style="background:#FFC107;color:#333;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 5px 5px 0;">💰 未会計</div>';
         
+        // 商品リスト
         const itemsHtml = order.items.map((item, idx) => {
           const memoText = order.memo?.[idx] || item.memo || '';
           const unitPrice = item.price + (item.toppingPrice || 0);
