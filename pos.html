@@ -1545,6 +1545,9 @@
     // 認証状態
     let isAuthenticated = false;
     
+    // リアルタイム更新用のlistenerを管理
+    let tableMonitorUnsubscribers = new Map(); // テーブルごとのlistener
+    
     // プリンターIPアドレス
     const PRINTER_IP = '192.168.244.41';
     
@@ -1737,6 +1740,12 @@
     // カテゴリでメニューをフィルター
     window.filterManualMenu = function() {
       const category = document.getElementById('manualCategorySelect').value;
+      
+      if (!allMenuItems || allMenuItems.length === 0) {
+        console.warn('⚠️ allMenuItemsが空です。メニューを再読み込みします。');
+        loadMenuFromFirebase();
+        return;
+      }
       
       if (category === 'all') {
         displayManualMenuItems(allMenuItems);
@@ -2466,9 +2475,22 @@
         
         alert(`注文 #${orderNumber} を追加しました！\nテーブル: ${tableNumber}\n合計: ¥${totalAmount.toLocaleString()}`);
         
+        // 注文完了音を鳴らす
+        new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjGH0fPTgjMGHm7A7+OZSA8PXLDn77BdGAg+mdvzyHkrBSh+zPDajzsIGGS36+uVQw0NVa3o7qxaFgo8ldjwz4EwBxxxxxxx').play();
+        
+        // 状態をリセット
         manualCart = [];
         document.getElementById('manualTable').value = '';
         updateManualCart();
+        
+        // メニューを再表示（allMenuItemsが既に読み込まれている場合）
+        if (allMenuItems && allMenuItems.length > 0) {
+          console.log('📋 メニュー再表示');
+          displayManualMenuItems(allMenuItems);
+        } else {
+          console.log('📋 メニュー再読み込み');
+          await loadMenuFromFirebase();
+        }
         
       } catch (e) {
         console.error('注文エラー:', e);
@@ -2478,6 +2500,18 @@
     
     // リアルタイム更新を開始
     function startRealtimeUpdates() {
+      console.log('🔔 リアルタイム更新を開始');
+      
+      // 既存のlistenerを全て解除
+      if (tableMonitorUnsubscribers.size > 0) {
+        console.log(`🔕 既存の ${tableMonitorUnsubscribers.size} 個のlistenerを解除`);
+        tableMonitorUnsubscribers.forEach((unsubscribe, tableNum) => {
+          unsubscribe();
+        });
+        tableMonitorUnsubscribers.clear();
+      }
+      
+      // 全テーブルの監視を開始
       TABLES.forEach(table => {
         monitorTable(table);
       });
@@ -2486,14 +2520,61 @@
       setInterval(calculateTodaySales, 5000);
     }
     
+    // 注文状態を完全リセットする関数
+    function resetOrderState() {
+      console.log('🔄 注文状態を完全リセット');
+      
+      // 手動入力関連の状態をリセット
+      manualCart = [];
+      currentToppingSelection = null;
+      selectedToppings = [];
+      
+      // 選択モード関連をリセット
+      selectionMode = false;
+      selectedItems.clear();
+      
+      // 値引きをリセット
+      discountAmount = 0;
+      
+      // UIをリセット
+      const menuItemsList = document.getElementById('menuItemsList');
+      if (menuItemsList) {
+        menuItemsList.innerHTML = '';
+      }
+      
+      const selectedItemsContainer = document.getElementById('selectedItems');
+      if (selectedItemsContainer) {
+        selectedItemsContainer.innerHTML = '<div class="empty-state">商品を選択してください</div>';
+      }
+      
+      const manualTotal = document.getElementById('manualTotal');
+      if (manualTotal) {
+        manualTotal.textContent = '¥0';
+      }
+      
+      const manualSubmitBtn = document.getElementById('manualSubmitBtn');
+      if (manualSubmitBtn) {
+        manualSubmitBtn.disabled = true;
+      }
+      
+      console.log('✅ 注文状態リセット完了');
+    }
+    
     // テーブルの注文を監視
     async function monitorTable(tableNum) {
+      // 既存のlistenerがあれば解除
+      if (tableMonitorUnsubscribers.has(tableNum)) {
+        const unsubscribe = tableMonitorUnsubscribers.get(tableNum);
+        unsubscribe();
+        console.log(`🔕 テーブル ${tableNum} の既存listener解除`);
+      }
+      
       const q = query(
         collection(db, 'orders'),
         where('tableNumber', '==', String(tableNum))
       );
       
-      onSnapshot(q, (snapshot) => {
+      const unsubscribe = onSnapshot(q, (snapshot) => {
         const hasActiveOrders = snapshot.docs.some(doc => {
           const data = doc.data();
           return !data.paidAt && !data.cancelledAt;
@@ -2512,10 +2593,19 @@
           loadOrders(tableNum);
         }
       });
+      
+      // listenerを保存
+      tableMonitorUnsubscribers.set(tableNum, unsubscribe);
+      console.log(`🔔 テーブル ${tableNum} のlistener登録`);
     }
     
     // テーブルを選択
     window.selectTable = async function(tableNum) {
+      console.log(`🎯 テーブル ${tableNum} を選択`);
+      
+      // 状態を完全リセット
+      resetOrderState();
+      
       selectedTable = tableNum;
       document.getElementById('selectedTableLabel').textContent = `テーブル ${tableNum}`;
       document.getElementById('orderSection').classList.remove('hidden');
@@ -3139,6 +3229,12 @@ currentOrders.forEach(order => {
         
         await loadOrders(selectedTable);
         
+        // メニューを再表示（手動注文セクション用）
+        if (allMenuItems && allMenuItems.length > 0) {
+          console.log('📋 会計後：メニュー再表示');
+          displayManualMenuItems(allMenuItems);
+        }
+        
       } catch (e) {
         console.error('会計エラー:', e);
         alert('会計処理に失敗しました: ' + e.message);
@@ -3618,9 +3714,19 @@ currentOrders.forEach(order => {
     
     // 選択をクリア
     window.clearSelection = function() {
+      console.log('🔄 選択をクリア');
       selectedTable = null;
       currentOrders = [];
       discountAmount = 0;
+      
+      // 選択モードもリセット
+      selectionMode = false;
+      selectedItems.clear();
+      
+      // テーブル結合モードもリセット
+      mergeMode = false;
+      selectedTablesForMerge.clear();
+      
       document.getElementById('orderSection').classList.add('hidden');
     };
   </script>
