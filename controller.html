@@ -119,10 +119,11 @@
       margin-bottom: 5px;
     }
     .order-item-toppings {
-      font-size: 13px;
+      font-size: 14px;
       color: #666;
-      margin: 3px 0;
-      padding-left: 10px;
+      margin: 2px 0;
+      padding-left: 20px;
+      line-height: 1.6;
     }
     .order-item-memo {
       font-size: 12px;
@@ -894,38 +895,40 @@
         
         const itemsHtml = order.items.map((item, idx) => {
           const memoText = order.memo?.[idx] || item.memo || '';
-          const unitPrice = item.price + (item.toppingPrice || 0);
-          const subtotal = unitPrice * item.quantity;
           
-          // トッピングを1つずつ改行で表示
+          // トッピングを1行ずつ表示するための処理
           let toppingsHtml = '';
           if (item.toppings && item.toppings !== 'なし') {
-            toppingsHtml = '<div style="font-size:14px;color:#ccc;margin-top:5px;margin-bottom:3px;">トッピング</div>';
-            const toppingLines = item.toppings.split('、');
-            toppingLines.forEach(t => {
-              toppingsHtml += `<div style="font-size:16px;color:#ccc;margin-left:10px;">${t.trim()}</div>`;
-            });
+            // カンマで分割して1行ずつ表示
+            const toppingsList = item.toppings.split(',').map(t => t.trim());
+            toppingsHtml = toppingsList.map(topping => 
+              `<div class="order-item-toppings">${topping}</div>`
+            ).join('');
           }
           
           return `
-            <div style="margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid rgba(255,255,255,0.1);">
-              <div style="font-size:20px;font-weight:bold;color:white;margin-bottom:5px;">${item.name} × ${item.quantity}</div>
+            <div class="order-item">
+              <div class="order-item-name">${item.name} × ${item.quantity}</div>
               ${toppingsHtml}
-              ${memoText ? `<div style="font-size:14px;color:#FFD700;margin-top:5px;">📝 ${memoText}</div>` : ''}
-              <div style="font-size:18px;color:#4CAF50;font-weight:bold;margin-top:8px;">¥${unitPrice.toLocaleString()} × ${item.quantity} = ¥${subtotal.toLocaleString()}</div>
+              ${memoText ? `<div class="order-item-memo">📝 ${memoText}</div>` : ''}
             </div>
           `;
         }).join('');
         
         card.innerHTML = `
+          <button class="control-btn btn-print" onclick="printOrder({
+            id: '${order.id}',
+            orderNumber: ${order.orderNumber},
+            tableNumber: '${order.tableNumber}',
+            items: ${JSON.stringify(order.items).replace(/'/g, "&#39;")},
+            totalAmount: ${order.totalAmount},
+            memo: ${JSON.stringify(order.memo || {}).replace(/'/g, "&#39;")}
+          })">🖨️ 印刷</button>
           <div class="order-number">#${order.orderNumber}</div>
           <div class="order-table">${order.tableNumber}</div>
           ${statusBadge}${paidBadge}
           ${itemsHtml}
-          <div style="margin-top:15px;padding-top:15px;border-top:3px solid #4CAF50;">
-            <div style="font-size:22px;font-weight:bold;color:#4CAF50;text-align:center;">合計金額</div>
-            <div style="font-size:28px;font-weight:bold;color:#4CAF50;text-align:center;margin-top:5px;">¥${order.totalAmount.toLocaleString()}</div>
-          </div>
+          <div style="font-size:20px;font-weight:bold;color:#4CAF50;margin-top:10px;">¥${order.totalAmount.toLocaleString()}</div>
           <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
             <button class="control-btn btn-complete" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✓完了</button>
             <button class="control-btn btn-cancel" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✕キャンセル</button>
@@ -939,9 +942,9 @@
         
         const completeBtn = card.querySelector('.btn-complete');
         const cancelBtn = card.querySelector('.btn-cancel');
-        const detailBtn = card.querySelectorAll('.control-btn')[2]; // 詳細ボタン
-        const paidBtn = card.querySelectorAll('.control-btn')[3];    // 会計ボタン
-        const deleteBtn = card.querySelectorAll('.control-btn')[4];  // 削除ボタン
+        const detailBtn = card.querySelectorAll('.control-btn')[3]; // 印刷ボタンが0なので+1
+        const paidBtn = card.querySelectorAll('.control-btn')[4];    // 印刷ボタンが0なので+1
+        const deleteBtn = card.querySelectorAll('.control-btn')[5];  // 印刷ボタンが0なので+1
         
         completeBtn.onclick = () => completeOrder(order.id, order.tableNumber, order.orderNumber);
         cancelBtn.onclick = () => cancelOrder(order.id, order.tableNumber, order.orderNumber);
@@ -1505,11 +1508,14 @@
             data: `${item.name} x${item.quantity}\n`
           });
           
-          // トッピング
+          // トッピング（1行ずつ表示）
           if (item.toppings && item.toppings !== 'なし') {
-            builder.createTextElement({
-              characterspace: 0,
-              data: `${item.toppings}\n`
+            const toppingsList = item.toppings.split(',').map(t => t.trim());
+            toppingsList.forEach(topping => {
+              builder.createTextElement({
+                characterspace: 0,
+                data: `  ${topping}\n`
+              });
             });
           }
           
