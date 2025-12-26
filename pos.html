@@ -66,7 +66,7 @@
     async function testFirebaseConnection() {
       try {
         console.log('🔍 Firebase接続テスト開始...');
-        const testQuery = query(collection(db, 'menu'), limit(1));
+        const testQuery = query(collection(db, 'menuItems'), limit(1));
         const testSnapshot = await getDocs(testQuery);
         console.log('✅ Firebase接続成功！', 'ドキュメント取得:', testSnapshot.size);
         return true;
@@ -1848,45 +1848,65 @@
     async function loadMenuFromFirebase() {
       const container = document.getElementById('menuItemsList');
       
+      if (!container) {
+        console.error('❌ menuItemsList要素が見つかりません');
+        return;
+      }
+      
       try {
         console.log('📋 メニュー読み込み開始');
         container.innerHTML = '<div class="loading">メニューを読み込んでいます...</div>';
         
         // トッピング読み込み
-        const toppingsSnapshot = await getDocs(collection(db, 'toppings'));
-        allToppings.clear();
-        
-        console.log('📋 Firestore toppingsコレクション件数:', toppingsSnapshot.size);
-        
-        toppingsSnapshot.forEach(doc => {
-          const data = doc.data();
-          console.log('  topping doc.id:', doc.id, 'data.id:', data.id, 'data:', data);
+        console.log('📋 トッピング読み込み開始...');
+        let toppingsLoaded = false;
+        try {
+          const toppingsSnapshot = await getDocs(collection(db, 'toppings'));
+          allToppings.clear();
           
-          // doc.idとdata.idの両方で登録
-          allToppings.set(doc.id, {
-            id: doc.id,
-            name: data.name,
-            options: data.options || []
-          });
+          console.log('📋 Firestore toppingsコレクション件数:', toppingsSnapshot.size);
           
-          if (data.id && data.id !== doc.id) {
-            allToppings.set(data.id, {
-              id: data.id,
+          toppingsSnapshot.forEach(doc => {
+            const data = doc.data();
+            console.log('  topping doc.id:', doc.id, 'data.id:', data.id, 'data:', data);
+            
+            // doc.idとdata.idの両方で登録
+            allToppings.set(doc.id, {
+              id: doc.id,
               name: data.name,
               options: data.options || []
             });
-          }
-        });
-        
-        console.log('✅ トッピング:', allToppings.size, '件');
-        console.log('   allToppingsの全キー:', Array.from(allToppings.keys()));
+            
+            if (data.id && data.id !== doc.id) {
+              allToppings.set(data.id, {
+                id: data.id,
+                name: data.name,
+                options: data.options || []
+              });
+            }
+          });
+          
+          console.log('✅ トッピング:', allToppings.size, '件');
+          console.log('   allToppingsの全キー:', Array.from(allToppings.keys()));
+          toppingsLoaded = true;
+        } catch (toppingError) {
+          console.warn('⚠️ トッピング読み込みエラー:', toppingError.message);
+        }
         
         // メニュー読み込み
-        const menuSnapshot = await getDocs(collection(db, 'menu'));
+        console.log('📋 メニュー読み込み開始...');
+        let menuSnapshot;
+        try {
+          menuSnapshot = await getDocs(collection(db, 'menuItems'));
+          console.log('📋 Firestore menuItemsコレクション件数:', menuSnapshot.size);
+        } catch (menuError) {
+          console.error('❌ menuItems読み込みエラー:', menuError);
+          throw menuError;
+        }
         
         if (menuSnapshot.empty) {
-          console.error('❌ menuコレクションが空です');
-          container.innerHTML = '<div class="empty-state">❌ メニューデータがありません</div>';
+          console.warn('⚠️ menuItemsコレクションが空です - MENU_DATAを使用します');
+          useFallbackMenu();
           return;
         }
         
@@ -1895,6 +1915,7 @@
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
+          console.log('  menu doc.id:', doc.id, 'data:', data);
           items.push({
             id: data.id,
             category: data.category,
@@ -1915,14 +1936,17 @@
         
         allMenuItems = items;
         console.log('✅ メニュー:', items.length, '件');
-        console.log('📋 allToppings の内容:');
-        allToppings.forEach((value, key) => {
-          console.log(`   ${key}:`, value);
-        });
-        console.log('📋 最初の5つのメニューアイテム:');
-        items.slice(0, 5).forEach(item => {
-          console.log(`   ${item.name} → toppingsId: ${item.toppingsId || 'なし'}`);
-        });
+        
+        if (toppingsLoaded) {
+          console.log('📋 allToppings の内容:');
+          allToppings.forEach((value, key) => {
+            console.log(`   ${key}:`, value);
+          });
+          console.log('📋 最初の5つのメニューアイテム:');
+          items.slice(0, 5).forEach(item => {
+            console.log(`   ${item.name} → toppingsId: ${item.toppingsId || 'なし'}`);
+          });
+        }
         
         // カテゴリ選択肢を生成
         const categorySelect = document.getElementById('manualCategorySelect');
@@ -1943,14 +1967,58 @@
         console.log('✅ メニュー表示完了');
         
       } catch (e) {
-        console.error('❌ メニュー読み込みエラー:', e.message);
-        container.innerHTML = `
-          <div class="empty-state" style="color: #f44336;">
-            ❌ メニューの読み込みに失敗<br><br>
-            ${e.message}
-          </div>
-        `;
+        console.error('❌ メニュー読み込みエラー:', e);
+        console.error('   エラーコード:', e.code);
+        console.error('   エラーメッセージ:', e.message);
+        console.error('   エラースタック:', e.stack);
+        
+        // フォールバック: MENU_DATAを使用
+        useFallbackMenu();
+        
+        if (container) {
+          const existingContent = container.innerHTML;
+          container.innerHTML = `
+            <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+              ⚠️ Firestoreからの読み込みに失敗しました<br>
+              <small>ローカルデータを使用しています</small><br>
+              <small style="color: #666;">${e.message}</small>
+            </div>
+          ` + existingContent;
+        }
       }
+    }
+    
+    // フォールバックメニューを使用
+    function useFallbackMenu() {
+      console.warn('⚠️ フォールバックメニュー（MENU_DATA）を使用します');
+      
+      const items = MENU_DATA.map(item => ({
+        id: item.id,
+        category: item.category,
+        name: item.name,
+        price: item.price,
+        toppingsId: null,
+        image: '',
+        note: ''
+      }));
+      
+      allMenuItems = items;
+      
+      // カテゴリ選択肢を生成
+      const categories = new Set(items.map(i => i.category));
+      const categorySelect = document.getElementById('manualCategorySelect');
+      if (categorySelect) {
+        categorySelect.innerHTML = '<option value="all">全ての商品</option>';
+        Array.from(categories).sort().forEach(cat => {
+          const option = document.createElement('option');
+          option.value = cat;
+          option.textContent = cat;
+          categorySelect.appendChild(option);
+        });
+      }
+      
+      displayManualMenuItems(items);
+      console.log('✅ フォールバックメニュー表示完了（23商品）');
     }
     
     // カテゴリでメニューをフィルター

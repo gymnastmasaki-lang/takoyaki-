@@ -689,6 +689,13 @@
           if (docSnap.exists()) {
             const orderData = docSnap.data();
             
+            // 完了・キャンセル・会計済みの注文は復元しない
+            if (orderData.completedAt || orderData.cancelledAt || orderData.paidAt || orderData.deletedAt) {
+              console.log('⚠️ 注文は既に処理済みです - 復元をスキップ');
+              localStorage.removeItem('currentOrderId');
+              return;
+            }
+            
             document.getElementById('order-num').textContent = orderData.orderNumber;
             document.getElementById('waiting').textContent = orderData.myPosition || 2;
             document.getElementById('order-total').textContent = '¥' + orderData.totalAmount.toLocaleString();
@@ -817,10 +824,12 @@
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
           // 自分より注文番号が小さく、まだ完了していない注文
+          // 会計済み・完了済み・キャンセル済みは除外
           if (data.orderNumber < myOrderNumber && 
               data.deleteAt && data.deleteAt.toDate() > now && 
               !data.cancelledAt &&
-              !data.completedAt) {
+              !data.completedAt &&
+              !data.paidAt) {
             ordersAhead++;
           }
         });
@@ -864,7 +873,7 @@
         updateOrderStatusDisplay(data);
         
         // 待ち順番を再計算して表示を更新
-        if (!data.completedAt && !data.cancelledAt) {
+        if (!data.completedAt && !data.cancelledAt && !data.paidAt) {
           // まだ完了していない → 前の人の状況に応じて更新
           const currentPosition = await calculateCurrentPosition(data.orderNumber, data.myPosition);
           if (currentPosition !== null) {
@@ -892,6 +901,9 @@
           
           // 通知済みフラグを立てる
           updateDoc(orderRef, { notifiedComplete: true }).catch(e => console.error(e));
+          
+          // localStorageをクリア（次の注文を許可）
+          localStorage.removeItem('currentOrderId');
         }
         
         if (data.cancelledAt && !data.notifiedCancel) {
@@ -902,12 +914,18 @@
           showCustomAlert('注文がキャンセルされました\n\n注文番号 #' + data.orderNumber + '\n\n番号をお呼びしましたがご不在でしたので\n注文をキャンセルさせて頂きました');
           
           updateDoc(orderRef, { notifiedCancel: true }).catch(e => console.error(e));
+          
+          // localStorageをクリア（次の注文を許可）
+          localStorage.removeItem('currentOrderId');
         }
         
         if (data.paidAt && !data.notifiedPaid) {
           console.log('💳 会計完了を検知');
           playNotificationSound();
           updateDoc(orderRef, { notifiedPaid: true }).catch(e => console.error(e));
+          
+          // localStorageをクリア（次の注文を許可）
+          localStorage.removeItem('currentOrderId');
         }
       });
       
@@ -928,8 +946,8 @@
           cancelledAt: data.cancelledAt
         });
         
-        // 完了またはキャンセルされていない場合のみ更新
-        if (!data.completedAt && !data.cancelledAt) {
+        // 完了またはキャンセルまたは会計済みでない場合のみ更新
+        if (!data.completedAt && !data.cancelledAt && !data.paidAt) {
           const currentPosition = await calculateCurrentPosition(data.orderNumber, data.myPosition);
           if (currentPosition !== null) {
             const waitingElement = document.getElementById('waiting');
@@ -957,8 +975,8 @@
         }
         
         const data = docSnap.data();
-        // 完了またはキャンセルされていない場合のみ更新
-        if (!data.completedAt && !data.cancelledAt) {
+        // 完了またはキャンセルまたは会計済みでない場合のみ更新
+        if (!data.completedAt && !data.cancelledAt && !data.paidAt) {
           const currentPosition = await calculateCurrentPosition(data.orderNumber, data.myPosition);
           if (currentPosition !== null) {
             const waitingElement = document.getElementById('waiting');
