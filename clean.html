@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🧹 Firestore クリーンアップ</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      padding: 30px;
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .log {
+      background: #f5f5f5;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      max-height: 400px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 14px;
+    }
+    .success { color: green; font-weight: bold; }
+    .error { color: red; font-weight: bold; }
+    .warning { color: orange; font-weight: bold; }
+    .info { color: blue; }
+    button {
+      width: 100%;
+      padding: 15px;
+      font-size: 18px;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+    .btn-cleanup {
+      background: #f44336;
+      color: white;
+    }
+    .btn-cleanup:hover {
+      background: #d32f2f;
+    }
+    .btn-test {
+      background: #2196F3;
+      color: white;
+    }
+    .btn-test:hover {
+      background: #1976D2;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧹 Firestore クリーンアップツール</h1>
+    
+    <p><strong>このツールは以下の壊れた注文を削除します:</strong></p>
+    <ul>
+      <li>items が空配列 [] の注文</li>
+      <li>orderNumber が null/undefined の注文</li>
+      <li>10分以上経過した未完了注文</li>
+    </ul>
+    
+    <button class="btn-test" onclick="testOnly()">
+      🔍 テストのみ（削除しない）
+    </button>
+    
+    <button class="btn-cleanup" onclick="cleanupFirestore()">
+      🗑️ クリーンアップ実行（壊れた注文を削除）
+    </button>
+    
+    <div class="log" id="log"></div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+    import { getFirestore, collection, getDocs, deleteDoc, doc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBo1S4-q5vXrFVj3r3tcF38OkdyPvdE",
+      authDomain: "konamonyahachi.firebaseapp.com",
+      projectId: "konamonyahachi",
+      storageBucket: "konamonyahachi.firebasestorage.app",
+      messagingSenderId: "117180785049",
+      appId: "1:117180785049:web:c31f23fb05e7aebf608b70"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    function log(message, type = 'info') {
+      const logDiv = document.getElementById('log');
+      const className = type;
+      const timestamp = new Date().toLocaleTimeString();
+      logDiv.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    async function findBrokenOrders() {
+      const brokenOrders = [];
+      const now = new Date();
+      
+      try {
+        log('📋 orders コレクションをスキャン中...', 'info');
+        const snapshot = await getDocs(collection(db, 'orders'));
+        log(`✅ 合計 ${snapshot.size} 件の注文を確認`, 'info');
+        
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          const id = docSnap.id;
+          
+          // チェック1: items が空
+          if (!data.items || data.items.length === 0) {
+            brokenOrders.push({
+              id,
+              reason: 'items が空',
+              data: {
+                orderNumber: data.orderNumber,
+                tableNumber: data.tableNumber,
+                timestamp: data.timestamp?.toDate?.()
+              }
+            });
+          }
+          // チェック2: orderNumber が null/undefined
+          else if (!data.orderNumber) {
+            brokenOrders.push({
+              id,
+              reason: 'orderNumber が null/undefined',
+              data: {
+                tableNumber: data.tableNumber,
+                itemsCount: data.items?.length,
+                timestamp: data.timestamp?.toDate?.()
+              }
+            });
+          }
+          // チェック3: 10分以上経過した未完了注文
+          else if (data.timestamp && !data.paidAt && !data.completedAt && !data.cancelledAt) {
+            const orderTime = data.timestamp.toDate();
+            const diffMinutes = (now - orderTime) / 1000 / 60;
+            
+            if (diffMinutes > 10) {
+              brokenOrders.push({
+                id,
+                reason: `${Math.floor(diffMinutes)}分経過した未完了注文`,
+                data: {
+                  orderNumber: data.orderNumber,
+                  tableNumber: data.tableNumber,
+                  timestamp: orderTime
+                }
+              });
+            }
+          }
+        });
+        
+        return brokenOrders;
+      } catch (e) {
+        log(`❌ エラー: ${e.message}`, 'error');
+        throw e;
+      }
+    }
+
+    window.testOnly = async function() {
+      const logDiv = document.getElementById('log');
+      logDiv.innerHTML = '<h3>🔍 テストモード（削除しません）</h3>';
+      
+      try {
+        const brokenOrders = await findBrokenOrders();
+        
+        if (brokenOrders.length === 0) {
+          log('✅ 壊れた注文は見つかりませんでした', 'success');
+        } else {
+          log(`⚠️ ${brokenOrders.length} 件の壊れた注文を発見`, 'warning');
+          log('', 'info');
+          
+          brokenOrders.forEach((order, index) => {
+            log(`${index + 1}. ID: ${order.id}`, 'warning');
+            log(`   理由: ${order.reason}`, 'info');
+            log(`   データ: ${JSON.stringify(order.data, null, 2)}`, 'info');
+            log('', 'info');
+          });
+        }
+      } catch (e) {
+        log(`❌ テスト失敗: ${e.message}`, 'error');
+      }
+    };
+
+    window.cleanupFirestore = async function() {
+      if (!confirm('本当に壊れた注文を削除しますか？\n\nこの操作は取り消せません。')) {
+        return;
+      }
+      
+      const logDiv = document.getElementById('log');
+      logDiv.innerHTML = '<h3>🗑️ クリーンアップ実行中...</h3>';
+      
+      try {
+        const brokenOrders = await findBrokenOrders();
+        
+        if (brokenOrders.length === 0) {
+          log('✅ 削除対象の注文はありません', 'success');
+          return;
+        }
+        
+        log(`⚠️ ${brokenOrders.length} 件の注文を削除します`, 'warning');
+        log('', 'info');
+        
+        for (const order of brokenOrders) {
+          try {
+            await deleteDoc(doc(db, 'orders', order.id));
+            log(`✅ 削除成功: ${order.id} (${order.reason})`, 'success');
+          } catch (e) {
+            log(`❌ 削除失敗: ${order.id} - ${e.message}`, 'error');
+          }
+        }
+        
+        log('', 'info');
+        log('🎉 クリーンアップ完了！', 'success');
+        log('', 'info');
+        log('次のステップ:', 'info');
+        log('1. 全てのブラウザをリロード（Ctrl+Shift+R）', 'info');
+        log('2. menu.html で新しい注文を試す', 'info');
+        
+      } catch (e) {
+        log(`❌ クリーンアップ失敗: ${e.message}`, 'error');
+      }
+    };
+  </script>
+</body>
+</html>
