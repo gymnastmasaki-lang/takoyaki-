@@ -1811,37 +1811,71 @@
       console.log('✅ システム起動');
       
       // テーブルボタンを生成
-      const tableGrid = document.getElementById('tableGrid');
-      tableGrid.innerHTML = '';
-      TABLES.forEach(table => {
-        const btn = document.createElement('button');
-        btn.className = 'table-btn';
-        btn.textContent = table;
-        btn.onclick = () => selectTable(table);
-        btn.id = `table-${table}`;
-        tableGrid.appendChild(btn);
-      });
+      try {
+        const tableGrid = document.getElementById('tableGrid');
+        if (!tableGrid) {
+          console.error('❌ tableGrid要素が見つかりません');
+        } else {
+          tableGrid.innerHTML = '';
+          TABLES.forEach(table => {
+            const btn = document.createElement('button');
+            btn.className = 'table-btn';
+            btn.textContent = table;
+            btn.onclick = () => selectTable(table);
+            btn.id = `table-${table}`;
+            tableGrid.appendChild(btn);
+          });
+          console.log('✅ テーブルボタン生成完了:', TABLES.length, '個');
+        }
+      } catch (e) {
+        console.error('❌ テーブルボタン生成エラー:', e);
+      }
       
       // 手動入力用のテーブル選択肢を生成
-      const manualTable = document.getElementById('manualTable');
-      TABLES.forEach(table => {
-        const option = document.createElement('option');
-        option.value = table;
-        option.textContent = `テーブル ${table}`;
-        manualTable.appendChild(option);
-      });
+      try {
+        const manualTable = document.getElementById('manualTable');
+        if (manualTable) {
+          TABLES.forEach(table => {
+            const option = document.createElement('option');
+            option.value = table;
+            option.textContent = `テーブル ${table}`;
+            manualTable.appendChild(option);
+          });
+          console.log('✅ 手動入力テーブル選択肢生成完了');
+        }
+      } catch (e) {
+        console.error('❌ 手動入力テーブル選択肢生成エラー:', e);
+      }
       
       // Firebaseからメニューとトッピングを読み込み
-      await loadMenuFromFirebase();
+      try {
+        await loadMenuFromFirebase();
+      } catch (e) {
+        console.error('❌ メニュー読み込みエラー:', e);
+      }
       
       // 営業時間状態を読み込み
-      await loadBusinessHoursStatus();
+      try {
+        await loadBusinessHoursStatus();
+      } catch (e) {
+        console.error('❌ 営業時間読み込みエラー:', e);
+      }
       
       // リアルタイム更新を開始
-      startRealtimeUpdates();
+      try {
+        startRealtimeUpdates();
+      } catch (e) {
+        console.error('❌ リアルタイム更新開始エラー:', e);
+      }
       
       // 本日の売上を計算
-      await calculateTodaySales();
+      try {
+        await calculateTodaySales();
+      } catch (e) {
+        console.error('❌ 売上計算エラー:', e);
+      }
+      
+      console.log('✅ システム初期化完了');
     }
     
     // Firebaseからメニューとトッピングを読み込み
@@ -1891,21 +1925,29 @@
           toppingsLoaded = true;
         } catch (toppingError) {
           console.warn('⚠️ トッピング読み込みエラー:', toppingError.message);
+          // トッピングが読み込めなくてもメニューは表示
         }
         
         // メニュー読み込み
         console.log('📋 メニュー読み込み開始...');
         let menuSnapshot;
         try {
-          menuSnapshot = await getDocs(collection(db, 'menuItems'));
-          console.log('📋 Firestore menuItemsコレクション件数:', menuSnapshot.size);
+          menuSnapshot = await getDocs(collection(db, 'menu'));
+          console.log('📋 Firestore menuコレクション件数:', menuSnapshot.size);
+          
+          // もしmenuコレクションが空なら、menuItemsを試す
+          if (menuSnapshot.empty) {
+            console.log('📋 menuが空 - menuItemsを試します...');
+            menuSnapshot = await getDocs(collection(db, 'menuItems'));
+            console.log('📋 Firestore menuItemsコレクション件数:', menuSnapshot.size);
+          }
         } catch (menuError) {
-          console.error('❌ menuItems読み込みエラー:', menuError);
+          console.error('❌ menu読み込みエラー:', menuError);
           throw menuError;
         }
         
         if (menuSnapshot.empty) {
-          console.warn('⚠️ menuItemsコレクションが空です - MENU_DATAを使用します');
+          console.warn('⚠️ menuコレクションもmenuItemsコレクションも空です - MENU_DATAを使用します');
           useFallbackMenu();
           return;
         }
@@ -1917,7 +1959,7 @@
           const data = doc.data();
           console.log('  menu doc.id:', doc.id, 'data:', data);
           items.push({
-            id: data.id,
+            id: data.id || doc.id,
             category: data.category,
             name: data.name,
             price: data.price,
