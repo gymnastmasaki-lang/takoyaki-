@@ -28,6 +28,7 @@
       
       if (tableNumber && !orderId && !fromIndex) {
         console.log('→ index.html?table=' + tableNumber + ' にリダイレクト');
+        // パラメータが明示的にある場合のみリダイレクト
         window.location.href = 'index.html?table=' + tableNumber;
       } else {
         console.log('→ リダイレクトしない(このページを表示)');
@@ -643,22 +644,55 @@
     const tableNumber = urlParams.get('table') || 'テイクアウト';
 
     window.onload = async function() {
-      console.log('ページ読み込み開始');
+      console.log('=== ページ読み込み開始 ===');
+      console.log('URL:', window.location.href);
+      console.log('tableNumber:', tableNumber);
       
-      // 時間帯による品切れチェック
-      await checkTimeBasedAvailability();
-      
-      await loadAllData();
-      await updateTopWaitingCount();
-      setInterval(updateTopWaitingCount, 10000);
-      watchSoldOutItems();
-      console.log('初期化完了');
-      
-      // ブラウザの戻るボタン対策
-      setupBackButtonPrevention();
-      
-      // リロード時に注文状態を復元
-      restoreOrderStateAfterReload();
+      try {
+        // 時間帯による品切れチェック
+        await checkTimeBasedAvailability();
+        
+        console.log('📋 メニューデータ読み込み開始');
+        await loadAllData();
+        
+        console.log('⏰ 待ち人数更新開始');
+        await updateTopWaitingCount();
+        setInterval(updateTopWaitingCount, 10000);
+        
+        console.log('👁️ 品切れ監視開始');
+        watchSoldOutItems();
+        
+        console.log('✅ 初期化完了');
+        
+        // ブラウザの戻るボタン対策
+        setupBackButtonPrevention();
+        
+        // リロード時に注文状態を復元
+        restoreOrderStateAfterReload();
+      } catch (error) {
+        console.error('❌ 初期化エラー:', error);
+        console.error('エラー詳細:', error.message);
+        console.error('スタックトレース:', error.stack);
+        
+        // エラーメッセージを画面に表示
+        const menuList = document.getElementById('menu-list');
+        if (menuList) {
+          menuList.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: #f44336;">
+              <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
+              <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">
+                データの読み込みに失敗しました
+              </div>
+              <div style="font-size: 14px; color: #666; margin-top: 10px;">
+                ${error.message}
+              </div>
+              <button onclick="location.reload()" style="margin-top: 20px; padding: 12px 30px; background: #2196F3; color: white; border: none; border-radius: 8px; font-size: 16px;">
+                再読み込み
+              </button>
+            </div>
+          `;
+        }
+      }
     };
 
     // ブラウザの戻るボタン対策
@@ -1143,9 +1177,18 @@
 
     async function loadAllData() {
       try {
-        console.log('データ読み込み開始');
+        console.log('📋 データ読み込み開始');
+        console.log('  - データベース接続確認中...');
+        
         const menuSnapshot = await getDocs(collection(db, 'menu'));
+        console.log('  - メニューアイテム数:', menuSnapshot.size);
+        
+        if (menuSnapshot.size === 0) {
+          console.warn('⚠️ メニューデータが0件です');
+        }
+        
         const isEatIn = tableNumber !== 'テイクアウト';
+        console.log('  - 利用スタイル:', isEatIn ? '店内' : 'テイクアウト');
         
         console.log('メニューアイテム数:', menuSnapshot.size);
 
@@ -1277,12 +1320,21 @@
     });
 
     function displayMenuItems(items) {
+      console.log('🎨 メニュー表示開始');
+      console.log('  - 表示する商品数:', items ? items.length : 0);
+      
       const list = document.getElementById('menu-list');
-      if (!list) return;
+      if (!list) {
+        console.error('❌ menu-list要素が見つかりません');
+        return;
+      }
+      
+      console.log('  - menu-list要素:', list);
       
       list.innerHTML = '';
       
       if (!items || items.length === 0) {
+        console.warn('⚠️ 表示する商品がありません');
         list.innerHTML = '<div style="text-align:center;color:#666;padding:40px;">商品が見つかりませんでした</div>';
         return;
       }
@@ -1311,6 +1363,8 @@
         div.onclick = () => selectItem(item);
         list.appendChild(div);
       });
+      
+      console.log('✅ メニュー表示完了:', list.children.length, '個のアイテムを表示');
     }
 
     async function selectItem(item) {
