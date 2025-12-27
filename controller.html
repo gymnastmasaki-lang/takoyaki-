@@ -290,120 +290,390 @@
   </style>
 </head>
 <body>
-  <div class="connection-indicator online" id="connectionStatus">
+  <div class="connection-indicator online" id="connection-indicator">
     <div class="connection-dot"></div>
     <span>オンライン</span>
   </div>
 
-  <div class="header">
-    <h1>注文管理コントローラー</h1>
+  <!-- 音声案内ボタンセクション -->
+  <div class="audio-buttons-section">
+    <div class="audio-button-grid" id="audio-button-grid"></div>
   </div>
 
-  <div class="top-controls">
-    <button class="big-btn btn-refresh" onclick="loadOrders()">🔄 更新</button>
-    <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">待ち+1</button>
-    <button class="big-btn btn-soldout" onclick="toggleSection('soldout')">売切管理</button>
-    <button class="big-btn" onclick="toggleSection('audio')" style="background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%);">🔊 音声案内</button>
-    <button class="big-btn" id="businessOverrideBtn" onclick="toggleBusinessHours()" style="background: linear-gradient(135deg, #FF5722 0%, #E64A19 100%);">営業時間</button>
+  <div id="page-orders">
+    <div class="top-controls">
+      <button class="big-btn btn-refresh" onclick="loadOrders()">更新</button>
+      <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">待1</button>
+      <button class="big-btn btn-soldout" onclick="showSoldOutPage()">品切</button>
+      <button class="big-btn" id="bulk-soldout-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="toggleBulkSoldOut()">一括</button>
+      <button class="big-btn" id="time-override-btn" style="background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%);" onclick="toggleTimeOverride()">時外</button>
+    </div>
+
+    <div class="manual-waiting-card">
+      <div class="manual-waiting-label">手動待ち人数</div>
+      <div class="manual-count" id="manual-count">0</div>
+      <button class="btn-reset" onclick="resetWaiting()">リセット</button>
+    </div>
+
+    <div id="staff-calls-container"></div>
+    <div id="orders-container"><div style="text-align:center;color:white;padding:40px;">読み込み中...</div></div>
   </div>
 
-  <div class="manual-waiting-card">
-    <div class="manual-waiting-label">手動待ち数</div>
-    <div class="manual-count" id="manualWaitingCount">0</div>
-    <button class="btn-reset" onclick="resetWaiting()">リセット</button>
-  </div>
-
-  <div id="staffCallsContainer"></div>
-  <div id="ordersContainer"></div>
-
-  <!-- 売り切れ管理セクション -->
-  <div id="soldoutSection" class="hidden">
+  <div id="page-soldout" class="hidden">
+    <button class="big-btn btn-refresh" style="margin-bottom: 15px;" onclick="backToOrders()">← 注文管理に戻る</button>
+    
+    <div class="header" style="margin-bottom: 15px;">
+      <h1>🚫 品切れ設定</h1>
+    </div>
+    
     <div class="category-filter">
-      <select id="soldoutCategoryFilter" onchange="filterSoldout()">
-        <option value="all">すべて</option>
+      <label style="display:block;font-size:16px;font-weight:bold;margin-bottom:10px;">カテゴリを選んでください</label>
+      <select id="soldout-category-select">
+        <option value="">全ての商品</option>
       </select>
     </div>
-    <div id="soldoutItemsContainer"></div>
-  </div>
-
-  <!-- 音声案内セクション -->
-  <div id="audioSection" class="hidden">
-    <div class="audio-buttons-section">
-      <h2>音声案内ボタン</h2>
-      <div class="audio-button-grid" id="audioButtonGrid">
-        <!-- 音声ボタンがここに生成されます -->
-      </div>
-    </div>
+    
+    <div id="soldout-menu-list"></div>
   </div>
 
   <script type="module">
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
-    import { getFirestore, collection, getDocs, doc, updateDoc, setDoc, onSnapshot, query, orderBy, where } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+    import { getFirestore, collection, getDocs, getDoc, doc, deleteDoc, setDoc, updateDoc, Timestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyBSwmWiMTRuN5bm0P46aaGzNz2a0qm7QKk",
-      authDomain: "ramenorder-2baff.firebaseapp.com",
-      projectId: "ramenorder-2baff",
-      storageBucket: "ramenorder-2baff.firebasestorage.app",
-      messagingSenderId: "502068620820",
-      appId: "1:502068620820:web:e4bc2f13b1f85b7b00a882"
-    };
-
-    const app = initializeApp(firebaseConfig);
+    const app = initializeApp({
+      apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+      authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+      projectId: "takoyaki-order-system-bacd7",
+      storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+      messagingSenderId: "104494752890",
+      appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+    });
+    
     const db = getFirestore(app);
     window.db = db;
 
-    let currentSection = 'orders';
-    let menuItems = [];
-    let categoryMap = {};
+    let audioEnabled = false;
+    let isFirstOrderLoad = true;
+    let lastOrderCount = 0;
+    let allMenuItems = [];
+    let isBulkSoldOut = false;
+    let currentAudio = null;
 
-    // オンライン状態の監視
+    // 接続監視
     window.addEventListener('online', () => {
-      const indicator = document.getElementById('connectionStatus');
+      const indicator = document.getElementById('connection-indicator');
       indicator.className = 'connection-indicator online';
       indicator.innerHTML = '<div class="connection-dot"></div><span>オンライン</span>';
     });
 
     window.addEventListener('offline', () => {
-      const indicator = document.getElementById('connectionStatus');
+      const indicator = document.getElementById('connection-indicator');
       indicator.className = 'connection-indicator offline';
       indicator.innerHTML = '<div class="connection-dot"></div><span>オフライン</span>';
     });
 
-    async function loadOrders() {
-      const q = query(collection(db, 'orders'), where('status', '==', 'pending'), orderBy('timestamp', 'desc'));
-      const snapshot = await getDocs(q);
-      const ordersContainer = document.getElementById('ordersContainer');
-      ordersContainer.innerHTML = '';
+    window.onload = async function() {
+      initializeAudioButtons();
+      showAudioEnablePopup();
+    };
+
+    // 音声案内ボタンの初期化
+    function initializeAudioButtons() {
+      const numbers = [619, 620, 621, 622, 623, 624, 625, 626, 627, 628];
+      const buttonGrid = document.getElementById('audio-button-grid');
       
-      snapshot.forEach(docSnap => {
-        const order = docSnap.data();
-        const orderCard = document.createElement('div');
-        orderCard.className = 'order-card';
+      numbers.forEach(num => {
+        const btn = document.createElement('button');
+        btn.className = 'audio-btn';
+        btn.textContent = num;
+        btn.onclick = () => playAudioAnnouncement(num, btn);
+        buttonGrid.appendChild(btn);
+      });
+    }
+    
+    // 音声案内を再生
+    function playAudioAnnouncement(number, button) {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+      }
+
+      document.querySelectorAll('.audio-btn').forEach(b => {
+        b.classList.remove('playing');
+      });
+
+      try {
+        const pinpon = new Audio('./pinpon.mp3');
+        pinpon.volume = 1.0;
+        currentAudio = pinpon;
+        
+        button.classList.add('playing');
+        
+        pinpon.play().catch(err => console.error('ピンポン音 再生失敗:', err));
+        
+        pinpon.onended = () => {
+          const audio = new Audio(`./${number}.wav`);
+          audio.volume = 1.0;
+          currentAudio = audio;
+
+          audio.play().catch(err => {
+            console.error(`${number}.wav 再生失敗:`, err);
+            button.classList.remove('playing');
+          });
+
+          audio.onended = () => {
+            button.classList.remove('playing');
+          };
+
+          audio.onerror = () => {
+            button.classList.remove('playing');
+          };
+        };
+        
+        pinpon.onerror = () => {
+          button.classList.remove('playing');
+        };
+
+      } catch (e) {
+        console.error('エラー:', e);
+        button.classList.remove('playing');
+      }
+    }
+
+    function showAudioEnablePopup() {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+      `;
+      
+      const popup = document.createElement('div');
+      popup.style.cssText = `
+        background: white;
+        border-radius: 20px;
+        padding: 40px;
+        max-width: 400px;
+        text-align: center;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+      `;
+      
+      popup.innerHTML = `
+        <div style="font-size: 48px; margin-bottom: 20px;">🔊</div>
+        <div style="font-size: 22px; font-weight: bold; margin-bottom: 15px; color: #333;">
+          音声通知を有効にしますか?
+        </div>
+        <div style="font-size: 16px; color: #666; margin-bottom: 30px;">
+          新規注文が入った時に音でお知らせします
+        </div>
+        <button style="
+          padding: 15px 40px;
+          background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+          color: white;
+          border: none;
+          border-radius: 12px;
+          font-size: 18px;
+          font-weight: bold;
+          cursor: pointer;
+          box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+        ">有効にする</button>
+      `;
+      
+      popup.querySelector('button').onclick = () => {
+        audioEnabled = true;
+        overlay.remove();
+        loadOrders();
+        loadTimeOverrideStatus();
+        watchWaiting();
+        watchStaffCalls();
+        watchOrders();
+      };
+      
+      overlay.appendChild(popup);
+      document.body.appendChild(overlay);
+    }
+
+    function watchOrders() {
+      const unsubscribe = onSnapshot(
+        collection(db, 'orders'), 
+        (snapshot) => {
+          const currentCount = snapshot.size;
+          
+          if (!isFirstOrderLoad && currentCount > lastOrderCount) {
+            playOrderSound();
+          }
+          
+          lastOrderCount = currentCount;
+          isFirstOrderLoad = false;
+          
+          loadOrders();
+        }
+      );
+      
+      return unsubscribe;
+    }
+
+    function watchWaiting() {
+      const unsubscribe = onSnapshot(
+        doc(db, 'settings', 'waiting'), 
+        (doc) => {
+          if (doc.exists()) {
+            const count = doc.data().manualCount || 0;
+            document.getElementById('manual-count').textContent = count;
+          }
+        }
+      );
+      
+      return unsubscribe;
+    }
+
+    function watchStaffCalls() {
+      let isFirstLoad = true;
+      const unsubscribe = onSnapshot(
+        collection(db, 'staff_calls'),
+        (snapshot) => {
+        const container = document.getElementById('staff-calls-container');
+        container.innerHTML = '';
+        
+        const calls = [];
+        snapshot.forEach(doc => calls.push({ id: doc.id, ...doc.data() }));
+        calls.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+        
+        calls.forEach(call => {
+          const isBill = call.type === 'bill';
+          const card = document.createElement('div');
+          card.className = 'staff-call-card';
+          if (isBill) card.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
+          
+          const orderNumberHtml = call.orderNumber 
+            ? `<div style="font-size:20px;text-align:center;margin-top:8px;font-weight:bold;color:#fff;">注文番号: #${call.orderNumber}</div>` 
+            : '';
+          
+          card.innerHTML = `
+            <div style="font-size:24px;text-align:center;font-weight:bold;">
+              ${isBill ? '💳 お会計です' : '📞 呼び出し'}
+            </div>
+            <div class="staff-call-table">${call.tableNumber || 'テイクアウト'}</div>
+            ${orderNumberHtml}
+            <button class="btn-reset" style="width:100%;margin-top:10px;" onclick="dismissCall('${call.id}')">対応完了</button>
+          `;
+          container.appendChild(card);
+        });
+        
+        if (!isFirstLoad && calls.length > 0) {
+          const isBill = calls[0].type === 'bill';
+          if (isBill) playBillSound();
+          else playCallSound();
+        }
+        isFirstLoad = false;
+      });
+      
+      return unsubscribe;
+    }
+
+    window.dismissCall = async (id) => {
+      await deleteDoc(doc(db, 'staff_calls', id));
+      showToast('✓ 対応完了');
+    };
+
+    function playOrderSound() {
+      if (!audioEnabled) return;
+      try {
+        const audio = new Audio('./order.wav');
+        audio.volume = 1.0;
+        audio.play().catch(e => console.log('音声再生失敗:', e));
+      } catch (e) {
+        console.log('音声エラー:', e);
+      }
+    }
+
+    function playCallSound() {
+      if (!audioEnabled) return;
+      try {
+        const audio = new Audio('./call.wav');
+        audio.volume = 1.0;
+        audio.play().catch(e => console.log('音声再生失敗:', e));
+      } catch (e) {
+        console.log('音声エラー:', e);
+      }
+    }
+
+    function playBillSound() {
+      if (!audioEnabled) return;
+      try {
+        const audio = new Audio('./okaikei.wav');
+        audio.volume = 1.0;
+        audio.play().catch(e => console.log('音声再生失敗:', e));
+      } catch (e) {
+        console.log('音声エラー:', e);
+      }
+    }
+
+    async function loadOrders() {
+      const orders = [];
+      (await getDocs(collection(db, 'orders'))).forEach(doc => {
+        const d = doc.data();
+        orders.push({
+          id: doc.id,
+          orderNumber: d.orderNumber,
+          tableNumber: d.tableNumber,
+          items: d.items,
+          totalAmount: d.totalAmount,
+          memo: d.memo || {},
+          completedAt: d.completedAt || null,
+          cancelledAt: d.cancelledAt || null,
+          paidAt: d.paidAt || null
+        });
+      });
+      
+      const container = document.getElementById('orders-container');
+      if (orders.length === 0) {
+        container.innerHTML = '<div style="text-align:center;color:white;padding:40px;">現在注文はありません</div>';
+        return;
+      }
+      
+      container.innerHTML = '';
+      orders.sort((a, b) => a.orderNumber - b.orderNumber).forEach(order => {
+        const card = document.createElement('div');
+        card.className = 'order-card';
+        
+        let statusBadge = '';
+        if (order.completedAt) {
+          statusBadge = '<div style="background:#4CAF50;color:white;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 0;">✓ 完了済み</div>';
+        } else if (order.cancelledAt) {
+          statusBadge = '<div style="background:#f44336;color:white;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 0;">✕ キャンセル済み</div>';
+        }
+        
+        let paidBadge = '';
+        if (order.paidAt) {
+          paidBadge = '<div style="background:#2196F3;color:white;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 5px 5px 0;">💳 会計済</div>';
+        }
         
         let itemsHTML = '';
         let grandTotal = 0;
         
         order.items.forEach((item, idx) => {
+          const memoText = order.memo?.[idx] || item.memo || '';
           const itemPrice = item.price || 0;
           const toppingPrice = item.toppingPrice || 0;
           const quantity = item.quantity || 1;
           const itemTotal = (itemPrice + toppingPrice) * quantity;
           grandTotal += itemTotal;
           
-          // トッピングの表示
-          let toppingsHTML = '';
+          // トッピングを1行ずつ表示
+          let toppingsHtml = '';
           if (item.toppings && item.toppings !== 'なし') {
             const toppingsList = item.toppings.split(',').map(t => t.trim());
-            toppingsHTML = toppingsList.map(topping => 
+            toppingsHtml = toppingsList.map(topping => 
               `<div class="order-item-toppings">・${topping}</div>`
             ).join('');
-          }
-          
-          // メモの表示
-          let memoHTML = '';
-          if (order.memo && order.memo[idx] || item.memo) {
-            memoHTML = `<div class="order-item-memo">※ ${order.memo?.[idx] || item.memo}</div>`;
           }
           
           itemsHTML += `
@@ -412,204 +682,418 @@
                 <div class="order-item-name">${item.name} × ${quantity}</div>
                 <div class="order-item-price">¥${itemPrice.toLocaleString()}</div>
               </div>
-              ${toppingsHTML}
-              ${memoHTML}
+              ${toppingsHtml}
+              ${memoText ? `<div class="order-item-memo">📝 ${memoText}</div>` : ''}
               <div class="order-item-total">¥${itemPrice.toLocaleString()} × ${quantity} = ¥${itemTotal.toLocaleString()}</div>
             </div>
           `;
         });
         
-        orderCard.innerHTML = `
-          <div style="margin-bottom: 10px;">
-            <span class="order-number">#${order.orderNumber}</span>
-            <span class="order-table">${order.tableNumber}</span>
-          </div>
+        card.innerHTML = `
+          <div class="order-number">#${order.orderNumber}</div>
+          <div class="order-table">${order.tableNumber}</div>
+          ${statusBadge}${paidBadge}
           ${itemsHTML}
           <div class="order-total">
             <div class="order-total-label">全ての合計金額</div>
             <div class="order-total-amount">¥${grandTotal.toLocaleString()}</div>
           </div>
-          <div style="margin-top: 15px; text-align: center;">
-            <button class="control-btn btn-complete" onclick="completeOrder('${docSnap.id}')">完了</button>
-            <button class="control-btn btn-cancel" onclick="cancelOrder('${docSnap.id}')">キャンセル</button>
+          <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            <button class="control-btn btn-complete" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✓完了</button>
+            <button class="control-btn btn-cancel" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✕キャンセル</button>
+            <button class="control-btn" style="background:linear-gradient(135deg,#9C27B0 0%,#7B1FA2 100%);font-size:11px;" data-order-id="${order.id}">📋詳細</button>
+          </div>
+          <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <button class="control-btn" id="paid-btn-${order.id}" style="background:linear-gradient(135deg,${order.paidAt ? '#2196F3' : '#FFC107'} 0%,${order.paidAt ? '#1976D2' : '#FFA000'} 100%);font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}" data-paid="${order.paidAt ? 'true' : 'false'}">${order.paidAt ? '💳 済' : '💳 未'}</button>
+            <button class="control-btn" style="background:linear-gradient(135deg,#757575 0%,#616161 100%);font-size:11px;${!order.completedAt && !order.cancelledAt ? 'opacity:0.5;cursor:not-allowed;' : ''}" data-order-id="${order.id}" ${!order.completedAt && !order.cancelledAt ? 'disabled' : ''}>🗑️削除</button>
           </div>
         `;
-        ordersContainer.appendChild(orderCard);
-      });
-    }
-
-    async function loadStaffCalls() {
-      const q = query(collection(db, 'staffCalls'), where('status', '==', 'pending'), orderBy('timestamp', 'desc'));
-      const snapshot = await getDocs(q);
-      const container = document.getElementById('staffCallsContainer');
-      container.innerHTML = '';
-      
-      snapshot.forEach(docSnap => {
-        const call = docSnap.data();
-        const card = document.createElement('div');
-        card.className = 'staff-call-card';
-        card.innerHTML = `
-          <div style="text-align:center;font-size:24px;font-weight:bold;">スタッフ呼び出し</div>
-          <div class="staff-call-table">${call.tableNumber}</div>
-          <div style="text-align:center;">
-            <button class="control-btn btn-complete" style="font-size:18px;padding:15px 40px;" onclick="resolveStaffCall('${docSnap.id}')">対応完了</button>
-          </div>
-        `;
+        
+        const completeBtn = card.querySelector('.btn-complete');
+        const cancelBtn = card.querySelector('.btn-cancel');
+        const detailBtn = card.querySelectorAll('.control-btn')[2];
+        const paidBtn = card.querySelectorAll('.control-btn')[3];
+        const deleteBtn = card.querySelectorAll('.control-btn')[4];
+        
+        completeBtn.onclick = () => completeOrder(order.id, order.tableNumber, order.orderNumber);
+        cancelBtn.onclick = () => cancelOrder(order.id, order.tableNumber, order.orderNumber);
+        detailBtn.onclick = () => showOrderDetail(order);
+        paidBtn.onclick = () => togglePaidStatus(order);
+        
+        if (order.completedAt || order.cancelledAt) {
+          deleteBtn.onclick = () => deleteOrder(order.id);
+        }
+        
         container.appendChild(card);
       });
     }
 
-    window.completeOrder = async (orderId) => {
-      await updateDoc(doc(db, 'orders', orderId), { status: 'completed' });
-      showToast('✓ 完了');
-      loadOrders();
-    };
-
-    window.cancelOrder = async (orderId) => {
-      const confirmed = await showConfirmDialog('この注文をキャンセルしますか?');
-      if (confirmed) {
-        await updateDoc(doc(db, 'orders', orderId), { status: 'cancelled' });
-        showToast('✓ キャンセル');
+    function showOrderDetail(order) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        overflow-y: auto;
+        padding: 20px 0;
+      `;
+      
+      const dialog = document.createElement('div');
+      dialog.style.cssText = `
+        background: white;
+        border-radius: 15px;
+        padding: 20px;
+        max-width: 90%;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+      `;
+      
+      let itemsHtml = '';
+      order.items.forEach((item, idx) => {
+        const currentMemo = order.memo?.[idx] || item.memo || '';
+        const toppingsText = item.toppings && item.toppings !== 'なし' ? item.toppings : 'なし';
+        itemsHtml += `
+          <div style="background:#f5f5f5;padding:15px;border-radius:10px;margin-bottom:10px;">
+            <div style="font-size:16px;font-weight:bold;margin-bottom:5px;">${item.name} × ${item.quantity}</div>
+            <div style="font-size:14px;color:#666;margin-bottom:8px;">🍴 トッピング: ${toppingsText}</div>
+            <input type="text" 
+                   id="memo-${idx}" 
+                   value="${currentMemo}"
+                   placeholder="メモを入力(ソース多め、マヨ抜きなど)"
+                   style="width:100%;padding:10px;border:2px solid #ddd;border-radius:8px;font-size:14px;">
+          </div>
+        `;
+      });
+      
+      dialog.innerHTML = `
+        <div style="font-size:20px;font-weight:bold;margin-bottom:15px;text-align:center;">
+          注文 #${order.orderNumber} の詳細
+        </div>
+        <div style="text-align:center;margin-bottom:15px;">
+          <span style="background:#2196F3;color:white;padding:5px 15px;border-radius:15px;">${order.tableNumber}</span>
+        </div>
+        ${itemsHtml}
+        <div style="font-size:18px;font-weight:bold;text-align:right;margin:15px 0;color:#4CAF50;">
+          合計: ¥${order.totalAmount.toLocaleString()}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <button id="save-memo-btn" style="
+            padding:15px;
+            background:#4CAF50;
+            color:white;
+            border:none;
+            border-radius:10px;
+            font-size:16px;
+            font-weight:bold;
+            cursor:pointer;
+          ">💾 メモを保存</button>
+          <button id="close-detail-btn" style="
+            padding:15px;
+            background:#757575;
+            color:white;
+            border:none;
+            border-radius:10px;
+            font-size:16px;
+            font-weight:bold;
+            cursor:pointer;
+          ">閉じる</button>
+        </div>
+      `;
+      
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+      
+      document.getElementById('save-memo-btn').onclick = async () => {
+        const newMemo = {};
+        order.items.forEach((item, idx) => {
+          const input = document.getElementById(`memo-${idx}`);
+          if (input && input.value.trim()) {
+            newMemo[idx] = input.value.trim();
+          }
+        });
+        
+        await updateDoc(doc(db, 'orders', order.id), { memo: newMemo });
+        showToast('✓ メモを保存しました');
+        overlay.remove();
         loadOrders();
+      };
+      
+      document.getElementById('close-detail-btn').onclick = () => overlay.remove();
+    }
+
+    async function completeOrder(orderId, tableNumber, orderNumber) {
+      const confirmed = await showConfirmDialog('この注文を完了しますか?');
+      if (!confirmed) return;
+      
+      try {
+        await updateDoc(doc(db, 'orders', orderId), {
+          status: 'completed',
+          completedAt: Timestamp.now()
+        });
+        
+        showToast('✓ 完了しました');
+        loadOrders();
+      } catch (e) {
+        console.error(e);
+        showToast('エラー: ' + e.message);
+      }
+    }
+
+    async function cancelOrder(orderId, tableNumber, orderNumber) {
+      const confirmed = await showConfirmDialog('この注文をキャンセルしますか?');
+      if (!confirmed) return;
+      
+      try {
+        await updateDoc(doc(db, 'orders', orderId), {
+          cancelledAt: Timestamp.now()
+        });
+        
+        showToast('✓ キャンセルしました');
+        loadOrders();
+      } catch (e) {
+        console.error(e);
+        showToast('エラー: ' + e.message);
+      }
+    }
+
+    async function deleteOrder(orderId) {
+      const confirmed = await showConfirmDialog('この注文を削除しますか?\n削除すると復元できません。');
+      if (!confirmed) return;
+      
+      try {
+        await deleteDoc(doc(db, 'orders', orderId));
+        showToast('✓ 注文を削除しました');
+        loadOrders();
+      } catch (e) {
+        console.error(e);
+        showToast('エラー: ' + e.message);
+      }
+    }
+
+    async function togglePaidStatus(order) {
+      try {
+        if (order.paidAt) {
+          const confirmed = await showConfirmDialog('会計を未済に戻しますか?');
+          if (!confirmed) return;
+          
+          await updateDoc(doc(db, 'orders', order.id), {
+            paidAt: null
+          });
+          
+          showToast('✓ 会計を未済に戻しました');
+          loadOrders();
+        } else {
+          await updateDoc(doc(db, 'orders', order.id), {
+            paidAt: Timestamp.now()
+          });
+          
+          showToast('✓ 会計済みにしました');
+          loadOrders();
+        }
+      } catch (e) {
+        console.error(e);
+        showToast('エラー: ' + e.message);
+      }
+    }
+
+    window.showSoldOutPage = async function() {
+      try {
+        const menuSnapshot = await getDocs(collection(db, 'menu'));
+        allMenuItems = [];
+        const categories = new Set();
+        
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          allMenuItems.push({
+            id: data.id,
+            name: data.name,
+            price: data.price,
+            category: data.category
+          });
+          if (data.category) categories.add(data.category);
+        });
+        
+        const select = document.getElementById('soldout-category-select');
+        select.innerHTML = '<option value="">全ての商品</option>';
+        Array.from(categories).sort().forEach(cat => {
+          const opt = document.createElement('option');
+          opt.value = cat;
+          opt.textContent = cat;
+          select.appendChild(opt);
+        });
+        
+        select.onchange = () => {
+          const filtered = select.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === select.value);
+          displaySoldOutItems(filtered);
+        };
+        
+        await displaySoldOutItems(allMenuItems);
+        document.getElementById('page-orders').style.display = 'none';
+        document.getElementById('page-soldout').classList.remove('hidden');
+      } catch (e) {
+        console.error(e);
+        showToast('エラー: ' + e.message);
       }
     };
 
-    window.resolveStaffCall = async (callId) => {
-      await updateDoc(doc(db, 'staffCalls', callId), { status: 'resolved' });
-      showToast('✓ 対応完了');
-      loadStaffCalls();
+    window.backToOrders = function() {
+      document.getElementById('page-soldout').classList.add('hidden');
+      document.getElementById('page-orders').style.display = 'block';
     };
 
-    window.toggleSection = (section) => {
-      currentSection = section;
-      document.getElementById('ordersContainer').classList.toggle('hidden', section !== 'orders');
-      document.getElementById('soldoutSection').classList.toggle('hidden', section !== 'soldout');
-      document.getElementById('audioSection').classList.toggle('hidden', section !== 'audio');
+    async function displaySoldOutItems(items) {
+      const list = document.getElementById('soldout-menu-list');
+      list.innerHTML = '';
       
-      if (section === 'soldout') loadSoldoutItems();
-      if (section === 'audio') loadAudioButtons();
-    };
-
-    async function loadSoldoutItems() {
-      const snapshot = await getDocs(collection(db, 'menu'));
-      menuItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
+      const soldOutIds = new Set();
+      soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
       
-      categoryMap = {};
-      menuItems.forEach(item => {
-        if (!categoryMap[item.category]) categoryMap[item.category] = [];
-        categoryMap[item.category].push(item);
+      items.sort((a, b) => {
+        const numA = parseInt(a.id.replace(/\D/g, ''));
+        const numB = parseInt(b.id.replace(/\D/g, ''));
+        return numA - numB;
       });
-      
-      const filterSelect = document.getElementById('soldoutCategoryFilter');
-      filterSelect.innerHTML = '<option value="all">すべて</option>';
-      Object.keys(categoryMap).forEach(cat => {
-        const option = document.createElement('option');
-        option.value = cat;
-        option.textContent = cat;
-        filterSelect.appendChild(option);
-      });
-      
-      filterSoldout();
-    }
-
-    window.filterSoldout = () => {
-      const category = document.getElementById('soldoutCategoryFilter').value;
-      const container = document.getElementById('soldoutItemsContainer');
-      container.innerHTML = '';
-      
-      const items = category === 'all' ? menuItems : (categoryMap[category] || []);
       
       items.forEach(item => {
+        const isSoldOut = soldOutIds.has(item.id);
         const div = document.createElement('div');
-        div.className = `soldout-item ${item.soldOut ? 'sold-out' : ''}`;
+        div.className = 'soldout-item' + (isSoldOut ? ' sold-out' : '');
+        
         div.innerHTML = `
           <div>
             <div class="soldout-item-name">${item.name}</div>
-            ${item.soldOut ? '<span class="soldout-badge">売り切れ</span>' : ''}
+            <div style="font-size:14px;color:#666;">¥${item.price.toLocaleString()}</div>
+            ${isSoldOut ? '<span class="soldout-badge">品切れ中</span>' : ''}
           </div>
-          <button class="soldout-toggle-btn ${item.soldOut ? 'set-available' : 'set-soldout'}" 
-                  onclick="toggleSoldout('${item.id}', ${!item.soldOut})">
-            ${item.soldOut ? '販売再開' : '売り切れ'}
+          <button class="soldout-toggle-btn ${isSoldOut ? 'set-available' : 'set-soldout'}" 
+                  onclick="toggleSoldOut('${item.id}', ${!isSoldOut})">
+            ${isSoldOut ? '✓ 販売再開' : '🚫 品切れ'}
           </button>
         `;
-        container.appendChild(div);
+        
+        list.appendChild(div);
       });
-    };
-
-    window.toggleSoldout = async (itemId, newStatus) => {
-      await updateDoc(doc(db, 'menu', itemId), { soldOut: newStatus });
-      showToast(newStatus ? '✓ 売り切れ設定' : '✓ 販売再開');
-      loadSoldoutItems();
-    };
-
-    async function loadAudioButtons() {
-      const snapshot = await getDocs(collection(db, 'audioButtons'));
-      const grid = document.getElementById('audioButtonGrid');
-      grid.innerHTML = '';
-      
-      snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
-        .sort((a, b) => (a.order || 0) - (b.order || 0))
-        .forEach(button => {
-          const btn = document.createElement('button');
-          btn.className = 'audio-btn';
-          btn.textContent = button.label;
-          btn.onclick = () => playAudioMessage(button.audioFile, btn);
-          grid.appendChild(btn);
-        });
     }
 
-    function playAudioMessage(audioFile, buttonElement) {
-      if (!audioFile) {
-        showToast('音声ファイルが設定されていません');
-        return;
-      }
-      
-      const audio = new Audio(audioFile);
-      buttonElement.classList.add('playing');
-      
-      audio.play().catch(err => {
-        console.error('音声再生エラー:', err);
-        showToast('音声再生に失敗しました');
-        buttonElement.classList.remove('playing');
-      });
-      
-      audio.onended = () => {
-        buttonElement.classList.remove('playing');
-      };
-    }
-
-    window.toggleBusinessHours = async () => {
-      const ref = doc(db, 'settings', 'businessHours');
-      const snapshot = await getDocs(collection(db, 'settings'));
-      let current = false;
-      snapshot.forEach(d => { 
-        if (d.id === 'businessHours') current = d.data().overrideEnabled || false; 
-      });
-      
-      const newValue = !current;
-      await setDoc(ref, { overrideEnabled: newValue });
-      
-      const btn = document.getElementById('businessOverrideBtn');
-      if (newValue) {
-        btn.textContent = '営業';
-        btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
-        showToast('✓ 営業中に設定');
-      } else {
-        btn.textContent = '営業時間';
-        btn.style.background = 'linear-gradient(135deg, #FF5722 0%, #E64A19 100%)';
-        showToast('✓ 通常営業時間に戻す');
-      }
-    };
-
-    async function loadBusinessHoursOverride() {
-      const btn = document.getElementById('businessOverrideBtn');
+    window.toggleSoldOut = async function(menuId, setSoldOut) {
       try {
-        const snapshot = await getDocs(collection(db, 'settings'));
-        let overrideEnabled = false;
-        snapshot.forEach(d => { 
-          if (d.id === 'businessHours') overrideEnabled = d.data().overrideEnabled || false; 
+        if (setSoldOut) {
+          await setDoc(doc(db, 'sold_out', menuId), {
+            menuId: menuId,
+            timestamp: Timestamp.now()
+          });
+          showToast('✓ 品切れに設定');
+        } else {
+          await deleteDoc(doc(db, 'sold_out', menuId));
+          showToast('✓ 販売再開');
+        }
+        
+        const sel = document.getElementById('soldout-category-select');
+        const filtered = sel.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === sel.value);
+        await displaySoldOutItems(filtered);
+      } catch (e) {
+        console.error(e);
+        showToast('エラー: ' + e.message);
+      }
+    };
+
+    window.toggleBulkSoldOut = async function() {
+      const btn = document.getElementById('bulk-soldout-btn');
+      
+      if (!isBulkSoldOut) {
+        const confirmed = await showConfirmDialog('全商品を品切れに設定しますか?');
+        if (!confirmed) return;
+        
+        try {
+          const menuSnapshot = await getDocs(collection(db, 'menu'));
+          const promises = [];
+          
+          menuSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data.id) {
+              promises.push(setDoc(doc(db, 'sold_out', data.id), {
+                menuId: data.id,
+                timestamp: Timestamp.now()
+              }));
+            }
+          });
+          
+          await Promise.all(promises);
+          isBulkSoldOut = true;
+          btn.textContent = '再販';
+          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          showToast('✓ 全商品を品切れに設定');
+        } catch (e) {
+          console.error(e);
+          showToast('エラー: ' + e.message);
+        }
+      } else {
+        const confirmed = await showConfirmDialog('全商品を販売再開しますか?');
+        if (!confirmed) return;
+        
+        try {
+          const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
+          const promises = [];
+          soldOutSnapshot.forEach(docSnap => promises.push(deleteDoc(docSnap.ref)));
+          
+          await Promise.all(promises);
+          isBulkSoldOut = false;
+          btn.textContent = '一括';
+          btn.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
+          showToast('✓ 全商品を販売再開');
+        } catch (e) {
+          console.error(e);
+          showToast('エラー: ' + e.message);
+        }
+      }
+    };
+
+    window.toggleTimeOverride = async function() {
+      const btn = document.getElementById('time-override-btn');
+      
+      try {
+        const settingsRef = doc(db, 'settings', 'timeOverride');
+        const settingsSnap = await getDoc(settingsRef);
+        const currentOverride = settingsSnap.exists() ? settingsSnap.data().enabled : false;
+        
+        const newOverride = !currentOverride;
+        
+        await setDoc(settingsRef, {
+          enabled: newOverride,
+          timestamp: Timestamp.now()
         });
+        
+        if (newOverride) {
+          btn.textContent = '営業';
+          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          showToast('✓ 営業時間外でも注文可能にしました');
+        } else {
+          btn.textContent = '時外';
+          btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
+          showToast('✓ 営業時間外チェックを有効にしました');
+        }
+      } catch (e) {
+        console.error(e);
+        showToast('エラー: ' + e.message);
+      }
+    };
+    
+    async function loadTimeOverrideStatus() {
+      try {
+        const settingsRef = doc(db, 'settings', 'timeOverride');
+        const settingsSnap = await getDoc(settingsRef);
+        const overrideEnabled = settingsSnap.exists() ? settingsSnap.data().enabled : false;
+        
+        const btn = document.getElementById('time-override-btn');
         if (overrideEnabled) {
           btn.textContent = '営業';
           btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
@@ -669,7 +1153,7 @@
           border: none;
           border-radius: 8px;
           font-size: 16px;
-          font-weight: bold;
+          font-weight:bold;
           cursor: pointer;
         `;
         okButton.onclick = () => {
@@ -724,27 +1208,6 @@
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 2000);
     }
-
-    // リアルタイム更新
-    onSnapshot(query(collection(db, 'orders'), where('status', '==', 'pending')), () => {
-      if (currentSection === 'orders') loadOrders();
-    });
-
-    onSnapshot(query(collection(db, 'staffCalls'), where('status', '==', 'pending')), () => {
-      loadStaffCalls();
-    });
-
-    onSnapshot(doc(db, 'settings', 'waiting'), (docSnap) => {
-      if (docSnap.exists()) {
-        const count = docSnap.data().manualCount || 0;
-        document.getElementById('manualWaitingCount').textContent = count;
-      }
-    });
-
-    // 初期読み込み
-    loadOrders();
-    loadStaffCalls();
-    loadBusinessHoursOverride();
 
     window.loadOrders = loadOrders;
   </script>
