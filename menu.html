@@ -102,8 +102,8 @@
     
     select {
       width: 100%;
-      padding: 12px;
-      font-size: 16px;
+      padding: 20px;
+      font-size: 22px;
       border: 3px solid #4CAF50;
       border-radius: 12px;
       background: white;
@@ -448,7 +448,7 @@
     
     .fixed-cart-btn {
       position: fixed;
-      bottom: 20px;
+      bottom: 80px;
       left: 20px;
       right: 20px;
       z-index: 1000;
@@ -516,6 +516,7 @@
       <div class="menu-grid" id="menu-list"></div>
     </div>
     <button id="cart-btn" class="btn-primary fixed-cart-btn hidden" onclick="showCart()">カートを見る</button>
+    <button class="btn-primary" style="position: fixed; bottom: 20px; left: 20px; right: 20px; z-index: 1000; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); box-shadow: 0 8px 20px rgba(0,0,0,0.3);" onclick="callStaff()">📞 呼出</button>
   </div>
 
   <!-- トッピング選択ページ -->
@@ -578,19 +579,10 @@
           ⏳ ただ今準備しています、<br>しばらくお待ちください
         </div>
         
-        <div class="warning-box" style="background: #e3f2fd; border-color: #2196F3; color: #1565c0;">
-          <strong>💡 待ち時間の過ごし方</strong><br><br>
-          別のページを見る場合は、<br>
-          <strong style="font-size: 18px;">時々このタブに戻ってきて<br>ステータスを確認してください</strong><br><br>
-          商品完成時は画面のタブタイトルが<br>
-          「🎉 商品完成!」と点滅します
-        </div>
-        
-        <div class="warning-box" style="background: #fff3cd; border-color: #ffc107; color: #856404;">
-          <strong>📱 重要なお願い</strong><br><br>
-          注文番号で管理していますので、<br>
-          <strong style="font-size: 20px; color: #d32f2f;">商品を受け取るまでこの画面を閉じないでください</strong><br><br>
-          画面を閉じると音声案内ができません
+        <div class="warning-box">
+          この番号でお呼びしますので<br>
+          商品を受け取るまで<br>
+          この画面を閉じないでください
         </div>
         
         <div class="warning-box" style="background: #ffebee; border-color: #ef5350; color: #c62828;">
@@ -612,7 +604,8 @@
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, doc, Timestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, deleteDoc, doc, Timestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getMessaging, getToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -625,6 +618,7 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
+    const messaging = getMessaging(app);
 
     let cart = [];
     let currentItem = null;
@@ -634,344 +628,175 @@
     let soldOutIds = new Set();
     let currentOrderId = null;
     let orderStatusUnsubscribe = null;
-    let allOrdersUnsubscribe = null;
-    let positionUpdateInterval = null;
-    let wakeLock = null;
-    let titleBlinkInterval = null;
     
     const urlParams = new URLSearchParams(window.location.search);
     const tableNumber = urlParams.get('table') || 'テイクアウト';
 
     window.onload = async function() {
       console.log('ページ読み込み開始');
-      
-      // 時間帯による品切れチェック
-      await checkTimeBasedAvailability();
-      
       await loadAllData();
       await updateTopWaitingCount();
       setInterval(updateTopWaitingCount, 10000);
       watchSoldOutItems();
+      
+      // プッシュ通知の許可をリクエスト
+      await requestNotificationPermission();
+      
+      // Service Workerを登録してFCMトークンを取得
+      await setupPushNotifications();
+      
       console.log('初期化完了');
-      
-      // ブラウザの戻るボタン対策
-      setupBackButtonPrevention();
-      
-      // リロード時に注文状態を復元
-      restoreOrderStateAfterReload();
     };
 
-    // ブラウザの戻るボタン対策
-    function setupBackButtonPrevention() {
-      history.pushState(null, null, location.href);
+    // プッシュ通知の許可をリクエスト
+    async function requestNotificationPermission() {
+      if (!('Notification' in window)) {
+        console.log('このブラウザはプッシュ通知をサポートしていません');
+        showCustomAlert('このブラウザはプッシュ通知をサポートしていません');
+        return;
+      }
       
-      window.addEventListener('popstate', function(event) {
-        const isMenuPage = !document.getElementById('page-menu').classList.contains('hidden');
+      console.log('現在の通知許可状態:', Notification.permission);
+      
+      if (Notification.permission === 'default') {
+        const permission = await Notification.requestPermission();
+        console.log('通知許可結果:', permission);
         
-        if (!isMenuPage) {
-          const confirmBack = confirm('メニュー画面に戻りますか？\n\n※カート内容は保持されます');
-          if (confirmBack) {
-            showPage('menu');
-          }
-          history.pushState(null, null, location.href);
+        if (permission === 'granted') {
+          console.log('✅ プッシュ通知が許可されました');
+          // テスト通知を送信
+          showBrowserNotification('通知設定完了', '注文の完成をお知らせします');
+        } else if (permission === 'denied') {
+          console.log('❌ プッシュ通知が拒否されました');
+          showCustomAlert('通知が拒否されています。\n\nブラウザの設定から通知を許可してください。\n\n商品完成時に通知が届かない可能性があります。');
         }
-      });
-    }
-    
-    // リロード時に注文状態を復元
-    function restoreOrderStateAfterReload() {
-      const savedOrderId = localStorage.getItem('currentOrderId');
-      if (savedOrderId) {
-        console.log('リロード検知: 注文状態を復元します', savedOrderId);
-        
-        const orderRef = doc(db, 'orders', savedOrderId);
-        getDoc(orderRef).then(docSnap => {
-          if (docSnap.exists()) {
-            const orderData = docSnap.data();
-            
-            document.getElementById('order-num').textContent = orderData.orderNumber;
-            document.getElementById('waiting').textContent = orderData.myPosition || 2;
-            document.getElementById('order-total').textContent = '¥' + orderData.totalAmount.toLocaleString();
-            document.getElementById('eat-style').textContent = orderData.tableNumber;
-            
-            const list = document.getElementById('order-items');
-            list.innerHTML = '';
-            orderData.items.forEach(item => {
-              const subtotal = (item.price + item.toppingPrice) * item.quantity;
-              const div = document.createElement('div');
-              div.className = 'cart-item';
-              div.innerHTML = `
-                <div class="cart-item-header">
-                  <div class="cart-item-name">${item.name}</div>
-                  <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
-                </div>
-                <div class="cart-item-details">
-                  ${item.toppings !== 'なし' ? `<div>🍴 ${item.toppings}</div>` : ''}
-                  <div>数量: ${item.quantity}</div>
-                </div>
-              `;
-              list.appendChild(div);
-            });
-            
-            showPage('complete');
-            watchOrderStatus(savedOrderId);
-          } else {
-            localStorage.removeItem('currentOrderId');
-          }
-        });
+      } else if (Notification.permission === 'denied') {
+        console.log('⚠️ 通知は既に拒否されています');
+        showCustomAlert('通知が拒否されています。\n\nブラウザの設定から通知を許可してください。\n\n商品完成時に通知が届きません。');
+      } else if (Notification.permission === 'granted') {
+        console.log('✅ 通知は既に許可されています');
       }
     }
-    
-    // 時間帯による利用可否チェック
-    async function checkTimeBasedAvailability() {
-      // オーバーライド設定をチェック
+
+    // FCMのセットアップ（Service Worker登録とトークン取得）
+    async function setupPushNotifications() {
       try {
-        const settingsRef = doc(db, 'settings', 'timeOverride');
-        const settingsSnap = await getDoc(settingsRef);
-        const overrideEnabled = settingsSnap.exists() ? settingsSnap.data().enabled : false;
+        // Service Workerを登録
+        console.log('Service Workerを登録中...');
+        const registration = await navigator.serviceWorker.register('./firebase-messaging-sw.js');
+        console.log('✅ Service Worker登録成功:', registration);
         
-        if (overrideEnabled) {
-          console.log('⚠️ 営業時間外チェックが無効化されています');
-          return; // チェックをスキップ
+        // 通知が許可されている場合のみトークンを取得
+        if (Notification.permission === 'granted') {
+          console.log('FCMトークンを取得中...');
+          
+          const currentToken = await getToken(messaging, {
+            vapidKey: 'BEZ4kEyOYUN7kVO4mgKJOwnbV7HEVaEJYob-7sz345FF82cyK0QRNera8hM-Vxn7DKRAelcA8egrYtZJT7pRlMtY',
+            serviceWorkerRegistration: registration
+          });
+          
+          if (currentToken) {
+            console.log('✅ FCMトークン取得成功:', currentToken);
+            
+            // トークンをFirestoreに保存
+            await saveFCMToken(currentToken);
+          } else {
+            console.log('トークンを取得できませんでした');
+          }
+        } else {
+          console.log('通知が許可されていないため、トークンを取得しません');
         }
-      } catch (e) {
-        console.error('オーバーライド設定の読み込みエラー:', e);
-      }
-      
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
-      const currentTime = hours * 100 + minutes; // 例: 22:30 = 2230
-      
-      const hasTableParam = urlParams.has('table');
-      
-      // ?table=パラメータがある場合（店内注文全て）: 22:00～11:00は品切れ
-      if (hasTableParam) {
-        if (currentTime >= 2200 || currentTime < 1100) {
-          showTimeBasedSoldOut('店内注文の受付時間は11:00～22:00です');
-          return;
-        }
-      }
-      // パラメータなし、またはテイクアウト: 22:30～11:00は品切れ
-      else {
-        if (currentTime >= 2230 || currentTime < 1100) {
-          showTimeBasedSoldOut('テイクアウトの受付時間は11:00～22:30です');
-          return;
-        }
+        
+        // フォアグラウンドメッセージを受信
+        onMessage(messaging, (payload) => {
+          console.log('フォアグラウンドメッセージ受信:', payload);
+          
+          const title = payload.notification?.title || '通知';
+          const body = payload.notification?.body || '';
+          
+          // 音声を再生
+          if (payload.data?.type === 'completed') {
+            playNotificationSound('done');
+          } else if (payload.data?.type === 'cancelled') {
+            playNotificationSound('cancel');
+          } else {
+            playNotificationSound();
+          }
+          
+          // 通知を表示
+          showBrowserNotification(title, body);
+          
+          // アラートも表示
+          showCustomAlert(body);
+        });
+        
+      } catch (error) {
+        console.error('FCMセットアップエラー:', error);
       }
     }
-    
-    // 時間外メッセージを表示
-    function showTimeBasedSoldOut(message) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.9);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-      `;
-      
-      const dialog = document.createElement('div');
-      dialog.style.cssText = `
-        background: white;
-        border-radius: 15px;
-        padding: 40px;
-        max-width: 80%;
-        text-align: center;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
-      `;
-      
-      dialog.innerHTML = `
-        <div style="font-size: 48px; margin-bottom: 20px;">🙇</div>
-        <div style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #f44336;">
-          営業時間外です
-        </div>
-        <div style="font-size: 16px; color: #666; line-height: 1.6;">
-          ${message}<br><br>
-          またのご来店をお待ちしております
-        </div>
-      `;
-      
-      overlay.appendChild(dialog);
-      document.body.appendChild(overlay);
-      
-      // メニュー画面を非表示
-      document.getElementById('page-menu').style.display = 'none';
+
+    // FCMトークンをFirestoreに保存
+    async function saveFCMToken(token) {
+      try {
+        const tokenRef = doc(db, 'fcm_tokens', tableNumber);
+        await setDoc(tokenRef, {
+          token: token,
+          tableNumber: tableNumber,
+          updatedAt: Timestamp.now()
+        });
+        console.log('✅ FCMトークンをFirestoreに保存しました');
+      } catch (error) {
+        console.error('FCMトークン保存エラー:', error);
+      }
     }
 
     // 注文のステータスを監視
-    // 現在の待ち順番を計算する関数
-    async function calculateCurrentPosition(myOrderNumber, savedPosition) {
-      try {
-        const now = new Date();
-        const ordersSnapshot = await getDocs(collection(db, 'orders'));
-        
-        // 自分より前の注文で、まだ完了していない注文を数える
-        let ordersAhead = 0;
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          // 自分より注文番号が小さく、まだ完了していない注文
-          if (data.orderNumber < myOrderNumber && 
-              data.deleteAt && data.deleteAt.toDate() > now && 
-              !data.cancelledAt &&
-              !data.completedAt) {
-            ordersAhead++;
-          }
-        });
-        
-        // 現在の順番 = 前の人の数 + 2（ダミー1 + 自分1）
-        const currentPosition = ordersAhead + 2;
-        
-        console.log('📢 待ち順番再計算:');
-        console.log('  - 自分の注文番号:', myOrderNumber);
-        console.log('  - 保存された初期順番:', savedPosition);
-        console.log('  - 現在の前の人数:', ordersAhead);
-        console.log('  - 現在の順番:', currentPosition);
-        
-        return currentPosition;
-      } catch (e) {
-        console.error('待ち順番計算エラー:', e);
-        return null;
-      }
-    }
-
     function watchOrderStatus(orderId) {
       if (orderStatusUnsubscribe) {
         orderStatusUnsubscribe();
-      }
-      if (allOrdersUnsubscribe) {
-        allOrdersUnsubscribe();
       }
       
       currentOrderId = orderId;
       const orderRef = doc(db, 'orders', orderId);
       
-      // 自分の注文を監視
-      orderStatusUnsubscribe = onSnapshot(orderRef, async (docSnap) => {
+      orderStatusUnsubscribe = onSnapshot(orderRef, (docSnap) => {
         if (!docSnap.exists()) {
           console.log('注文が削除されました');
           return;
         }
         
         const data = docSnap.data();
-        console.log('📋 注文ステータス更新:', data);
         updateOrderStatusDisplay(data);
-        
-        // 待ち順番を再計算して表示を更新
-        if (!data.completedAt && !data.cancelledAt) {
-          // まだ完了していない → 前の人の状況に応じて更新
-          const currentPosition = await calculateCurrentPosition(data.orderNumber, data.myPosition);
-          if (currentPosition !== null) {
-            const waitingElement = document.getElementById('waiting');
-            if (waitingElement) {
-              waitingElement.textContent = currentPosition;
-            }
-          }
-        } else {
-          // 完了またはキャンセルされた → 1番目（商品受け取り）
-          const waitingElement = document.getElementById('waiting');
-          if (waitingElement) {
-            waitingElement.textContent = 1;
-            console.log('✅ 注文完了/削除 → 1番目に更新');
-          }
-        }
         
         // ステータスが変更されたら通知を表示
         if (data.completedAt && !data.notifiedComplete) {
-          console.log('🎉 注文完了を検知 - 通知表示');
+          showBrowserNotification('🎉 商品が出来上がりました!', '画面の注文番号を店員にお見せください');
           playNotificationSound('done');
-          startTitleBlink('🎉 商品完成!');
-          vibrateDevice([500, 200, 500, 200, 500]);
-          showCustomAlert('商品が出来上がりました!\n\n注文番号 #' + data.orderNumber + '\n\n画面の注文番号を店員にお見せください');
           
-          // 通知済みフラグを立てる
+          // アラートも表示
+          showCustomAlert('商品が出来上がりました！\n\n注文番号 #' + data.orderNumber + '\n\n画面の注文番号を店員にお見せください');
+          
+          // 通知済みフラグを立てる（次回の監視で再度通知しないように）
           updateDoc(orderRef, { notifiedComplete: true }).catch(e => console.error(e));
         }
         
         if (data.cancelledAt && !data.notifiedCancel) {
-          console.log('❌ キャンセルを検知 - 通知表示');
+          showBrowserNotification('❌ 注文がキャンセルされました', '番号をお呼びしましたがご不在でしたので注文をキャンセルさせて頂きました');
           playNotificationSound('cancel');
-          startTitleBlink('❌ キャンセル');
-          vibrateDevice([200, 100, 200]);
+          
+          // アラートも表示
           showCustomAlert('注文がキャンセルされました\n\n注文番号 #' + data.orderNumber + '\n\n番号をお呼びしましたがご不在でしたので\n注文をキャンセルさせて頂きました');
           
           updateDoc(orderRef, { notifiedCancel: true }).catch(e => console.error(e));
         }
         
         if (data.paidAt && !data.notifiedPaid) {
-          console.log('💳 会計完了を検知');
-          playNotificationSound();
+          showBrowserNotification('粉もん屋 八 下赤塚店', 'お会計が完了しました\n商品が出来上がりましたらお呼びしますので、しばらくお待ちください');
+          playNotificationSound(); // notification.mp3を再生
+          
           updateDoc(orderRef, { notifiedPaid: true }).catch(e => console.error(e));
         }
       });
-      
-      // 全ての注文を監視して、他の注文が変更されたら自分の順番も更新
-      allOrdersUnsubscribe = onSnapshot(collection(db, 'orders'), async (snapshot) => {
-        console.log('📦 注文コレクション変更検知');
-        
-        const docSnap = await getDoc(orderRef);
-        if (!docSnap.exists()) {
-          console.log('⚠️ 自分の注文が存在しません');
-          return;
-        }
-        
-        const data = docSnap.data();
-        console.log('📋 自分の注文状態:', {
-          orderNumber: data.orderNumber,
-          completedAt: data.completedAt,
-          cancelledAt: data.cancelledAt
-        });
-        
-        // 完了またはキャンセルされていない場合のみ更新
-        if (!data.completedAt && !data.cancelledAt) {
-          const currentPosition = await calculateCurrentPosition(data.orderNumber, data.myPosition);
-          if (currentPosition !== null) {
-            const waitingElement = document.getElementById('waiting');
-            if (waitingElement) {
-              const oldPosition = waitingElement.textContent;
-              waitingElement.textContent = currentPosition;
-              console.log(`🔄 他の注文変更により順番更新: ${oldPosition} → ${currentPosition}`);
-            }
-          }
-        } else {
-          console.log('⏹️ 自分の注文が完了/キャンセル済みのため更新スキップ');
-        }
-      });
-      
-      // 待ち順番を30秒ごとに更新（他の注文の削除を反映するため）
-      if (positionUpdateInterval) {
-        clearInterval(positionUpdateInterval);
-      }
-      
-      positionUpdateInterval = setInterval(async () => {
-        const docSnap = await getDoc(orderRef);
-        if (!docSnap.exists()) {
-          clearInterval(positionUpdateInterval);
-          return;
-        }
-        
-        const data = docSnap.data();
-        // 完了またはキャンセルされていない場合のみ更新
-        if (!data.completedAt && !data.cancelledAt) {
-          const currentPosition = await calculateCurrentPosition(data.orderNumber, data.myPosition);
-          if (currentPosition !== null) {
-            const waitingElement = document.getElementById('waiting');
-            if (waitingElement) {
-              waitingElement.textContent = currentPosition;
-              console.log('⏰ 待ち順番を定期更新:', currentPosition);
-            }
-          }
-        } else {
-          // 完了/キャンセル済みなら定期更新を停止
-          clearInterval(positionUpdateInterval);
-        }
-      }, 5000); // 5秒ごと
     }
 
     // 注文ステータス表示の更新
@@ -1002,78 +827,42 @@
       }
     }
 
+    // ブラウザ通知を表示
+    function showBrowserNotification(title, body) {
+      if (Notification.permission === 'granted') {
+        const notification = new Notification(title, {
+          body: body,
+          icon: 'https://img.icons8.com/color/96/000000/Tako.png',
+          badge: 'https://img.icons8.com/color/96/000000/Tako.png',
+          vibrate: [200, 100, 200],
+          requireInteraction: true, // 通知が自動で消えないようにする
+          tag: 'order-notification-' + Date.now() // 一意のタグ
+        });
+        
+        // 通知をクリックしたらウィンドウにフォーカス
+        notification.onclick = function() {
+          window.focus();
+          notification.close();
+        };
+      } else {
+        console.log('通知の許可がありません。現在の許可状態:', Notification.permission);
+      }
+    }
+
     // 通知音を再生
     function playNotificationSound(soundType) {
-      console.log('🔊 通知音を再生:', soundType || 'notification');
-      
       try {
-        let soundFile = './notification.mp3';
+        let soundFile = 'https://gymnastmasaki-lang.github.io/takoyaki-/notification.mp3'; // デフォルト
         if (soundType === 'done') {
-          soundFile = './done.wav';
+          soundFile = 'https://gymnastmasaki-lang.github.io/takoyaki-/done.wav';
         } else if (soundType === 'cancel') {
-          soundFile = './cancel.wav';
+          soundFile = 'https://gymnastmasaki-lang.github.io/takoyaki-/cancel.wav';
         }
-        
         const audio = new Audio(soundFile);
-        audio.volume = 1.0;
-        
-        const playPromise = audio.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => console.log('✅ 音声再生成功'))
-            .catch(e => console.log('⚠️ 音声再生失敗:', e));
-        }
+        audio.volume = 1.0; // 音量最大
+        audio.play().catch(e => console.log('音声再生エラー:', e));
       } catch (e) {
-        console.error('❌ 音声ファイルエラー:', e);
-      }
-    }
-
-    // バイブレーション
-    function vibrateDevice(pattern) {
-      if ('vibrate' in navigator) {
-        navigator.vibrate(pattern);
-        console.log('✅ バイブレーション実行');
-      }
-    }
-
-    // タイトルを点滅させる
-    function startTitleBlink(message) {
-      if (titleBlinkInterval) {
-        clearInterval(titleBlinkInterval);
-      }
-      
-      const originalTitle = document.title;
-      let isOriginal = true;
-      
-      titleBlinkInterval = setInterval(() => {
-        document.title = isOriginal ? message : originalTitle;
-        isOriginal = !isOriginal;
-      }, 1000);
-      
-      // 10秒後に停止
-      setTimeout(() => {
-        if (titleBlinkInterval) {
-          clearInterval(titleBlinkInterval);
-          document.title = originalTitle;
-        }
-      }, 10000);
-    }
-
-    // 画面スリープを防止
-    async function keepScreenAwake() {
-      if ('wakeLock' in navigator) {
-        try {
-          wakeLock = await navigator.wakeLock.request('screen');
-          console.log('✅ 画面スリープ防止を有効化');
-          
-          wakeLock.addEventListener('release', () => {
-            console.log('画面スリープ防止が解除されました');
-          });
-        } catch (err) {
-          console.error('❌ Wake Lock失敗:', err);
-        }
-      } else {
-        console.log('⚠️ このブラウザはWake Lockをサポートしていません');
+        console.log('音声ファイルが見つかりません:', e);
       }
     }
 
@@ -1086,6 +875,7 @@
           soldOutIds.add(doc.data().menuId);
         });
         
+        // applyTimeBasedSoldOut(); // 🔴 自動品切れ設定を一時的に無効化
         updateSoldOutDisplay();
       });
     }
@@ -1253,10 +1043,35 @@
           soldOutIds.add(doc.data().menuId);
         });
 
+        // applyTimeBasedSoldOut(); // 🔴 自動品切れ設定を一時的に無効化
         updateSoldOutDisplay();
       } catch (e) {
         console.error('品切れ情報取得エラー:', e);
       }
+    }
+
+    function applyTimeBasedSoldOut() {
+      // 🔴 自動品切れ設定を一時的に無効化
+      // const now = new Date();
+      // const hour = now.getHours();
+      // const minute = now.getMinutes();
+
+      // const isTakeout = tableNumber === 'テイクアウト';
+      // const currentTime = hour + (minute / 60);
+
+      // let shouldSoldOut = false;
+
+      // if (isTakeout) {
+      //   shouldSoldOut = (currentTime >= 22.5 || hour < 11);
+      // } else {
+      //   shouldSoldOut = (hour >= 22 || hour < 11);
+      // }
+
+      // if (shouldSoldOut) {
+      //   allMenuItems.forEach(item => {
+      //     soldOutIds.add(item.id);
+      //   });
+      // }
     }
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -1557,37 +1372,6 @@
         
         const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
         
-        // 有効な注文を計算（自分より前の注文のみ）
-        let ordersAhead = 0;
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          // 自分より注文番号が小さく、まだ有効な注文のみカウント
-          if (data.orderNumber < orderNumber && 
-              data.deleteAt && data.deleteAt.toDate() > now && 
-              !data.cancelledAt &&
-              !data.completedAt) {
-            ordersAhead++;
-          }
-        });
-        
-        // 手動待ち人数を取得
-        const settingsSnapshot = await getDocs(collection(db, 'settings'));
-        let manualCount = 0;
-        settingsSnapshot.forEach(doc => {
-          if (doc.id === 'waiting') {
-            manualCount = doc.data().manualCount || 0;
-          }
-        });
-        
-        // 待ち順番を計算：手動待ち人数 + 自分より前の注文 + 2（ダミー1 + 自分1）
-        const myPosition = manualCount + ordersAhead + 2;
-        
-        console.log('📊 待ち順番計算:');
-        console.log('  - 手動待ち人数:', manualCount);
-        console.log('  - 自分より前の注文:', ordersAhead);
-        console.log('  - 自分の順番:', myPosition);
-        console.log('  - 自分の順番:', myPosition);
-        
         const orderData = {
           orderNumber: orderNumber,
           timestamp: Timestamp.fromDate(now),
@@ -1601,8 +1385,7 @@
           paidAt: null,
           notifiedComplete: false,
           notifiedCancel: false,
-          notifiedPaid: false,
-          myPosition: myPosition
+          notifiedPaid: false
         };
         
         const docRef = await addDoc(collection(db, 'orders'), orderData);
@@ -1611,11 +1394,24 @@
           orderId: docRef.id
         });
         
-        // リロード対策: 注文IDをlocalStorageに保存
-        localStorage.setItem("currentOrderId", docRef.id);
+        const validOrders = [];
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
+            validOrders.push(data.orderNumber);
+          }
+        });
+        validOrders.push(orderNumber);
+        validOrders.sort((a, b) => a - b);
+        const myPosition = validOrders.indexOf(orderNumber) + 1;
+        const displayPosition = myPosition + 1;
+        
+        await updateDoc(docRef, {
+          myPosition: displayPosition
+        });
         
         document.getElementById('order-num').textContent = orderNumber;
-        document.getElementById('waiting').textContent = myPosition;
+        document.getElementById('waiting').textContent = displayPosition;
         document.getElementById('order-total').textContent = '¥' + totalAmount.toLocaleString();
         document.getElementById('eat-style').textContent = tableNumber;
         
@@ -1638,9 +1434,6 @@
         
         // 注文のステータスを監視開始
         watchOrderStatus(docRef.id);
-        
-        // 画面スリープを防止
-        keepScreenAwake();
         
         cart = [];
         showPage('page-complete');
@@ -1680,15 +1473,10 @@
     
     window.callStaffFromComplete = async function() {
       try {
-        // 注文番号を取得
-        const orderNumElement = document.getElementById('order-num');
-        const orderNumber = orderNumElement ? orderNumElement.textContent : null;
-        
         const callData = {
           tableNumber: tableNumber,
           timestamp: Timestamp.now(),
-          type: 'call',
-          orderNumber: orderNumber  // 注文番号を追加
+          type: 'call'
         };
         await addDoc(collection(db, 'staff_calls'), callData);
         
@@ -1701,15 +1489,10 @@
     
     window.requestBillFromComplete = async function() {
       try {
-        // 注文番号を取得
-        const orderNumElement = document.getElementById('order-num');
-        const orderNumber = orderNumElement ? orderNumElement.textContent : null;
-        
         const billData = {
           tableNumber: tableNumber,
           timestamp: Timestamp.now(),
-          type: 'bill',
-          orderNumber: orderNumber  // 注文番号を追加
+          type: 'bill'
         };
         await addDoc(collection(db, 'staff_calls'), billData);
         
