@@ -94,10 +94,10 @@
     
     .category-filter label {
       display: block;
-      font-size: 14px;
-      font-weight: bold;
-      color: #333;
-      margin-bottom: 10px;
+      font-size: 16px;
+      font-weight: normal;
+      color: #666;
+      margin-bottom: 8px;
     }
     
     select {
@@ -749,13 +749,17 @@
       currentOrderId = orderId;
       const orderRef = doc(db, 'orders', orderId);
       
-      orderStatusUnsubscribe = onSnapshot(orderRef, (docSnap) => {
+      orderStatusUnsubscribe = onSnapshot(orderRef, async (docSnap) => {
         if (!docSnap.exists()) {
           console.log('注文が削除されました');
           return;
         }
         
         const data = docSnap.data();
+        
+        // 自分の順番を計算
+        await updateMyPosition(data);
+        
         updateOrderStatusDisplay(data);
         
         // ステータスが変更されたら通知を表示
@@ -787,6 +791,51 @@
           updateDoc(orderRef, { notifiedPaid: true }).catch(e => console.error(e));
         }
       });
+    }
+
+    // 自分の順番を計算して更新
+    async function updateMyPosition(currentOrderData) {
+      if (currentOrderData.completedAt || currentOrderData.cancelledAt) {
+        // 完了またはキャンセル済みの場合は計算不要
+        return;
+      }
+      
+      try {
+        const now = new Date();
+        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        
+        // 有効な注文（未完了・未キャンセル・削除予定時刻前）を抽出
+        const validOrders = [];
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.deleteAt && 
+              data.deleteAt.toDate() > now && 
+              !data.completedAt && 
+              !data.cancelledAt) {
+            validOrders.push({
+              orderNumber: data.orderNumber,
+              timestamp: data.timestamp
+            });
+          }
+        });
+        
+        // 注文番号でソート
+        validOrders.sort((a, b) => a.orderNumber - b.orderNumber);
+        
+        // 自分の順番を計算
+        const myIndex = validOrders.findIndex(order => order.orderNumber === currentOrderData.orderNumber);
+        if (myIndex !== -1) {
+          const myPosition = myIndex + 1;
+          
+          // 待ち順番表示を更新
+          const waitingElement = document.getElementById('waiting');
+          if (waitingElement) {
+            waitingElement.textContent = myPosition;
+          }
+        }
+      } catch (error) {
+        console.error('順番計算エラー:', error);
+      }
     }
 
     // 注文ステータス表示の更新
@@ -1443,6 +1492,24 @@
         
         // 注文のステータスを監視開始
         watchOrderStatus(docRef.id);
+        
+        // 10秒ごとに順番を更新
+        const positionUpdateInterval = setInterval(async () => {
+          if (currentOrderId) {
+            const orderRef = doc(db, 'orders', currentOrderId);
+            const orderSnap = await getDoc(orderRef);
+            if (orderSnap.exists()) {
+              const data = orderSnap.data();
+              if (!data.completedAt && !data.cancelledAt) {
+                await updateMyPosition(data);
+              } else {
+                clearInterval(positionUpdateInterval);
+              }
+            } else {
+              clearInterval(positionUpdateInterval);
+            }
+          }
+        }, 10000);
         
         cart = [];
         showPage('page-complete');
