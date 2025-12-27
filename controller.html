@@ -5,21 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>注文管理コントローラー</title>
   
-  <!-- Star WebPRNT SDK -->
-  <!-- 注意: Star mC-Print3のWebサーバー機能を有効にする必要があります -->
-  <script>
-    // SDKのロード状態をチェック
-    window.starSDKLoaded = false;
-    window.starSDKError = null;
-  </script>
-  <script src="http://192.168.244.41/StarWebPRNT/StarWebPrintBuilder.js" 
-          onerror="console.error('StarWebPrintBuilder.jsの読み込みに失敗しました。プリンターのWebサーバーが有効か確認してください。'); window.starSDKError = 'SDKファイルが見つかりません';">
-  </script>
-  <script src="http://192.168.244.41/StarWebPRNT/StarWebPrintTrader.js"
-          onerror="console.error('StarWebPrintTrader.jsの読み込みに失敗しました。'); window.starSDKError = 'SDKファイルが見つかりません';"
-          onload="window.starSDKLoaded = true; console.log('Star WebPRNT SDK読み込み完了');">
-  </script>
-  
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -113,23 +98,59 @@
       border-radius: 8px;
       margin: 8px 0;
     }
+    .order-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
     .order-item-name {
       font-size: 16px;
       font-weight: bold;
-      margin-bottom: 5px;
+    }
+    .order-item-price {
+      font-size: 14px;
+      color: #666;
     }
     .order-item-toppings {
       font-size: 14px;
       color: #666;
-      margin: 2px 0;
-      padding-left: 20px;
-      line-height: 1.6;
+      margin: 4px 0;
+      padding-left: 10px;
+      line-height: 1.8;
+    }
+    .order-item-total {
+      font-size: 16px;
+      font-weight: bold;
+      color: #333;
+      text-align: right;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #ddd;
     }
     .order-item-memo {
       font-size: 12px;
       color: #f44336;
       margin-top: 5px;
       padding-left: 10px;
+    }
+    .order-total {
+      background: #e3f2fd;
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 15px;
+      text-align: right;
+    }
+    .order-total-label {
+      font-size: 18px;
+      font-weight: bold;
+      color: #1976D2;
+    }
+    .order-total-amount {
+      font-size: 24px;
+      font-weight: bold;
+      color: #1976D2;
+      margin-top: 5px;
     }
     .control-btn {
       padding: 12px;
@@ -143,14 +164,6 @@
     }
     .btn-complete { background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); }
     .btn-cancel { background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); }
-    .btn-print { 
-      background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); 
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      padding: 8px 15px;
-      font-size: 12px;
-    }
     .staff-call-card {
       background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
       color: white;
@@ -243,10 +256,6 @@
       background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
       animation: pulse 0.5s infinite;
     }
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.05); }
-    }
     
     /* オンライン状態インジケーター */
     .connection-indicator {
@@ -271,11 +280,6 @@
     .connection-indicator.offline {
       background: #f44336;
       color: white;
-      animation: blink 1s infinite;
-    }
-    .connection-indicator.reconnecting {
-      background: #FF9800;
-      color: white;
     }
     .connection-dot {
       width: 10px;
@@ -283,1058 +287,329 @@
       border-radius: 50%;
       background: white;
     }
-    @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
   </style>
 </head>
 <body>
-  <!-- 接続状態インジケーター -->
-  <div id="connection-indicator" class="connection-indicator online">
+  <div class="connection-indicator online" id="connectionStatus">
     <div class="connection-dot"></div>
     <span>オンライン</span>
   </div>
-  
-  <!-- 音声案内ボタンセクション -->
-  <div class="audio-buttons-section">
-    <div class="audio-button-grid" id="audio-button-grid"></div>
-  </div>
-  
-  <div id="page-orders">
-    <div class="top-controls">
-      <button class="big-btn btn-refresh" onclick="loadOrders()">更新</button>
-      <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">待1</button>
-      <button class="big-btn btn-soldout" onclick="showSoldOutPage()">品切</button>
-      <button class="big-btn" id="bulk-soldout-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="toggleBulkSoldOut()">一括</button>
-      <button class="big-btn" id="time-override-btn" style="background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%);" onclick="toggleTimeOverride()">時外</button>
-    </div>
-    
-    <div class="manual-waiting-card">
-      <div class="manual-waiting-label">手動待ち人数</div>
-      <div class="manual-count" id="manual-count">0</div>
-      <button class="btn-reset" onclick="resetWaiting()">リセット</button>
-    </div>
-    
-    <div id="staff-calls-container"></div>
-    <div id="orders-container"><div style="text-align:center;color:white;padding:40px;">読み込み中...</div></div>
+
+  <div class="header">
+    <h1>注文管理コントローラー</h1>
   </div>
 
-  <div id="page-soldout" class="hidden">
-    <button class="big-btn btn-refresh" style="margin-bottom: 15px;" onclick="backToOrders()">← 注文管理に戻る</button>
-    
-    <div class="header" style="margin-bottom: 15px;">
-      <h1>🚫 品切れ設定</h1>
-    </div>
-    
+  <div class="top-controls">
+    <button class="big-btn btn-refresh" onclick="loadOrders()">🔄 更新</button>
+    <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">待ち+1</button>
+    <button class="big-btn btn-soldout" onclick="toggleSection('soldout')">売切管理</button>
+    <button class="big-btn" onclick="toggleSection('audio')" style="background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%);">🔊 音声案内</button>
+    <button class="big-btn" id="businessOverrideBtn" onclick="toggleBusinessHours()" style="background: linear-gradient(135deg, #FF5722 0%, #E64A19 100%);">営業時間</button>
+  </div>
+
+  <div class="manual-waiting-card">
+    <div class="manual-waiting-label">手動待ち数</div>
+    <div class="manual-count" id="manualWaitingCount">0</div>
+    <button class="btn-reset" onclick="resetWaiting()">リセット</button>
+  </div>
+
+  <div id="staffCallsContainer"></div>
+  <div id="ordersContainer"></div>
+
+  <!-- 売り切れ管理セクション -->
+  <div id="soldoutSection" class="hidden">
     <div class="category-filter">
-      <label style="display:block;font-size:16px;font-weight:bold;margin-bottom:10px;">カテゴリを選んでください</label>
-      <select id="soldout-category-select">
-        <option value="">全ての商品</option>
+      <select id="soldoutCategoryFilter" onchange="filterSoldout()">
+        <option value="all">すべて</option>
       </select>
     </div>
-    
-    <div id="soldout-menu-list"></div>
+    <div id="soldoutItemsContainer"></div>
+  </div>
+
+  <!-- 音声案内セクション -->
+  <div id="audioSection" class="hidden">
+    <div class="audio-buttons-section">
+      <h2>音声案内ボタン</h2>
+      <div class="audio-button-grid" id="audioButtonGrid">
+        <!-- 音声ボタンがここに生成されます -->
+      </div>
+    </div>
   </div>
 
   <script type="module">
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, getDocs, getDoc, doc, deleteDoc, setDoc, updateDoc, Timestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
+    import { getFirestore, collection, getDocs, doc, updateDoc, setDoc, onSnapshot, query, orderBy, where } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
 
-    const app = initializeApp({
-      apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
-      authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
-      projectId: "takoyaki-order-system-bacd7",
-      storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
-      messagingSenderId: "104494752890",
-      appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
-    });
+    const firebaseConfig = {
+      apiKey: "AIzaSyBSwmWiMTRuN5bm0P46aaGzNz2a0qm7QKk",
+      authDomain: "ramenorder-2baff.firebaseapp.com",
+      projectId: "ramenorder-2baff",
+      storageBucket: "ramenorder-2baff.firebasestorage.app",
+      messagingSenderId: "502068620820",
+      appId: "1:502068620820:web:e4bc2f13b1f85b7b00a882"
+    };
+
+    const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
+    window.db = db;
 
-    let audioEnabled = false;
-    let isFirstOrderLoad = true;
-    let lastOrderCount = 0;
-    let allMenuItems = [];
-    let isBulkSoldOut = false;
-    let currentAudio = null;
-    let printerUrl = 'http://192.168.244.41'; // mC-Print3のIPアドレス
-    let printedOrders = new Set(); // 印刷済み注文を記録
-    
-    // ネットワーク監視用
-    let isOnline = true;
-    let reconnectCount = 0;
-    let lastReconnectTime = Date.now();
-    let connectionCheckInterval = null;
+    let currentSection = 'orders';
+    let menuItems = [];
+    let categoryMap = {};
 
-    window.onload = async function() {
-      initializeAudioButtons();
-      showAudioEnablePopup();
-      checkPrinterConnection();
-      initializeNetworkMonitoring();
-    };
-    
-    // プリンター接続確認
-    function checkPrinterConnection() {
-      setTimeout(() => {
-        if (window.starSDKError) {
-          console.warn('Star WebPRNT SDK読み込みエラー:', window.starSDKError);
-          console.warn('印刷機能を使用するには、プリンターのWebサーバー設定を有効にしてください。');
-        } else if (window.starSDKLoaded) {
-          console.log('✓ Star WebPRNT SDK読み込み完了');
-          console.log('プリンターURL:', printerUrl);
-        } else {
-          console.warn('Star WebPRNT SDKの読み込み状態が不明です');
-        }
-      }, 1000);
-    }
-    
-    // ネットワーク監視機能
-    function initializeNetworkMonitoring() {
-      const indicator = document.getElementById('connection-indicator');
-      const indicatorText = indicator.querySelector('span');
-      
-      // オンライン/オフライン検知
-      window.addEventListener('online', handleOnline);
-      window.addEventListener('offline', handleOffline);
-      
-      // ページの可視性変更を検知（タブ切り替え時など）
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-      
-      // 定期的な接続チェック（30秒ごと）
-      connectionCheckInterval = setInterval(checkFirestoreConnection, 30000);
-      
-      // 初回チェック
-      checkFirestoreConnection();
-      
-      function handleVisibilityChange() {
-        if (!document.hidden) {
-          // タブがアクティブになったときにデータを再読み込み
-          console.log('🔄 タブがアクティブになりました - データを再読み込み');
-          loadOrders();
-          checkFirestoreConnection();
-        }
-      }
-      
-      function handleOnline() {
-        console.log('🟢 ネットワーク接続が復帰しました');
-        isOnline = true;
-        reconnectCount++;
-        lastReconnectTime = Date.now();
-        
-        indicator.className = 'connection-indicator reconnecting';
-        indicatorText.textContent = '再接続中...';
-        
-        // 再接続音を鳴らす
-        playReconnectSound();
-        
-        // 少し待ってから再接続ポップアップを表示
-        setTimeout(() => {
-          showReconnectPopup();
-          
-          // データを再読み込み
-          loadOrders();
-          
-          // 接続状態を更新
-          indicator.className = 'connection-indicator online';
-          indicatorText.textContent = 'オンライン';
-          
-          showToast('✓ 接続が復帰しました');
-        }, 1000);
-      }
-      
-      function handleOffline() {
-        console.log('🔴 ネットワーク接続が切断されました');
-        isOnline = false;
-        
-        indicator.className = 'connection-indicator offline';
-        indicatorText.textContent = 'オフライン';
-        
-        showToast('⚠️ ネットワーク接続が切断されました');
-      }
-      
-      async function checkFirestoreConnection() {
-        try {
-          // Firestoreに軽量なクエリを送信して接続確認
-          const testRef = doc(db, 'settings', 'waiting');
-          await getDoc(testRef);
-          
-          if (!isOnline) {
-            // オフライン状態から復帰
-            handleOnline();
-          } else {
-            // 正常にオンライン
-            indicator.className = 'connection-indicator online';
-            indicatorText.textContent = 'オンライン';
-          }
-        } catch (error) {
-          console.warn('接続チェック失敗:', error);
-          
-          if (isOnline) {
-            // オンラインからオフラインに変更
-            handleOffline();
-          }
-        }
-      }
-    }
-    
-    // 再接続音を鳴らす
-    function playReconnectSound() {
-      if (!audioEnabled) return;
-      
-      try {
-        const audio = new Audio('https://firebasestorage.googleapis.com/v0/b/takoyaki-order-system-bacd7.firebasestorage.app/o/pinpon.wav?alt=media');
-        audio.volume = 0.7;
-        audio.play().catch(e => console.log('再接続音再生失敗:', e));
-      } catch (e) {
-        console.log('再接続音エラー:', e);
-      }
-    }
-    
-    // 再接続時のポップアップ
-    function showReconnectPopup() {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.8);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-      `;
-      
-      const popup = document.createElement('div');
-      popup.style.cssText = `
-        background: white;
-        border-radius: 20px;
-        padding: 40px;
-        max-width: 90%;
-        text-align: center;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-        animation: slideIn 0.3s ease-out;
-      `;
-      
-      popup.innerHTML = `
-        <div style="font-size: 64px; margin-bottom: 20px;">🔄</div>
-        <div style="font-size: 28px; font-weight: bold; margin-bottom: 15px; color: #4CAF50;">
-          接続が復帰しました！
-        </div>
-        <div style="font-size: 18px; color: #666; margin-bottom: 15px;">
-          注文データを再読み込みしています
-        </div>
-        <div style="font-size: 14px; color: #999;">
-          再接続回数: ${reconnectCount}回
-        </div>
-      `;
-      
-      overlay.appendChild(popup);
-      document.body.appendChild(overlay);
-      
-      // 3秒後に自動で閉じる
-      setTimeout(() => {
-        overlay.style.opacity = '0';
-        overlay.style.transition = 'opacity 0.3s';
-        setTimeout(() => overlay.remove(), 300);
-      }, 3000);
-    }
-    
-    // 音声案内ボタンの初期化
-    function initializeAudioButtons() {
-      const numbers = [619, 620, 621, 622, 623, 624, 625, 626, 627, 628];
-      const buttonGrid = document.getElementById('audio-button-grid');
-      
-      numbers.forEach(num => {
-        const btn = document.createElement('button');
-        btn.className = 'audio-btn';
-        btn.textContent = num;
-        btn.onclick = () => playAudioAnnouncement(num, btn);
-        buttonGrid.appendChild(btn);
-      });
-    }
-    
-    // 音声案内を再生
-    function playAudioAnnouncement(number, button) {
-      // 既に再生中の音声があれば停止
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
-      }
+    // オンライン状態の監視
+    window.addEventListener('online', () => {
+      const indicator = document.getElementById('connectionStatus');
+      indicator.className = 'connection-indicator online';
+      indicator.innerHTML = '<div class="connection-dot"></div><span>オンライン</span>';
+    });
 
-      // すべてのボタンからplayingクラスを削除
-      document.querySelectorAll('.audio-btn').forEach(b => {
-        b.classList.remove('playing');
-      });
-
-      try {
-        // まずピンポン音を再生
-        const pinpon = new Audio('./pinpon.mp3');
-        pinpon.volume = 1.0;
-        currentAudio = pinpon;
-        
-        button.classList.add('playing');
-        
-        pinpon.play()
-          .then(() => {
-            console.log('🔔 ピンポン音 再生開始');
-          })
-          .catch(err => {
-            console.error('❌ ピンポン音 再生失敗:', err);
-          });
-        
-        // ピンポン音が終わったら番号音声を再生
-        pinpon.onended = () => {
-          const audio = new Audio(`./${number}.wav`);
-          audio.volume = 1.0;
-          currentAudio = audio;
-
-          audio.play()
-            .then(() => {
-              console.log(`✅ ${number}.wav 再生開始`);
-            })
-            .catch(err => {
-              console.error(`❌ ${number}.wav 再生失敗:`, err);
-              button.classList.remove('playing');
-            });
-
-          // 番号音声再生終了時
-          audio.onended = () => {
-            button.classList.remove('playing');
-            console.log(`✅ ${number}.wav 再生終了`);
-          };
-
-          // エラー発生時
-          audio.onerror = () => {
-            button.classList.remove('playing');
-            console.error(`❌ ${number}.wav 読み込みエラー`);
-          };
-        };
-        
-        // ピンポン音のエラー処理
-        pinpon.onerror = () => {
-          button.classList.remove('playing');
-          console.error('❌ ピンポン音 読み込みエラー');
-        };
-
-      } catch (e) {
-        console.error('エラー:', e);
-        button.classList.remove('playing');
-      }
-    }
-
-    function showAudioEnablePopup() {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.8);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-      `;
-      
-      const popup = document.createElement('div');
-      popup.style.cssText = `
-        background: white;
-        border-radius: 20px;
-        padding: 40px;
-        max-width: 90%;
-        text-align: center;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-      `;
-      
-      popup.innerHTML = `
-        <div style="font-size: 48px; margin-bottom: 20px;">🔊</div>
-        <div style="font-size: 22px; font-weight: bold; margin-bottom: 15px; color: #333;">
-          音声通知を有効にしますか?
-        </div>
-        <div style="font-size: 16px; color: #666; margin-bottom: 30px;">
-          新規注文が入った時に音でお知らせします
-        </div>
-        <button style="
-          padding: 15px 40px;
-          background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-          color: white;
-          border: none;
-          border-radius: 12px;
-          font-size: 18px;
-          font-weight: bold;
-          cursor: pointer;
-          box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
-        ">有効にする</button>
-      `;
-      
-      popup.querySelector('button').onclick = () => {
-        audioEnabled = true;
-        overlay.remove();
-        loadOrders();
-        loadTimeOverrideStatus();
-        watchWaiting();
-        watchStaffCalls();
-        watchOrders();
-      };
-      
-      overlay.appendChild(popup);
-      document.body.appendChild(overlay);
-    }
-
-    function watchOrders() {
-      const unsubscribe = onSnapshot(
-        collection(db, 'orders'), 
-        (snapshot) => {
-          const currentCount = snapshot.size;
-          
-          if (!isFirstOrderLoad && currentCount > lastOrderCount) {
-            playOrderSound();
-            
-            // 新規注文を検出して自動印刷
-            snapshot.forEach(doc => {
-              const order = { id: doc.id, ...doc.data() };
-              if (!printedOrders.has(order.id) && order.status === 'pending') {
-                printOrder(order);
-                printedOrders.add(order.id);
-              }
-            });
-          }
-          
-          lastOrderCount = currentCount;
-          isFirstOrderLoad = false;
-          
-          loadOrders();
-        },
-        (error) => {
-          console.error('❌ Firestoreリスナーエラー (orders):', error);
-          
-          // エラー時は接続状態を更新
-          const indicator = document.getElementById('connection-indicator');
-          const indicatorText = indicator.querySelector('span');
-          indicator.className = 'connection-indicator offline';
-          indicatorText.textContent = 'エラー';
-          
-          showToast('⚠️ データベース接続エラー');
-          
-          // 5秒後に再接続を試みる
-          setTimeout(() => {
-            console.log('🔄 Firestoreリスナーを再起動します...');
-            watchOrders();
-          }, 5000);
-        }
-      );
-      
-      return unsubscribe;
-    }
-
-    function watchWaiting() {
-      const unsubscribe = onSnapshot(
-        doc(db, 'settings', 'waiting'), 
-        (doc) => {
-          if (doc.exists()) {
-            const count = doc.data().manualCount || 0;
-            document.getElementById('manual-count').textContent = count;
-          }
-        },
-        (error) => {
-          console.error('❌ Firestoreリスナーエラー (waiting):', error);
-          setTimeout(() => watchWaiting(), 5000);
-        }
-      );
-      
-      return unsubscribe;
-    }
-
-    function watchStaffCalls() {
-      let isFirstLoad = true;
-      const unsubscribe = onSnapshot(
-        collection(db, 'staff_calls'),
-        (snapshot) => {
-        const container = document.getElementById('staff-calls-container');
-        container.innerHTML = '';
-        
-        const calls = [];
-        snapshot.forEach(doc => calls.push({ id: doc.id, ...doc.data() }));
-        calls.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
-        
-        calls.forEach(call => {
-          const isBill = call.type === 'bill';
-          const card = document.createElement('div');
-          card.className = 'staff-call-card';
-          if (isBill) card.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
-          
-          // 注文番号がある場合は表示
-          const orderNumberHtml = call.orderNumber 
-            ? `<div style="font-size:20px;text-align:center;margin-top:8px;font-weight:bold;color:#fff;">注文番号: #${call.orderNumber}</div>` 
-            : '';
-          
-          card.innerHTML = `
-            <div style="font-size:24px;text-align:center;font-weight:bold;">
-              ${isBill ? '💳 お会計です' : '📞 呼び出し'}
-            </div>
-            <div class="staff-call-table">${call.tableNumber || 'テイクアウト'}</div>
-            ${orderNumberHtml}
-            <button class="btn-reset" style="width:100%;margin-top:10px;" onclick="dismissCall('${call.id}')">対応完了</button>
-          `;
-          container.appendChild(card);
-        });
-        
-        if (!isFirstLoad && calls.length > 0) {
-          const isBill = calls[0].type === 'bill';
-          if (isBill) playBillSound();
-          else playCallSound();
-        }
-        isFirstLoad = false;
-      },
-      (error) => {
-        console.error('❌ Firestoreリスナーエラー (staff_calls):', error);
-        setTimeout(() => watchStaffCalls(), 5000);
-      });
-      
-      return unsubscribe;
-    }
-
-    window.dismissCall = async (id) => {
-      await deleteDoc(doc(db, 'staff_calls', id));
-      showToast('✓ 対応完了');
-    };
-
-    function playOrderSound() {
-      if (!audioEnabled) {
-        console.log('⚠️ 音声通知が無効です');
-        return;
-      }
-      console.log('🔊 注文音を再生');
-      try {
-        const audio = new Audio('./order.wav');
-        audio.volume = 1.0;
-        audio.play()
-          .then(() => console.log('✅ 注文音再生成功'))
-          .catch(e => console.error('❌ 注文音再生失敗:', e));
-      } catch (e) {
-        console.error('❌ 注文音エラー:', e);
-      }
-    }
-
-    function playCallSound() {
-      if (!audioEnabled) {
-        console.log('⚠️ 音声通知が無効です');
-        return;
-      }
-      console.log('🔊 呼び出し音を再生');
-      try {
-        const audio = new Audio('./call.wav');
-        audio.volume = 1.0;
-        audio.play()
-          .then(() => console.log('✅ 呼び出し音再生成功'))
-          .catch(e => console.error('❌ 呼び出し音再生失敗:', e));
-      } catch (e) {
-        console.error('❌ 呼び出し音エラー:', e);
-      }
-    }
-
-    function playBillSound() {
-      if (!audioEnabled) {
-        console.log('⚠️ 音声通知が無効です');
-        return;
-      }
-      console.log('🔊 お会計音を再生');
-      try {
-        const audio = new Audio('./okaikei.wav');
-        audio.volume = 1.0;
-        audio.play()
-          .then(() => console.log('✅ お会計音再生成功'))
-          .catch(e => console.error('❌ お会計音再生失敗:', e));
-      } catch (e) {
-        console.error('❌ お会計音エラー:', e);
-      }
-    }
+    window.addEventListener('offline', () => {
+      const indicator = document.getElementById('connectionStatus');
+      indicator.className = 'connection-indicator offline';
+      indicator.innerHTML = '<div class="connection-dot"></div><span>オフライン</span>';
+    });
 
     async function loadOrders() {
-      const orders = [];
-      (await getDocs(collection(db, 'orders'))).forEach(doc => {
-        const d = doc.data();
-        orders.push({
-          id: doc.id,
-          orderNumber: d.orderNumber,
-          tableNumber: d.tableNumber,
-          items: d.items,
-          totalAmount: d.totalAmount,
-          memo: d.memo || {},
-          completedAt: d.completedAt || null,
-          cancelledAt: d.cancelledAt || null,
-          paidAt: d.paidAt || null
-        });
-      });
+      const q = query(collection(db, 'orders'), where('status', '==', 'pending'), orderBy('timestamp', 'desc'));
+      const snapshot = await getDocs(q);
+      const ordersContainer = document.getElementById('ordersContainer');
+      ordersContainer.innerHTML = '';
       
-      const container = document.getElementById('orders-container');
-      if (orders.length === 0) {
-        container.innerHTML = '<div style="text-align:center;color:white;padding:40px;">現在注文はありません</div>';
-        return;
-      }
-      
-      container.innerHTML = '';
-      orders.sort((a, b) => a.orderNumber - b.orderNumber).forEach(order => {
-        const card = document.createElement('div');
-        card.className = 'order-card';
+      snapshot.forEach(docSnap => {
+        const order = docSnap.data();
+        const orderCard = document.createElement('div');
+        orderCard.className = 'order-card';
         
-        let statusBadge = '';
-        if (order.completedAt) {
-          statusBadge = '<div style="background:#4CAF50;color:white;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 0;">✓ 完了済み</div>';
-        } else if (order.cancelledAt) {
-          statusBadge = '<div style="background:#f44336;color:white;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 0;">✕ キャンセル済み</div>';
-        }
+        let itemsHTML = '';
+        let grandTotal = 0;
         
-        let paidBadge = '';
-        if (order.paidAt) {
-          paidBadge = '<div style="background:#2196F3;color:white;padding:5px 10px;border-radius:8px;display:inline-block;margin:5px 5px 5px 0;">💳 会計済</div>';
-        }
-        
-        const itemsHtml = order.items.map((item, idx) => {
-          const memoText = order.memo?.[idx] || item.memo || '';
+        order.items.forEach((item, idx) => {
+          const itemPrice = item.price || 0;
+          const toppingPrice = item.toppingPrice || 0;
+          const quantity = item.quantity || 1;
+          const itemTotal = (itemPrice + toppingPrice) * quantity;
+          grandTotal += itemTotal;
           
-          // トッピングを1行ずつ表示するための処理
-          let toppingsHtml = '';
+          // トッピングの表示
+          let toppingsHTML = '';
           if (item.toppings && item.toppings !== 'なし') {
-            // カンマで分割して1行ずつ表示
             const toppingsList = item.toppings.split(',').map(t => t.trim());
-            toppingsHtml = toppingsList.map(topping => 
-              `<div class="order-item-toppings">${topping}</div>`
+            toppingsHTML = toppingsList.map(topping => 
+              `<div class="order-item-toppings">・${topping}</div>`
             ).join('');
           }
           
-          return `
+          // メモの表示
+          let memoHTML = '';
+          if (order.memo && order.memo[idx] || item.memo) {
+            memoHTML = `<div class="order-item-memo">※ ${order.memo?.[idx] || item.memo}</div>`;
+          }
+          
+          itemsHTML += `
             <div class="order-item">
-              <div class="order-item-name">${item.name} × ${item.quantity}</div>
-              ${toppingsHtml}
-              ${memoText ? `<div class="order-item-memo">📝 ${memoText}</div>` : ''}
+              <div class="order-item-header">
+                <div class="order-item-name">${item.name} × ${quantity}</div>
+                <div class="order-item-price">¥${itemPrice.toLocaleString()}</div>
+              </div>
+              ${toppingsHTML}
+              ${memoHTML}
+              <div class="order-item-total">¥${itemPrice.toLocaleString()} × ${quantity} = ¥${itemTotal.toLocaleString()}</div>
             </div>
           `;
-        }).join('');
+        });
         
-        card.innerHTML = `
-          <button class="control-btn btn-print" onclick="printOrder({
-            id: '${order.id}',
-            orderNumber: ${order.orderNumber},
-            tableNumber: '${order.tableNumber}',
-            items: ${JSON.stringify(order.items).replace(/'/g, "&#39;")},
-            totalAmount: ${order.totalAmount},
-            memo: ${JSON.stringify(order.memo || {}).replace(/'/g, "&#39;")}
-          })">🖨️ 印刷</button>
-          <div class="order-number">#${order.orderNumber}</div>
-          <div class="order-table">${order.tableNumber}</div>
-          ${statusBadge}${paidBadge}
-          ${itemsHtml}
-          <div style="font-size:20px;font-weight:bold;color:#4CAF50;margin-top:10px;">¥${order.totalAmount.toLocaleString()}</div>
-          <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-            <button class="control-btn btn-complete" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✓完了</button>
-            <button class="control-btn btn-cancel" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✕キャンセル</button>
-            <button class="control-btn" style="background:linear-gradient(135deg,#9C27B0 0%,#7B1FA2 100%);font-size:11px;" data-order-id="${order.id}">📋詳細</button>
+        orderCard.innerHTML = `
+          <div style="margin-bottom: 10px;">
+            <span class="order-number">#${order.orderNumber}</span>
+            <span class="order-table">${order.tableNumber}</span>
           </div>
-          <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-            <button class="control-btn" id="paid-btn-${order.id}" style="background:linear-gradient(135deg,${order.paidAt ? '#2196F3' : '#FFC107'} 0%,${order.paidAt ? '#1976D2' : '#FFA000'} 100%);font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}" data-paid="${order.paidAt ? 'true' : 'false'}">${order.paidAt ? '💳 済' : '💳 未'}</button>
-            <button class="control-btn" style="background:linear-gradient(135deg,#757575 0%,#616161 100%);font-size:11px;${!order.completedAt && !order.cancelledAt ? 'opacity:0.5;cursor:not-allowed;' : ''}" data-order-id="${order.id}" ${!order.completedAt && !order.cancelledAt ? 'disabled' : ''}>🗑️削除</button>
+          ${itemsHTML}
+          <div class="order-total">
+            <div class="order-total-label">全ての合計金額</div>
+            <div class="order-total-amount">¥${grandTotal.toLocaleString()}</div>
+          </div>
+          <div style="margin-top: 15px; text-align: center;">
+            <button class="control-btn btn-complete" onclick="completeOrder('${docSnap.id}')">完了</button>
+            <button class="control-btn btn-cancel" onclick="cancelOrder('${docSnap.id}')">キャンセル</button>
           </div>
         `;
-        
-        const completeBtn = card.querySelector('.btn-complete');
-        const cancelBtn = card.querySelector('.btn-cancel');
-        const detailBtn = card.querySelectorAll('.control-btn')[3]; // 印刷ボタンが0なので+1
-        const paidBtn = card.querySelectorAll('.control-btn')[4];    // 印刷ボタンが0なので+1
-        const deleteBtn = card.querySelectorAll('.control-btn')[5];  // 印刷ボタンが0なので+1
-        
-        completeBtn.onclick = () => completeOrder(order.id, order.tableNumber, order.orderNumber);
-        cancelBtn.onclick = () => cancelOrder(order.id, order.tableNumber, order.orderNumber);
-        detailBtn.onclick = () => showOrderDetail(order);
-        paidBtn.onclick = () => togglePaidStatus(order);
-        
-        // 削除ボタンは完了/キャンセル後のみ有効
-        if (order.completedAt || order.cancelledAt) {
-          deleteBtn.onclick = () => deleteOrder(order.id);
-        }
-        
+        ordersContainer.appendChild(orderCard);
+      });
+    }
+
+    async function loadStaffCalls() {
+      const q = query(collection(db, 'staffCalls'), where('status', '==', 'pending'), orderBy('timestamp', 'desc'));
+      const snapshot = await getDocs(q);
+      const container = document.getElementById('staffCallsContainer');
+      container.innerHTML = '';
+      
+      snapshot.forEach(docSnap => {
+        const call = docSnap.data();
+        const card = document.createElement('div');
+        card.className = 'staff-call-card';
+        card.innerHTML = `
+          <div style="text-align:center;font-size:24px;font-weight:bold;">スタッフ呼び出し</div>
+          <div class="staff-call-table">${call.tableNumber}</div>
+          <div style="text-align:center;">
+            <button class="control-btn btn-complete" style="font-size:18px;padding:15px 40px;" onclick="resolveStaffCall('${docSnap.id}')">対応完了</button>
+          </div>
+        `;
         container.appendChild(card);
       });
     }
 
-    function showOrderDetail(order) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-        overflow-y: auto;
-        padding: 20px 0;
-      `;
-      
-      const dialog = document.createElement('div');
-      dialog.style.cssText = `
-        background: white;
-        border-radius: 15px;
-        padding: 20px;
-        max-width: 90%;
-        max-height: 90vh;
-        overflow-y: auto;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
-      `;
-      
-      let itemsHtml = '';
-      order.items.forEach((item, idx) => {
-        const currentMemo = order.memo?.[idx] || item.memo || '';
-        const toppingsText = item.toppings && item.toppings !== 'なし' ? item.toppings : 'なし';
-        itemsHtml += `
-          <div style="background:#f5f5f5;padding:15px;border-radius:10px;margin-bottom:10px;">
-            <div style="font-size:16px;font-weight:bold;margin-bottom:5px;">${item.name} × ${item.quantity}</div>
-            <div style="font-size:14px;color:#666;margin-bottom:8px;">🍴 トッピング: ${toppingsText}</div>
-            <input type="text" 
-                   id="memo-${idx}" 
-                   value="${currentMemo}"
-                   placeholder="メモを入力(ソース多め、マヨ抜きなど)"
-                   style="width:100%;padding:10px;border:2px solid #ddd;border-radius:8px;font-size:14px;">
-          </div>
-        `;
-      });
-      
-      dialog.innerHTML = `
-        <div style="font-size:20px;font-weight:bold;margin-bottom:15px;text-align:center;">
-          注文 #${order.orderNumber} の詳細
-        </div>
-        <div style="text-align:center;margin-bottom:15px;">
-          <span style="background:#2196F3;color:white;padding:5px 15px;border-radius:15px;">${order.tableNumber}</span>
-        </div>
-        ${itemsHtml}
-        <div style="font-size:18px;font-weight:bold;text-align:right;margin:15px 0;color:#4CAF50;">
-          合計: ¥${order.totalAmount.toLocaleString()}
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <button id="save-memo-btn" style="
-            padding:15px;
-            background:#4CAF50;
-            color:white;
-            border:none;
-            border-radius:10px;
-            font-size:16px;
-            font-weight:bold;
-            cursor:pointer;
-          ">💾 メモを保存</button>
-          <button id="close-detail-btn" style="
-            padding:15px;
-            background:#757575;
-            color:white;
-            border:none;
-            border-radius:10px;
-            font-size:16px;
-            font-weight:bold;
-            cursor:pointer;
-          ">閉じる</button>
-        </div>
-      `;
-      
-      overlay.appendChild(dialog);
-      document.body.appendChild(overlay);
-      
-      document.getElementById('save-memo-btn').onclick = async () => {
-        const newMemo = {};
-        order.items.forEach((item, idx) => {
-          const input = document.getElementById(`memo-${idx}`);
-          if (input && input.value.trim()) {
-            newMemo[idx] = input.value.trim();
-          }
-        });
-        
-        await updateDoc(doc(db, 'orders', order.id), { memo: newMemo });
-        showToast('✓ メモを保存しました');
-        overlay.remove();
-        loadOrders();
-      };
-      
-      document.getElementById('close-detail-btn').onclick = () => overlay.remove();
-    }
+    window.completeOrder = async (orderId) => {
+      await updateDoc(doc(db, 'orders', orderId), { status: 'completed' });
+      showToast('✓ 完了');
+      loadOrders();
+    };
 
-    async function completeOrder(orderId, tableNumber, orderNumber) {
-      const confirmed = await showConfirmDialog('この注文を完了しますか?');
-      if (!confirmed) return;
-      
-      try {
-        console.log('✅ 注文完了処理開始:', orderId);
-        
-        await updateDoc(doc(db, 'orders', orderId), {
-          status: 'completed',
-          completedAt: Timestamp.now()
-        });
-        
-        console.log('✅ Firestore更新完了 - Cloud Functionsがプッシュ通知を送信します');
-        showToast('✓ 完了しました');
-        loadOrders();
-      } catch (e) {
-        console.error('❌ エラー:', e);
-        showToast('エラー: ' + e.message);
-      }
-    }
-
-    async function cancelOrder(orderId, tableNumber, orderNumber) {
+    window.cancelOrder = async (orderId) => {
       const confirmed = await showConfirmDialog('この注文をキャンセルしますか?');
-      if (!confirmed) return;
-      
-      try {
-        console.log('✅ キャンセル処理開始:', orderId);
-        
-        await updateDoc(doc(db, 'orders', orderId), {
-          cancelledAt: Timestamp.now()
-        });
-        
-        console.log('✅ Firestore更新完了 - Cloud Functionsがプッシュ通知を送信します');
-        showToast('✓ キャンセルしました');
+      if (confirmed) {
+        await updateDoc(doc(db, 'orders', orderId), { status: 'cancelled' });
+        showToast('✓ キャンセル');
         loadOrders();
-      } catch (e) {
-        console.error('❌ エラー:', e);
-        showToast('エラー: ' + e.message);
-      }
-    }
-
-    async function deleteOrder(orderId) {
-      const confirmed = await showConfirmDialog('この注文を削除しますか?\n削除すると復元できません。');
-      if (!confirmed) return;
-      
-      try {
-        await deleteDoc(doc(db, 'orders', orderId));
-        showToast('✓ 注文を削除しました');
-        loadOrders();
-      } catch (e) {
-        console.error(e);
-        showToast('エラー: ' + e.message);
-      }
-    }
-
-    async function togglePaidStatus(order) {
-      try {
-        if (order.paidAt) {
-          const confirmed = await showConfirmDialog('会計を未済に戻しますか?');
-          if (!confirmed) return;
-          
-          await updateDoc(doc(db, 'orders', order.id), {
-            paidAt: null
-          });
-          
-          showToast('✓ 会計を未済に戻しました');
-          loadOrders();
-        } else {
-          console.log('✅ 会計済み処理開始:', order.id);
-          
-          await updateDoc(doc(db, 'orders', order.id), {
-            paidAt: Timestamp.now()
-          });
-          
-          console.log('✅ Firestore更新完了 - Cloud Functionsがプッシュ通知を送信します');
-          showToast('✓ 会計済みにしました');
-          loadOrders();
-        }
-      } catch (e) {
-        console.error(e);
-        showToast('エラー: ' + e.message);
-      }
-    }
-
-    window.showSoldOutPage = async function() {
-      try {
-        const menuSnapshot = await getDocs(collection(db, 'menu'));
-        allMenuItems = [];
-        const categories = new Set();
-        
-        menuSnapshot.forEach(doc => {
-          const data = doc.data();
-          allMenuItems.push({
-            id: data.id,
-            name: data.name,
-            price: data.price,
-            category: data.category
-          });
-          if (data.category) categories.add(data.category);
-        });
-        
-        const select = document.getElementById('soldout-category-select');
-        select.innerHTML = '<option value="">全ての商品</option>';
-        Array.from(categories).sort().forEach(cat => {
-          const opt = document.createElement('option');
-          opt.value = cat;
-          opt.textContent = cat;
-          select.appendChild(opt);
-        });
-        
-        select.onchange = () => {
-          const filtered = select.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === select.value);
-          displaySoldOutItems(filtered);
-        };
-        
-        await displaySoldOutItems(allMenuItems);
-        document.getElementById('page-orders').style.display = 'none';
-        document.getElementById('page-soldout').classList.remove('hidden');
-      } catch (e) {
-        console.error(e);
-        showToast('エラー: ' + e.message);
       }
     };
 
-    window.backToOrders = function() {
-      document.getElementById('page-soldout').classList.add('hidden');
-      document.getElementById('page-orders').style.display = 'block';
+    window.resolveStaffCall = async (callId) => {
+      await updateDoc(doc(db, 'staffCalls', callId), { status: 'resolved' });
+      showToast('✓ 対応完了');
+      loadStaffCalls();
     };
 
-    async function displaySoldOutItems(items) {
-      const list = document.getElementById('soldout-menu-list');
-      list.innerHTML = '';
+    window.toggleSection = (section) => {
+      currentSection = section;
+      document.getElementById('ordersContainer').classList.toggle('hidden', section !== 'orders');
+      document.getElementById('soldoutSection').classList.toggle('hidden', section !== 'soldout');
+      document.getElementById('audioSection').classList.toggle('hidden', section !== 'audio');
       
-      const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
-      const soldOutIds = new Set();
-      soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
+      if (section === 'soldout') loadSoldoutItems();
+      if (section === 'audio') loadAudioButtons();
+    };
+
+    async function loadSoldoutItems() {
+      const snapshot = await getDocs(collection(db, 'menu'));
+      menuItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       
-      items.sort((a, b) => {
-        const numA = parseInt(a.id.replace(/\D/g, ''));
-        const numB = parseInt(b.id.replace(/\D/g, ''));
-        return numA - numB;
+      categoryMap = {};
+      menuItems.forEach(item => {
+        if (!categoryMap[item.category]) categoryMap[item.category] = [];
+        categoryMap[item.category].push(item);
       });
+      
+      const filterSelect = document.getElementById('soldoutCategoryFilter');
+      filterSelect.innerHTML = '<option value="all">すべて</option>';
+      Object.keys(categoryMap).forEach(cat => {
+        const option = document.createElement('option');
+        option.value = cat;
+        option.textContent = cat;
+        filterSelect.appendChild(option);
+      });
+      
+      filterSoldout();
+    }
+
+    window.filterSoldout = () => {
+      const category = document.getElementById('soldoutCategoryFilter').value;
+      const container = document.getElementById('soldoutItemsContainer');
+      container.innerHTML = '';
+      
+      const items = category === 'all' ? menuItems : (categoryMap[category] || []);
       
       items.forEach(item => {
-        const isSoldOut = soldOutIds.has(item.id);
         const div = document.createElement('div');
-        div.className = 'soldout-item' + (isSoldOut ? ' sold-out' : '');
-        
+        div.className = `soldout-item ${item.soldOut ? 'sold-out' : ''}`;
         div.innerHTML = `
           <div>
             <div class="soldout-item-name">${item.name}</div>
-            <div style="font-size:14px;color:#666;">¥${item.price.toLocaleString()}</div>
-            ${isSoldOut ? '<span class="soldout-badge">品切れ中</span>' : ''}
+            ${item.soldOut ? '<span class="soldout-badge">売り切れ</span>' : ''}
           </div>
-          <button class="soldout-toggle-btn ${isSoldOut ? 'set-available' : 'set-soldout'}" 
-                  onclick="toggleSoldOut('${item.id}', ${!isSoldOut})">
-            ${isSoldOut ? '✓ 販売再開' : '🚫 品切れ'}
+          <button class="soldout-toggle-btn ${item.soldOut ? 'set-available' : 'set-soldout'}" 
+                  onclick="toggleSoldout('${item.id}', ${!item.soldOut})">
+            ${item.soldOut ? '販売再開' : '売り切れ'}
           </button>
         `;
-        
-        list.appendChild(div);
+        container.appendChild(div);
       });
+    };
+
+    window.toggleSoldout = async (itemId, newStatus) => {
+      await updateDoc(doc(db, 'menu', itemId), { soldOut: newStatus });
+      showToast(newStatus ? '✓ 売り切れ設定' : '✓ 販売再開');
+      loadSoldoutItems();
+    };
+
+    async function loadAudioButtons() {
+      const snapshot = await getDocs(collection(db, 'audioButtons'));
+      const grid = document.getElementById('audioButtonGrid');
+      grid.innerHTML = '';
+      
+      snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .sort((a, b) => (a.order || 0) - (b.order || 0))
+        .forEach(button => {
+          const btn = document.createElement('button');
+          btn.className = 'audio-btn';
+          btn.textContent = button.label;
+          btn.onclick = () => playAudioMessage(button.audioFile, btn);
+          grid.appendChild(btn);
+        });
     }
 
-    window.toggleSoldOut = async function(menuId, setSoldOut) {
-      try {
-        if (setSoldOut) {
-          await setDoc(doc(db, 'sold_out', menuId), {
-            menuId: menuId,
-            timestamp: Timestamp.now()
-          });
-          showToast('✓ 品切れに設定');
-        } else {
-          await deleteDoc(doc(db, 'sold_out', menuId));
-          showToast('✓ 販売再開');
-        }
-        
-        const sel = document.getElementById('soldout-category-select');
-        const filtered = sel.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === sel.value);
-        await displaySoldOutItems(filtered);
-      } catch (e) {
-        console.error(e);
-        showToast('エラー: ' + e.message);
+    function playAudioMessage(audioFile, buttonElement) {
+      if (!audioFile) {
+        showToast('音声ファイルが設定されていません');
+        return;
       }
-    };
-
-    window.toggleBulkSoldOut = async function() {
-      const btn = document.getElementById('bulk-soldout-btn');
       
-      if (!isBulkSoldOut) {
-        const confirmed = await showConfirmDialog('全商品を品切れに設定しますか?');
-        if (!confirmed) return;
-        
-        try {
-          const menuSnapshot = await getDocs(collection(db, 'menu'));
-          const promises = [];
-          
-          menuSnapshot.forEach(docSnap => {
-            const data = docSnap.data();
-            if (data.id) {
-              promises.push(setDoc(doc(db, 'sold_out', data.id), {
-                menuId: data.id,
-                timestamp: Timestamp.now()
-              }));
-            }
-          });
-          
-          await Promise.all(promises);
-          isBulkSoldOut = true;
-          btn.textContent = '再販';
-          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
-          showToast('✓ 全商品を品切れに設定');
-        } catch (e) {
-          console.error(e);
-          showToast('エラー: ' + e.message);
-        }
+      const audio = new Audio(audioFile);
+      buttonElement.classList.add('playing');
+      
+      audio.play().catch(err => {
+        console.error('音声再生エラー:', err);
+        showToast('音声再生に失敗しました');
+        buttonElement.classList.remove('playing');
+      });
+      
+      audio.onended = () => {
+        buttonElement.classList.remove('playing');
+      };
+    }
+
+    window.toggleBusinessHours = async () => {
+      const ref = doc(db, 'settings', 'businessHours');
+      const snapshot = await getDocs(collection(db, 'settings'));
+      let current = false;
+      snapshot.forEach(d => { 
+        if (d.id === 'businessHours') current = d.data().overrideEnabled || false; 
+      });
+      
+      const newValue = !current;
+      await setDoc(ref, { overrideEnabled: newValue });
+      
+      const btn = document.getElementById('businessOverrideBtn');
+      if (newValue) {
+        btn.textContent = '営業';
+        btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+        showToast('✓ 営業中に設定');
       } else {
-        const confirmed = await showConfirmDialog('全商品を販売再開しますか?');
-        if (!confirmed) return;
-        
-        try {
-          const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
-          const promises = [];
-          soldOutSnapshot.forEach(docSnap => promises.push(deleteDoc(docSnap.ref)));
-          
-          await Promise.all(promises);
-          isBulkSoldOut = false;
-          btn.textContent = '一括';
-          btn.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
-          showToast('✓ 全商品を販売再開');
-        } catch (e) {
-          console.error(e);
-          showToast('エラー: ' + e.message);
-        }
+        btn.textContent = '営業時間';
+        btn.style.background = 'linear-gradient(135deg, #FF5722 0%, #E64A19 100%)';
+        showToast('✓ 通常営業時間に戻す');
       }
     };
 
-    window.toggleTimeOverride = async function() {
-      const btn = document.getElementById('time-override-btn');
-      
+    async function loadBusinessHoursOverride() {
+      const btn = document.getElementById('businessOverrideBtn');
       try {
-        const settingsRef = doc(db, 'settings', 'timeOverride');
-        const settingsSnap = await getDoc(settingsRef);
-        const currentOverride = settingsSnap.exists() ? settingsSnap.data().enabled : false;
-        
-        const newOverride = !currentOverride;
-        
-        await setDoc(settingsRef, {
-          enabled: newOverride,
-          timestamp: Timestamp.now()
+        const snapshot = await getDocs(collection(db, 'settings'));
+        let overrideEnabled = false;
+        snapshot.forEach(d => { 
+          if (d.id === 'businessHours') overrideEnabled = d.data().overrideEnabled || false; 
         });
-        
-        if (newOverride) {
-          btn.textContent = '営業';
-          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
-          showToast('✓ 営業時間外でも注文可能にしました');
-        } else {
-          btn.textContent = '時外';
-          btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
-          showToast('✓ 営業時間外チェックを有効にしました');
-        }
-      } catch (e) {
-        console.error(e);
-        showToast('エラー: ' + e.message);
-      }
-    };
-    
-    async function loadTimeOverrideStatus() {
-      try {
-        const settingsRef = doc(db, 'settings', 'timeOverride');
-        const settingsSnap = await getDoc(settingsRef);
-        const overrideEnabled = settingsSnap.exists() ? settingsSnap.data().enabled : false;
-        
-        const btn = document.getElementById('time-override-btn');
         if (overrideEnabled) {
           btn.textContent = '営業';
           btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
@@ -1450,151 +725,26 @@
       setTimeout(() => toast.remove(), 2000);
     }
 
-    // 印刷機能
-    window.printOrder = async function(order) {
-      console.log('印刷開始:', order);
-      
-      // SDKが読み込まれているかチェック
-      if (window.starSDKError) {
-        showToast('✗ ' + window.starSDKError + '\nプリンターのWebサーバー設定を確認してください');
-        return;
+    // リアルタイム更新
+    onSnapshot(query(collection(db, 'orders'), where('status', '==', 'pending')), () => {
+      if (currentSection === 'orders') loadOrders();
+    });
+
+    onSnapshot(query(collection(db, 'staffCalls'), where('status', '==', 'pending')), () => {
+      loadStaffCalls();
+    });
+
+    onSnapshot(doc(db, 'settings', 'waiting'), (docSnap) => {
+      if (docSnap.exists()) {
+        const count = docSnap.data().manualCount || 0;
+        document.getElementById('manualWaitingCount').textContent = count;
       }
-      
-      if (typeof StarWebPrintBuilder === 'undefined' || typeof StarWebPrintTrader === 'undefined') {
-        showToast('✗ Star WebPRNT SDKが読み込まれていません\nページを再読み込みしてください');
-        return;
-      }
-      
-      try {
-        // Star WebPRNT Builderを使用してレシートを生成
-        const builder = new StarWebPrintBuilder();
-        const request = builder.createInitializationElement();
-        
-        // 58mm幅に設定
-        builder.createPeripheralElement({ channel: 1, on: 1000 });
-        
-        // 注文番号（大きく表示）
-        builder.createTextElement({
-          characterspace: 0,
-          width: 3,
-          height: 3,
-          emphasis: true,
-          alignment: 'center',
-          data: `#${order.orderNumber}\n`
-        });
-        
-        builder.createFeedElement({ line: 1 });
-        
-        // テーブル番号
-        builder.createTextElement({
-          characterspace: 0,
-          width: 2,
-          height: 2,
-          emphasis: true,
-          alignment: 'center',
-          data: `${order.tableNumber}\n`
-        });
-        
-        builder.createFeedElement({ line: 1 });
-        builder.createRuledLineElement({ thickness: 'medium' });
-        builder.createFeedElement({ line: 1 });
-        
-        // 注文明細
-        order.items.forEach((item, idx) => {
-          // 商品名と数量
-          builder.createTextElement({
-            characterspace: 0,
-            emphasis: true,
-            data: `${item.name} x${item.quantity}\n`
-          });
-          
-          // トッピング（1行ずつ表示）
-          if (item.toppings && item.toppings !== 'なし') {
-            const toppingsList = item.toppings.split(',').map(t => t.trim());
-            toppingsList.forEach(topping => {
-              builder.createTextElement({
-                characterspace: 0,
-                data: `  ${topping}\n`
-              });
-            });
-          }
-          
-          // メモ
-          if (order.memo && order.memo?.[idx] || item.memo) {
-            builder.createTextElement({
-              characterspace: 0,
-              emphasis: true,
-              data: `[メモ] ${order.memo?.[idx] || item.memo}\n`
-            });
-          }
-          
-          // 金額
-          const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-          builder.createTextElement({
-            characterspace: 0,
-            alignment: 'right',
-            data: `¥${itemTotal.toLocaleString()}\n`
-          });
-          
-          builder.createFeedElement({ line: 1 });
-        });
-        
-        builder.createRuledLineElement({ thickness: 'medium' });
-        builder.createFeedElement({ line: 1 });
-        
-        // 合計金額
-        builder.createTextElement({
-          characterspace: 0,
-          width: 2,
-          height: 2,
-          emphasis: true,
-          alignment: 'right',
-          data: `合計 ¥${order.totalAmount.toLocaleString()}\n`
-        });
-        
-        builder.createFeedElement({ line: 3 });
-        
-        // カット
-        builder.createCutPaperElement({ feed: true, type: 'partial' });
-        
-        // 印刷実行
-        const trader = new StarWebPrintTrader({ url: printerUrl });
-        
-        trader.onReceive = function(response) {
-          console.log('印刷レスポンス:', response);
-          const status = response.traderStatus;
-          
-          if (status && status.indexOf('Success') >= 0) {
-            console.log('印刷成功');
-            showToast('✓ 印刷しました');
-          } else {
-            console.warn('印刷完了したが状態が不明:', status);
-            showToast('✓ 印刷コマンド送信完了');
-          }
-        };
-        
-        trader.onError = function(response) {
-          console.error('印刷エラー詳細:', response);
-          let errorMsg = '印刷エラー';
-          
-          if (response && response.status) {
-            errorMsg += '\nHTTPステータス: ' + response.status;
-          }
-          if (response && response.responseText) {
-            errorMsg += '\n' + response.responseText;
-          }
-          
-          showToast('✗ ' + errorMsg + '\nプリンターの接続を確認してください');
-        };
-        
-        console.log('印刷リクエスト送信:', printerUrl);
-        trader.sendMessage({ request: request });
-        
-      } catch (e) {
-        console.error('印刷失敗:', e);
-        showToast('✗ 印刷失敗: ' + e.message);
-      }
-    };
+    });
+
+    // 初期読み込み
+    loadOrders();
+    loadStaffCalls();
+    loadBusinessHoursOverride();
 
     window.loadOrders = loadOrders;
   </script>
