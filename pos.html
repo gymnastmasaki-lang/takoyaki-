@@ -678,6 +678,50 @@
       color: #333;
     }
     
+    /* トッピング選択 */
+    .topping-item {
+      display: flex;
+      align-items: center;
+      padding: 15px;
+      background: white;
+      border: 2px solid #ddd;
+      border-radius: 12px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    .topping-item:hover {
+      border-color: #667eea;
+      transform: translateX(5px);
+    }
+    
+    .topping-item input[type="checkbox"] {
+      width: 24px;
+      height: 24px;
+      margin-right: 15px;
+      cursor: pointer;
+    }
+    
+    .topping-item-info {
+      flex: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .topping-item-name {
+      font-size: 16px;
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .topping-item-price {
+      font-size: 18px;
+      font-weight: bold;
+      color: #667eea;
+    }
+    
     .hidden {
       display: none !important;
     }
@@ -810,6 +854,19 @@
     </div>
   </div>
   
+  <!-- トッピング選択モーダル -->
+  <div id="toppingModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>🍴 トッピングを選択</h3>
+      <div id="toppingModalItemName" style="font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #667eea;"></div>
+      <div id="toppingsList" style="max-height: 400px; overflow-y: auto;">
+        <!-- トッピングリスト -->
+      </div>
+      <button class="btn btn-primary" onclick="confirmTopping()">決定</button>
+      <button class="btn btn-secondary" onclick="closeToppingModal()">キャンセル</button>
+    </div>
+  </div>
+  
   <script>
     let selectedTable = null;
     let currentOrders = [];
@@ -825,9 +882,9 @@
     // プリンターIPアドレス（画像から）
     const PRINTER_IP = '192.168.244.41';
     
-    // メニューデータ
     // メニューデータ（Firebaseから取得）
     let menuData = [];
+    let toppingsData = [];
     
     // テーブル定義
     const TABLES = [
@@ -858,6 +915,23 @@
         console.log('✅ メニューを読み込みました:', menuData.length, '件');
       } catch (e) {
         console.error('❌ メニューの読み込みに失敗:', e);
+      }
+      
+      // Firebaseからトッピングを取得
+      try {
+        const toppingsSnapshot = await getDocs(collection(db, 'toppings'));
+        toppingsData = [];
+        toppingsSnapshot.forEach(doc => {
+          const data = doc.data();
+          toppingsData.push({
+            id: doc.id,
+            name: data.name || '',
+            price: data.price || 0
+          });
+        });
+        console.log('✅ トッピングを読み込みました:', toppingsData.length, '件');
+      } catch (e) {
+        console.error('❌ トッピングの読み込みに失敗:', e);
       }
       
       // テーブルボタンを生成
@@ -932,24 +1006,138 @@
       });
     }
     
+    // 一時的な選択中のアイテム
+    let currentSelectingItem = null;
+    let selectedToppings = [];
+    
     // メニュー項目の選択切り替え
-    function toggleMenuItem(itemId) {
+    window.toggleMenuItem = function(itemId) {
       const checkbox = document.getElementById(`menu-${itemId}`);
       const item = menuData.find(m => m.id === itemId);
       
       if (checkbox.checked) {
-        manualCart.push({
-          ...item,
-          quantity: 1,
-          toppings: 'なし',
-          toppingPrice: 0
-        });
+        // トッピング選択モーダルを表示
+        currentSelectingItem = { ...item };
+        selectedToppings = [];
+        showToppingModal(item);
       } else {
         manualCart = manualCart.filter(i => i.id !== itemId);
+        updateManualCart();
+      }
+    };
+    
+    // トッピング選択モーダルを表示
+    function showToppingModal(item) {
+      document.getElementById('toppingModalItemName').textContent = item.name;
+      const list = document.getElementById('toppingsList');
+      list.innerHTML = '';
+      
+      // 「なし」オプション
+      const noneDiv = document.createElement('div');
+      noneDiv.className = 'topping-item';
+      noneDiv.innerHTML = `
+        <input type="checkbox" id="topping-none" onchange="selectNoneTopping(this)">
+        <div class="topping-item-info">
+          <span class="topping-item-name">トッピングなし</span>
+          <span class="topping-item-price">¥0</span>
+        </div>
+      `;
+      list.appendChild(noneDiv);
+      
+      // トッピングリスト
+      toppingsData.forEach(topping => {
+        const div = document.createElement('div');
+        div.className = 'topping-item';
+        div.innerHTML = `
+          <input type="checkbox" id="topping-${topping.id}" value="${topping.id}" onchange="selectTopping(this)">
+          <div class="topping-item-info">
+            <span class="topping-item-name">${topping.name}</span>
+            <span class="topping-item-price">+¥${topping.price.toLocaleString()}</span>
+          </div>
+        `;
+        list.appendChild(div);
+      });
+      
+      // デフォルトで「なし」を選択
+      document.getElementById('topping-none').checked = true;
+      
+      document.getElementById('toppingModal').classList.remove('hidden');
+    }
+    
+    // 「なし」トッピングを選択
+    window.selectNoneTopping = function(checkbox) {
+      if (checkbox.checked) {
+        // 他のトッピングをすべてクリア
+        selectedToppings = [];
+        toppingsData.forEach(t => {
+          const cb = document.getElementById(`topping-${t.id}`);
+          if (cb) cb.checked = false;
+        });
+      }
+    };
+    
+    // トッピングを選択
+    window.selectTopping = function(checkbox) {
+      const noneCheckbox = document.getElementById('topping-none');
+      
+      if (checkbox.checked) {
+        // 「なし」のチェックを外す
+        noneCheckbox.checked = false;
+        
+        // 選択されたトッピングを追加
+        const toppingId = checkbox.value;
+        const topping = toppingsData.find(t => t.id === toppingId);
+        if (topping && !selectedToppings.find(t => t.id === toppingId)) {
+          selectedToppings.push(topping);
+        }
+      } else {
+        // 選択解除
+        selectedToppings = selectedToppings.filter(t => t.id !== checkbox.value);
+        
+        // トッピングが何も選択されていない場合は「なし」を選択
+        if (selectedToppings.length === 0) {
+          noneCheckbox.checked = true;
+        }
+      }
+    };
+    
+    // トッピング選択を確定
+    window.confirmTopping = function() {
+      if (!currentSelectingItem) return;
+      
+      let toppingNames = 'なし';
+      let toppingPrice = 0;
+      
+      if (selectedToppings.length > 0) {
+        toppingNames = selectedToppings.map(t => t.name).join(', ');
+        toppingPrice = selectedToppings.reduce((sum, t) => sum + t.price, 0);
       }
       
+      manualCart.push({
+        ...currentSelectingItem,
+        quantity: 1,
+        toppings: toppingNames,
+        toppingPrice: toppingPrice
+      });
+      
+      closeToppingModal();
       updateManualCart();
-    }
+    };
+    
+    // トッピングモーダルを閉じる
+    window.closeToppingModal = function() {
+      // チェックボックスをクリア
+      if (currentSelectingItem) {
+        const checkbox = document.getElementById(`menu-${currentSelectingItem.id}`);
+        if (checkbox && manualCart.filter(i => i.id === currentSelectingItem.id).length === 0) {
+          checkbox.checked = false;
+        }
+      }
+      
+      document.getElementById('toppingModal').classList.add('hidden');
+      currentSelectingItem = null;
+      selectedToppings = [];
+    };
     
     // 手動カートの表示更新
     function updateManualCart() {
@@ -968,13 +1156,16 @@
       let total = 0;
       
       manualCart.forEach((item, index) => {
-        const subtotal = item.price * item.quantity;
+        const subtotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
         total += subtotal;
         
         const div = document.createElement('div');
         div.className = 'selected-item';
         div.innerHTML = `
-          <span>${item.name}</span>
+          <div style="flex: 1;">
+            <div style="font-weight: bold; margin-bottom: 5px;">${item.name}</div>
+            <div style="font-size: 12px; color: #666;">トッピング: ${item.toppings || 'なし'}</div>
+          </div>
           <div>
             <input type="number" class="quantity-input" min="1" value="${item.quantity}" 
                    onchange="updateQuantity(${index}, this.value)">
@@ -1207,8 +1398,15 @@
       if (order.completedAt) card.classList.add('completed');
       if (order.cancelledAt) card.classList.add('cancelled');
       
-      const timestamp = order.timestamp.toDate();
-      const timeStr = `${timestamp.getHours()}:${String(timestamp.getMinutes()).padStart(2, '0')}`;
+      let timeStr = '--:--';
+      try {
+        if (order.timestamp && order.timestamp.toDate) {
+          const timestamp = order.timestamp.toDate();
+          timeStr = `${timestamp.getHours()}:${String(timestamp.getMinutes()).padStart(2, '0')}`;
+        }
+      } catch (e) {
+        console.error('Timestamp変換エラー:', e);
+      }
       
       let statusHtml = '';
       if (order.cancelledAt) {
@@ -1220,23 +1418,25 @@
       }
       
       let itemsHtml = '';
-      order.items.forEach(item => {
-        const subtotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-        itemsHtml += `
-          <div class="order-item">
-            <div>
-              <div class="item-name">${item.name}</div>
-              <div class="item-details">数量: ${item.quantity}個 | トッピング: ${item.toppings}</div>
+      if (order.items && Array.isArray(order.items)) {
+        order.items.forEach(item => {
+          const subtotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+          itemsHtml += `
+            <div class="order-item">
+              <div>
+                <div class="item-name">${item.name}</div>
+                <div class="item-details">数量: ${item.quantity}個 | トッピング: ${item.toppings || 'なし'}</div>
+              </div>
+              <div class="item-price">¥${subtotal.toLocaleString()}</div>
             </div>
-            <div class="item-price">¥${subtotal.toLocaleString()}</div>
-          </div>
-        `;
-      });
+          `;
+        });
+      }
       
       card.innerHTML = `
         <div class="order-header">
           <div>
-            <span class="order-number">#${order.orderNumber}</span>
+            <span class="order-number">#${order.orderNumber || '---'}</span>
             ${statusHtml}
           </div>
           <div class="order-time">${timeStr}</div>
@@ -1246,7 +1446,7 @@
         </div>
         <div class="order-total">
           <span class="total-label">小計:</span>
-          <span class="total-amount">¥${order.totalAmount.toLocaleString()}</span>
+          <span class="total-amount">¥${(order.totalAmount || 0).toLocaleString()}</span>
         </div>
       `;
       
