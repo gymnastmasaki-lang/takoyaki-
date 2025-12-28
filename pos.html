@@ -343,6 +343,14 @@
       border-bottom: none;
     }
     
+    .order-item-detailed {
+      padding: 15px;
+      margin-bottom: 15px;
+      background: #f8f9fa;
+      border-radius: 10px;
+      border-left: 4px solid #667eea;
+    }
+    
     .item-name {
       font-weight: 500;
       color: #333;
@@ -536,6 +544,20 @@
       border-radius: 5px;
       cursor: pointer;
       font-size: 14px;
+    }
+    
+    .edit-btn {
+      padding: 5px 12px;
+      background: #FF9800;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .edit-btn:hover {
+      background: #F57C00;
     }
     
     .empty-state {
@@ -1053,27 +1075,19 @@
       `;
       list.appendChild(noneDiv);
       
-      // この商品に対応するトッピングのみを表示
-      const allowedToppingIds = item.toppings || [];
-      
-      if (allowedToppingIds.length > 0) {
-        // トッピングリスト（フィルタリング済み）
-        toppingsData.forEach(topping => {
-          // この商品のtoppingsフィールドに含まれるトッピングのみ表示
-          if (allowedToppingIds.includes(topping.id)) {
-            const div = document.createElement('div');
-            div.className = 'topping-item';
-            div.innerHTML = `
-              <input type="checkbox" id="topping-${topping.id}" value="${topping.id}" onchange="selectTopping(this)">
-              <div class="topping-item-info">
-                <span class="topping-item-name">${topping.name}</span>
-                <span class="topping-item-price">+¥${topping.price.toLocaleString()}</span>
-              </div>
-            `;
-            list.appendChild(div);
-          }
-        });
-      }
+      // 全てのトッピングを表示
+      toppingsData.forEach(topping => {
+        const div = document.createElement('div');
+        div.className = 'topping-item';
+        div.innerHTML = `
+          <input type="checkbox" id="topping-${topping.id}" value="${topping.id}" onchange="selectTopping(this)">
+          <div class="topping-item-info">
+            <span class="topping-item-name">${topping.name}</span>
+            <span class="topping-item-price">+¥${topping.price.toLocaleString()}</span>
+          </div>
+        `;
+        list.appendChild(div);
+      });
       
       // デフォルトで「なし」を選択
       document.getElementById('topping-none').checked = true;
@@ -1130,12 +1144,20 @@
         toppingPrice = selectedToppings.reduce((sum, t) => sum + t.price, 0);
       }
       
-      manualCart.push({
-        ...currentSelectingItem,
-        quantity: 1,
-        toppings: toppingNames,
-        toppingPrice: toppingPrice
-      });
+      // 編集モードかどうかを確認
+      if (currentSelectingItem.editIndex !== undefined) {
+        // 既存アイテムを更新
+        manualCart[currentSelectingItem.editIndex].toppings = toppingNames;
+        manualCart[currentSelectingItem.editIndex].toppingPrice = toppingPrice;
+      } else {
+        // 新規アイテムを追加
+        manualCart.push({
+          ...currentSelectingItem,
+          quantity: 1,
+          toppings: toppingNames,
+          toppingPrice: toppingPrice
+        });
+      }
       
       closeToppingModal();
       updateManualCart();
@@ -1183,9 +1205,10 @@
             <div style="font-weight: bold; margin-bottom: 5px;">${item.name}</div>
             <div style="font-size: 12px; color: #666;">トッピング: ${item.toppings || 'なし'}</div>
           </div>
-          <div>
+          <div style="display: flex; gap: 5px;">
             <input type="number" class="quantity-input" min="1" value="${item.quantity}" 
                    onchange="updateQuantity(${index}, this.value)">
+            <button class="edit-btn" onclick="editCartItem(${index})">修正</button>
             <button class="remove-btn" onclick="removeFromManualCart(${index})">削除</button>
           </div>
           <span>¥${subtotal.toLocaleString()}</span>
@@ -1195,6 +1218,72 @@
       
       document.getElementById('manualTotal').textContent = `¥${total.toLocaleString()}`;
       submitBtn.disabled = manualCart.length === 0 || !manualTable.value;
+    }
+    
+    // カート内アイテムを修正
+    window.editCartItem = function(index) {
+      const item = manualCart[index];
+      
+      // 現在のトッピング情報を保持
+      currentSelectingItem = { ...item };
+      currentSelectingItem.editIndex = index;
+      
+      // 現在選択されているトッピングを復元
+      selectedToppings = [];
+      if (item.toppings && item.toppings !== 'なし') {
+        const toppingNames = item.toppings.split(', ');
+        toppingNames.forEach(name => {
+          const topping = toppingsData.find(t => t.name === name);
+          if (topping) {
+            selectedToppings.push(topping);
+          }
+        });
+      }
+      
+      // トッピングモーダルを表示
+      showToppingModalForEdit(item, index);
+    };
+    
+    // 修正用トッピングモーダル
+    function showToppingModalForEdit(item, index) {
+      document.getElementById('toppingModalItemName').textContent = item.name + ' (修正)';
+      const list = document.getElementById('toppingsList');
+      list.innerHTML = '';
+      
+      // 「なし」オプション
+      const noneDiv = document.createElement('div');
+      noneDiv.className = 'topping-item';
+      noneDiv.innerHTML = `
+        <input type="checkbox" id="topping-none" onchange="selectNoneTopping(this)">
+        <div class="topping-item-info">
+          <span class="topping-item-name">トッピングなし</span>
+          <span class="topping-item-price">¥0</span>
+        </div>
+      `;
+      list.appendChild(noneDiv);
+      
+      // 全てのトッピングを表示
+      toppingsData.forEach(topping => {
+        const isSelected = selectedToppings.some(t => t.id === topping.id);
+        const div = document.createElement('div');
+        div.className = 'topping-item';
+        div.innerHTML = `
+          <input type="checkbox" id="topping-${topping.id}" value="${topping.id}" 
+                 onchange="selectTopping(this)" ${isSelected ? 'checked' : ''}>
+          <div class="topping-item-info">
+            <span class="topping-item-name">${topping.name}</span>
+            <span class="topping-item-price">+¥${topping.price.toLocaleString()}</span>
+          </div>
+        `;
+        list.appendChild(div);
+      });
+      
+      // トッピングが選択されていない場合は「なし」を選択
+      if (selectedToppings.length === 0) {
+        document.getElementById('topping-none').checked = true;
+      }
+      
+      document.getElementById('toppingModal').classList.remove('hidden');
     }
     
     // 数量更新
@@ -1452,14 +1541,27 @@
       let itemsHtml = '';
       if (order.items && Array.isArray(order.items)) {
         order.items.forEach(item => {
-          const subtotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+          const itemBasePrice = item.price;
+          const itemWithTopping = itemBasePrice + (item.toppingPrice || 0);
+          const itemTotal = itemWithTopping * item.quantity;
+          
+          // トッピングを改行で表示
+          let toppingsHtml = '';
+          if (item.toppings && item.toppings !== 'なし') {
+            const toppingList = item.toppings.split(', ');
+            toppingsHtml = toppingList.map(t => `<div style="font-size: 12px; color: #666; padding-left: 10px;">　${t}</div>`).join('');
+          }
+          
           itemsHtml += `
-            <div class="order-item">
-              <div>
-                <div class="item-name">${item.name}</div>
-                <div class="item-details">数量: ${item.quantity}個 | トッピング: ${item.toppings || 'なし'}</div>
+            <div class="order-item-detailed">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <div style="font-weight: bold;">${item.name} ×${item.quantity}</div>
+                <div>¥${itemBasePrice.toLocaleString()}</div>
               </div>
-              <div class="item-price">¥${subtotal.toLocaleString()}</div>
+              ${toppingsHtml}
+              <div style="display: flex; justify-content: flex-end; margin-top: 5px; padding-top: 5px; border-top: 1px dashed #ddd;">
+                <div style="font-weight: bold; color: #667eea;">¥${itemWithTopping.toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
+              </div>
             </div>
           `;
         });
@@ -1477,7 +1579,7 @@
           ${itemsHtml}
         </div>
         <div class="order-total">
-          <span class="total-label">小計:</span>
+          <span class="total-label">合計の合計金額:</span>
           <span class="total-amount">¥${(order.totalAmount || 0).toLocaleString()}</span>
         </div>
       `;
