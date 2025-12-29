@@ -2162,12 +2162,10 @@
           const orderDate = data.timestamp.toDate();
           const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
           
-          console.log(`注文#${data.orderNumber}: JST=${jstOrderDate.toLocaleString('ja-JP')}, paidAt=${!!data.paidAt}, deleted=${!!data.deleted}, cancelled=${!!data.cancelledAt}`);
-          
-          // 今日の注文で、会計済み（削除・キャンセルではない）
-          if (jstOrderDate >= todayStart && data.paidAt && !data.deleted && !data.cancelledAt) {
+          // 今日の注文で、完了ボタンを押した（completedAtがある）もの
+          if (jstOrderDate >= todayStart && data.completedAt && !data.deleted) {
             customerCount++;
-            console.log(`  → カウント: ${customerCount}`);
+            console.log(`注文#${data.orderNumber}: 完了済み → カウント: ${customerCount}`);
           }
         });
         
@@ -2237,6 +2235,8 @@
         let paypaySales = 0;
         let orderCount = 0;
         
+        console.log('売上計算 - 開始日:', startDate.toLocaleString('ja-JP'));
+        
         ordersSnapshot.forEach(docSnap => {
           const data = docSnap.data();
           if (!data.timestamp) return;
@@ -2244,9 +2244,12 @@
           const orderDate = data.timestamp.toDate();
           const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
           
-          if (jstOrderDate >= startDate && data.paidAt && !data.deleted && !data.cancelledAt) {
+          // 指定期間の注文で、会計済み（削除されていない）もの
+          if (jstOrderDate >= startDate && data.paidAt && !data.deleted) {
             totalSales += data.totalAmount || 0;
             orderCount++;
+            
+            console.log(`注文#${data.orderNumber}: ¥${data.totalAmount} (${data.paymentMethod})`);
             
             // 支払い方法別
             if (data.paymentMethod === 'cash') cashSales += data.totalAmount || 0;
@@ -2254,6 +2257,8 @@
             else if (data.paymentMethod === 'paypay') paypaySales += data.totalAmount || 0;
           }
         });
+        
+        console.log('最終売上:', totalSales, '注文数:', orderCount);
         
         container.innerHTML = `
           <div style="background: white; border-radius: 12px; padding: 20px;">
@@ -2319,15 +2324,24 @@
         let orderCount = 0;
         let customerCount = 0;
         
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
+        ordersSnapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          if (!data.timestamp) return;
+          
           const orderDate = data.timestamp.toDate();
           const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
           
-          if (jstOrderDate >= todayStart && data.paidAt && !data.deleted && !data.cancelledAt) {
-            totalSales += data.totalAmount || 0;
-            orderCount++;
-            customerCount++;
+          // 今日の注文
+          if (jstOrderDate >= todayStart && !data.deleted) {
+            // 会計済み → 売上に加算
+            if (data.paidAt) {
+              totalSales += data.totalAmount || 0;
+              orderCount++;
+            }
+            // 完了済み → 客数に加算
+            if (data.completedAt) {
+              customerCount++;
+            }
           }
         });
         
@@ -2378,15 +2392,24 @@
         };
         
         const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
+        ordersSnapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          if (!data.timestamp) return;
+          
           const orderDate = data.timestamp.toDate();
           const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
           
-          if (jstOrderDate >= todayStart && data.paidAt && !data.deleted && !data.cancelledAt) {
-            settlementData.totalSales += data.totalAmount || 0;
-            settlementData.orderCount++;
-            settlementData.customerCount++;
+          // 今日の注文
+          if (jstOrderDate >= todayStart && !data.deleted) {
+            // 会計済み → 売上に加算
+            if (data.paidAt) {
+              settlementData.totalSales += data.totalAmount || 0;
+              settlementData.orderCount++;
+            }
+            // 完了済み → 客数に加算
+            if (data.completedAt) {
+              settlementData.customerCount++;
+            }
           }
         });
         
