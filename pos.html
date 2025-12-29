@@ -820,6 +820,7 @@
       <div class="header-right">
         <button onclick="showHistoryModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">📜 履歴</button>
         <button onclick="showMonthlyReportModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">📊 月次レポート</button>
+        <button onclick="showResetOrderNumberModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">🔄 番号リセット</button>
         <div class="auto-print-toggle">
           <label>レシート自動発行</label>
           <label class="toggle-switch">
@@ -995,6 +996,26 @@
       
       <button class="btn btn-primary" onclick="proceedToSplitPayment()" id="splitPaymentBtn" disabled>選択した注文を会計</button>
       <button class="btn btn-secondary" onclick="closeSplitPaymentModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 注文番号リセットモーダル -->
+  <div id="resetOrderNumberModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 500px;">
+      <h3 style="color: #ff6b6b;">⚠️ 注文番号リセット</h3>
+      <div style="margin: 20px 0; padding: 20px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 8px;">
+        <p style="margin: 0 0 10px 0; font-weight: bold; color: #856404;">注意事項:</p>
+        <ul style="margin: 0; padding-left: 20px; color: #856404;">
+          <li>注文番号を619番にリセットします</li>
+          <li>すべての注文が削除済みであることを確認してください</li>
+          <li>この操作は取り消せません</li>
+        </ul>
+      </div>
+      <div style="margin: 20px 0;">
+        <p style="font-size: 16px; font-weight: bold;">本当にリセットしますか？</p>
+      </div>
+      <button class="btn" style="width: 100%; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; margin-bottom: 10px;" onclick="confirmResetOrderNumber()">リセットする</button>
+      <button class="btn btn-secondary" onclick="closeResetOrderNumberModal()">キャンセル</button>
     </div>
   </div>
   
@@ -1507,6 +1528,51 @@
       document.getElementById('splitPaymentModal').classList.add('hidden');
       document.getElementById('paymentModal').classList.remove('hidden');
       selectedSplitOrders = [];
+    };
+    
+    // 注文番号リセットモーダルを表示
+    window.showResetOrderNumberModal = function() {
+      document.getElementById('resetOrderNumberModal').classList.remove('hidden');
+    };
+    
+    // 注文番号リセットモーダルを閉じる
+    window.closeResetOrderNumberModal = function() {
+      document.getElementById('resetOrderNumberModal').classList.add('hidden');
+    };
+    
+    // 注文番号リセットを実行
+    window.confirmResetOrderNumber = async function() {
+      try {
+        // 全注文を取得して削除済み以外がないか確認
+        const allOrdersSnapshot = await getDocs(collection(db, 'orders'));
+        let hasActiveOrders = false;
+        
+        allOrdersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (!data.deleted) {
+            hasActiveOrders = true;
+          }
+        });
+        
+        if (hasActiveOrders) {
+          alert('⚠️ まだ削除されていない注文があります。\nすべての注文を削除してからリセットしてください。');
+          return;
+        }
+        
+        // order_counterドキュメントを更新（存在しない場合は作成）
+        const counterRef = doc(db, 'system', 'order_counter');
+        await setDoc(counterRef, {
+          lastOrderNumber: 618,
+          lastResetDate: Timestamp.now(),
+          resetBy: 'pos_system'
+        });
+        
+        alert('✅ 注文番号を619番にリセットしました');
+        closeResetOrderNumberModal();
+      } catch (e) {
+        console.error('リセットエラー:', e);
+        alert('エラーが発生しました: ' + e.message);
+      }
     };
     
     // 手動カートの表示更新
