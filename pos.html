@@ -808,6 +808,41 @@
       color: #666;
     }
   </style>
+  
+  <script>
+    // タップ音を再生する関数
+    function playBeep() {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 800; // 800Hzのビープ音
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    }
+    
+    // クリックイベントにビープ音を追加
+    document.addEventListener('DOMContentLoaded', function() {
+      document.addEventListener('click', function(e) {
+        // ボタン、チェックボックス、.table-btn、.menu-item-checkbox、.topping-itemをクリックしたらビープ音
+        if (e.target.closest('button') || 
+            e.target.closest('.table-btn') || 
+            e.target.closest('.menu-item-checkbox') || 
+            e.target.closest('.topping-item') ||
+            e.target.type === 'checkbox') {
+          playBeep();
+        }
+      });
+    });
+  </script>
 </head>
 <body>
   <div class="container">
@@ -1165,6 +1200,14 @@
         const btn = document.createElement('button');
         btn.className = 'table-btn';
         
+        // 即会計ボタンは特別なスタイル
+        if (table === '即会計') {
+          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          btn.style.color = 'white';
+          btn.style.fontSize = '20px';
+          btn.style.fontWeight = 'bold';
+        }
+        
         // 予約テーブルの場合はメモアイコンを追加
         if (table.startsWith('予約')) {
           btn.style.position = 'relative';
@@ -1194,7 +1237,13 @@
         tableLabel.textContent = table;
         btn.appendChild(tableLabel);
         
-        btn.onclick = () => selectTable(table);
+        // 即会計の場合は直接会計モーダルを表示
+        if (table === '即会計') {
+          btn.onclick = () => showQuickCheckout();
+        } else {
+          btn.onclick = () => selectTable(table);
+        }
+        
         btn.id = `table-${table}`;
         tableGrid.appendChild(btn);
       });
@@ -1665,12 +1714,18 @@
         let dateMatch = true;
         if (dateFilter === 'today') {
           const todayStart = new Date(jstNow);
-          todayStart.setHours(1, 0, 0, 0);
+          todayStart.setHours(3, 0, 0, 0);
+          if (jstNow.getHours() < 3) {
+            todayStart.setDate(todayStart.getDate() - 1);
+          }
           dateMatch = jstOrderDate >= todayStart;
         } else if (dateFilter === 'yesterday') {
           const yesterdayStart = new Date(jstNow);
           yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-          yesterdayStart.setHours(1, 0, 0, 0);
+          yesterdayStart.setHours(3, 0, 0, 0);
+          if (jstNow.getHours() < 3) {
+            yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          }
           const yesterdayEnd = new Date(yesterdayStart);
           yesterdayEnd.setDate(yesterdayEnd.getDate() + 1);
           dateMatch = jstOrderDate >= yesterdayStart && jstOrderDate < yesterdayEnd;
@@ -1949,6 +2004,101 @@
       document.getElementById('monthlyReportModal').classList.add('hidden');
     };
     
+    // ========== 即会計機能 ==========
+    
+    let quickCheckoutCart = []; // 即会計用カート
+    
+    // 即会計モーダルを表示
+    window.showQuickCheckout = function() {
+      quickCheckoutCart = [];
+      updateQuickCheckoutCart();
+      
+      // 手動入力セクションを即会計モードで表示
+      document.getElementById('orderSection').classList.remove('hidden');
+      document.getElementById('selectedTableLabel').textContent = '💳 即会計';
+      document.getElementById('ordersList').innerHTML = `
+        <div style="padding: 20px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border-radius: 12px; margin-bottom: 20px;">
+          <h3 style="margin: 0;">💳 即会計モード</h3>
+          <p style="margin: 5px 0 0 0; font-size: 14px;">商品を選択して「注文を追加」してください</p>
+        </div>
+        <div id="quickCheckoutOrders"></div>
+      `;
+      
+      selectedTable = '即会計';
+      
+      // スクロール
+      document.getElementById('orderSection').scrollIntoView({ behavior: 'smooth' });
+    };
+    
+    // 即会計カートを更新
+    function updateQuickCheckoutCart() {
+      const container = document.getElementById('quickCheckoutOrders');
+      if (!container) return;
+      
+      if (quickCheckoutCart.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">商品を追加してください</div>';
+        document.getElementById('totalSection').classList.add('hidden');
+        return;
+      }
+      
+      container.innerHTML = '';
+      let total = 0;
+      
+      quickCheckoutCart.forEach((item, index) => {
+        const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+        total += itemTotal;
+        
+        const card = document.createElement('div');
+        card.style.cssText = `
+          background: white;
+          border-radius: 12px;
+          padding: 15px;
+          margin-bottom: 10px;
+          border: 2px solid #4CAF50;
+        `;
+        
+        let toppingsHtml = '';
+        if (item.toppings && item.toppings !== 'なし') {
+          const toppingList = item.toppings.split(', ');
+          toppingsHtml = toppingList.map(t => 
+            `<div style="font-size: 12px; color: #666; padding-left: 10px;">　${t}</div>`
+          ).join('');
+        }
+        
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="flex: 1;">
+              <div style="font-weight: bold; font-size: 16px;">${item.name} ×${item.quantity}</div>
+              ${toppingsHtml}
+              <div style="color: #666; font-size: 14px; margin-top: 5px;">¥${item.price.toLocaleString()} + ¥${(item.toppingPrice || 0).toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
+            </div>
+            <button onclick="removeQuickCheckoutItem(${index})" style="padding: 8px 16px; background: #f44336; color: white; border: none; border-radius: 8px; cursor: pointer;">削除</button>
+          </div>
+        `;
+        
+        container.appendChild(card);
+      });
+      
+      // 合計表示
+      document.getElementById('totalSection').classList.remove('hidden');
+      document.getElementById('totalAmount').textContent = `¥${total.toLocaleString()}`;
+      
+      // currentOrdersを更新（会計ボタン用）
+      currentOrders = [{
+        id: 'quick-checkout',
+        tableNumber: '即会計',
+        items: quickCheckoutCart,
+        totalAmount: total
+      }];
+      totalAmountToPay = total;
+    }
+    
+    // 即会計カートから商品を削除
+    window.removeQuickCheckoutItem = function(index) {
+      quickCheckoutCart.splice(index, 1);
+      updateQuickCheckoutCart();
+    };
+    
     // 手動カートの表示更新
     function updateManualCart() {
       const container = document.getElementById('selectedItems');
@@ -2116,6 +2266,32 @@
     
     // 手動注文を送信
     window.submitManualOrder = async function() {
+      // 即会計モードの場合
+      if (selectedTable === '即会計') {
+        if (manualCart.length === 0) {
+          alert('商品を選択してください');
+          return;
+        }
+        
+        // 即会計カートに追加
+        manualCart.forEach(item => {
+          quickCheckoutCart.push({ ...item });
+        });
+        
+        // 手動カートをクリア
+        manualCart = [];
+        updateManualCart();
+        updateQuickCheckoutCart();
+        
+        // チェックボックスをクリア
+        document.querySelectorAll('#menuItemsList input[type="checkbox"]').forEach(cb => {
+          cb.checked = false;
+        });
+        
+        return;
+      }
+      
+      // 通常のテーブル注文
       const tableNumber = document.getElementById('manualTable').value;
       
       if (!tableNumber || manualCart.length === 0) {
