@@ -998,6 +998,75 @@
     </div>
   </div>
   
+  <!-- 履歴モーダル -->
+  <div id="historyModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+      <h3>📜 注文履歴</h3>
+      
+      <div style="margin: 20px 0; display: flex; gap: 10px; flex-wrap: wrap;">
+        <select id="historyDateFilter" onchange="filterHistory()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <option value="today">今日</option>
+          <option value="yesterday">昨日</option>
+          <option value="week">今週</option>
+          <option value="month">今月</option>
+          <option value="all">全期間</option>
+        </select>
+        
+        <select id="historyStatusFilter" onchange="filterHistory()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <option value="all">すべて</option>
+          <option value="deleted">削除済み</option>
+          <option value="paid">会計済み</option>
+          <option value="completed">完了</option>
+          <option value="cancelled">キャンセル</option>
+        </select>
+        
+        <button onclick="refreshHistory()" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">🔄 更新</button>
+      </div>
+      
+      <div id="historyList" style="max-height: 60vh; overflow-y: auto;">
+        <!-- 履歴リスト -->
+      </div>
+      
+      <button class="btn btn-secondary" onclick="closeHistoryModal()">閉じる</button>
+    </div>
+  </div>
+  
+  <!-- 月次レポートモーダル -->
+  <div id="monthlyReportModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <h3>📊 月次レポート</h3>
+      
+      <div style="margin: 20px 0; display: flex; gap: 10px; align-items: center;">
+        <select id="reportYear" onchange="generateMonthlyReport()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <!-- JavaScriptで生成 -->
+        </select>
+        
+        <select id="reportMonth" onchange="generateMonthlyReport()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <option value="1">1月</option>
+          <option value="2">2月</option>
+          <option value="3">3月</option>
+          <option value="4">4月</option>
+          <option value="5">5月</option>
+          <option value="6">6月</option>
+          <option value="7">7月</option>
+          <option value="8">8月</option>
+          <option value="9">9月</option>
+          <option value="10">10月</option>
+          <option value="11">11月</option>
+          <option value="12">12月</option>
+        </select>
+        
+        <button onclick="generateMonthlyReport()" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">📊 集計</button>
+      </div>
+      
+      <div id="monthlyReportContent">
+        <!-- レポート内容 -->
+      </div>
+      
+      <button class="btn btn-secondary" onclick="closeMonthlyReportModal()">閉じる</button>
+    </div>
+  </div>
+  
   
   <script>
     let selectedTable = null;
@@ -1537,7 +1606,348 @@
       selectedSplitOrders = [];
     };
     
-    // 注文番号リセットモーダルを表示
+    // ========== 履歴機能 ==========
+    
+    let historyOrders = [];
+    
+    // 履歴モーダルを表示
+    window.showHistoryModal = async function() {
+      document.getElementById('historyModal').classList.remove('hidden');
+      await loadHistory();
+    };
+    
+    // 履歴を読み込み
+    async function loadHistory() {
+      try {
+        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        historyOrders = [];
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          historyOrders.push({
+            id: doc.id,
+            orderNumber: data.orderNumber || 0,
+            timestamp: data.timestamp,
+            tableNumber: data.tableNumber || '',
+            items: data.items || [],
+            totalAmount: data.totalAmount || 0,
+            paidAt: data.paidAt || null,
+            completedAt: data.completedAt || null,
+            cancelledAt: data.cancelledAt || null,
+            deleted: data.deleted || false,
+            deletedAt: data.deletedAt || null
+          });
+        });
+        
+        // 注文番号で降順ソート（新しい順）
+        historyOrders.sort((a, b) => b.orderNumber - a.orderNumber);
+        
+        filterHistory();
+      } catch (e) {
+        console.error('履歴読み込みエラー:', e);
+        alert('履歴の読み込みに失敗しました');
+      }
+    }
+    
+    // 履歴をフィルタ表示
+    window.filterHistory = function() {
+      const dateFilter = document.getElementById('historyDateFilter').value;
+      const statusFilter = document.getElementById('historyStatusFilter').value;
+      
+      const now = new Date();
+      const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+      
+      let filtered = historyOrders.filter(order => {
+        // 日付フィルタ
+        const orderDate = order.timestamp.toDate();
+        const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+        
+        let dateMatch = true;
+        if (dateFilter === 'today') {
+          const todayStart = new Date(jstNow);
+          todayStart.setHours(1, 0, 0, 0);
+          dateMatch = jstOrderDate >= todayStart;
+        } else if (dateFilter === 'yesterday') {
+          const yesterdayStart = new Date(jstNow);
+          yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          yesterdayStart.setHours(1, 0, 0, 0);
+          const yesterdayEnd = new Date(yesterdayStart);
+          yesterdayEnd.setDate(yesterdayEnd.getDate() + 1);
+          dateMatch = jstOrderDate >= yesterdayStart && jstOrderDate < yesterdayEnd;
+        } else if (dateFilter === 'week') {
+          const weekAgo = new Date(jstNow);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          dateMatch = jstOrderDate >= weekAgo;
+        } else if (dateFilter === 'month') {
+          const monthStart = new Date(jstNow);
+          monthStart.setDate(1);
+          monthStart.setHours(0, 0, 0, 0);
+          dateMatch = jstOrderDate >= monthStart;
+        }
+        
+        // ステータスフィルタ
+        let statusMatch = true;
+        if (statusFilter === 'deleted') {
+          statusMatch = order.deleted;
+        } else if (statusFilter === 'paid') {
+          statusMatch = order.paidAt && !order.deleted;
+        } else if (statusFilter === 'completed') {
+          statusMatch = order.completedAt && !order.deleted;
+        } else if (statusFilter === 'cancelled') {
+          statusMatch = order.cancelledAt && !order.deleted;
+        }
+        
+        return dateMatch && statusMatch;
+      });
+      
+      displayHistory(filtered);
+    };
+    
+    // 履歴を表示
+    function displayHistory(orders) {
+      const container = document.getElementById('historyList');
+      
+      if (orders.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">該当する履歴がありません</div>';
+        return;
+      }
+      
+      container.innerHTML = '';
+      
+      orders.forEach(order => {
+        const card = document.createElement('div');
+        card.style.cssText = `
+          background: white;
+          border-radius: 12px;
+          padding: 15px;
+          margin-bottom: 15px;
+          border: 2px solid #ddd;
+        `;
+        
+        // ステータスバッジ
+        let badges = [];
+        if (order.deleted) badges.push('<span style="background: #666; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">🗑️ 削除済み</span>');
+        if (order.paidAt) badges.push('<span style="background: #2196F3; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">💳 会計済</span>');
+        if (order.completedAt) badges.push('<span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">✓ 完了</span>');
+        if (order.cancelledAt) badges.push('<span style="background: #f44336; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">✕ キャンセル</span>');
+        
+        const orderDate = order.timestamp.toDate();
+        const dateStr = orderDate.toLocaleString('ja-JP');
+        
+        let itemsHtml = '';
+        order.items.forEach(item => {
+          itemsHtml += `<div style="padding: 5px 0; border-bottom: 1px solid #eee;">
+            ${item.name} ×${item.quantity} - ¥${((item.price + (item.toppingPrice || 0)) * item.quantity).toLocaleString()}
+          </div>`;
+        });
+        
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div>
+              <strong style="font-size: 18px;">#${order.orderNumber}</strong>
+              <span style="color: #666; margin-left: 10px;">${order.tableNumber}</span>
+            </div>
+            <div>${badges.join('')}</div>
+          </div>
+          <div style="font-size: 12px; color: #999; margin-bottom: 10px;">${dateStr}</div>
+          <div style="max-height: 150px; overflow-y: auto; margin: 10px 0;">
+            ${itemsHtml}
+          </div>
+          <div style="text-align: right; font-size: 18px; font-weight: bold; color: #667eea; margin-top: 10px;">
+            合計: ¥${order.totalAmount.toLocaleString()}
+          </div>
+        `;
+        
+        container.appendChild(card);
+      });
+    }
+    
+    // 履歴を更新
+    window.refreshHistory = async function() {
+      await loadHistory();
+    };
+    
+    // 履歴モーダルを閉じる
+    window.closeHistoryModal = function() {
+      document.getElementById('historyModal').classList.add('hidden');
+    };
+    
+    // ========== 月次レポート機能 ==========
+    
+    // 月次レポートモーダルを表示
+    window.showMonthlyReportModal = function() {
+      // 年の選択肢を生成
+      const yearSelect = document.getElementById('reportYear');
+      const currentYear = new Date().getFullYear();
+      yearSelect.innerHTML = '';
+      for (let year = currentYear; year >= currentYear - 5; year--) {
+        const option = document.createElement('option');
+        option.value = year;
+        option.textContent = `${year}年`;
+        yearSelect.appendChild(option);
+      }
+      
+      // 現在の月を選択
+      const currentMonth = new Date().getMonth() + 1;
+      document.getElementById('reportMonth').value = currentMonth;
+      
+      document.getElementById('monthlyReportModal').classList.remove('hidden');
+      generateMonthlyReport();
+    };
+    
+    // 月次レポートを生成
+    window.generateMonthlyReport = async function() {
+      const year = parseInt(document.getElementById('reportYear').value);
+      const month = parseInt(document.getElementById('reportMonth').value);
+      
+      const container = document.getElementById('monthlyReportContent');
+      container.innerHTML = '<div style="text-align: center; padding: 40px;">集計中...</div>';
+      
+      try {
+        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        
+        let totalSales = 0;
+        let totalOrders = 0;
+        let paidOrders = 0;
+        let cancelledOrders = 0;
+        let deletedOrders = 0;
+        let itemCounts = {};
+        let categoryCounts = {};
+        let dailySales = {};
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          const orderDate = data.timestamp.toDate();
+          
+          if (orderDate.getFullYear() === year && orderDate.getMonth() + 1 === month) {
+            totalOrders++;
+            
+            if (data.deleted) {
+              deletedOrders++;
+            }
+            if (data.paidAt) {
+              paidOrders++;
+              totalSales += data.totalAmount || 0;
+              
+              // 日別売上
+              const day = orderDate.getDate();
+              dailySales[day] = (dailySales[day] || 0) + (data.totalAmount || 0);
+            }
+            if (data.cancelledAt) {
+              cancelledOrders++;
+            }
+            
+            // 商品集計
+            if (data.items && data.paidAt) {
+              data.items.forEach(item => {
+                itemCounts[item.name] = (itemCounts[item.name] || 0) + item.quantity;
+                
+                // カテゴリ集計
+                const category = item.category || 'その他';
+                categoryCounts[category] = (categoryCounts[category] || 0) + item.quantity;
+              });
+            }
+          }
+        });
+        
+        // 人気商品トップ10
+        const topItems = Object.entries(itemCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10);
+        
+        // カテゴリ別売上
+        const categoryList = Object.entries(categoryCounts)
+          .sort((a, b) => b[1] - a[1]);
+        
+        // 日別売上グラフ用データ
+        const daysInMonth = new Date(year, month, 0).getDate();
+        let dailyChart = '';
+        for (let day = 1; day <= daysInMonth; day++) {
+          const sales = dailySales[day] || 0;
+          const barHeight = sales > 0 ? Math.max(20, (sales / Math.max(...Object.values(dailySales))) * 100) : 0;
+          dailyChart += `
+            <div style="display: flex; align-items: flex-end; margin-right: 2px;">
+              <div style="width: 20px; height: ${barHeight}px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 3px 3px 0 0;" title="${day}日: ¥${sales.toLocaleString()}"></div>
+            </div>
+          `;
+        }
+        
+        container.innerHTML = `
+          <div style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+            <h4 style="margin-bottom: 15px; color: #667eea;">📈 売上サマリー</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+              <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">総売上</div>
+                <div style="font-size: 28px; font-weight: bold;">¥${totalSales.toLocaleString()}</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">会計済み注文</div>
+                <div style="font-size: 28px; font-weight: bold;">${paidOrders}件</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">総注文数</div>
+                <div style="font-size: 28px; font-weight: bold;">${totalOrders}件</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">平均単価</div>
+                <div style="font-size: 28px; font-weight: bold;">¥${paidOrders > 0 ? Math.round(totalSales / paidOrders).toLocaleString() : 0}</div>
+              </div>
+            </div>
+          </div>
+          
+          <div style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+            <h4 style="margin-bottom: 15px; color: #667eea;">📊 日別売上推移</h4>
+            <div style="display: flex; height: 150px; align-items: flex-end; justify-content: space-between; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+              ${dailyChart}
+            </div>
+          </div>
+          
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+            <div style="background: white; border-radius: 12px; padding: 20px;">
+              <h4 style="margin-bottom: 15px; color: #667eea;">🏆 人気商品トップ10</h4>
+              ${topItems.map((item, idx) => `
+                <div style="display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee;">
+                  <span>${idx + 1}. ${item[0]}</span>
+                  <strong>${item[1]}個</strong>
+                </div>
+              `).join('')}
+            </div>
+            
+            <div style="background: white; border-radius: 12px; padding: 20px;">
+              <h4 style="margin-bottom: 15px; color: #667eea;">📦 カテゴリ別販売数</h4>
+              ${categoryList.map(cat => `
+                <div style="display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee;">
+                  <span>${cat[0]}</span>
+                  <strong>${cat[1]}個</strong>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          
+          <div style="background: white; border-radius: 12px; padding: 20px; margin-top: 20px;">
+            <h4 style="margin-bottom: 15px; color: #667eea;">📋 その他の統計</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+              <div style="padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                <div style="font-size: 12px; color: #666;">キャンセル数</div>
+                <div style="font-size: 20px; font-weight: bold;">${cancelledOrders}件</div>
+              </div>
+              <div style="padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                <div style="font-size: 12px; color: #666;">削除数</div>
+                <div style="font-size: 20px; font-weight: bold;">${deletedOrders}件</div>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        console.error('レポート生成エラー:', e);
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: red;">レポートの生成に失敗しました</div>';
+      }
+    };
+    
+    // 月次レポートモーダルを閉じる
+    window.closeMonthlyReportModal = function() {
+      document.getElementById('monthlyReportModal').classList.add('hidden');
+    };
     
     // 手動カートの表示更新
     function updateManualCart() {
