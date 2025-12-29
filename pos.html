@@ -897,6 +897,17 @@
   <div id="paymentModal" class="modal-overlay hidden">
     <div class="modal">
       <h3>💳 支払い方法を選択</h3>
+      
+      <!-- 分割会計ボタン -->
+      <div style="margin-bottom: 20px; padding: 15px; background: #f0f8ff; border-radius: 10px; border-left: 4px solid #667eea;">
+        <button class="btn" style="width: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;" onclick="showSplitPaymentModal()">
+          ✂️ 分割会計
+        </button>
+        <div style="font-size: 12px; color: #666; margin-top: 8px; text-align: center;">
+          複数の注文を選択して一緒に会計
+        </div>
+      </div>
+      
       <div class="payment-methods">
         <button class="payment-method-btn" onclick="selectPaymentMethod('cash')">
           💵 現金
@@ -950,6 +961,43 @@
     </div>
   </div>
   
+  <!-- 予約メモモーダル -->
+  <div id="reservationMemoModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 500px;">
+      <h3>📝 予約メモ</h3>
+      <div style="margin: 20px 0;">
+        <label style="display: block; margin-bottom: 10px; font-weight: bold;">
+          <span id="reservationTableName"></span>のメモ
+        </label>
+        <textarea id="reservationMemoText" rows="5" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; resize: vertical;"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="saveReservationMemo()">💾 保存</button>
+      <button class="btn btn-secondary" onclick="closeReservationMemoModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 分割会計モーダル -->
+  <div id="splitPaymentModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+      <h3>✂️ 分割会計</h3>
+      <p style="color: #666; margin-bottom: 20px;">一緒に会計する注文を選択してください</p>
+      
+      <div id="splitOrdersList" style="margin-bottom: 20px;">
+        <!-- 注文リストが動的に生成される -->
+      </div>
+      
+      <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: bold;">
+          <span>選択した注文の合計:</span>
+          <span id="splitTotalAmount" style="color: #667eea;">¥0</span>
+        </div>
+      </div>
+      
+      <button class="btn btn-primary" onclick="proceedToSplitPayment()" id="splitPaymentBtn" disabled>選択した注文を会計</button>
+      <button class="btn btn-secondary" onclick="closeSplitPaymentModal()">キャンセル</button>
+    </div>
+  </div>
+  
   <script>
     let selectedTable = null;
     let currentOrders = [];
@@ -961,6 +1009,7 @@
     let cashReceived = 0;
     let changeAmount = 0;
     let lastPaymentData = null;
+    let currentReservationTable = null; // 予約メモ編集中のテーブル
     
     // プリンターIPアドレス（画像から）
     const PRINTER_IP = '192.168.244.41';
@@ -968,6 +1017,7 @@
     // メニューデータ（Firebaseから取得）
     let menuData = [];
     let toppingsData = [];
+    let reservationMemos = {}; // 予約メモを保存
     
     // テーブル定義
     const TABLES = [
@@ -1052,9 +1102,14 @@
           memoIcon.innerHTML = '📝';
           memoIcon.style.position = 'absolute';
           memoIcon.style.top = '5px';
-          memoIcon.style.left = '5px';
+          memoIcon.style.right = '5px';
           memoIcon.style.fontSize = '16px';
           memoIcon.style.cursor = 'pointer';
+          memoIcon.style.zIndex = '10';
+          memoIcon.onclick = (e) => {
+            e.stopPropagation(); // テーブル選択を防ぐ
+            showReservationMemoModal(table);
+          };
           btn.appendChild(memoIcon);
         }
         
@@ -1291,6 +1346,137 @@
       document.getElementById('toppingModal').classList.add('hidden');
       currentSelectingItem = null;
       selectedToppings = [];
+    };
+    
+    // 予約メモモーダルを表示
+    window.showReservationMemoModal = function(tableName) {
+      currentReservationTable = tableName;
+      document.getElementById('reservationTableName').textContent = tableName;
+      document.getElementById('reservationMemoText').value = reservationMemos[tableName] || '';
+      document.getElementById('reservationMemoModal').classList.remove('hidden');
+    };
+    
+    // 予約メモを保存
+    window.saveReservationMemo = function() {
+      if (!currentReservationTable) return;
+      
+      const memo = document.getElementById('reservationMemoText').value.trim();
+      if (memo) {
+        reservationMemos[currentReservationTable] = memo;
+        alert(`${currentReservationTable}のメモを保存しました`);
+      } else {
+        delete reservationMemos[currentReservationTable];
+        alert(`${currentReservationTable}のメモを削除しました`);
+      }
+      
+      closeReservationMemoModal();
+    };
+    
+    // 予約メモモーダルを閉じる
+    window.closeReservationMemoModal = function() {
+      document.getElementById('reservationMemoModal').classList.add('hidden');
+      currentReservationTable = null;
+    };
+    
+    // 分割会計モーダルを表示
+    let selectedSplitOrders = [];
+    window.showSplitPaymentModal = function() {
+      // 未払いの注文のみを表示
+      const unpaidOrders = currentOrders.filter(o => !o.paidAt && !o.cancelledAt);
+      
+      if (unpaidOrders.length === 0) {
+        alert('会計可能な注文がありません');
+        return;
+      }
+      
+      const list = document.getElementById('splitOrdersList');
+      list.innerHTML = '';
+      selectedSplitOrders = [];
+      
+      unpaidOrders.forEach(order => {
+        const div = document.createElement('div');
+        div.style.cssText = `
+          padding: 15px;
+          margin-bottom: 10px;
+          border: 2px solid #ddd;
+          border-radius: 10px;
+          cursor: pointer;
+          transition: all 0.2s;
+        `;
+        
+        div.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <input type="checkbox" id="split-${order.id}" style="width: 20px; height: 20px; margin-right: 10px;">
+              <strong style="font-size: 18px;">#${order.orderNumber}</strong>
+              <span style="color: #666; margin-left: 10px;">${new Date(order.timestamp.toDate()).toLocaleTimeString('ja-JP', {hour: '2-digit', minute: '2-digit'})}</span>
+            </div>
+            <div style="font-size: 20px; font-weight: bold; color: #667eea;">¥${order.totalAmount.toLocaleString()}</div>
+          </div>
+        `;
+        
+        const checkbox = div.querySelector('input');
+        div.onclick = () => {
+          checkbox.checked = !checkbox.checked;
+          updateSplitSelection();
+        };
+        checkbox.onclick = (e) => e.stopPropagation();
+        checkbox.onchange = updateSplitSelection;
+        
+        list.appendChild(div);
+      });
+      
+      document.getElementById('paymentModal').classList.add('hidden');
+      document.getElementById('splitPaymentModal').classList.remove('hidden');
+      updateSplitSelection();
+    };
+    
+    // 分割会計の選択を更新
+    function updateSplitSelection() {
+      selectedSplitOrders = [];
+      let total = 0;
+      
+      currentOrders.forEach(order => {
+        const checkbox = document.getElementById(`split-${order.id}`);
+        if (checkbox && checkbox.checked) {
+          selectedSplitOrders.push(order);
+          total += order.totalAmount || 0;
+        }
+      });
+      
+      document.getElementById('splitTotalAmount').textContent = `¥${total.toLocaleString()}`;
+      document.getElementById('splitPaymentBtn').disabled = selectedSplitOrders.length === 0;
+    }
+    
+    // 分割会計を実行
+    window.proceedToSplitPayment = function() {
+      if (selectedSplitOrders.length === 0) {
+        alert('注文を選択してください');
+        return;
+      }
+      
+      // 選択した注文をcurrentOrdersにセット
+      currentOrders = selectedSplitOrders;
+      totalAmountToPay = selectedSplitOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      
+      // 分割会計モーダルを閉じて支払いモーダルを表示
+      document.getElementById('splitPaymentModal').classList.add('hidden');
+      document.getElementById('paymentModal').classList.remove('hidden');
+      
+      // 支払い方法をリセット
+      selectedPaymentMethod = null;
+      document.querySelectorAll('.payment-method-btn').forEach(btn => {
+        btn.classList.remove('selected');
+      });
+      document.getElementById('cashInputSection').classList.add('hidden');
+      document.getElementById('completePaymentBtn').disabled = true;
+    };
+    
+    // 分割会計モーダルを閉じる
+    window.closeSplitPaymentModal = function() {
+      document.getElementById('splitPaymentModal').classList.add('hidden');
+      document.getElementById('paymentModal').classList.remove('hidden');
+      selectedSplitOrders = [];
     };
     
     // 手動カートの表示更新
@@ -1620,19 +1806,16 @@
           }
         });
         
-        // 全ての注文を表示（未払い、完了、キャンセル全て、ただし非表示以外）
+        // 全ての注文を表示（未払い、会計済み、完了、キャンセル全て）
         orders.forEach(order => {
-          // 非表示(deleted)以外は全て表示
-          if (!order.deleted) {
-            const card = createOrderCard(order);
-            container.appendChild(card);
-            
-            // 未払い注文のみ合計に含める
-            if (!order.cancelledAt && !order.paidAt) {
-              currentOrders.push(order);
-              totalAmount += order.totalAmount || 0;
-              hasUnpaidOrders = true;
-            }
+          const card = createOrderCard(order);
+          container.appendChild(card);
+          
+          // 未払い注文のみ合計に含める
+          if (!order.cancelledAt && !order.paidAt) {
+            currentOrders.push(order);
+            totalAmount += order.totalAmount || 0;
+            hasUnpaidOrders = true;
           }
         });
         
@@ -1724,9 +1907,9 @@
         </div>
         <div class="order-actions">
           ${!order.paidAt && !order.cancelledAt ? `<button class="order-action-btn pay-btn" onclick="payOrderIndividual('${order.id}', ${order.totalAmount || 0})">💰 会計</button>` : ''}
-          ${!order.completedAt && !order.cancelledAt && !order.paidAt ? `<button class="order-action-btn complete-btn" onclick="completeOrder('${order.id}')">✅ 完了</button>` : ''}
-          ${!order.cancelledAt && !order.paidAt ? `<button class="order-action-btn cancel-btn" onclick="cancelOrder('${order.id}')">❌ キャンセル</button>` : ''}
-          <button class="order-action-btn delete-btn" onclick="deleteOrder('${order.id}')">👁️‍🗨️ 非表示</button>
+          <button class="order-action-btn complete-btn" onclick="completeOrder('${order.id}')">✅ 完了</button>
+          <button class="order-action-btn cancel-btn" onclick="cancelOrder('${order.id}')">❌ キャンセル</button>
+          ${order.completedAt || order.cancelledAt ? `<button class="order-action-btn delete-btn" onclick="deleteOrder('${order.id}')">🗑️ 削除</button>` : ''}
         </div>
       `;
       
@@ -1787,13 +1970,11 @@
     
     // 注文を削除する
     window.deleteOrder = async function(orderId) {
-      if (!confirm('この注文を非表示にしますか？（履歴には残ります）')) return;
+      if (!confirm('この注文を削除しますか？\n削除すると復元できません。')) return;
       
       try {
-        await updateDoc(doc(db, 'orders', orderId), {
-          deleted: true
-        });
-        alert('注文を非表示にしました');
+        await deleteDoc(doc(db, 'orders', orderId));
+        alert('注文を削除しました');
         await loadOrders(selectedTable);
       } catch (e) {
         console.error('非表示エラー:', e);
