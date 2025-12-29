@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>管理画面 - Firebase版</title>
+    <title>管理画面 - Firebaseバージョン</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -96,6 +96,29 @@
             const [editingMemo, setEditingMemo] = useState('');
             const [isLoading, setIsLoading] = useState(false);
             const [error, setError] = useState(null);
+
+            // 時刻を15分単位に丸める関数
+            const roundTimeToQuarter = (timeStr, isClockIn) => {
+                if (!timeStr) return null;
+                
+                const [hours, minutes] = timeStr.split(':').map(Number);
+                const totalMinutes = hours * 60 + minutes;
+                
+                // 15分単位に丸める
+                let roundedMinutes;
+                if (isClockIn) {
+                    // 出勤・休憩入: 切り上げ（例: 09:05 → 09:15）
+                    roundedMinutes = Math.ceil(totalMinutes / 15) * 15;
+                } else {
+                    // 退勤・休憩出: 切り捨て（例: 17:07 → 17:00）
+                    roundedMinutes = Math.floor(totalMinutes / 15) * 15;
+                }
+                
+                const roundedHours = Math.floor(roundedMinutes / 60);
+                const roundedMins = roundedMinutes % 60;
+                
+                return `${String(roundedHours).padStart(2, '0')}:${String(roundedMins).padStart(2, '0')}`;
+            };
 
             // Firestoreからデータを読み込み
             useEffect(() => {
@@ -196,15 +219,23 @@
                     return hours * 60 + minutes;
                 };
                 
-                const clockInMin = parseTime(record.clockIn);
-                const clockOutMin = parseTime(record.clockOut);
+                // 15分単位に丸める
+                const roundedClockIn = roundTimeToQuarter(record.clockIn, true);
+                const roundedClockOut = roundTimeToQuarter(record.clockOut, false);
+                const roundedBreakStart1 = roundTimeToQuarter(record.breakStart1, true);
+                const roundedBreakEnd1 = roundTimeToQuarter(record.breakEnd1, false);
+                const roundedBreakStart2 = roundTimeToQuarter(record.breakStart2, true);
+                const roundedBreakEnd2 = roundTimeToQuarter(record.breakEnd2, false);
+                
+                const clockInMin = parseTime(roundedClockIn);
+                const clockOutMin = parseTime(roundedClockOut);
                 let workMin = clockOutMin - clockInMin;
                 
-                if (record.breakStart1 && record.breakEnd1) {
-                    workMin -= (parseTime(record.breakEnd1) - parseTime(record.breakStart1));
+                if (roundedBreakStart1 && roundedBreakEnd1) {
+                    workMin -= (parseTime(roundedBreakEnd1) - parseTime(roundedBreakStart1));
                 }
-                if (record.breakStart2 && record.breakEnd2) {
-                    workMin -= (parseTime(record.breakEnd2) - parseTime(record.breakStart2));
+                if (roundedBreakStart2 && roundedBreakEnd2) {
+                    workMin -= (parseTime(roundedBreakEnd2) - parseTime(roundedBreakStart2));
                 }
                 
                 return Math.max(0, workMin / 60);
@@ -319,7 +350,7 @@
             };
 
             const deleteEmployee = async (id) => {
-                if (!confirm('この従業員を削除してもよろしいですか？')) return;
+                if (!confirm('この従業員を削除してもよろしいですか?')) return;
                 
                 setIsLoading(true);
                 try {
@@ -348,7 +379,7 @@
                 const timeRegex = /^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$/;
                 
                 if (editingValue && !timeRegex.test(editingValue)) {
-                    alert('時刻の形式が正しくありません（HH:MM形式で入力してください）');
+                    alert('時刻の形式が正しくありません(HH:MM形式で入力してください)');
                     return;
                 }
                 
@@ -438,11 +469,11 @@
                         const dailyPay = calculateDailyPay(employee, record);
                         const remarks = record.isHoliday ? '休日出勤' : '';
                         
-                        csvContent += `${day}日,${record.clockIn || ''},${record.breakStart1 || ''},${record.breakEnd1 || ''},${record.breakStart2 || ''},${record.breakEnd2 || ''},${record.clockOut || ''},${workHours.toFixed(1)}h,¥${Math.round(dailyPay.total).toLocaleString()},${remarks}\n`;
+                        csvContent += `${day}日,${record.clockIn || ''},${record.breakStart1 || ''},${record.breakEnd1 || ''},${record.breakStart2 || ''},${record.breakEnd2 || ''},${record.clockOut || ''},${workHours.toFixed(2)}h,¥${Math.round(dailyPay.total).toLocaleString()},${remarks}\n`;
                     }
                 }
                 
-                csvContent += `\n給与内訳\n項目,金額\n基本給,¥${Math.round(totals.basePay).toLocaleString()}\n時間外手当（25%）,¥${Math.round(totals.overtimePay).toLocaleString()}\n休日出勤手当（35%）,¥${Math.round(totals.holidayPay).toLocaleString()}\n交通費（${totals.workDays}日分）,¥${totals.transport.toLocaleString()}\n合計労働時間,${totals.hours.toFixed(1)}時間\n総支給額,¥${Math.round(totals.total).toLocaleString()}\n`;
+                csvContent += `\n給与内訳\n項目,金額\n基本給,¥${Math.round(totals.basePay).toLocaleString()}\n時間外手当(25%),¥${Math.round(totals.overtimePay).toLocaleString()}\n休日出勤手当(35%),¥${Math.round(totals.holidayPay).toLocaleString()}\n交通費(${totals.workDays}日分),¥${totals.transport.toLocaleString()}\n合計労働時間,${totals.hours.toFixed(2)}時間\n総支給額,¥${Math.round(totals.total).toLocaleString()}\n`;
                 
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement('a');
@@ -460,7 +491,7 @@
                                 <div className="text-center mb-6">
                                     <Lock className="w-16 h-16 mx-auto mb-4 text-gray-400" />
                                     <h2 className="text-2xl font-bold">管理画面ログイン</h2>
-                                    <p className="text-sm text-gray-600 mt-2">Firebase版</p>
+                                    <p className="text-sm text-gray-600 mt-2">Firebaseバージョン (15分刻み)</p>
                                 </div>
                                 
                                 {error && (
@@ -498,7 +529,7 @@
                 );
             }
 
-            // メイン画面（続く...）
+            // メイン画面(続き...)
             return (
                 <div className="min-h-screen bg-gray-100 p-4">
                     {isLoading && (
@@ -516,7 +547,7 @@
                             <div className="flex justify-between items-center">
                                 <div>
                                     <h1 className="text-3xl font-bold text-gray-800">勤怠管理システム</h1>
-                                    <p className="text-gray-600 mt-1">管理画面（Firebase版）</p>
+                                    <p className="text-gray-600 mt-1">管理画面(Firebaseバージョン・15分刻み)</p>
                                 </div>
                                 <button
                                     onClick={() => setIsAdminAuthenticated(false)}
@@ -702,15 +733,15 @@
                                                     <td className="border p-3 text-right font-bold">¥{Math.round(totals.basePay).toLocaleString()}</td>
                                                 </tr>
                                                 <tr>
-                                                    <td className="border p-3">時間外手当（25%割増）</td>
+                                                    <td className="border p-3">時間外手当(25%割増)</td>
                                                     <td className="border p-3 text-right font-bold">¥{Math.round(totals.overtimePay).toLocaleString()}</td>
                                                 </tr>
                                                 <tr>
-                                                    <td className="border p-3">休日出勤手当（35%割増）</td>
+                                                    <td className="border p-3">休日出勤手当(35%割増)</td>
                                                     <td className="border p-3 text-right font-bold">¥{Math.round(totals.holidayPay).toLocaleString()}</td>
                                                 </tr>
                                                 <tr>
-                                                    <td className="border p-3">交通費（{totals.workDays}日分）</td>
+                                                    <td className="border p-3">交通費({totals.workDays}日分)</td>
                                                     <td className="border p-3 text-right font-bold">¥{totals.transport.toLocaleString()}</td>
                                                 </tr>
                                                 <tr className="bg-blue-50">
@@ -724,7 +755,7 @@
                                     <div className="mb-4">
                                         <h3 className="text-xl font-bold mb-4">勤怠詳細</h3>
                                         <div className="text-sm text-gray-600 mb-2">
-                                            合計労働時間: {totals.hours.toFixed(1)}時間
+                                            合計労働時間: {totals.hours.toFixed(2)}時間 (15分単位で計算)
                                         </div>
                                         <div className="overflow-x-auto">
                                             <table className="w-full border-collapse border text-sm">
@@ -775,7 +806,7 @@
                                                                                 if (e.key === 'Escape') cancelEditingTime();
                                                                             }}
                                                                             className="w-full p-1 text-xs border border-gray-300 mt-1"
-                                                                            placeholder="メモ（例：買い物を頼んだ為修正）"
+                                                                            placeholder="メモ(例:買い物を頼んだ為修正)"
                                                                         />
                                                                         <div className="flex gap-1 mt-1">
                                                                             <button
@@ -815,7 +846,7 @@
                                                                 {renderEditableCell('breakStart2', record.breakStart2)}
                                                                 {renderEditableCell('breakEnd2', record.breakEnd2)}
                                                                 {renderEditableCell('clockOut', record.clockOut)}
-                                                                <td className="border p-2 text-center bg-gray-50">{workHours.toFixed(1)}h</td>
+                                                                <td className="border p-2 text-center bg-gray-50">{workHours.toFixed(2)}h</td>
                                                                 <td className="border p-2 text-right bg-gray-50">¥{Math.round(dailyPay.total).toLocaleString()}</td>
                                                                 <td className="border p-2 text-center text-xs bg-gray-50">
                                                                     {record.isHoliday && <span className="text-purple-600 font-bold block">🏖️ 休日出勤</span>}
@@ -866,7 +897,8 @@
 
                                     <div className="mt-8 text-sm text-gray-600">
                                         <p>※この給与明細書は労働基準法に基づき、5年間保管してください。</p>
-                                        <p>※時間外労働（8時間超過）は25%割増、休日出勤は35%割増にて計算されています。</p>
+                                        <p>※時間外労働(8時間超過)は25%割増、休日出勤は35%割増にて計算されています。</p>
+                                        <p>※労働時間は15分単位で計算されています(出勤は切り上げ、退勤は切り捨て)</p>
                                     </div>
                                 </div>
                             );
@@ -952,7 +984,7 @@
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium mb-2">時給（円）</label>
+                        <label className="block text-sm font-medium mb-2">時給(円)</label>
                         <input
                             type="number"
                             value={rate}
@@ -962,7 +994,7 @@
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium mb-2">交通費（円/日）</label>
+                        <label className="block text-sm font-medium mb-2">交通費(円/日)</label>
                         <input
                             type="number"
                             value={transport}
