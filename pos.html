@@ -3132,6 +3132,9 @@
           });
         }
         
+        // 🆕 日次売上を更新
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod);
+        
         // 支払いデータを保存（レシート印刷用）
         lastPaymentData = {
           tableNumber: selectedTable,
@@ -3395,6 +3398,68 @@
       selectedTable = null;
       currentOrders = [];
       document.getElementById('orderSection').classList.add('hidden');
+    };
+    
+    // 日次売上更新関数
+    window.updateDailySales = async function(totalAmount, paymentMethod) {
+      try {
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        
+        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod });
+        
+        const salesRef = doc(db, 'dailySales', dateStr);
+        const salesDoc = await getDoc(salesRef);
+        
+        if (salesDoc.exists()) {
+          const data = salesDoc.data();
+          console.log('既存データ:', data);
+          
+          const updates = {
+            totalSales: (data.totalSales || 0) + totalAmount,
+            customerCount: (data.customerCount || 0) + 1,
+            cashSales: data.cashSales || 0,
+            emoneSales: data.emoneSales || 0,
+            creditSales: data.creditSales || 0,
+            updatedAt: Timestamp.now()
+          };
+          
+          // 支払い方法別の売上を加算
+          if (paymentMethod === 'cash') {
+            updates.cashSales += totalAmount;
+          } else if (paymentMethod === 'emoney') {
+            updates.emoneSales += totalAmount;
+          } else if (paymentMethod === 'credit') {
+            updates.creditSales += totalAmount;
+          }
+          
+          await updateDoc(salesRef, updates);
+          console.log('✅ 既存売上データ更新:', updates);
+          
+        } else {
+          const newData = {
+            date: dateStr,
+            totalSales: totalAmount,
+            customerCount: 1,
+            cashSales: paymentMethod === 'cash' ? totalAmount : 0,
+            emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
+            creditSales: paymentMethod === 'credit' ? totalAmount : 0,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now()
+          };
+          
+          await setDoc(salesRef, newData);
+          console.log('✅ 新規売上データ作成:', newData);
+        }
+        
+        // 更新後のデータを取得して確認
+        const updatedDoc = await getDoc(salesRef);
+        console.log('更新後のデータ:', updatedDoc.data());
+        
+      } catch (error) {
+        console.error('❌ 日次売上更新エラー:', error);
+        throw error;
+      }
     };
   </script>
 </body>
