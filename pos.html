@@ -1806,8 +1806,11 @@
           }
         });
         
-        // 全ての注文を表示（未払い、会計済み、完了、キャンセル全て）
+        // 削除されていない注文のみ表示
         orders.forEach(order => {
+          // deletedフラグが立っている注文はスキップ（履歴では表示）
+          if (order.deleted) return;
+          
           const card = createOrderCard(order);
           container.appendChild(card);
           
@@ -1970,14 +1973,18 @@
     
     // 注文を削除する
     window.deleteOrder = async function(orderId) {
-      if (!confirm('この注文を削除しますか？\n削除すると復元できません。')) return;
+      if (!confirm('この注文を削除しますか？\n※履歴から確認できます')) return;
       
       try {
-        await deleteDoc(doc(db, 'orders', orderId));
+        // deleteDocではなくdeletedフラグを立てる（Firebaseルールで削除が許可されていない可能性があるため）
+        await updateDoc(doc(db, 'orders', orderId), {
+          deleted: true,
+          deletedAt: Timestamp.now()
+        });
         alert('注文を削除しました');
         await loadOrders(selectedTable);
       } catch (e) {
-        console.error('非表示エラー:', e);
+        console.error('削除エラー:', e);
         alert('エラーが発生しました: ' + e.message);
       }
     };
