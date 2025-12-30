@@ -1081,13 +1081,15 @@
         });
         
         if (newOverride) {
-          btn.textContent = '時外';
-          btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
-          showToast('✓ 営業時間外チェックを有効にしました');
-        } else {
+          // 営業時間外でも注文可能（オーバーライド有効）
           btn.textContent = '営業';
           btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
           showToast('✓ 営業時間外でも注文可能にしました');
+        } else {
+          // 営業時間外チェック有効（オーバーライド無効）
+          btn.textContent = '時外';
+          btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
+          showToast('✓ 営業時間外チェックを有効にしました');
         }
       } catch (e) {
         console.error(e);
@@ -1103,8 +1105,13 @@
         
         const btn = document.getElementById('time-override-btn');
         if (overrideEnabled) {
+          // 営業時間外でも注文可能（緑）
           btn.textContent = '営業';
           btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+        } else {
+          // 営業時間外チェック有効（紫）
+          btn.textContent = '時外';
+          btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
         }
       } catch (e) {
         console.error('時間オーバーライド読み込みエラー:', e);
@@ -1216,6 +1223,101 @@
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 2000);
     }
+    
+    // ========== ネット回線監視 ==========
+    
+    let isOffline = false;
+    let offlineNotificationShown = false;
+    
+    // ネット回線の状態を監視
+    function checkOnlineStatus() {
+      if (!navigator.onLine && !isOffline) {
+        isOffline = true;
+        showOfflineNotification();
+      } else if (navigator.onLine && isOffline) {
+        isOffline = false;
+        hideOfflineNotification();
+        showToast('✓ ネット回線が復旧しました');
+      }
+    }
+    
+    // オフライン通知を表示
+    function showOfflineNotification() {
+      if (offlineNotificationShown) return;
+      offlineNotificationShown = true;
+      
+      const notification = document.createElement('div');
+      notification.id = 'offline-notification';
+      notification.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%);
+        color: white;
+        padding: 20px;
+        text-align: center;
+        z-index: 9999;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      `;
+      
+      notification.innerHTML = `
+        <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">
+          ⚠️ ネット回線が切断されました
+        </div>
+        <div style="font-size: 14px; margin-bottom: 15px;">
+          音声通知を有効にすることをお勧めします
+        </div>
+        <button onclick="enableAudioNotification()" style="
+          padding: 12px 30px;
+          background: white;
+          color: #c92a2a;
+          border: none;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        ">
+          🔊 音声を有効にする
+        </button>
+      `;
+      
+      document.body.appendChild(notification);
+      showToast('⚠️ ネット回線が切断されました');
+    }
+    
+    // オフライン通知を非表示
+    function hideOfflineNotification() {
+      const notification = document.getElementById('offline-notification');
+      if (notification) {
+        notification.remove();
+        offlineNotificationShown = false;
+      }
+    }
+    
+    // 音声通知を有効にする
+    window.enableAudioNotification = function() {
+      // 音声を再生してユーザーインタラクションを記録
+      const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGGi77eifTRAMUKjj8LZjHAY4ktfyzXksBS'
+      );
+      audio.play().then(() => {
+        showToast('✓ 音声通知が有効になりました');
+        hideOfflineNotification();
+      }).catch(e => {
+        showToast('音声の有効化に失敗しました');
+      });
+    };
+    
+    // 初回チェック
+    checkOnlineStatus();
+    
+    // 定期的にチェック（5秒ごと）
+    setInterval(checkOnlineStatus, 5000);
+    
+    // オンライン/オフラインイベントをリッスン
+    window.addEventListener('online', checkOnlineStatus);
+    window.addEventListener('offline', checkOnlineStatus);
 
     window.loadOrders = loadOrders;
   </script>
