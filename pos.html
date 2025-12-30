@@ -49,6 +49,34 @@
     
     // 初期化完了イベントを発行
     window.dispatchEvent(new Event('firebaseReady'));
+    
+    // 担当者リストを読み込む
+    loadStaffList();
+  </script>
+  
+  <script>
+    // 担当者リストを読み込む
+    async function loadStaffList() {
+      try {
+        const staffSelect = document.getElementById('staffSelect');
+        const staffSnapshot = await getDocs(collection(db, 'staff'));
+        
+        // リセット
+        staffSelect.innerHTML = '<option value="">選択してください</option>';
+        
+        staffSnapshot.forEach(doc => {
+          const data = doc.data();
+          const option = document.createElement('option');
+          option.value = data.name || '';
+          option.textContent = data.name || '';
+          staffSelect.appendChild(option);
+        });
+        
+        console.log('✅ 担当者リスト読み込み完了');
+      } catch (e) {
+        console.error('❌ 担当者リスト読み込みエラー:', e);
+      }
+    }
   </script>
   
   <style>
@@ -859,7 +887,12 @@
     <div class="header">
       <div class="header-left">
         <h1>🧾 レジシステム</h1>
-        <div class="status">粉もん屋 八 下赤塚店</div>
+        <div class="status">
+          <label for="staffSelect" style="margin-right: 10px; font-weight: bold;">担当者:</label>
+          <select id="staffSelect" style="padding: 8px 12px; font-size: 16px; border: 2px solid #667eea; border-radius: 8px; background: white; cursor: pointer;">
+            <option value="">選択してください</option>
+          </select>
+        </div>
       </div>
       <div class="header-right">
         <button onclick="showCustomerCountModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #00bcd4 0%, #0097a7 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">👥 客数</button>
@@ -2461,26 +2494,33 @@
           return;
         }
         
-        // 担当者名を取得（kintaiから）
-        let staffName = '担当者不明';
+        // 担当者名を集計（会計ごとに記録された担当者）
+        const staffCounts = {};
         try {
-          console.log('👤 担当者取得開始');
-          const kintaiSnapshot = await window.getDocs(window.collection(window.db, 'attendance'));
-          const today = new Date();
-          const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-          console.log('今日の日付:', todayStr);
-          
-          kintaiSnapshot.forEach(doc => {
-            const data = doc.data();
-            console.log('勤怠データ:', data);
-            if (data.date === todayStr && data.clockIn && !data.clockOut) {
-              staffName = data.name || '担当者不明';
-              console.log('✅ 担当者発見:', staffName);
+          console.log('👤 担当者集計開始');
+          ordersSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (!data.timestamp || !data.paidAt || data.deleted) return;
+            
+            const orderDate = data.timestamp.toDate();
+            const orderDateStr = `${orderDate.getFullYear()}-${String(orderDate.getMonth()+1).padStart(2,'0')}-${String(orderDate.getDate()).padStart(2,'0')}`;
+            
+            if (orderDateStr === dateStr && data.staffName) {
+              staffCounts[data.staffName] = (staffCounts[data.staffName] || 0) + 1;
             }
           });
-          console.log('最終担当者名:', staffName);
+          
+          console.log('担当者集計:', staffCounts);
+          
+          // 担当者リストを作成
+          const staffList = Object.entries(staffCounts)
+            .map(([name, count]) => `${name}(${count}件)`)
+            .join(', ');
+          
+          staffName = staffList || '担当者不明';
+          console.log('最終担当者:', staffName);
         } catch (e) {
-          console.error('❌ 担当者取得エラー:', e);
+          console.error('❌ 担当者集計エラー:', e);
         }
         
         // 今日の全注文を取得して詳細を計算
@@ -2499,8 +2539,15 @@
           const orderDateStr = `${orderDate.getFullYear()}-${String(orderDate.getMonth()+1).padStart(2,'0')}-${String(orderDate.getDate()).padStart(2,'0')}`;
           
           if (orderDateStr === dateStr) {
+            console.log('📦 注文データ:', {
+              orderNumber: data.orderNumber,
+              tableNumber: data.tableNumber,
+              items: data.items,
+              totalAmount: data.totalAmount
+            });
+            
             // 商品数をカウント
-            if (data.items) {
+            if (data.items && data.items.length > 0) {
               data.items.forEach(item => {
                 totalItems += item.quantity || 0;
                 
@@ -2509,19 +2556,32 @@
                 const itemName = item.name || '';
                 const tableNumber = data.tableNumber || '';
                 
+                console.log('  商品:', {
+                  name: itemName,
+                  price: item.price,
+                  quantity: item.quantity,
+                  total: itemTotal,
+                  table: tableNumber
+                });
+                
                 // 店内テーブル（c1, c2, T-M, T-H）は全て10%
                 if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
                   tax10Total += itemTotal;
+                  console.log('    → 10%（店内）');
                 }
                 // レジ袋は常に10%（即会計、テイクアウト、予約テーブル）
                 else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
                   tax10Total += itemTotal;
+                  console.log('    → 10%（レジ袋）');
                 }
                 // その他全て8%（即会計、テイクアウト、予約テーブル）
                 else {
                   tax8Total += itemTotal;
+                  console.log('    → 8%（その他）');
                 }
               });
+            } else {
+              console.warn('⚠️ 商品データなし');
             }
             
             // 値引き
@@ -2532,6 +2592,13 @@
               drawerOpenCount++;
             }
           }
+        });
+        
+        console.log('📊 集計結果:', {
+          totalItems,
+          tax8Total,
+          tax10Total,
+          drawerOpenCount
         });
         
         // 税金計算（正しい計算）
@@ -3233,18 +3300,27 @@
         return;
       }
       
+      // 担当者を確認
+      const staffSelect = document.getElementById('staffSelect');
+      const staffName = staffSelect.value;
+      if (!staffName) {
+        alert('担当者を選択してください');
+        return;
+      }
+      
       try {
         const now = window.Timestamp.now();
         
         // 注文番号リストを取得
         const orderNumbers = currentOrders.map(o => o.orderNumber);
         
-        // 全ての注文に支払い済みフラグを設定
+        // 全ての注文に支払い済みフラグと担当者を設定
         for (const order of currentOrders) {
           await window.updateDoc(doc(db, 'orders', order.id), {
             paidAt: now,
             notifiedPaid: true,
-            paymentMethod: selectedPaymentMethod
+            paymentMethod: selectedPaymentMethod,
+            staffName: staffName  // 担当者名を追加
           });
         }
         
@@ -3260,7 +3336,8 @@
           paymentMethod: selectedPaymentMethod,
           cashReceived: selectedPaymentMethod === 'cash' ? cashReceived : totalAmountToPay,
           change: selectedPaymentMethod === 'cash' ? changeAmount : 0,
-          timestamp: new Date()
+          timestamp: new Date(),
+          staffName: staffName  // 担当者名を追加
         };
         
         // モーダルを閉じる
