@@ -2461,8 +2461,22 @@
           return;
         }
         
-        // 担当者名を取得（後で実装）
+        // 担当者名を取得（kintaiから）
         let staffName = '担当者不明';
+        try {
+          const kintaiSnapshot = await window.getDocs(window.collection(window.db, 'attendance'));
+          const today = new Date();
+          const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+          
+          kintaiSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.date === todayStr && data.clockIn && !data.clockOut) {
+              staffName = data.name || '担当者不明';
+            }
+          });
+        } catch (e) {
+          console.log('担当者取得エラー:', e);
+        }
         
         // 今日の全注文を取得して詳細を計算
         const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
@@ -2484,10 +2498,28 @@
             if (data.items) {
               data.items.forEach(item => {
                 totalItems += item.quantity || 0;
+                
+                // 税率別に分類
+                const itemTotal = (item.price || 0) * (item.quantity || 0);
+                const itemName = item.name || '';
+                const tableNumber = data.tableNumber || '';
+                
+                // 店内テーブル（c1, c2, T-M, T-H）は全て10%
+                if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
+                  tax10Total += itemTotal;
+                }
+                // レジ袋は常に10%（即会計、テイクアウト、予約テーブル）
+                else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
+                  tax10Total += itemTotal;
+                }
+                // その他全て8%（即会計、テイクアウト、予約テーブル）
+                else {
+                  tax8Total += itemTotal;
+                }
               });
             }
             
-            // 値引き（後で実装）
+            // 値引き
             discountTotal += data.discount || 0;
             
             // ドロアオープン数（現金支払い時にカウント）
@@ -2497,50 +2529,57 @@
           }
         });
         
-        // 税金計算（簡易版：8%と10%を5:5で分ける）
-        const taxExcludedTotal = Math.round(settlementData.totalSales / 1.09);
-        tax8Total = Math.round(taxExcludedTotal * 0.5);
-        tax10Total = Math.round(taxExcludedTotal * 0.5);
+        // 税金計算（正しい計算）
         const tax8Amount = Math.round(tax8Total * 0.08);
         const tax10Amount = Math.round(tax10Total * 0.10);
         const totalTax = tax8Amount + tax10Amount;
+        const taxExcludedTotal = tax8Total + tax10Total;
         
-        // CSVデータを生成
-        const csvData = [
-          ['精算ジャーナル'],
-          ['日付', dateStr],
-          ['客数', settlementData.customerCount + '組'],
-          ['総売上点数', totalItems + '点'],
-          ['合計売上', '¥' + settlementData.totalSales.toLocaleString()],
-          [],
-          ['内訳'],
-          ['現金', '¥' + settlementData.cashSales.toLocaleString()],
-          ['電子マネー', '¥' + settlementData.emoneSales.toLocaleString()],
-          ['クレジットカード', '¥' + settlementData.creditSales.toLocaleString()],
-          ['値引き', '¥' + discountTotal.toLocaleString()],
-          [],
-          ['税金'],
-          ['8%商品合計', '¥' + tax8Total.toLocaleString()],
-          ['10%商品合計', '¥' + tax10Total.toLocaleString()],
-          ['8%消費税', '¥' + tax8Amount.toLocaleString()],
-          ['10%消費税', '¥' + tax10Amount.toLocaleString()],
-          ['消費税合計', '¥' + totalTax.toLocaleString()],
-          ['税抜合計', '¥' + taxExcludedTotal.toLocaleString()],
-          ['税込合計', '¥' + settlementData.totalSales.toLocaleString()],
-          [],
-          ['その他'],
-          ['ドロアオープン数', drawerOpenCount + '回'],
-          ['担当者', staffName]
-        ];
+        // テキストファイルを生成（見やすい形式）
+        const textContent = `
+=====================================
+      精算ジャーナル
+=====================================
+
+日付: ${dateStr}
+客数: ${settlementData.customerCount}組
+総売上点数: ${totalItems}点
+合計売上: ¥${settlementData.totalSales.toLocaleString()}
+
+-------------------------------------
+内訳
+-------------------------------------
+現金: ¥${settlementData.cashSales.toLocaleString()}
+電子マネー: ¥${settlementData.emoneSales.toLocaleString()}
+クレジットカード: ¥${settlementData.creditSales.toLocaleString()}
+値引き: ¥${discountTotal.toLocaleString()}
+
+-------------------------------------
+税金
+-------------------------------------
+8%商品合計: ¥${tax8Total.toLocaleString()}
+10%商品合計: ¥${tax10Total.toLocaleString()}
+8%消費税: ¥${tax8Amount.toLocaleString()}
+10%消費税: ¥${tax10Amount.toLocaleString()}
+消費税合計: ¥${totalTax.toLocaleString()}
+税抜合計: ¥${taxExcludedTotal.toLocaleString()}
+税込合計: ¥${settlementData.totalSales.toLocaleString()}
+
+-------------------------------------
+その他
+-------------------------------------
+ドロアオープン数: ${drawerOpenCount}回
+担当者: ${staffName}
+
+=====================================
+`;
         
-        // CSVファイルを生成
-        const csvContent = csvData.map(row => row.join(',')).join('\n');
-        const bom = '\uFEFF'; // UTF-8 BOM
-        const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+        // テキストファイルをダウンロード
+        const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `精算ジャーナル_${dateStr}.csv`;
+        link.download = `精算ジャーナル_${dateStr}.txt`;
         link.click();
         URL.revokeObjectURL(url);
         
