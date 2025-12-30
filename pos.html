@@ -2162,62 +2162,21 @@
         }
         
         const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        const todayStart = new Date(jstNow);
-        todayStart.setHours(3, 0, 0, 0);
-        if (jstNow.getHours() < 3) {
-          todayStart.setDate(todayStart.getDate() - 1);
-        }
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         
-        console.log('JST現在時刻:', jstNow.toLocaleString('ja-JP'));
-        console.log('今日の開始:', todayStart.toLocaleString('ja-JP'));
+        console.log('日付キー:', dateStr);
         
-        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
-        console.log('取得した注文数:', ordersSnapshot.size);
+        const salesRef = window.doc(window.db, 'dailySales', dateStr);
+        const salesDoc = await window.getDoc(salesRef);
         
         let customerCount = 0;
-        let totalOrders = 0;
+        if (salesDoc.exists()) {
+          customerCount = salesDoc.data().customerCount || 0;
+          console.log('取得した客数:', customerCount);
+        } else {
+          console.log('本日のデータなし');
+        }
         
-        ordersSnapshot.forEach(docSnap => {
-          totalOrders++;
-          const data = docSnap.data();
-          
-          console.log(`\n注文 ${totalOrders}:`, {
-            id: docSnap.id,
-            orderNumber: data.orderNumber,
-            timestamp: data.timestamp ? data.timestamp.toDate().toLocaleString('ja-JP') : 'なし',
-            completedAt: data.completedAt ? '✓' : '✗',
-            deleted: data.deleted ? '✓' : '✗'
-          });
-          
-          if (!data.timestamp) {
-            console.log('  → timestampなし、スキップ');
-            return;
-          }
-          
-          const orderDate = data.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-          
-          const isToday = jstOrderDate >= todayStart;
-          const isCompleted = !!data.completedAt;
-          const isDeleted = !!data.deleted;
-          
-          console.log('  判定:', {
-            isToday,
-            isCompleted,
-            isDeleted,
-            shouldCount: isToday && isCompleted && !isDeleted
-          });
-          
-          // 今日の注文で、完了ボタンを押した（completedAtがある）もの
-          if (isToday && isCompleted && !isDeleted) {
-            customerCount++;
-            console.log(`  ✅ カウント → 現在: ${customerCount}`);
-          }
-        });
-        
-        console.log('\n=== 客数計算完了 ===');
-        console.log('総注文数:', totalOrders);
         console.log('最終客数:', customerCount);
         
         container.innerHTML = `
@@ -2263,58 +2222,102 @@
           });
         }
         
-        const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        
-        let startDate = new Date(jstNow);
-        startDate.setHours(3, 0, 0, 0);
-        
-        if (filter === 'today') {
-          if (jstNow.getHours() < 3) {
-            startDate.setDate(startDate.getDate() - 1);
-          }
-        } else if (filter === 'yesterday') {
-          startDate.setDate(startDate.getDate() - 1);
-          if (jstNow.getHours() < 3) {
-            startDate.setDate(startDate.getDate() - 1);
-          }
-        } else if (filter === 'week') {
-          startDate.setDate(startDate.getDate() - 7);
-        } else if (filter === 'month') {
-          startDate.setDate(1);
-        }
-        
-        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
         let totalSales = 0;
         let cashSales = 0;
-        let cardSales = 0;
-        let paypaySales = 0;
+        let emoneSales = 0;
+        let creditSales = 0;
         let orderCount = 0;
         
-        console.log('売上計算 - 開始日:', startDate.toLocaleString('ja-JP'));
-        
-        ordersSnapshot.forEach(docSnap => {
-          const data = docSnap.data();
-          if (!data.timestamp) return;
+        // 今日の場合は日次売上データから取得
+        if (filter === 'today') {
+          const now = new Date();
+          const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
           
-          const orderDate = data.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+          const salesRef = window.doc(window.db, 'dailySales', dateStr);
+          const salesDoc = await window.getDoc(salesRef);
           
-          // 指定期間の注文で、会計済み（削除されていない）もの
-          if (jstOrderDate >= startDate && data.paidAt && !data.deleted) {
-            totalSales += data.totalAmount || 0;
-            orderCount++;
-            
-            console.log(`注文#${data.orderNumber}: ¥${data.totalAmount} (${data.paymentMethod})`);
-            
-            // 支払い方法別
-            if (data.paymentMethod === 'cash') cashSales += data.totalAmount || 0;
-            else if (data.paymentMethod === 'card') cardSales += data.totalAmount || 0;
-            else if (data.paymentMethod === 'paypay') paypaySales += data.totalAmount || 0;
+          if (salesDoc.exists()) {
+            const data = salesDoc.data();
+            totalSales = data.totalSales || 0;
+            cashSales = data.cashSales || 0;
+            emoneSales = data.emoneSales || 0;
+            creditSales = data.creditSales || 0;
+            orderCount = data.customerCount || 0; // 注文数 = 客数
           }
-        });
+        } else {
+          // 他の期間は従来通り全注文をループ
+          const now = new Date();
+          const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+          
+          let startDate = new Date(jstNow);
+          startDate.setHours(3, 0, 0, 0);
+          
+          if (filter === 'yesterday') {
+            startDate.setDate(startDate.getDate() - 1);
+            if (jstNow.getHours() < 3) {
+              startDate.setDate(startDate.getDate() - 1);
+            }
+          } else if (filter === 'week') {
+            startDate.setDate(startDate.getDate() - 7);
+          } else if (filter === 'month') {
+            startDate.setDate(1);
+          }
+          
+          const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+          
+          ordersSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (!data.timestamp) return;
+            
+            const orderDate = data.timestamp.toDate();
+            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+            
+            // 指定期間の注文で、会計済み（削除されていない）もの
+            if (jstOrderDate >= startDate && data.paidAt && !data.deleted) {
+              totalSales += data.totalAmount || 0;
+              orderCount++;
+              
+              // 支払い方法別
+              if (data.paymentMethod === 'cash') cashSales += data.totalAmount || 0;
+              else if (data.paymentMethod === 'emoney') emoneSales += data.totalAmount || 0;
+              else if (data.paymentMethod === 'credit') creditSales += data.totalAmount || 0;
+            }
+          });
+        }
         
         console.log('最終売上:', totalSales, '注文数:', orderCount);
+        
+        // 売上目標達成率を計算（今日の場合のみ）
+        let targetSection = '';
+        if (filter === 'today') {
+          const now = new Date();
+          const dayOfWeek = now.getDay(); // 0=日曜, 6=土曜
+          const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+          const targetSales = isWeekend ? 70000 : 50000;
+          const achievementRate = Math.round((totalSales / targetSales) * 100);
+          
+          const rateColor = achievementRate >= 100 ? '#4CAF50' : achievementRate >= 80 ? '#FF9800' : '#f44336';
+          
+          targetSection = `
+            <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white;">
+              <h4 style="margin: 0 0 10px 0;">📊 売上目標</h4>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <span>目標金額（${isWeekend ? '土日祝' : '平日'}）</span>
+                <strong>¥${targetSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                <span>現在の売上</span>
+                <strong>¥${totalSales.toLocaleString()}</strong>
+              </div>
+              <div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.2); border-radius: 8px;">
+                <div style="font-size: 32px; font-weight: bold; color: ${rateColor};">
+                  ${achievementRate}%
+                </div>
+                <div style="font-size: 14px; opacity: 0.9;">達成率</div>
+              </div>
+            </div>
+          `;
+        }
         
         container.innerHTML = `
           <div style="background: white; border-radius: 12px; padding: 20px;">
@@ -2329,6 +2332,8 @@
               </div>
             </div>
             
+            ${targetSection}
+            
             <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
               <h4 style="margin: 0 0 15px 0;">支払い方法別</h4>
               <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
@@ -2337,11 +2342,11 @@
               </div>
               <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
                 <span>💳 カード</span>
-                <strong>¥${cardSales.toLocaleString()}</strong>
+                <strong>¥${creditSales.toLocaleString()}</strong>
               </div>
               <div style="display: flex; justify-content: space-between; padding: 10px 0;">
-                <span>📱 PayPay</span>
-                <strong>¥${paypaySales.toLocaleString()}</strong>
+                <span>📱 電子マネー</span>
+                <strong>¥${emoneSales.toLocaleString()}</strong>
               </div>
             </div>
           </div>
@@ -2375,52 +2380,56 @@
       
       try {
         const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        const todayStart = new Date(jstNow);
-        todayStart.setHours(3, 0, 0, 0);
-        if (jstNow.getHours() < 3) {
-          todayStart.setDate(todayStart.getDate() - 1);
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        
+        // 日次売上データから取得
+        const salesRef = window.doc(window.db, 'dailySales', dateStr);
+        const salesDoc = await window.getDoc(salesRef);
+        
+        let settlementData = {
+          totalSales: 0,
+          customerCount: 0,
+          cashSales: 0,
+          emoneSales: 0,
+          creditSales: 0
+        };
+        
+        if (salesDoc.exists()) {
+          const data = salesDoc.data();
+          settlementData = {
+            totalSales: data.totalSales || 0,
+            customerCount: data.customerCount || 0,
+            cashSales: data.cashSales || 0,
+            emoneSales: data.emoneSales || 0,
+            creditSales: data.creditSales || 0
+          };
         }
         
-        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
-        let totalSales = 0;
-        let orderCount = 0;
-        let customerCount = 0;
-        
-        ordersSnapshot.forEach(docSnap => {
-          const data = docSnap.data();
-          if (!data.timestamp) return;
-          
-          const orderDate = data.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-          
-          // 今日の注文
-          if (jstOrderDate >= todayStart && !data.deleted) {
-            // 会計済み → 売上に加算
-            if (data.paidAt) {
-              totalSales += data.totalAmount || 0;
-              orderCount++;
-            }
-            // 完了済み → 客数に加算
-            if (data.completedAt) {
-              customerCount++;
-            }
-          }
-        });
+        // settlementDataをグローバルに保存（CSV生成で使用）
+        window.currentSettlementData = settlementData;
+        window.currentSettlementDate = dateStr;
         
         container.innerHTML = `
           <div style="background: #f8f9fa; padding: 20px; border-radius: 10px;">
             <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 2px solid #ddd;">
               <span style="font-size: 16px;">総売上</span>
-              <strong style="font-size: 20px; color: #4CAF50;">¥${totalSales.toLocaleString()}</strong>
+              <strong style="font-size: 20px; color: #4CAF50;">¥${settlementData.totalSales.toLocaleString()}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
-              <span>注文数</span>
-              <strong>${orderCount}件</strong>
+              <span>客数</span>
+              <strong>${settlementData.customerCount}組</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+              <span>💵 現金</span>
+              <strong>¥${settlementData.cashSales.toLocaleString()}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+              <span>💳 カード</span>
+              <strong>¥${settlementData.creditSales.toLocaleString()}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; padding: 10px 0;">
-              <span>客数</span>
-              <strong>${customerCount}組</strong>
+              <span>📱 電子マネー</span>
+              <strong>¥${settlementData.emoneSales.toLocaleString()}</strong>
             </div>
           </div>
         `;
@@ -2430,7 +2439,7 @@
       }
     };
     
-    // 精算を実行
+    // 精算を実行（CSVダウンロード）
     window.confirmSettlement = async function() {
       // Firebase初期化を待つ
       if (!window.firebaseReady) {
@@ -2439,57 +2448,119 @@
         });
       }
       
-      if (!confirm('精算を実行しますか？\nこの操作は取り消せません。')) {
+      if (!confirm('精算ジャーナルをダウンロードしますか？')) {
         return;
       }
       
       try {
-        const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        const todayStart = new Date(jstNow);
-        todayStart.setHours(3, 0, 0, 0);
-        if (jstNow.getHours() < 3) {
-          todayStart.setDate(todayStart.getDate() - 1);
+        const settlementData = window.currentSettlementData;
+        const dateStr = window.currentSettlementDate;
+        
+        if (!settlementData) {
+          alert('精算データが見つかりません');
+          return;
         }
         
-        // 精算記録を保存
-        const settlementData = {
-          timestamp: window.Timestamp.now(),
-          date: todayStart,
-          totalSales: 0,
-          orderCount: 0,
-          customerCount: 0
-        };
+        // 担当者名を取得（後で実装）
+        let staffName = '担当者不明';
         
+        // 今日の全注文を取得して詳細を計算
         const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+        let totalItems = 0;
+        let tax8Total = 0;
+        let tax10Total = 0;
+        let discountTotal = 0;
+        let drawerOpenCount = 0;
+        
         ordersSnapshot.forEach(docSnap => {
           const data = docSnap.data();
-          if (!data.timestamp) return;
+          if (!data.timestamp || !data.paidAt || data.deleted) return;
           
           const orderDate = data.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+          const orderDateStr = `${orderDate.getFullYear()}-${String(orderDate.getMonth()+1).padStart(2,'0')}-${String(orderDate.getDate()).padStart(2,'0')}`;
           
-          // 今日の注文
-          if (jstOrderDate >= todayStart && !data.deleted) {
-            // 会計済み → 売上に加算
-            if (data.paidAt) {
-              settlementData.totalSales += data.totalAmount || 0;
-              settlementData.orderCount++;
+          if (orderDateStr === dateStr) {
+            // 商品数をカウント
+            if (data.items) {
+              data.items.forEach(item => {
+                totalItems += item.quantity || 0;
+              });
             }
-            // 完了済み → 客数に加算
-            if (data.completedAt) {
-              settlementData.customerCount++;
+            
+            // 値引き（後で実装）
+            discountTotal += data.discount || 0;
+            
+            // ドロアオープン数（現金支払い時にカウント）
+            if (data.paymentMethod === 'cash') {
+              drawerOpenCount++;
             }
           }
         });
         
-        // 精算記録を保存
-        await window.addDoc(window.collection(window.db, 'settlements'), settlementData);
+        // 税金計算（簡易版：8%と10%を5:5で分ける）
+        const taxExcludedTotal = Math.round(settlementData.totalSales / 1.09);
+        tax8Total = Math.round(taxExcludedTotal * 0.5);
+        tax10Total = Math.round(taxExcludedTotal * 0.5);
+        const tax8Amount = Math.round(tax8Total * 0.08);
+        const tax10Amount = Math.round(tax10Total * 0.10);
+        const totalTax = tax8Amount + tax10Amount;
         
-        alert(`精算が完了しました\n\n売上: ¥${settlementData.totalSales.toLocaleString()}\n注文数: ${settlementData.orderCount}件\n客数: ${settlementData.customerCount}組`);
+        // CSVデータを生成
+        const csvData = [
+          ['精算ジャーナル'],
+          ['日付', dateStr],
+          ['客数', settlementData.customerCount + '組'],
+          ['総売上点数', totalItems + '点'],
+          ['合計売上', '¥' + settlementData.totalSales.toLocaleString()],
+          [],
+          ['内訳'],
+          ['現金', '¥' + settlementData.cashSales.toLocaleString()],
+          ['電子マネー', '¥' + settlementData.emoneSales.toLocaleString()],
+          ['クレジットカード', '¥' + settlementData.creditSales.toLocaleString()],
+          ['値引き', '¥' + discountTotal.toLocaleString()],
+          [],
+          ['税金'],
+          ['8%商品合計', '¥' + tax8Total.toLocaleString()],
+          ['10%商品合計', '¥' + tax10Total.toLocaleString()],
+          ['8%消費税', '¥' + tax8Amount.toLocaleString()],
+          ['10%消費税', '¥' + tax10Amount.toLocaleString()],
+          ['消費税合計', '¥' + totalTax.toLocaleString()],
+          ['税抜合計', '¥' + taxExcludedTotal.toLocaleString()],
+          ['税込合計', '¥' + settlementData.totalSales.toLocaleString()],
+          [],
+          ['その他'],
+          ['ドロアオープン数', drawerOpenCount + '回'],
+          ['担当者', staffName]
+        ];
         
+        // CSVファイルを生成
+        const csvContent = csvData.map(row => row.join(',')).join('\n');
+        const bom = '\uFEFF'; // UTF-8 BOM
+        const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `精算ジャーナル_${dateStr}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+        
+        // 精算記録をFirebaseに保存
+        await window.addDoc(window.collection(window.db, 'settlements'), {
+          date: dateStr,
+          timestamp: window.Timestamp.now(),
+          totalSales: settlementData.totalSales,
+          customerCount: settlementData.customerCount,
+          cashSales: settlementData.cashSales,
+          emoneSales: settlementData.emoneSales,
+          creditSales: settlementData.creditSales,
+          totalItems: totalItems,
+          discountTotal: discountTotal,
+          drawerOpenCount: drawerOpenCount,
+          staffName: staffName
+        });
+        
+        alert('精算ジャーナルをダウンロードしました');
         closeSettlementModal();
-        closeSalesModal();
       } catch (e) {
         console.error('精算エラー:', e);
         alert('精算に失敗しました: ' + e.message);
