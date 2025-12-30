@@ -12,7 +12,7 @@
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-    import { getFirestore, collection, query, where, getDocs, updateDoc, doc, Timestamp, onSnapshot, addDoc, orderBy, getDoc, setDoc, limit } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    import { getFirestore, collection, query, where, getDocs, updateDoc, doc, Timestamp, onSnapshot, addDoc, orderBy, getDoc, setDoc, limit, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
     
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -26,6 +26,7 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     
+    // グローバルに公開
     window.db = db;
     window.collection = collection;
     window.query = query;
@@ -40,6 +41,14 @@
     window.getDoc = getDoc;
     window.setDoc = setDoc;
     window.limit = limit;
+    window.deleteDoc = deleteDoc;
+    
+    // 初期化完了フラグ
+    window.firebaseReady = true;
+    console.log('✅ Firebase初期化完了');
+    
+    // 初期化完了イベントを発行
+    window.dispatchEvent(new Event('firebaseReady'));
   </script>
   
   <style>
@@ -343,6 +352,14 @@
       border-bottom: none;
     }
     
+    .order-item-detailed {
+      padding: 15px;
+      margin-bottom: 15px;
+      background: #f8f9fa;
+      border-radius: 10px;
+      border-left: 4px solid #667eea;
+    }
+    
     .item-name {
       font-weight: 500;
       color: #333;
@@ -377,6 +394,52 @@
     .total-amount {
       color: #667eea;
       font-size: 28px;
+    }
+    
+    /* 注文アクションボタン */
+    .order-actions {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 2px dashed #ddd;
+    }
+    
+    .order-action-btn {
+      padding: 12px;
+      font-size: 14px;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .order-action-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    
+    .pay-btn {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .complete-btn {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      color: white;
+    }
+    
+    .cancel-btn {
+      background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+      color: white;
+    }
+    
+    .delete-btn {
+      background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+      color: white;
     }
     
     /* ボタン */
@@ -520,6 +583,14 @@
       border-radius: 8px;
     }
     
+    .selected-item-detailed {
+      padding: 15px;
+      margin-bottom: 15px;
+      background: #f8f9fa;
+      border-radius: 10px;
+      border-left: 4px solid #667eea;
+    }
+    
     .quantity-input {
       width: 60px;
       padding: 5px;
@@ -536,6 +607,20 @@
       border-radius: 5px;
       cursor: pointer;
       font-size: 14px;
+    }
+    
+    .edit-btn {
+      padding: 5px 12px;
+      background: #FF9800;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .edit-btn:hover {
+      background: #F57C00;
     }
     
     .empty-state {
@@ -678,6 +763,50 @@
       color: #333;
     }
     
+    /* トッピング選択 */
+    .topping-item {
+      display: flex;
+      align-items: center;
+      padding: 15px;
+      background: white;
+      border: 2px solid #ddd;
+      border-radius: 12px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    .topping-item:hover {
+      border-color: #667eea;
+      transform: translateX(5px);
+    }
+    
+    .topping-item input[type="checkbox"] {
+      width: 24px;
+      height: 24px;
+      margin-right: 15px;
+      cursor: pointer;
+    }
+    
+    .topping-item-info {
+      flex: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .topping-item-name {
+      font-size: 16px;
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .topping-item-price {
+      font-size: 18px;
+      font-weight: bold;
+      color: #667eea;
+    }
+    
     .hidden {
       display: none !important;
     }
@@ -688,6 +817,41 @@
       color: #666;
     }
   </style>
+  
+  <script>
+    // タップ音を再生する関数
+    function playBeep() {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 800; // 800Hzのビープ音
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    }
+    
+    // クリックイベントにビープ音を追加
+    document.addEventListener('DOMContentLoaded', function() {
+      document.addEventListener('click', function(e) {
+        // ボタン、チェックボックス、.table-btn、.menu-item-checkbox、.topping-itemをクリックしたらビープ音
+        if (e.target.closest('button') || 
+            e.target.closest('.table-btn') || 
+            e.target.closest('.menu-item-checkbox') || 
+            e.target.closest('.topping-item') ||
+            e.target.type === 'checkbox') {
+          playBeep();
+        }
+      });
+    });
+  </script>
 </head>
 <body>
   <div class="container">
@@ -698,8 +862,8 @@
         <div class="status">粉もん屋 八 下赤塚店</div>
       </div>
       <div class="header-right">
-        <button onclick="showCustomerCount()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #00bcd4 0%, #0097a7 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">👥 客数</button>
-        <button onclick="showSales()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">💰 売上</button>
+        <button onclick="showCustomerCountModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #00bcd4 0%, #0097a7 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">👥 客数</button>
+        <button onclick="showSalesModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">💰 売上</button>
         <button onclick="showHistoryModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">📜 履歴</button>
         <button onclick="showMonthlyReportModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">📊 月次レポート</button>
         <div class="auto-print-toggle">
@@ -750,6 +914,13 @@
           </div>
           
           <div class="input-group">
+            <label>カテゴリ選択</label>
+            <select id="categoryFilter" onchange="filterMenuByCategory()">
+              <option value="all">全ての商品</option>
+            </select>
+          </div>
+          
+          <div class="input-group">
             <label>商品を選択</label>
             <div class="menu-items-list" id="menuItemsList">
               <div class="loading">メニュー読み込み中...</div>
@@ -772,6 +943,17 @@
   <div id="paymentModal" class="modal-overlay hidden">
     <div class="modal">
       <h3>💳 支払い方法を選択</h3>
+      
+      <!-- 分割会計ボタン -->
+      <div style="margin-bottom: 20px; padding: 15px; background: #f0f8ff; border-radius: 10px; border-left: 4px solid #667eea;">
+        <button class="btn" style="width: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;" onclick="showSplitPaymentModal()">
+          ✂️ 分割会計
+        </button>
+        <div style="font-size: 12px; color: #666; margin-top: 8px; text-align: center;">
+          複数の注文を選択して一緒に会計
+        </div>
+      </div>
+      
       <div class="payment-methods">
         <button class="payment-method-btn" onclick="selectPaymentMethod('cash')">
           💵 現金
@@ -812,6 +994,185 @@
     </div>
   </div>
   
+  <!-- トッピング選択モーダル -->
+  <div id="toppingModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>🍴 トッピングを選択</h3>
+      <div id="toppingModalItemName" style="font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #667eea;"></div>
+      <div id="toppingsList" style="max-height: 400px; overflow-y: auto;">
+        <!-- トッピングリスト -->
+      </div>
+      <button class="btn btn-primary" onclick="confirmTopping()">決定</button>
+      <button class="btn btn-secondary" onclick="closeToppingModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 予約メモモーダル -->
+  <div id="reservationMemoModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 500px;">
+      <h3>📝 予約メモ</h3>
+      <div style="margin: 20px 0;">
+        <label style="display: block; margin-bottom: 10px; font-weight: bold;">
+          <span id="reservationTableName"></span>のメモ
+        </label>
+        <textarea id="reservationMemoText" rows="5" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; resize: vertical;"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="saveReservationMemo()">💾 保存</button>
+      <button class="btn btn-secondary" onclick="closeReservationMemoModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 分割会計モーダル -->
+  <div id="splitPaymentModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+      <h3>✂️ 分割会計</h3>
+      <p style="color: #666; margin-bottom: 20px;">一緒に会計する注文を選択してください</p>
+      
+      <div id="splitOrdersList" style="margin-bottom: 20px;">
+        <!-- 注文リストが動的に生成される -->
+      </div>
+      
+      <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: bold;">
+          <span>選択した注文の合計:</span>
+          <span id="splitTotalAmount" style="color: #667eea;">¥0</span>
+        </div>
+      </div>
+      
+      <button class="btn btn-primary" onclick="proceedToSplitPayment()" id="splitPaymentBtn" disabled>選択した注文を会計</button>
+      <button class="btn btn-secondary" onclick="closeSplitPaymentModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 履歴モーダル -->
+  <div id="historyModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+      <h3>📜 注文履歴</h3>
+      
+      <div style="margin: 20px 0; display: flex; gap: 10px; flex-wrap: wrap;">
+        <select id="historyDateFilter" onchange="filterHistory()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <option value="today">今日</option>
+          <option value="yesterday">昨日</option>
+          <option value="week">今週</option>
+          <option value="month">今月</option>
+          <option value="all">全期間</option>
+        </select>
+        
+        <select id="historyStatusFilter" onchange="filterHistory()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <option value="all">すべて</option>
+          <option value="deleted">削除済み</option>
+          <option value="paid">会計済み</option>
+          <option value="completed">完了</option>
+          <option value="cancelled">キャンセル</option>
+        </select>
+        
+        <button onclick="refreshHistory()" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">🔄 更新</button>
+      </div>
+      
+      <div id="historyList" style="max-height: 60vh; overflow-y: auto;">
+        <!-- 履歴リスト -->
+      </div>
+      
+      <button class="btn btn-secondary" onclick="closeHistoryModal()">閉じる</button>
+    </div>
+  </div>
+  
+  <!-- 客数モーダル -->
+  <div id="customerCountModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 600px;">
+      <h3>👥 本日の客数</h3>
+      
+      <div id="customerCountContent" style="padding: 20px;">
+        <!-- 客数表示 -->
+      </div>
+      
+      <button class="btn btn-secondary" onclick="closeCustomerCountModal()">閉じる</button>
+    </div>
+  </div>
+  
+  <!-- 売上モーダル -->
+  <div id="salesModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 700px;">
+      <h3>💰 本日の売上</h3>
+      
+      <div style="margin: 20px 0; display: flex; gap: 10px;">
+        <select id="salesDateFilter" onchange="calculateSales()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px; flex: 1;">
+          <option value="today">今日</option>
+          <option value="yesterday">昨日</option>
+          <option value="week">今週</option>
+          <option value="month">今月</option>
+        </select>
+        <button onclick="showSettlementModal()" style="padding: 8px 16px; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">🔄 精算</button>
+      </div>
+      
+      <div id="salesContent">
+        <!-- 売上表示 -->
+      </div>
+      
+      <button class="btn btn-secondary" onclick="closeSalesModal()">閉じる</button>
+    </div>
+  </div>
+  
+  <!-- 精算モーダル -->
+  <div id="settlementModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 500px;">
+      <h3 style="color: #ff6b6b;">🔄 精算確認</h3>
+      
+      <div style="margin: 20px 0; padding: 20px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 8px;">
+        <p style="margin: 0 0 10px 0; font-weight: bold; color: #856404;">注意事項:</p>
+        <ul style="margin: 0; padding-left: 20px; color: #856404;">
+          <li>本日の売上データを確定します</li>
+          <li>精算後は本日分の売上が0円にリセットされます</li>
+          <li>この操作は取り消せません</li>
+        </ul>
+      </div>
+      
+      <div id="settlementSummary" style="margin: 20px 0;">
+        <!-- 精算サマリー -->
+      </div>
+      
+      <button class="btn" style="width: 100%; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; margin-bottom: 10px;" onclick="confirmSettlement()">精算を実行</button>
+      <button class="btn btn-secondary" onclick="closeSettlementModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 月次レポートモーダル -->
+  <div id="monthlyReportModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <h3>📊 月次レポート</h3>
+      
+      <div style="margin: 20px 0; display: flex; gap: 10px; align-items: center;">
+        <select id="reportYear" onchange="generateMonthlyReport()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <!-- JavaScriptで生成 -->
+        </select>
+        
+        <select id="reportMonth" onchange="generateMonthlyReport()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <option value="1">1月</option>
+          <option value="2">2月</option>
+          <option value="3">3月</option>
+          <option value="4">4月</option>
+          <option value="5">5月</option>
+          <option value="6">6月</option>
+          <option value="7">7月</option>
+          <option value="8">8月</option>
+          <option value="9">9月</option>
+          <option value="10">10月</option>
+          <option value="11">11月</option>
+          <option value="12">12月</option>
+        </select>
+        
+        <button onclick="generateMonthlyReport()" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">📊 集計</button>
+      </div>
+      
+      <div id="monthlyReportContent">
+        <!-- レポート内容 -->
+      </div>
+      
+      <button class="btn btn-secondary" onclick="closeMonthlyReportModal()">閉じる</button>
+    </div>
+  </div>
+  
+  
   <script>
     let selectedTable = null;
     let currentOrders = [];
@@ -823,13 +1184,15 @@
     let cashReceived = 0;
     let changeAmount = 0;
     let lastPaymentData = null;
+    let currentReservationTable = null; // 予約メモ編集中のテーブル
     
     // プリンターIPアドレス（画像から）
     const PRINTER_IP = '192.168.244.41';
     
-    // メニューデータ
     // メニューデータ（Firebaseから取得）
     let menuData = [];
+    let toppingsData = [];
+    let reservationMemos = {}; // 予約メモを保存
     
     // テーブル定義
     const TABLES = [
@@ -845,21 +1208,59 @@
     async function initializeSystem() {
       // Firebaseからメニューを取得
       try {
-        const menuSnapshot = await getDocs(collection(db, 'menu'));
+        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
         menuData = [];
         menuSnapshot.forEach(doc => {
           const data = doc.data();
           menuData.push({
-            id: doc.id,
+            id: data.id || doc.id, // data.idを優先、なければdoc.id
+            docId: doc.id, // ドキュメントIDも保持
             name: data.name || '',
             price: data.price || 0,
             category: data.category || 'その他',
-            taxRate: data.taxRate || 10
+            taxRate: data.taxRate || 10,
+            toppingsId: data.toppingsId || '', // カンマ区切りのトッピングID文字列
+            toppings: data.toppings || [] // 配列形式（互換性のため）
           });
         });
+        
+        // menu.htmlと同じソート方法：文字列比較
+        console.log('ソート前のメニューID:', menuData.map(m => m.id).join(', '));
+        menuData.sort((a, b) => {
+          if (a.id < b.id) return -1;
+          if (a.id > b.id) return 1;
+          return 0;
+        });
+        
         console.log('✅ メニューを読み込みました:', menuData.length, '件');
+        console.log('ソート後のメニューID:', menuData.map(m => m.id).join(', '));
       } catch (e) {
         console.error('❌ メニューの読み込みに失敗:', e);
+      }
+      
+      // Firebaseからトッピングを取得
+      try {
+        const toppingsSnapshot = await window.getDocs(window.collection(window.db, 'toppings'));
+        toppingsData = [];
+        toppingsSnapshot.forEach(doc => {
+          const data = doc.data();
+          toppingsData.push({
+            id: data.id || doc.id, // data.idを優先
+            docId: doc.id,
+            name: data.name || '',
+            price: data.price || 0,
+            order: data.order || 99 // 並び順フィールド
+          });
+        });
+        
+        // menu.htmlと同じソート方法：orderフィールドでソート
+        console.log('ソート前のトッピングID:', toppingsData.map(t => t.id).join(', '));
+        toppingsData.sort((a, b) => a.order - b.order);
+        
+        console.log('✅ トッピングを読み込みました:', toppingsData.length, '件');
+        console.log('ソート後のトッピングID:', toppingsData.map(t => t.id).join(', '));
+      } catch (e) {
+        console.error('❌ トッピングの読み込みに失敗:', e);
       }
       
       // テーブルボタンを生成
@@ -872,13 +1273,25 @@
         // 予約テーブルの場合はメモアイコンを追加
         if (table.startsWith('予約')) {
           btn.style.position = 'relative';
+          
+          // メモがある場合は背景色を変更
+          if (reservationMemos[table]) {
+            btn.style.background = 'linear-gradient(135deg, #FF9800 0%, #FF5722 100%)';
+            btn.style.color = 'white';
+          }
+          
           const memoIcon = document.createElement('span');
           memoIcon.innerHTML = '📝';
           memoIcon.style.position = 'absolute';
           memoIcon.style.top = '5px';
-          memoIcon.style.left = '5px';
+          memoIcon.style.right = '5px';
           memoIcon.style.fontSize = '16px';
           memoIcon.style.cursor = 'pointer';
+          memoIcon.style.zIndex = '10';
+          memoIcon.onclick = (e) => {
+            e.stopPropagation(); // テーブル選択を防ぐ
+            showReservationMemoModal(table);
+          };
           btn.appendChild(memoIcon);
         }
         
@@ -886,7 +1299,9 @@
         tableLabel.textContent = table;
         btn.appendChild(tableLabel);
         
+        
         btn.onclick = () => selectTable(table);
+        
         btn.id = `table-${table}`;
         tableGrid.appendChild(btn);
       });
@@ -900,11 +1315,34 @@
         manualTable.appendChild(option);
       });
       
+      // カテゴリを初期化
+      initializeCategories();
+      
       // メニュー項目を表示
       displayMenuItems();
       
       // リアルタイム更新を開始
       startRealtimeUpdates();
+    }
+    
+    // テーブルボタンの色を更新
+    function updateTableButtons() {
+      TABLES.forEach(table => {
+        if (table.startsWith('予約')) {
+          const btn = document.getElementById(`table-${table}`);
+          if (btn) {
+            if (reservationMemos[table]) {
+              // メモがある場合はオレンジ色
+              btn.style.background = 'linear-gradient(135deg, #FF9800 0%, #FF5722 100%)';
+              btn.style.color = 'white';
+            } else {
+              // メモがない場合は通常色
+              btn.style.background = '';
+              btn.style.color = '';
+            }
+          }
+        }
+      });
     }
     
     // 自動印刷トグル
@@ -915,43 +1353,1124 @@
       status.className = autoPrintEnabled ? 'toggle-status on' : 'toggle-status off';
     };
     
+    // カテゴリを初期化
+    function initializeCategories() {
+      const categoryFilter = document.getElementById('categoryFilter');
+      const categories = [...new Set(menuData.map(item => item.category))].sort();
+      
+      // 既存のオプションをクリア（「全ての商品」以外）
+      categoryFilter.innerHTML = '<option value="all">全ての商品</option>';
+      
+      // カテゴリを追加
+      categories.forEach(category => {
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = category;
+        categoryFilter.appendChild(option);
+      });
+    }
+    
+    // カテゴリでフィルタ
+    window.filterMenuByCategory = function() {
+      const selectedCategory = document.getElementById('categoryFilter').value;
+      displayMenuItems(selectedCategory);
+    };
+    
     // メニュー項目を表示
-    function displayMenuItems() {
+    function displayMenuItems(categoryFilter = 'all') {
       const container = document.getElementById('menuItemsList');
       container.innerHTML = '';
       
-      menuData.forEach(item => {
+      const filteredMenu = categoryFilter === 'all' 
+        ? menuData 
+        : menuData.filter(item => item.category === categoryFilter);
+      
+      filteredMenu.forEach(item => {
         const div = document.createElement('div');
         div.className = 'menu-item-checkbox';
+        div.style.cursor = 'pointer';
         div.innerHTML = `
-          <input type="checkbox" id="menu-${item.id}" value="${item.id}" onchange="toggleMenuItem('${item.id}')">
+          <input type="checkbox" id="menu-${item.id}" value="${item.id}" style="pointer-events: none;">
           <div class="menu-item-info">
             <div class="menu-item-name-small">${item.name}</div>
             <div class="menu-item-price-small">¥${item.price.toLocaleString()}</div>
           </div>
         `;
+        
+        // div全体をクリック可能に
+        div.onclick = () => {
+          const checkbox = document.getElementById(`menu-${item.id}`);
+          checkbox.checked = !checkbox.checked;
+          toggleMenuItem(item.id);
+        };
+        
         container.appendChild(div);
       });
     }
     
+    // 一時的な選択中のアイテム
+    let currentSelectingItem = null;
+    let selectedToppings = [];
+    
     // メニュー項目の選択切り替え
-    function toggleMenuItem(itemId) {
+    window.toggleMenuItem = function(itemId) {
       const checkbox = document.getElementById(`menu-${itemId}`);
       const item = menuData.find(m => m.id === itemId);
       
       if (checkbox.checked) {
-        manualCart.push({
-          ...item,
-          quantity: 1,
-          toppings: 'なし',
-          toppingPrice: 0
-        });
+        // トッピング選択モーダルを表示
+        currentSelectingItem = { ...item };
+        selectedToppings = [];
+        showToppingModal(item);
       } else {
         manualCart = manualCart.filter(i => i.id !== itemId);
+        updateManualCart();
+      }
+    };
+    
+    // トッピング選択モーダルを表示
+    function showToppingModal(item) {
+      document.getElementById('toppingModalItemName').textContent = item.name;
+      const list = document.getElementById('toppingsList');
+      list.innerHTML = '';
+      
+      // 「なし」オプション
+      const noneDiv = document.createElement('div');
+      noneDiv.className = 'topping-item';
+      noneDiv.style.cursor = 'pointer';
+      noneDiv.innerHTML = `
+        <input type="checkbox" id="topping-none" style="pointer-events: none;">
+        <div class="topping-item-info">
+          <span class="topping-item-name">標準トッピング</span>
+          <span class="topping-item-price">¥0</span>
+        </div>
+      `;
+      
+      // div全体をクリック可能に
+      noneDiv.onclick = () => {
+        const checkbox = document.getElementById('topping-none');
+        checkbox.checked = !checkbox.checked;
+        selectNoneTopping(checkbox);
+      };
+      
+      list.appendChild(noneDiv);
+      
+      // toppingsIdからトッピングIDのリストを取得
+      let allowedToppingIds = [];
+      if (item.toppingsId && typeof item.toppingsId === 'string') {
+        // カンマ区切り文字列から配列に変換
+        allowedToppingIds = item.toppingsId.split(',').map(id => id.trim());
+      } else if (item.toppings && Array.isArray(item.toppings)) {
+        // 配列形式の場合
+        allowedToppingIds = item.toppings;
       }
       
-      updateManualCart();
+      toppingsData.forEach(topping => {
+        // toppingsIdが空または含まれている場合に表示
+        if (allowedToppingIds.length === 0 || allowedToppingIds.includes(topping.id)) {
+          const div = document.createElement('div');
+          div.className = 'topping-item';
+          div.style.cursor = 'pointer';
+          div.innerHTML = `
+            <input type="checkbox" id="topping-${topping.id}" value="${topping.id}" style="pointer-events: none;">
+            <div class="topping-item-info">
+              <span class="topping-item-name">${topping.name}</span>
+              <span class="topping-item-price">+¥${topping.price.toLocaleString()}</span>
+            </div>
+          `;
+          
+          // div全体をクリック可能に
+          div.onclick = () => {
+            const checkbox = document.getElementById(`topping-${topping.id}`);
+            checkbox.checked = !checkbox.checked;
+            selectTopping(checkbox);
+          };
+          
+          list.appendChild(div);
+        }
+      });
+      
+      // デフォルトで「なし」を選択
+      document.getElementById('topping-none').checked = true;
+      
+      document.getElementById('toppingModal').classList.remove('hidden');
     }
+    
+    // 「なし」トッピングを選択
+    window.selectNoneTopping = function(checkbox) {
+      if (checkbox.checked) {
+        // 他のトッピングをすべてクリア
+        selectedToppings = [];
+        toppingsData.forEach(t => {
+          const cb = document.getElementById(`topping-${t.id}`);
+          if (cb) cb.checked = false;
+        });
+      }
+    };
+    
+    // トッピングを選択
+    window.selectTopping = function(checkbox) {
+      const noneCheckbox = document.getElementById('topping-none');
+      
+      if (checkbox.checked) {
+        // 「なし」のチェックを外す
+        noneCheckbox.checked = false;
+        
+        // 選択されたトッピングを追加
+        const toppingId = checkbox.value;
+        const topping = toppingsData.find(t => t.id === toppingId);
+        if (topping && !selectedToppings.find(t => t.id === toppingId)) {
+          selectedToppings.push(topping);
+        }
+      } else {
+        // 選択解除
+        selectedToppings = selectedToppings.filter(t => t.id !== checkbox.value);
+        
+        // トッピングが何も選択されていない場合は「なし」を選択
+        if (selectedToppings.length === 0) {
+          noneCheckbox.checked = true;
+        }
+      }
+    };
+    
+    // トッピング選択を確定
+    window.confirmTopping = function() {
+      if (!currentSelectingItem) return;
+      
+      let toppingNames = 'なし';
+      let toppingPrice = 0;
+      
+      if (selectedToppings.length > 0) {
+        toppingNames = selectedToppings.map(t => t.name).join(', ');
+        toppingPrice = selectedToppings.reduce((sum, t) => sum + t.price, 0);
+      }
+      
+      // 編集モードかどうかを確認
+      if (currentSelectingItem.editIndex !== undefined) {
+        // 既存アイテムを更新
+        manualCart[currentSelectingItem.editIndex].toppings = toppingNames;
+        manualCart[currentSelectingItem.editIndex].toppingPrice = toppingPrice;
+      } else {
+        // 新規アイテムを追加
+        manualCart.push({
+          ...currentSelectingItem,
+          quantity: 1,
+          toppings: toppingNames,
+          toppingPrice: toppingPrice
+        });
+      }
+      
+      closeToppingModal();
+      updateManualCart();
+    };
+    
+    // トッピングモーダルを閉じる
+    window.closeToppingModal = function() {
+      // チェックボックスをクリア
+      if (currentSelectingItem) {
+        const checkbox = document.getElementById(`menu-${currentSelectingItem.id}`);
+        if (checkbox && manualCart.filter(i => i.id === currentSelectingItem.id).length === 0) {
+          checkbox.checked = false;
+        }
+      }
+      
+      document.getElementById('toppingModal').classList.add('hidden');
+      currentSelectingItem = null;
+      selectedToppings = [];
+    };
+    
+    // 予約メモモーダルを表示
+    window.showReservationMemoModal = function(tableName) {
+      currentReservationTable = tableName;
+      document.getElementById('reservationTableName').textContent = tableName;
+      document.getElementById('reservationMemoText').value = reservationMemos[tableName] || '';
+      document.getElementById('reservationMemoModal').classList.remove('hidden');
+    };
+    
+    // 予約メモを保存
+    window.saveReservationMemo = function() {
+      if (!currentReservationTable) return;
+      
+      const memo = document.getElementById('reservationMemoText').value.trim();
+      if (memo) {
+        reservationMemos[currentReservationTable] = memo;
+        alert(`${currentReservationTable}のメモを保存しました`);
+      } else {
+        delete reservationMemos[currentReservationTable];
+        alert(`${currentReservationTable}のメモを削除しました`);
+      }
+      
+      // ボタンの色を更新
+      updateTableButtons();
+      
+      closeReservationMemoModal();
+    };
+    
+    // 予約メモモーダルを閉じる
+    window.closeReservationMemoModal = function() {
+      document.getElementById('reservationMemoModal').classList.add('hidden');
+      currentReservationTable = null;
+    };
+    
+    // 分割会計モーダルを表示
+    let selectedSplitOrders = [];
+    window.showSplitPaymentModal = function() {
+      // 未払いの注文のみを表示
+      const unpaidOrders = currentOrders.filter(o => !o.paidAt && !o.cancelledAt);
+      
+      if (unpaidOrders.length === 0) {
+        alert('会計可能な注文がありません');
+        return;
+      }
+      
+      const list = document.getElementById('splitOrdersList');
+      list.innerHTML = '';
+      selectedSplitOrders = [];
+      
+      unpaidOrders.forEach(order => {
+        const div = document.createElement('div');
+        div.style.cssText = `
+          padding: 15px;
+          margin-bottom: 10px;
+          border: 2px solid #ddd;
+          border-radius: 10px;
+          cursor: pointer;
+          transition: all 0.2s;
+        `;
+        
+        div.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <input type="checkbox" id="split-${order.id}" style="width: 20px; height: 20px; margin-right: 10px;">
+              <strong style="font-size: 18px;">#${order.orderNumber}</strong>
+              <span style="color: #666; margin-left: 10px;">${new Date(order.timestamp.toDate()).toLocaleTimeString('ja-JP', {hour: '2-digit', minute: '2-digit'})}</span>
+            </div>
+            <div style="font-size: 20px; font-weight: bold; color: #667eea;">¥${order.totalAmount.toLocaleString()}</div>
+          </div>
+        `;
+        
+        const checkbox = div.querySelector('input');
+        div.onclick = () => {
+          checkbox.checked = !checkbox.checked;
+          updateSplitSelection();
+        };
+        checkbox.onclick = (e) => e.stopPropagation();
+        checkbox.onchange = updateSplitSelection;
+        
+        list.appendChild(div);
+      });
+      
+      document.getElementById('paymentModal').classList.add('hidden');
+      document.getElementById('splitPaymentModal').classList.remove('hidden');
+      updateSplitSelection();
+    };
+    
+    // 分割会計の選択を更新
+    function updateSplitSelection() {
+      selectedSplitOrders = [];
+      let total = 0;
+      
+      currentOrders.forEach(order => {
+        const checkbox = document.getElementById(`split-${order.id}`);
+        if (checkbox && checkbox.checked) {
+          selectedSplitOrders.push(order);
+          total += order.totalAmount || 0;
+        }
+      });
+      
+      document.getElementById('splitTotalAmount').textContent = `¥${total.toLocaleString()}`;
+      document.getElementById('splitPaymentBtn').disabled = selectedSplitOrders.length === 0;
+    }
+    
+    // 分割会計を実行
+    window.proceedToSplitPayment = function() {
+      if (selectedSplitOrders.length === 0) {
+        alert('注文を選択してください');
+        return;
+      }
+      
+      // 選択した注文をcurrentOrdersにセット
+      currentOrders = selectedSplitOrders;
+      totalAmountToPay = selectedSplitOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      
+      // 分割会計モーダルを閉じて支払いモーダルを表示
+      document.getElementById('splitPaymentModal').classList.add('hidden');
+      document.getElementById('paymentModal').classList.remove('hidden');
+      
+      // 支払い方法をリセット
+      selectedPaymentMethod = null;
+      document.querySelectorAll('.payment-method-btn').forEach(btn => {
+        btn.classList.remove('selected');
+      });
+      document.getElementById('cashInputSection').classList.add('hidden');
+      document.getElementById('completePaymentBtn').disabled = true;
+    };
+    
+    // 分割会計モーダルを閉じる
+    window.closeSplitPaymentModal = function() {
+      document.getElementById('splitPaymentModal').classList.add('hidden');
+      document.getElementById('paymentModal').classList.remove('hidden');
+      selectedSplitOrders = [];
+    };
+    
+    // ========== 履歴機能 ==========
+    
+    let historyOrders = [];
+    
+    // 履歴モーダルを表示
+    window.showHistoryModal = async function() {
+      document.getElementById('historyModal').classList.remove('hidden');
+      await loadHistory();
+    };
+    
+    // 履歴を読み込み
+    async function loadHistory() {
+      try {
+        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+        historyOrders = [];
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          historyOrders.push({
+            id: doc.id,
+            orderNumber: data.orderNumber || 0,
+            timestamp: data.timestamp,
+            tableNumber: data.tableNumber || '',
+            items: data.items || [],
+            totalAmount: data.totalAmount || 0,
+            paidAt: data.paidAt || null,
+            completedAt: data.completedAt || null,
+            cancelledAt: data.cancelledAt || null,
+            deleted: data.deleted || false,
+            deletedAt: data.deletedAt || null
+          });
+        });
+        
+        // 注文番号で降順ソート（新しい順）
+        historyOrders.sort((a, b) => b.orderNumber - a.orderNumber);
+        
+        filterHistory();
+      } catch (e) {
+        console.error('履歴読み込みエラー:', e);
+        alert('履歴の読み込みに失敗しました');
+      }
+    }
+    
+    // 履歴をフィルタ表示
+    window.filterHistory = function() {
+      const dateFilter = document.getElementById('historyDateFilter').value;
+      const statusFilter = document.getElementById('historyStatusFilter').value;
+      
+      const now = new Date();
+      const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+      
+      let filtered = historyOrders.filter(order => {
+        // 日付フィルタ
+        const orderDate = order.timestamp.toDate();
+        const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+        
+        let dateMatch = true;
+        if (dateFilter === 'today') {
+          const todayStart = new Date(jstNow);
+          todayStart.setHours(3, 0, 0, 0);
+          if (jstNow.getHours() < 3) {
+            todayStart.setDate(todayStart.getDate() - 1);
+          }
+          dateMatch = jstOrderDate >= todayStart;
+        } else if (dateFilter === 'yesterday') {
+          const yesterdayStart = new Date(jstNow);
+          yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          yesterdayStart.setHours(3, 0, 0, 0);
+          if (jstNow.getHours() < 3) {
+            yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          }
+          const yesterdayEnd = new Date(yesterdayStart);
+          yesterdayEnd.setDate(yesterdayEnd.getDate() + 1);
+          dateMatch = jstOrderDate >= yesterdayStart && jstOrderDate < yesterdayEnd;
+        } else if (dateFilter === 'week') {
+          const weekAgo = new Date(jstNow);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          dateMatch = jstOrderDate >= weekAgo;
+        } else if (dateFilter === 'month') {
+          const monthStart = new Date(jstNow);
+          monthStart.setDate(1);
+          monthStart.setHours(0, 0, 0, 0);
+          dateMatch = jstOrderDate >= monthStart;
+        }
+        
+        // ステータスフィルタ
+        let statusMatch = true;
+        if (statusFilter === 'deleted') {
+          statusMatch = order.deleted;
+        } else if (statusFilter === 'paid') {
+          statusMatch = order.paidAt && !order.deleted;
+        } else if (statusFilter === 'completed') {
+          statusMatch = order.completedAt && !order.deleted;
+        } else if (statusFilter === 'cancelled') {
+          statusMatch = order.cancelledAt && !order.deleted;
+        }
+        
+        return dateMatch && statusMatch;
+      });
+      
+      displayHistory(filtered);
+    };
+    
+    // 履歴を表示
+    function displayHistory(orders) {
+      const container = document.getElementById('historyList');
+      
+      if (orders.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">該当する履歴がありません</div>';
+        return;
+      }
+      
+      container.innerHTML = '';
+      
+      orders.forEach(order => {
+        const card = document.createElement('div');
+        card.style.cssText = `
+          background: white;
+          border-radius: 12px;
+          padding: 15px;
+          margin-bottom: 15px;
+          border: 2px solid #ddd;
+        `;
+        
+        // ステータスバッジ
+        let badges = [];
+        if (order.deleted) badges.push('<span style="background: #666; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">🗑️ 削除済み</span>');
+        if (order.paidAt) badges.push('<span style="background: #2196F3; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">💳 会計済</span>');
+        if (order.completedAt) badges.push('<span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">✓ 完了</span>');
+        if (order.cancelledAt) badges.push('<span style="background: #f44336; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">✕ キャンセル</span>');
+        
+        const orderDate = order.timestamp.toDate();
+        const dateStr = orderDate.toLocaleString('ja-JP');
+        
+        let itemsHtml = '';
+        order.items.forEach(item => {
+          itemsHtml += `<div style="padding: 5px 0; border-bottom: 1px solid #eee;">
+            ${item.name} ×${item.quantity} - ¥${((item.price + (item.toppingPrice || 0)) * item.quantity).toLocaleString()}
+          </div>`;
+        });
+        
+        // アクションボタン（会計済みの場合のみ表示）
+        let actionsHtml = '';
+        if (order.paidAt) {
+          actionsHtml = `
+            <div style="display: flex; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 2px solid #eee;">
+              <button onclick="reprintReceipt('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                🖨️ レシート再印刷
+              </button>
+              <button onclick="reprintInvoice('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                📄 領収書再印刷
+              </button>
+            </div>
+          `;
+        }
+        
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div>
+              <strong style="font-size: 18px;">#${order.orderNumber}</strong>
+              <span style="color: #666; margin-left: 10px;">${order.tableNumber}</span>
+            </div>
+            <div>${badges.join('')}</div>
+          </div>
+          <div style="font-size: 12px; color: #999; margin-bottom: 10px;">${dateStr}</div>
+          <div style="max-height: 150px; overflow-y: auto; margin: 10px 0;">
+            ${itemsHtml}
+          </div>
+          <div style="text-align: right; font-size: 18px; font-weight: bold; color: #667eea; margin-top: 10px;">
+            合計: ¥${order.totalAmount.toLocaleString()}
+          </div>
+          ${actionsHtml}
+        `;
+        
+        container.appendChild(card);
+      });
+    }
+    
+    // 履歴からレシートを再印刷
+    window.reprintReceipt = async function(orderId) {
+      try {
+        const orderDoc = await window.getDoc(doc(db, 'orders', orderId));
+        if (!orderDoc.exists()) {
+          alert('注文が見つかりません');
+          return;
+        }
+        
+        const orderData = orderDoc.data();
+        
+        // lastPaymentDataを再構築
+        lastPaymentData = {
+          orderNumbers: [orderData.orderNumber],
+          tableNumber: orderData.tableNumber,
+          items: orderData.items,
+          totalAmount: orderData.totalAmount,
+          paymentMethod: 'cash', // デフォルト
+          timestamp: orderData.paidAt || orderData.timestamp
+        };
+        
+        await printReceipt();
+        alert('レシートを再印刷しました');
+      } catch (e) {
+        console.error('再印刷エラー:', e);
+        alert('レシートの再印刷に失敗しました: ' + e.message);
+      }
+    };
+    
+    // 履歴から領収書を再印刷
+    window.reprintInvoice = async function(orderId) {
+      try {
+        const orderDoc = await window.getDoc(doc(db, 'orders', orderId));
+        if (!orderDoc.exists()) {
+          alert('注文が見つかりません');
+          return;
+        }
+        
+        const orderData = orderDoc.data();
+        
+        // lastPaymentDataを再構築
+        lastPaymentData = {
+          orderNumbers: [orderData.orderNumber],
+          tableNumber: orderData.tableNumber,
+          items: orderData.items,
+          totalAmount: orderData.totalAmount,
+          paymentMethod: 'cash', // デフォルト
+          timestamp: orderData.paidAt || orderData.timestamp
+        };
+        
+        await printInvoice();
+        alert('領収書を再印刷しました');
+      } catch (e) {
+        console.error('再印刷エラー:', e);
+        alert('領収書の再印刷に失敗しました: ' + e.message);
+      }
+    };
+    
+    // 履歴を更新
+    window.refreshHistory = async function() {
+      await loadHistory();
+    };
+    
+    // 履歴モーダルを閉じる
+    window.closeHistoryModal = function() {
+      document.getElementById('historyModal').classList.add('hidden');
+    };
+    
+    // ========== 月次レポート機能 ==========
+    
+    // 月次レポートモーダルを表示
+    window.showMonthlyReportModal = function() {
+      // 年の選択肢を生成
+      const yearSelect = document.getElementById('reportYear');
+      const currentYear = new Date().getFullYear();
+      yearSelect.innerHTML = '';
+      for (let year = currentYear; year >= currentYear - 5; year--) {
+        const option = document.createElement('option');
+        option.value = year;
+        option.textContent = `${year}年`;
+        yearSelect.appendChild(option);
+      }
+      
+      // 現在の月を選択
+      const currentMonth = new Date().getMonth() + 1;
+      document.getElementById('reportMonth').value = currentMonth;
+      
+      document.getElementById('monthlyReportModal').classList.remove('hidden');
+      generateMonthlyReport();
+    };
+    
+    // 月次レポートを生成
+    window.generateMonthlyReport = async function() {
+      const year = parseInt(document.getElementById('reportYear').value);
+      const month = parseInt(document.getElementById('reportMonth').value);
+      
+      const container = document.getElementById('monthlyReportContent');
+      container.innerHTML = '<div style="text-align: center; padding: 40px;">集計中...</div>';
+      
+      try {
+        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+        
+        let totalSales = 0;
+        let totalOrders = 0;
+        let paidOrders = 0;
+        let cancelledOrders = 0;
+        let deletedOrders = 0;
+        let itemCounts = {};
+        let categoryCounts = {};
+        let dailySales = {};
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          const orderDate = data.timestamp.toDate();
+          
+          if (orderDate.getFullYear() === year && orderDate.getMonth() + 1 === month) {
+            totalOrders++;
+            
+            if (data.deleted) {
+              deletedOrders++;
+            }
+            if (data.paidAt) {
+              paidOrders++;
+              totalSales += data.totalAmount || 0;
+              
+              // 日別売上
+              const day = orderDate.getDate();
+              dailySales[day] = (dailySales[day] || 0) + (data.totalAmount || 0);
+            }
+            if (data.cancelledAt) {
+              cancelledOrders++;
+            }
+            
+            // 商品集計
+            if (data.items && data.paidAt) {
+              data.items.forEach(item => {
+                itemCounts[item.name] = (itemCounts[item.name] || 0) + item.quantity;
+                
+                // カテゴリ集計
+                const category = item.category || 'その他';
+                categoryCounts[category] = (categoryCounts[category] || 0) + item.quantity;
+              });
+            }
+          }
+        });
+        
+        // 人気商品トップ10
+        const topItems = Object.entries(itemCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10);
+        
+        // カテゴリ別売上
+        const categoryList = Object.entries(categoryCounts)
+          .sort((a, b) => b[1] - a[1]);
+        
+        // 日別売上グラフ用データ
+        const daysInMonth = new Date(year, month, 0).getDate();
+        let dailyChart = '';
+        for (let day = 1; day <= daysInMonth; day++) {
+          const sales = dailySales[day] || 0;
+          const barHeight = sales > 0 ? Math.max(20, (sales / Math.max(...Object.values(dailySales))) * 100) : 0;
+          dailyChart += `
+            <div style="display: flex; align-items: flex-end; margin-right: 2px;">
+              <div style="width: 20px; height: ${barHeight}px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 3px 3px 0 0;" title="${day}日: ¥${sales.toLocaleString()}"></div>
+            </div>
+          `;
+        }
+        
+        container.innerHTML = `
+          <div style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+            <h4 style="margin-bottom: 15px; color: #667eea;">📈 売上サマリー</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+              <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">総売上</div>
+                <div style="font-size: 28px; font-weight: bold;">¥${totalSales.toLocaleString()}</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">会計済み注文</div>
+                <div style="font-size: 28px; font-weight: bold;">${paidOrders}件</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">総注文数</div>
+                <div style="font-size: 28px; font-weight: bold;">${totalOrders}件</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">平均単価</div>
+                <div style="font-size: 28px; font-weight: bold;">¥${paidOrders > 0 ? Math.round(totalSales / paidOrders).toLocaleString() : 0}</div>
+              </div>
+            </div>
+          </div>
+          
+          <div style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+            <h4 style="margin-bottom: 15px; color: #667eea;">📊 日別売上推移</h4>
+            <div style="display: flex; height: 150px; align-items: flex-end; justify-content: space-between; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+              ${dailyChart}
+            </div>
+          </div>
+          
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+            <div style="background: white; border-radius: 12px; padding: 20px;">
+              <h4 style="margin-bottom: 15px; color: #667eea;">🏆 人気商品トップ10</h4>
+              ${topItems.map((item, idx) => `
+                <div style="display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee;">
+                  <span>${idx + 1}. ${item[0]}</span>
+                  <strong>${item[1]}個</strong>
+                </div>
+              `).join('')}
+            </div>
+            
+            <div style="background: white; border-radius: 12px; padding: 20px;">
+              <h4 style="margin-bottom: 15px; color: #667eea;">📦 カテゴリ別販売数</h4>
+              ${categoryList.map(cat => `
+                <div style="display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee;">
+                  <span>${cat[0]}</span>
+                  <strong>${cat[1]}個</strong>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          
+          <div style="background: white; border-radius: 12px; padding: 20px; margin-top: 20px;">
+            <h4 style="margin-bottom: 15px; color: #667eea;">📋 その他の統計</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+              <div style="padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                <div style="font-size: 12px; color: #666;">キャンセル数</div>
+                <div style="font-size: 20px; font-weight: bold;">${cancelledOrders}件</div>
+              </div>
+              <div style="padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                <div style="font-size: 12px; color: #666;">削除数</div>
+                <div style="font-size: 20px; font-weight: bold;">${deletedOrders}件</div>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        console.error('レポート生成エラー:', e);
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: red;">レポートの生成に失敗しました</div>';
+      }
+    };
+    
+    // 月次レポートモーダルを閉じる
+    window.closeMonthlyReportModal = function() {
+      document.getElementById('monthlyReportModal').classList.add('hidden');
+    };
+    
+    // ========== 客数機能 ==========
+    
+    // 客数モーダルを表示
+    window.showCustomerCountModal = async function() {
+      document.getElementById('customerCountModal').classList.remove('hidden');
+      await calculateCustomerCount();
+    };
+    
+    // 客数を計算
+    async function calculateCustomerCount() {
+      const container = document.getElementById('customerCountContent');
+      container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
+      
+      try {
+        console.log('=== 客数計算開始 ===');
+        
+        // Firebase初期化を待つ
+        if (!window.firebaseReady) {
+          console.log('⏳ Firebase初期化待機中...');
+          await new Promise(resolve => {
+            window.addEventListener('firebaseReady', resolve, { once: true });
+          });
+          console.log('✅ Firebase初期化完了を確認');
+        }
+        
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        
+        console.log('日付キー:', dateStr);
+        
+        const salesRef = window.doc(window.db, 'dailySales', dateStr);
+        const salesDoc = await window.getDoc(salesRef);
+        
+        let customerCount = 0;
+        if (salesDoc.exists()) {
+          customerCount = salesDoc.data().customerCount || 0;
+          console.log('取得した客数:', customerCount);
+        } else {
+          console.log('本日のデータなし');
+        }
+        
+        console.log('最終客数:', customerCount);
+        
+        container.innerHTML = `
+          <div style="text-align: center;">
+            <div style="font-size: 80px; font-weight: bold; color: #00bcd4; margin: 20px 0;">
+              ${customerCount}
+            </div>
+            <div style="font-size: 24px; color: #666;">
+              組
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        console.error('客数計算エラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red;">エラーが発生しました</div>';
+      }
+    }
+    
+    // 客数モーダルを閉じる
+    window.closeCustomerCountModal = function() {
+      document.getElementById('customerCountModal').classList.add('hidden');
+    };
+    
+    // ========== 売上機能 ==========
+    
+    // 売上モーダルを表示
+    window.showSalesModal = function() {
+      document.getElementById('salesModal').classList.remove('hidden');
+      calculateSales();
+    };
+    
+    // 売上を計算
+    window.calculateSales = async function() {
+      const container = document.getElementById('salesContent');
+      const filter = document.getElementById('salesDateFilter').value;
+      container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
+      
+      try {
+        // Firebase初期化を待つ
+        if (!window.firebaseReady) {
+          await new Promise(resolve => {
+            window.addEventListener('firebaseReady', resolve, { once: true });
+          });
+        }
+        
+        let totalSales = 0;
+        let cashSales = 0;
+        let emoneSales = 0;
+        let creditSales = 0;
+        let orderCount = 0;
+        
+        // 今日の場合は日次売上データから取得
+        if (filter === 'today') {
+          const now = new Date();
+          const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+          
+          const salesRef = window.doc(window.db, 'dailySales', dateStr);
+          const salesDoc = await window.getDoc(salesRef);
+          
+          if (salesDoc.exists()) {
+            const data = salesDoc.data();
+            totalSales = data.totalSales || 0;
+            cashSales = data.cashSales || 0;
+            emoneSales = data.emoneSales || 0;
+            creditSales = data.creditSales || 0;
+            orderCount = data.customerCount || 0; // 注文数 = 客数
+          }
+        } else {
+          // 他の期間は従来通り全注文をループ
+          const now = new Date();
+          const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+          
+          let startDate = new Date(jstNow);
+          startDate.setHours(3, 0, 0, 0);
+          
+          if (filter === 'yesterday') {
+            startDate.setDate(startDate.getDate() - 1);
+            if (jstNow.getHours() < 3) {
+              startDate.setDate(startDate.getDate() - 1);
+            }
+          } else if (filter === 'week') {
+            startDate.setDate(startDate.getDate() - 7);
+          } else if (filter === 'month') {
+            startDate.setDate(1);
+          }
+          
+          const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+          
+          ordersSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (!data.timestamp) return;
+            
+            const orderDate = data.timestamp.toDate();
+            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+            
+            // 指定期間の注文で、会計済み（削除されていない）もの
+            if (jstOrderDate >= startDate && data.paidAt && !data.deleted) {
+              totalSales += data.totalAmount || 0;
+              orderCount++;
+              
+              // 支払い方法別
+              if (data.paymentMethod === 'cash') cashSales += data.totalAmount || 0;
+              else if (data.paymentMethod === 'emoney') emoneSales += data.totalAmount || 0;
+              else if (data.paymentMethod === 'credit') creditSales += data.totalAmount || 0;
+            }
+          });
+        }
+        
+        console.log('最終売上:', totalSales, '注文数:', orderCount);
+        
+        container.innerHTML = `
+          <div style="background: white; border-radius: 12px; padding: 20px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 15px; border-radius: 10px; text-align: center;">
+                <div style="font-size: 14px; opacity: 0.9;">総売上</div>
+                <div style="font-size: 28px; font-weight: bold;">¥${totalSales.toLocaleString()}</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; padding: 15px; border-radius: 10px; text-align: center;">
+                <div style="font-size: 14px; opacity: 0.9;">注文数</div>
+                <div style="font-size: 28px; font-weight: bold;">${orderCount}件</div>
+              </div>
+            </div>
+            
+            <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
+              <h4 style="margin: 0 0 15px 0;">支払い方法別</h4>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+                <span>💵 現金</span>
+                <strong>¥${cashSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+                <span>💳 カード</span>
+                <strong>¥${creditSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0;">
+                <span>📱 電子マネー</span>
+                <strong>¥${emoneSales.toLocaleString()}</strong>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        console.error('売上計算エラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red;">エラーが発生しました</div>';
+      }
+    };
+    
+    // 売上モーダルを閉じる
+    window.closeSalesModal = function() {
+      document.getElementById('salesModal').classList.add('hidden');
+    };
+    
+    // ========== 精算機能 ==========
+    
+    // 精算モーダルを表示
+    window.showSettlementModal = async function() {
+      // Firebase初期化を待つ
+      if (!window.firebaseReady) {
+        await new Promise(resolve => {
+          window.addEventListener('firebaseReady', resolve, { once: true });
+        });
+      }
+      
+      const container = document.getElementById('settlementSummary');
+      container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
+      
+      document.getElementById('settlementModal').classList.remove('hidden');
+      
+      try {
+        const now = new Date();
+        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        const todayStart = new Date(jstNow);
+        todayStart.setHours(3, 0, 0, 0);
+        if (jstNow.getHours() < 3) {
+          todayStart.setDate(todayStart.getDate() - 1);
+        }
+        
+        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+        let totalSales = 0;
+        let orderCount = 0;
+        let customerCount = 0;
+        
+        ordersSnapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          if (!data.timestamp) return;
+          
+          const orderDate = data.timestamp.toDate();
+          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+          
+          // 今日の注文
+          if (jstOrderDate >= todayStart && !data.deleted) {
+            // 会計済み → 売上に加算
+            if (data.paidAt) {
+              totalSales += data.totalAmount || 0;
+              orderCount++;
+            }
+            // 完了済み → 客数に加算
+            if (data.completedAt) {
+              customerCount++;
+            }
+          }
+        });
+        
+        container.innerHTML = `
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 10px;">
+            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 2px solid #ddd;">
+              <span style="font-size: 16px;">総売上</span>
+              <strong style="font-size: 20px; color: #4CAF50;">¥${totalSales.toLocaleString()}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+              <span>注文数</span>
+              <strong>${orderCount}件</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 10px 0;">
+              <span>客数</span>
+              <strong>${customerCount}組</strong>
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        console.error('精算サマリーエラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red;">エラーが発生しました</div>';
+      }
+    };
+    
+    // 精算を実行
+    window.confirmSettlement = async function() {
+      // Firebase初期化を待つ
+      if (!window.firebaseReady) {
+        await new Promise(resolve => {
+          window.addEventListener('firebaseReady', resolve, { once: true });
+        });
+      }
+      
+      if (!confirm('精算を実行しますか？\nこの操作は取り消せません。')) {
+        return;
+      }
+      
+      try {
+        const now = new Date();
+        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        const todayStart = new Date(jstNow);
+        todayStart.setHours(3, 0, 0, 0);
+        if (jstNow.getHours() < 3) {
+          todayStart.setDate(todayStart.getDate() - 1);
+        }
+        
+        // 精算記録を保存
+        const settlementData = {
+          timestamp: window.Timestamp.now(),
+          date: todayStart,
+          totalSales: 0,
+          orderCount: 0,
+          customerCount: 0
+        };
+        
+        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+        ordersSnapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          if (!data.timestamp) return;
+          
+          const orderDate = data.timestamp.toDate();
+          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+          
+          // 今日の注文
+          if (jstOrderDate >= todayStart && !data.deleted) {
+            // 会計済み → 売上に加算
+            if (data.paidAt) {
+              settlementData.totalSales += data.totalAmount || 0;
+              settlementData.orderCount++;
+            }
+            // 完了済み → 客数に加算
+            if (data.completedAt) {
+              settlementData.customerCount++;
+            }
+          }
+        });
+        
+        // 精算記録を保存
+        await window.addDoc(window.collection(window.db, 'settlements'), settlementData);
+        
+        alert(`精算が完了しました\n\n売上: ¥${settlementData.totalSales.toLocaleString()}\n注文数: ${settlementData.orderCount}件\n客数: ${settlementData.customerCount}組`);
+        
+        closeSettlementModal();
+        closeSalesModal();
+      } catch (e) {
+        console.error('精算エラー:', e);
+        alert('精算に失敗しました: ' + e.message);
+      }
+    };
+    
+    // 精算モーダルを閉じる
+    window.closeSettlementModal = function() {
+      document.getElementById('settlementModal').classList.add('hidden');
+    };
     
     // 手動カートの表示更新
     function updateManualCart() {
@@ -970,25 +2489,135 @@
       let total = 0;
       
       manualCart.forEach((item, index) => {
-        const subtotal = item.price * item.quantity;
-        total += subtotal;
+        const itemBasePrice = item.price;
+        const itemWithTopping = itemBasePrice + (item.toppingPrice || 0);
+        const itemTotal = itemWithTopping * item.quantity;
+        total += itemTotal;
+        
+        // トッピングを改行で表示
+        let toppingsHtml = '';
+        if (item.toppings && item.toppings !== 'なし') {
+          const toppingList = item.toppings.split(', ');
+          toppingsHtml = toppingList.map(t => `<div style="font-size: 12px; color: #666; padding-left: 10px;">　${t}</div>`).join('');
+        }
         
         const div = document.createElement('div');
-        div.className = 'selected-item';
+        div.className = 'selected-item-detailed';
         div.innerHTML = `
-          <span>${item.name}</span>
-          <div>
-            <input type="number" class="quantity-input" min="1" value="${item.quantity}" 
-                   onchange="updateQuantity(${index}, this.value)">
-            <button class="remove-btn" onclick="removeFromManualCart(${index})">削除</button>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+            <div style="font-weight: bold;">${item.name} ×${item.quantity}</div>
+            <div>¥${itemBasePrice.toLocaleString()}</div>
           </div>
-          <span>¥${subtotal.toLocaleString()}</span>
+          ${toppingsHtml}
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 5px; border-top: 1px dashed #ddd;">
+            <div style="display: flex; gap: 5px;">
+              <input type="number" class="quantity-input" min="1" value="${item.quantity}" 
+                     onchange="updateQuantity(${index}, this.value)">
+              <button class="edit-btn" onclick="editCartItem(${index})">修正</button>
+              <button class="remove-btn" onclick="removeFromManualCart(${index})">削除</button>
+            </div>
+            <div style="font-weight: bold; color: #667eea;">¥${itemWithTopping.toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
+          </div>
         `;
         container.appendChild(div);
       });
       
       document.getElementById('manualTotal').textContent = `¥${total.toLocaleString()}`;
       submitBtn.disabled = manualCart.length === 0 || !manualTable.value;
+    }
+    
+    // カート内アイテムを修正
+    window.editCartItem = function(index) {
+      const item = manualCart[index];
+      
+      // 現在のトッピング情報を保持
+      currentSelectingItem = { ...item };
+      currentSelectingItem.editIndex = index;
+      
+      // 現在選択されているトッピングを復元
+      selectedToppings = [];
+      if (item.toppings && item.toppings !== 'なし') {
+        const toppingNames = item.toppings.split(', ');
+        toppingNames.forEach(name => {
+          const topping = toppingsData.find(t => t.name === name);
+          if (topping) {
+            selectedToppings.push(topping);
+          }
+        });
+      }
+      
+      // トッピングモーダルを表示
+      showToppingModalForEdit(item, index);
+    };
+    
+    // 修正用トッピングモーダル
+    function showToppingModalForEdit(item, index) {
+      document.getElementById('toppingModalItemName').textContent = item.name + ' (修正)';
+      const list = document.getElementById('toppingsList');
+      list.innerHTML = '';
+      
+      // 「なし」オプション
+      const noneDiv = document.createElement('div');
+      noneDiv.className = 'topping-item';
+      noneDiv.style.cursor = 'pointer';
+      noneDiv.innerHTML = `
+        <input type="checkbox" id="topping-none" style="pointer-events: none;">
+        <div class="topping-item-info">
+          <span class="topping-item-name">標準トッピング</span>
+          <span class="topping-item-price">¥0</span>
+        </div>
+      `;
+      
+      // div全体をクリック可能に
+      noneDiv.onclick = () => {
+        const checkbox = document.getElementById('topping-none');
+        checkbox.checked = !checkbox.checked;
+        selectNoneTopping(checkbox);
+      };
+      
+      list.appendChild(noneDiv);
+      
+      // toppingsIdからトッピングIDのリストを取得
+      let allowedToppingIds = [];
+      if (item.toppingsId && typeof item.toppingsId === 'string') {
+        allowedToppingIds = item.toppingsId.split(',').map(id => id.trim());
+      } else if (item.toppings && Array.isArray(item.toppings)) {
+        allowedToppingIds = item.toppings;
+      }
+      
+      toppingsData.forEach(topping => {
+        // toppingsIdが空または含まれている場合に表示
+        if (allowedToppingIds.length === 0 || allowedToppingIds.includes(topping.id)) {
+          const isSelected = selectedToppings.some(t => t.id === topping.id);
+          const div = document.createElement('div');
+          div.className = 'topping-item';
+          div.style.cursor = 'pointer';
+          div.innerHTML = `
+            <input type="checkbox" id="topping-${topping.id}" value="${topping.id}" 
+                   style="pointer-events: none;" ${isSelected ? 'checked' : ''}>
+            <div class="topping-item-info">
+              <span class="topping-item-name">${topping.name}</span>
+              <span class="topping-item-price">+¥${topping.price.toLocaleString()}</span>
+            </div>
+          `;
+          
+          // div全体をクリック可能に
+          div.onclick = () => {
+            const checkbox = document.getElementById(`topping-${topping.id}`);
+            checkbox.checked = !checkbox.checked;
+            selectTopping(checkbox);
+          };
+          
+          list.appendChild(div);
+        }
+      });
+      
+      // トッピングが選択されていない場合は「なし」を選択
+      if (selectedToppings.length === 0) {
+        document.getElementById('topping-none').checked = true;
+      }
+      
+      document.getElementById('toppingModal').classList.remove('hidden');
     }
     
     // 数量更新
@@ -1027,20 +2656,35 @@
           todayStart.setDate(todayStart.getDate() - 1);
         }
         
-        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
         let maxOrderNumber = 618;
+        let hasActiveOrders = false;
         
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
-          const orderDate = data.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
           
-          if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
-            maxOrderNumber = data.orderNumber;
+          // 削除されていない注文があるかチェック
+          if (!data.deleted) {
+            hasActiveOrders = true;
+            
+            // 削除されていない注文のみから最大番号を取得
+            const orderDate = data.timestamp.toDate();
+            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+            
+            if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
+              maxOrderNumber = data.orderNumber;
+            }
           }
         });
         
-        const orderNumber = maxOrderNumber + 1;
+        // 削除されていない注文が0件なら619番から開始
+        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
+        
+        console.log('注文番号生成:', {
+          hasActiveOrders,
+          maxOrderNumber,
+          nextOrderNumber: orderNumber
+        });
         
         let totalAmount = 0;
         manualCart.forEach(item => {
@@ -1051,12 +2695,12 @@
         
         const orderData = {
           orderNumber: orderNumber,
-          timestamp: Timestamp.fromDate(now),
+          timestamp: window.Timestamp.fromDate(now),
           tableNumber: tableNumber,
           items: manualCart,
           totalAmount: totalAmount,
           status: 'pending',
-          deleteAt: Timestamp.fromDate(deleteAt),
+          deleteAt: window.Timestamp.fromDate(deleteAt),
           cancelledAt: null,
           completedAt: null,
           paidAt: null,
@@ -1066,9 +2710,9 @@
           manualEntry: true
         };
         
-        const docRef = await addDoc(collection(db, 'orders'), orderData);
+        const docRef = await window.addDoc(window.collection(window.db, 'orders'), orderData);
         
-        await updateDoc(docRef, {
+        await window.updateDoc(docRef, {
           orderId: docRef.id
         });
         
@@ -1095,14 +2739,15 @@
     // テーブルの注文を監視
     async function monitorTable(tableNum) {
       const q = query(
-        collection(db, 'orders'),
+        window.collection(window.db, 'orders'),
         where('tableNumber', '==', String(tableNum))
       );
       
       onSnapshot(q, (snapshot) => {
         const unpaidOrders = snapshot.docs.filter(doc => {
           const data = doc.data();
-          return !data.paidAt && !data.cancelledAt;
+          // 削除済み、会計済み、キャンセル済みを除外
+          return !data.deleted && !data.paidAt && !data.cancelledAt;
         });
         
         const hasActiveOrders = unpaidOrders.length > 0;
@@ -1154,12 +2799,11 @@
       
       try {
         const q = query(
-          collection(db, 'orders'),
-          where('tableNumber', '==', String(tableNum)),
-          orderBy('timestamp', 'desc')
+          window.collection(window.db, 'orders'),
+          where('tableNumber', '==', String(tableNum))
         );
         
-        const snapshot = await getDocs(q);
+        const snapshot = await window.getDocs(q);
         
         if (snapshot.empty) {
           container.innerHTML = '<div class="empty-state">このテーブルに注文はありません</div>';
@@ -1172,22 +2816,48 @@
         let totalAmount = 0;
         let hasUnpaidOrders = false;
         
+        // 注文を配列に変換してソート
+        const orders = [];
         snapshot.forEach(doc => {
           const data = doc.data();
-          const order = { id: doc.id, ...data };
+          orders.push({ id: doc.id, ...data });
+        });
+        
+        // 注文番号でソート（古い順: 619→620→621）
+        orders.sort((a, b) => {
+          return a.orderNumber - b.orderNumber;
+        });
+        
+        // 削除されていない注文のみ表示
+        console.log('全注文数:', orders.length);
+        orders.forEach(order => {
+          console.log(`注文#${order.orderNumber}: deleted=${order.deleted}, paidAt=${order.paidAt}, cancelledAt=${order.cancelledAt}`);
           
-          if (!data.cancelledAt && !data.paidAt) {
+          // deletedフラグが立っている注文はスキップ（履歴では表示）
+          if (order.deleted) {
+            console.log(`  → スキップ（削除済み）`);
+            return;
+          }
+          
+          const card = createOrderCard(order);
+          container.appendChild(card);
+          
+          // 未払い注文のみ合計に含める
+          if (!order.cancelledAt && !order.paidAt) {
             currentOrders.push(order);
-            totalAmount += data.totalAmount;
+            totalAmount += order.totalAmount || 0;
             hasUnpaidOrders = true;
-            
-            const card = createOrderCard(order);
-            container.appendChild(card);
           }
         });
         
+        console.log('表示された注文数:', container.children.length);
+        
+        // 注文が1つも表示されなかった場合
+        if (container.children.length === 0) {
+          container.innerHTML = '<div class="empty-state">このテーブルに注文はありません</div>';
+        }
+        
         if (!hasUnpaidOrders) {
-          container.innerHTML = '<div class="empty-state">未会計の注文はありません</div>';
           document.getElementById('totalSection').classList.add('hidden');
         } else {
           document.getElementById('totalAmount').textContent = `¥${totalAmount.toLocaleString()}`;
@@ -1197,7 +2867,8 @@
         
       } catch (e) {
         console.error('注文読み込みエラー:', e);
-        container.innerHTML = '<div class="empty-state">エラーが発生しました</div>';
+        console.error('エラー詳細:', e.message);
+        container.innerHTML = '<div class="empty-state">エラーが発生しました: ' + e.message + '</div>';
       }
     }
     
@@ -1209,8 +2880,15 @@
       if (order.completedAt) card.classList.add('completed');
       if (order.cancelledAt) card.classList.add('cancelled');
       
-      const timestamp = order.timestamp.toDate();
-      const timeStr = `${timestamp.getHours()}:${String(timestamp.getMinutes()).padStart(2, '0')}`;
+      let timeStr = '--:--';
+      try {
+        if (order.timestamp && order.timestamp.toDate) {
+          const timestamp = order.timestamp.toDate();
+          timeStr = `${timestamp.getHours()}:${String(timestamp.getMinutes()).padStart(2, '0')}`;
+        }
+      } catch (e) {
+        console.error('Timestamp変換エラー:', e);
+      }
       
       let statusHtml = '';
       if (order.cancelledAt) {
@@ -1222,23 +2900,38 @@
       }
       
       let itemsHtml = '';
-      order.items.forEach(item => {
-        const subtotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-        itemsHtml += `
-          <div class="order-item">
-            <div>
-              <div class="item-name">${item.name}</div>
-              <div class="item-details">数量: ${item.quantity}個 | トッピング: ${item.toppings}</div>
+      if (order.items && Array.isArray(order.items)) {
+        order.items.forEach(item => {
+          const itemBasePrice = item.price;
+          const itemWithTopping = itemBasePrice + (item.toppingPrice || 0);
+          const itemTotal = itemWithTopping * item.quantity;
+          
+          // トッピングを改行で表示
+          let toppingsHtml = '';
+          if (item.toppings && item.toppings !== 'なし') {
+            const toppingList = item.toppings.split(', ');
+            toppingsHtml = toppingList.map(t => `<div style="font-size: 12px; color: #666; padding-left: 10px;">　${t}</div>`).join('');
+          }
+          
+          itemsHtml += `
+            <div class="order-item-detailed">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <div style="font-weight: bold;">${item.name} ×${item.quantity}</div>
+                <div>¥${itemBasePrice.toLocaleString()}</div>
+              </div>
+              ${toppingsHtml}
+              <div style="display: flex; justify-content: flex-end; margin-top: 5px; padding-top: 5px; border-top: 1px dashed #ddd;">
+                <div style="font-weight: bold; color: #667eea;">¥${itemWithTopping.toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
+              </div>
             </div>
-            <div class="item-price">¥${subtotal.toLocaleString()}</div>
-          </div>
-        `;
-      });
+          `;
+        });
+      }
       
       card.innerHTML = `
         <div class="order-header">
           <div>
-            <span class="order-number">#${order.orderNumber}</span>
+            <span class="order-number">#${order.orderNumber || '---'}</span>
             ${statusHtml}
           </div>
           <div class="order-time">${timeStr}</div>
@@ -1247,13 +2940,97 @@
           ${itemsHtml}
         </div>
         <div class="order-total">
-          <span class="total-label">小計:</span>
-          <span class="total-amount">¥${order.totalAmount.toLocaleString()}</span>
+          <span class="total-label">合計:</span>
+          <span class="total-amount">¥${(order.totalAmount || 0).toLocaleString()}</span>
+        </div>
+        <div class="order-actions">
+          ${!order.paidAt && !order.cancelledAt ? `<button class="order-action-btn pay-btn" onclick="payOrderIndividual('${order.id}', ${order.totalAmount || 0})">💰 会計</button>` : ''}
+          <button class="order-action-btn complete-btn" onclick="completeOrder('${order.id}')">✅ 完了</button>
+          <button class="order-action-btn cancel-btn" onclick="cancelOrder('${order.id}')">❌ キャンセル</button>
+          ${order.completedAt || order.cancelledAt ? `<button class="order-action-btn delete-btn" onclick="deleteOrder('${order.id}')">🗑️ 削除</button>` : ''}
         </div>
       `;
       
       return card;
     }
+    
+    // 個別注文の会計
+    window.payOrderIndividual = function(orderId, amount) {
+      const order = currentOrders.find(o => o.id === orderId);
+      if (!order) {
+        alert('注文が見つかりません');
+        return;
+      }
+      
+      // 単一注文を選択して会計モーダルを表示
+      currentOrders = [order];
+      totalAmountToPay = amount;
+      document.getElementById('paymentModal').classList.remove('hidden');
+      selectedPaymentMethod = null;
+      document.querySelectorAll('.payment-method-btn').forEach(btn => {
+        btn.classList.remove('selected');
+      });
+      document.getElementById('cashInputSection').classList.add('hidden');
+      document.getElementById('completePaymentBtn').disabled = true;
+    };
+    
+    // 注文を完了にする
+    window.completeOrder = async function(orderId) {
+      if (!confirm('この注文を完了にしますか？')) return;
+      
+      try {
+        await window.updateDoc(doc(db, 'orders', orderId), {
+          completedAt: window.Timestamp.now()
+        });
+        alert('注文を完了にしました');
+        await loadOrders(selectedTable);
+      } catch (e) {
+        console.error('完了エラー:', e);
+        alert('エラーが発生しました');
+      }
+    };
+    
+    // 注文をキャンセルする
+    window.cancelOrder = async function(orderId) {
+      if (!confirm('この注文をキャンセルしますか？')) return;
+      
+      try {
+        await window.updateDoc(doc(db, 'orders', orderId), {
+          cancelledAt: window.Timestamp.now()
+        });
+        alert('注文をキャンセルしました');
+        await loadOrders(selectedTable);
+      } catch (e) {
+        console.error('キャンセルエラー:', e);
+        alert('エラーが発生しました');
+      }
+    };
+    
+    // 注文を削除する
+    window.deleteOrder = async function(orderId) {
+      if (!confirm('この注文を削除しますか？\n※履歴から確認できます')) return;
+      
+      console.log('削除開始: orderId =', orderId);
+      console.log('selectedTable =', selectedTable);
+      
+      try {
+        // deleteDocではなくdeletedフラグを立てる（Firebaseルールで削除が許可されていない可能性があるため）
+        console.log('updateDoc実行中...');
+        await window.updateDoc(doc(db, 'orders', orderId), {
+          deleted: true,
+          deletedAt: window.Timestamp.now()
+        });
+        console.log('updateDoc成功');
+        alert('注文を削除しました');
+        console.log('loadOrders実行中...');
+        await loadOrders(selectedTable);
+        console.log('loadOrders完了');
+      } catch (e) {
+        console.error('削除エラー:', e);
+        console.error('エラー詳細:', e.message, e.code);
+        alert('エラーが発生しました: ' + e.message);
+      }
+    };
     
     // 支払いモーダルを表示
     window.showPaymentModal = function() {
@@ -1312,19 +3089,22 @@
       }
       
       try {
-        const now = Timestamp.now();
+        const now = window.Timestamp.now();
         
         // 注文番号リストを取得
         const orderNumbers = currentOrders.map(o => o.orderNumber);
         
         // 全ての注文に支払い済みフラグを設定
         for (const order of currentOrders) {
-          await updateDoc(doc(db, 'orders', order.id), {
+          await window.updateDoc(doc(db, 'orders', order.id), {
             paidAt: now,
             notifiedPaid: true,
             paymentMethod: selectedPaymentMethod
           });
         }
+        
+        // 🆕 日次売上を更新
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod);
         
         // 支払いデータを保存（レシート印刷用）
         lastPaymentData = {
@@ -1337,9 +3117,6 @@
           change: selectedPaymentMethod === 'cash' ? changeAmount : 0,
           timestamp: new Date()
         };
-        
-        // 日次売上を更新
-        await updateDailySales(totalAmountToPay, selectedPaymentMethod);
         
         // モーダルを閉じる
         closePaymentModal();
@@ -1594,153 +3371,66 @@
       document.getElementById('orderSection').classList.add('hidden');
     };
     
-    // ========== 日次売上更新 ==========
-    
-    // 日次売上を更新
-    async function updateDailySales(amount, paymentMethod) {
-      try {
-        console.log('💰 日次売上更新開始:', { amount, paymentMethod });
-        
-        // 今日の日付を取得（JST、午前3時基準）
-        const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        const todayStart = new Date(jstNow);
-        todayStart.setHours(3, 0, 0, 0);
-        if (jstNow.getHours() < 3) {
-          todayStart.setDate(todayStart.getDate() - 1);
-        }
-        
-        // 日付をYYYY-MM-DD形式に変換
-        const dateKey = `${todayStart.getFullYear()}-${String(todayStart.getMonth() + 1).padStart(2, '0')}-${String(todayStart.getDate()).padStart(2, '0')}`;
-        console.log('日付キー:', dateKey);
-        
-        // dailySalesコレクションの該当日付のドキュメントを取得
-        const salesRef = doc(db, 'dailySales', dateKey);
-        const salesDoc = await getDoc(salesRef);
-        
-        if (salesDoc.exists()) {
-          // 既存データに加算
-          const currentData = salesDoc.data();
-          console.log('既存データ:', currentData);
-          
-          const updatedData = {
-            totalSales: (currentData.totalSales || 0) + amount,
-            customerCount: (currentData.customerCount || 0) + 1,
-            orderCount: (currentData.orderCount || 0) + 1,
-            cashSales: (currentData.cashSales || 0) + (paymentMethod === 'cash' ? amount : 0),
-            cardSales: (currentData.cardSales || 0) + (paymentMethod === 'card' ? amount : 0),
-            paypaySales: (currentData.paypaySales || 0) + (paymentMethod === 'paypay' ? amount : 0),
-            lastUpdated: Timestamp.now()
-          };
-          
-          await updateDoc(salesRef, updatedData);
-          console.log('✅ 日次売上更新完了（更新）:', updatedData);
-        } else {
-          // 新規作成
-          const newData = {
-            date: dateKey,
-            dateTimestamp: Timestamp.fromDate(todayStart),
-            totalSales: amount,
-            customerCount: 1,
-            orderCount: 1,
-            cashSales: paymentMethod === 'cash' ? amount : 0,
-            cardSales: paymentMethod === 'card' ? amount : 0,
-            paypaySales: paymentMethod === 'paypay' ? amount : 0,
-            createdAt: Timestamp.now(),
-            lastUpdated: Timestamp.now()
-          };
-          
-          await setDoc(salesRef, newData);
-          console.log('✅ 日次売上更新完了（新規）:', newData);
-        }
-      } catch (e) {
-        console.error('❌ 日次売上更新エラー:', e);
-        // エラーが発生しても会計処理は継続
-      }
-    }
-    
-    // ========== 客数・売上表示 ==========
-    
-    // 客数モーダルを表示
-    window.showCustomerCount = async function() {
+    // 日次売上更新関数
+    window.updateDailySales = async function(totalAmount, paymentMethod) {
       try {
         const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        const todayStart = new Date(jstNow);
-        todayStart.setHours(3, 0, 0, 0);
-        if (jstNow.getHours() < 3) {
-          todayStart.setDate(todayStart.getDate() - 1);
-        }
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         
-        const dateKey = `${todayStart.getFullYear()}-${String(todayStart.getMonth() + 1).padStart(2, '0')}-${String(todayStart.getDate()).padStart(2, '0')}`;
+        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod });
         
-        const salesRef = doc(db, 'dailySales', dateKey);
+        const salesRef = doc(db, 'dailySales', dateStr);
         const salesDoc = await getDoc(salesRef);
-        
-        let customerCount = 0;
-        if (salesDoc.exists()) {
-          customerCount = salesDoc.data().customerCount || 0;
-        }
-        
-        // confirmはOKボタンのみ表示され、スクロールしない
-        confirm(`本日の客数: ${customerCount}組`);
-      } catch (e) {
-        console.error('客数取得エラー:', e);
-        confirm('客数の取得に失敗しました');
-      }
-    };
-    
-    // 売上モーダルを表示
-    window.showSales = async function() {
-      try {
-        const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        const todayStart = new Date(jstNow);
-        todayStart.setHours(3, 0, 0, 0);
-        if (jstNow.getHours() < 3) {
-          todayStart.setDate(todayStart.getDate() - 1);
-        }
-        
-        const dateKey = `${todayStart.getFullYear()}-${String(todayStart.getMonth() + 1).padStart(2, '0')}-${String(todayStart.getDate()).padStart(2, '0')}`;
-        
-        const salesRef = doc(db, 'dailySales', dateKey);
-        const salesDoc = await getDoc(salesRef);
-        
-        let salesData = {
-          totalSales: 0,
-          cashSales: 0,
-          cardSales: 0,
-          paypaySales: 0,
-          orderCount: 0
-        };
         
         if (salesDoc.exists()) {
           const data = salesDoc.data();
-          salesData = {
-            totalSales: data.totalSales || 0,
+          console.log('既存データ:', data);
+          
+          const updates = {
+            totalSales: (data.totalSales || 0) + totalAmount,
+            customerCount: (data.customerCount || 0) + 1,
             cashSales: data.cashSales || 0,
-            cardSales: data.cardSales || 0,
-            paypaySales: data.paypaySales || 0,
-            orderCount: data.orderCount || 0
+            emoneSales: data.emoneSales || 0,
+            creditSales: data.creditSales || 0,
+            updatedAt: Timestamp.now()
           };
+          
+          // 支払い方法別の売上を加算
+          if (paymentMethod === 'cash') {
+            updates.cashSales += totalAmount;
+          } else if (paymentMethod === 'emoney') {
+            updates.emoneSales += totalAmount;
+          } else if (paymentMethod === 'credit') {
+            updates.creditSales += totalAmount;
+          }
+          
+          await updateDoc(salesRef, updates);
+          console.log('✅ 既存売上データ更新:', updates);
+          
+        } else {
+          const newData = {
+            date: dateStr,
+            totalSales: totalAmount,
+            customerCount: 1,
+            cashSales: paymentMethod === 'cash' ? totalAmount : 0,
+            emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
+            creditSales: paymentMethod === 'credit' ? totalAmount : 0,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now()
+          };
+          
+          await setDoc(salesRef, newData);
+          console.log('✅ 新規売上データ作成:', newData);
         }
         
-        // confirmはOKボタンのみ表示され、スクロールしない
-        confirm(`本日の売上\n\n総売上: ¥${salesData.totalSales.toLocaleString()}\n注文数: ${salesData.orderCount}件\n\n現金: ¥${salesData.cashSales.toLocaleString()}\nカード: ¥${salesData.cardSales.toLocaleString()}\nPayPay: ¥${salesData.paypaySales.toLocaleString()}`);
-      } catch (e) {
-        console.error('売上取得エラー:', e);
-        confirm('売上の取得に失敗しました');
+        // 更新後のデータを取得して確認
+        const updatedDoc = await getDoc(salesRef);
+        console.log('更新後のデータ:', updatedDoc.data());
+        
+      } catch (error) {
+        console.error('❌ 日次売上更新エラー:', error);
+        throw error;
       }
-    };
-    
-    // ========== 履歴機能 ==========
-    
-    window.showHistoryModal = function() {
-      confirm('履歴機能は次のバージョンで実装されます');
-    };
-    
-    window.showMonthlyReportModal = function() {
-      confirm('月次レポート機能は次のバージョンで実装されます');
     };
   </script>
 </body>
