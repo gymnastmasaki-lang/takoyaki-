@@ -2461,14 +2461,28 @@
           return;
         }
         
-        // 担当者名を取得（後で実装）
+        // 担当者名を取得（kintaiから）
         let staffName = '担当者不明';
+        try {
+          const kintaiSnapshot = await window.getDocs(window.collection(window.db, 'attendance'));
+          const today = new Date();
+          const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+          
+          kintaiSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.date === todayStr && data.clockIn && !data.clockOut) {
+              staffName = data.name || '担当者不明';
+            }
+          });
+        } catch (e) {
+          console.log('担当者取得エラー:', e);
+        }
         
         // 今日の全注文を取得して詳細を計算
         const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
         let totalItems = 0;
-        let tax8Total = 0;
-        let tax10Total = 0;
+        let tax8Items = [];
+        let tax10Items = [];
         let discountTotal = 0;
         let drawerOpenCount = 0;
         
@@ -2484,10 +2498,28 @@
             if (data.items) {
               data.items.forEach(item => {
                 totalItems += item.quantity || 0;
+                
+                // 税率別に分類
+                const itemTotal = (item.price || 0) * (item.quantity || 0);
+                const itemName = item.name || '';
+                const tableNumber = data.tableNumber || '';
+                
+                // 店内テーブル（c1, c2, T-M, T-H）は全て10%
+                if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
+                  tax10Items.push(itemTotal);
+                }
+                // レジ袋は常に10%（即会計、テイクアウト、予約テーブル）
+                else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
+                  tax10Items.push(itemTotal);
+                }
+                // その他全て8%（即会計、テイクアウト、予約テーブル）
+                else {
+                  tax8Items.push(itemTotal);
+                }
               });
             }
             
-            // 値引き（後で実装）
+            // 値引き
             discountTotal += data.discount || 0;
             
             // ドロアオープン数（現金支払い時にカウント）
@@ -2497,57 +2529,118 @@
           }
         });
         
-        // 税金計算（簡易版：8%と10%を5:5で分ける）
-        const taxExcludedTotal = Math.round(settlementData.totalSales / 1.09);
-        tax8Total = Math.round(taxExcludedTotal * 0.5);
-        tax10Total = Math.round(taxExcludedTotal * 0.5);
+        // 税金計算（正しい方法）
+        const tax8Total = tax8Items.reduce((sum, val) => sum + val, 0);
+        const tax10Total = tax10Items.reduce((sum, val) => sum + val, 0);
         const tax8Amount = Math.round(tax8Total * 0.08);
         const tax10Amount = Math.round(tax10Total * 0.10);
         const totalTax = tax8Amount + tax10Amount;
+        const taxExcludedTotal = tax8Total + tax10Total;
         
-        // CSVデータを生成
-        const csvData = [
-          ['精算ジャーナル'],
-          ['日付', dateStr],
-          ['客数', settlementData.customerCount + '組'],
-          ['総売上点数', totalItems + '点'],
-          ['合計売上', '¥' + settlementData.totalSales.toLocaleString()],
-          [],
-          ['内訳'],
-          ['現金', '¥' + settlementData.cashSales.toLocaleString()],
-          ['電子マネー', '¥' + settlementData.emoneSales.toLocaleString()],
-          ['クレジットカード', '¥' + settlementData.creditSales.toLocaleString()],
-          ['値引き', '¥' + discountTotal.toLocaleString()],
-          [],
-          ['税金'],
-          ['8%商品合計', '¥' + tax8Total.toLocaleString()],
-          ['10%商品合計', '¥' + tax10Total.toLocaleString()],
-          ['8%消費税', '¥' + tax8Amount.toLocaleString()],
-          ['10%消費税', '¥' + tax10Amount.toLocaleString()],
-          ['消費税合計', '¥' + totalTax.toLocaleString()],
-          ['税抜合計', '¥' + taxExcludedTotal.toLocaleString()],
-          ['税込合計', '¥' + settlementData.totalSales.toLocaleString()],
-          [],
-          ['その他'],
-          ['ドロアオープン数', drawerOpenCount + '回'],
-          ['担当者', staffName]
-        ];
+        // PDFを生成（jsPDFライブラリを使用）
+        if (typeof jspdf === 'undefined') {
+          // jsPDFが読み込まれていない場合は動的に読み込む
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+          });
+        }
         
-        // CSVファイルを生成
-        const csvContent = csvData.map(row => row.join(',')).join('\n');
-        const bom = '\uFEFF'; // UTF-8 BOM
-        const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `精算ジャーナル_${dateStr}.csv`;
-        link.click();
-        URL.revokeObjectURL(url);
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        // 日本語フォント対応のため、テキストを画像として追加する方法を使用
+        // シンプルなレイアウト
+        let y = 20;
+        const lineHeight = 8;
+        
+        doc.setFontSize(16);
+        doc.text('Settlement Journal', 105, y, { align: 'center' });
+        y += lineHeight * 2;
+        
+        doc.setFontSize(12);
+        doc.text(`Date: ${dateStr}`, 20, y);
+        y += lineHeight;
+        doc.text(`Customers: ${settlementData.customerCount}`, 20, y);
+        y += lineHeight;
+        doc.text(`Total Items: ${totalItems}`, 20, y);
+        y += lineHeight;
+        doc.text(`Total Sales: ¥${settlementData.totalSales.toLocaleString()}`, 20, y);
+        y += lineHeight * 2;
+        
+        doc.text('Payment Methods:', 20, y);
+        y += lineHeight;
+        doc.text(`  Cash: ¥${settlementData.cashSales.toLocaleString()}`, 20, y);
+        y += lineHeight;
+        doc.text(`  E-Money: ¥${settlementData.emoneSales.toLocaleString()}`, 20, y);
+        y += lineHeight;
+        doc.text(`  Credit: ¥${settlementData.creditSales.toLocaleString()}`, 20, y);
+        y += lineHeight;
+        doc.text(`  Discount: ¥${discountTotal.toLocaleString()}`, 20, y);
+        y += lineHeight * 2;
+        
+        doc.text('Tax Details:', 20, y);
+        y += lineHeight;
+        doc.text(`  8% Items: ¥${tax8Total.toLocaleString()}`, 20, y);
+        y += lineHeight;
+        doc.text(`  10% Items: ¥${tax10Total.toLocaleString()}`, 20, y);
+        y += lineHeight;
+        doc.text(`  8% Tax: ¥${tax8Amount.toLocaleString()}`, 20, y);
+        y += lineHeight;
+        doc.text(`  10% Tax: ¥${tax10Amount.toLocaleString()}`, 20, y);
+        y += lineHeight;
+        doc.text(`  Total Tax: ¥${totalTax.toLocaleString()}`, 20, y);
+        y += lineHeight;
+        doc.text(`  Subtotal: ¥${taxExcludedTotal.toLocaleString()}`, 20, y);
+        y += lineHeight;
+        doc.text(`  Total: ¥${settlementData.totalSales.toLocaleString()}`, 20, y);
+        y += lineHeight * 2;
+        
+        doc.text('Other:', 20, y);
+        y += lineHeight;
+        doc.text(`  Drawer Opens: ${drawerOpenCount}`, 20, y);
+        y += lineHeight;
+        doc.text(`  Staff: ${staffName}`, 20, y);
+        
+        // PDFをダウンロード
+        doc.save(`精算ジャーナル_${dateStr}.pdf`);
         
         // 精算記録をFirebaseに保存
         await window.addDoc(window.collection(window.db, 'settlements'), {
           date: dateStr,
           timestamp: window.Timestamp.now(),
+          totalSales: settlementData.totalSales,
+          customerCount: settlementData.customerCount,
+          cashSales: settlementData.cashSales,
+          emoneSales: settlementData.emoneSales,
+          creditSales: settlementData.creditSales,
+          totalItems: totalItems,
+          discountTotal: discountTotal,
+          drawerOpenCount: drawerOpenCount,
+          staffName: staffName,
+          tax8Total: tax8Total,
+          tax10Total: tax10Total,
+          tax8Amount: tax8Amount,
+          tax10Amount: tax10Amount
+        });
+        
+        // 日次売上データをリセット（翌日用）
+        const salesRef = window.doc(window.db, 'dailySales', dateStr);
+        await window.updateDoc(salesRef, {
+          settled: true,
+          settledAt: window.Timestamp.now()
+        });
+        
+        alert('精算ジャーナルをダウンロードしました');
+        closeSettlementModal();
+      } catch (e) {
+        console.error('精算エラー:', e);
+        alert('精算に失敗しました: ' + e.message);
+      }
+    };
           totalSales: settlementData.totalSales,
           customerCount: settlementData.customerCount,
           cashSales: settlementData.cashSales,
