@@ -281,6 +281,105 @@
       background: #f44336;
       color: white;
     }
+    
+    /* 支払い方法モーダル */
+    .payment-modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.7);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .payment-modal-overlay.show {
+      display: flex;
+    }
+    .payment-modal {
+      background: white;
+      border-radius: 20px;
+      padding: 30px;
+      max-width: 500px;
+      width: 100%;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    }
+    .payment-modal h3 {
+      text-align: center;
+      color: #667eea;
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+    .payment-method-btn {
+      width: 100%;
+      padding: 20px;
+      margin: 10px 0;
+      font-size: 18px;
+      font-weight: bold;
+      border: 3px solid #ddd;
+      border-radius: 15px;
+      cursor: pointer;
+      background: white;
+      transition: all 0.3s;
+    }
+    .payment-method-btn:hover {
+      border-color: #667eea;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(102,126,234,0.3);
+    }
+    .payment-method-btn.selected {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-color: #667eea;
+    }
+    .payment-modal-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .payment-modal-btn {
+      padding: 15px;
+      font-size: 16px;
+      font-weight: bold;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .payment-modal-btn.confirm {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      color: white;
+    }
+    .payment-modal-btn.cancel {
+      background: #e0e0e0;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  
+  <!-- 支払い方法選択モーダル -->
+  <div id="paymentModal" class="payment-modal-overlay">
+    <div class="payment-modal">
+      <h3>💳 支払い方法を選択</h3>
+      <div id="paymentMethodsList">
+        <button class="payment-method-btn" data-method="cash">💵 現金</button>
+        <button class="payment-method-btn" data-method="emoney">📱 電子マネー</button>
+        <button class="payment-method-btn" data-method="credit">💳 クレジットカード</button>
+      </div>
+      <div class="payment-modal-buttons">
+        <button class="payment-modal-btn confirm" onclick="confirmPayment()">会計完了</button>
+        <button class="payment-modal-btn cancel" onclick="closePaymentModal()">キャンセル</button>
+      </div>
+    </div>
+  </div>
+      background: #f44336;
+      color: white;
+    }
     .connection-dot {
       width: 10px;
       height: 10px;
@@ -886,6 +985,9 @@
       }
     }
 
+    let currentPaymentOrder = null;
+    let selectedPaymentMethod = null;
+    
     async function togglePaidStatus(order) {
       try {
         if (order.paidAt) {
@@ -899,16 +1001,177 @@
           showToast('✓ 会計を未済に戻しました');
           loadOrders();
         } else {
-          await updateDoc(doc(db, 'orders', order.id), {
-            paidAt: Timestamp.now()
-          });
+          // 支払い方法選択モーダルを表示
+          currentPaymentOrder = order;
+          selectedPaymentMethod = null;
+          document.getElementById('paymentModal').classList.add('show');
           
-          showToast('✓ 会計済みにしました');
-          loadOrders();
+          // ボタンのイベントリスナーを設定
+          document.querySelectorAll('.payment-method-btn').forEach(btn => {
+            btn.classList.remove('selected');
+            btn.onclick = () => selectPaymentMethod(btn.dataset.method);
+          });
         }
       } catch (e) {
         console.error(e);
         showToast('エラー: ' + e.message);
+      }
+    }
+    
+    function selectPaymentMethod(method) {
+      selectedPaymentMethod = method;
+      document.querySelectorAll('.payment-method-btn').forEach(btn => {
+        btn.classList.remove('selected');
+      });
+      event.target.classList.add('selected');
+    }
+    
+    function closePaymentModal() {
+      document.getElementById('paymentModal').classList.remove('show');
+      currentPaymentOrder = null;
+      selectedPaymentMethod = null;
+    }
+    
+    async function confirmPayment() {
+      if (!selectedPaymentMethod) {
+        showToast('支払い方法を選択してください');
+        return;
+      }
+      
+      if (!currentPaymentOrder) {
+        showToast('エラー: 注文情報が見つかりません');
+        return;
+      }
+      
+      try {
+        const order = currentPaymentOrder;
+        
+        // 担当者名（コントローラーからは固定）
+        const staffName = 'コントローラー';
+        
+        // 注文を会計済みに更新
+        await updateDoc(doc(db, 'orders', order.id), {
+          paidAt: Timestamp.now(),
+          notifiedPaid: true,
+          paymentMethod: selectedPaymentMethod,
+          staffName: staffName
+        });
+        
+        // 商品点数をカウント
+        let itemCount = 0;
+        let tax8Total = 0;
+        let tax10Total = 0;
+        
+        if (order.items && Array.isArray(order.items)) {
+          order.items.forEach(item => {
+            itemCount += item.quantity || 0;
+            
+            // 商品ごとの金額を計算（トッピング込み）
+            const basePrice = item.price || 0;
+            const toppingPrice = item.toppingPrice || 0;
+            const totalPrice = basePrice + toppingPrice;
+            const itemTotal = totalPrice * (item.quantity || 0);
+            
+            // テーブル番号による税率判定
+            const tableNumber = order.tableNumber || '';
+            const itemName = item.name || '';
+            
+            // 【10%】店内テーブル: c1, c2, T-M, T-H のみ
+            if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
+              tax10Total += itemTotal;
+            }
+            // 【10%】レジ袋（どのテーブルでも）
+            else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
+              tax10Total += itemTotal;
+            }
+            // 【8%】その他すべて（即会計、テイクアウト、予約1-5など）
+            else {
+              tax8Total += itemTotal;
+            }
+          });
+        }
+        
+        console.log('📦 会計商品点数:', itemCount);
+        console.log('💰 税率別売上:', { tax8Total, tax10Total });
+        
+        // 日次売上を更新
+        await updateDailySales(order.totalAmount, selectedPaymentMethod, itemCount, tax8Total, tax10Total);
+        
+        closePaymentModal();
+        showToast('✓ 会計済みにしました');
+        loadOrders();
+      } catch (e) {
+        console.error(e);
+        showToast('エラー: ' + e.message);
+      }
+    }
+    
+    // 日次売上更新関数
+    async function updateDailySales(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total) {
+      try {
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        
+        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount, tax8Total, tax10Total });
+        
+        const salesRef = doc(db, 'dailySales', dateStr);
+        const salesDoc = await getDoc(salesRef);
+        
+        if (salesDoc.exists()) {
+          const data = salesDoc.data();
+          console.log('既存データ:', data);
+          
+          const updates = {
+            totalSales: (data.totalSales || 0) + totalAmount,
+            customerCount: (data.customerCount || 0) + 1,
+            totalItems: (data.totalItems || 0) + itemCount,
+            tax8Total: (data.tax8Total || 0) + tax8Total,
+            tax10Total: (data.tax10Total || 0) + tax10Total,
+            cashSales: data.cashSales || 0,
+            emoneSales: data.emoneSales || 0,
+            creditSales: data.creditSales || 0,
+            updatedAt: Timestamp.now()
+          };
+          
+          // 支払い方法別の売上を加算
+          if (paymentMethod === 'cash') {
+            updates.cashSales += totalAmount;
+          } else if (paymentMethod === 'emoney') {
+            updates.emoneSales += totalAmount;
+          } else if (paymentMethod === 'credit') {
+            updates.creditSales += totalAmount;
+          }
+          
+          await updateDoc(salesRef, updates);
+          console.log('✅ 既存売上データ更新:', updates);
+          
+        } else {
+          const newData = {
+            date: dateStr,
+            totalSales: totalAmount,
+            customerCount: 1,
+            totalItems: itemCount,
+            tax8Total: tax8Total,
+            tax10Total: tax10Total,
+            cashSales: paymentMethod === 'cash' ? totalAmount : 0,
+            emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
+            creditSales: paymentMethod === 'credit' ? totalAmount : 0,
+            drawerOpenCount: 0,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now()
+          };
+          
+          await setDoc(salesRef, newData);
+          console.log('✅ 新規売上データ作成:', newData);
+        }
+        
+        // 更新後のデータを取得して確認
+        const updatedDoc = await getDoc(salesRef);
+        console.log('更新後のデータ:', updatedDoc.data());
+        
+      } catch (error) {
+        console.error('❌ 日次売上更新エラー:', error);
+        throw error;
       }
     }
 

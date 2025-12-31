@@ -633,6 +633,16 @@
       const hasTableParam = urlParams.get('table');
       let closedStartTime, closedEndTime, operatingHours;
       
+      // 🆕 時間外解除設定を確認
+      let timeOverrideEnabled = false;
+      try {
+        const settingsRef = await getDoc(doc(db, 'settings', 'timeOverride'));
+        timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
+        console.log('時間外解除設定:', timeOverrideEnabled);
+      } catch (e) {
+        console.error('時間外解除設定の読み込みエラー:', e);
+      }
+      
       if (hasTableParam) {
         // menu.html?table=の場合：22:00-11:00が営業時間外
         closedStartTime = 22 * 60; // 22:00 = 1320分
@@ -646,7 +656,8 @@
       }
       
       // 営業時間外判定（22:00/22:30以降 または 11:00より前）
-      const isClosed = currentTime >= closedStartTime || currentTime < closedEndTime;
+      // 🆕 時間外解除が有効な場合は営業中として扱う
+      const isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
       
       if (isClosed) {
         console.log('営業時間外');
@@ -1121,7 +1132,7 @@
       }
       
       currentItem = item;
-      selectedToppings = [];
+      selectedToppings = [];  // 🆕 トッピングをクリア（標準トッピング状態）
       qty = 1;
       
       document.getElementById('item-info').innerHTML = `
@@ -1150,6 +1161,26 @@
         
         const list = document.getElementById('topping-list');
         list.innerHTML = '';
+        
+        // 🆕 標準トッピングを一番上に追加（デフォルトで選択状態）
+        const standardDiv = document.createElement('div');
+        standardDiv.className = 'topping-item selected';  // 🆕 最初から選択状態
+        standardDiv.id = 'standard-topping';
+        standardDiv.innerHTML = `
+          <span>標準トッピング</span>
+          <span style="color: #4CAF50; font-weight: bold;">無料</span>
+        `;
+        standardDiv.onclick = () => {
+          // 標準トッピングを選択したら他のトッピングを全て解除
+          document.querySelectorAll('.topping-item').forEach(item => {
+            item.classList.remove('selected');
+          });
+          standardDiv.classList.add('selected');
+          selectedToppings = [];
+          updateSubtotal();
+        };
+        list.appendChild(standardDiv);
+        
         if (toppings.length > 0) {
           toppings.forEach(t => {
             const div = document.createElement('div');
@@ -1159,6 +1190,9 @@
               <span style="color: #4CAF50; font-weight: bold;">${t.price > 0 ? '+¥' + t.price.toLocaleString() : '無料'}</span>
             `;
             div.onclick = () => {
+              // 他のトッピングを選択したら標準トッピングを解除
+              document.getElementById('standard-topping').classList.remove('selected');
+              
               div.classList.toggle('selected');
               const idx = selectedToppings.findIndex(x => x.id === t.id);
               if (idx > -1) selectedToppings.splice(idx, 1);
@@ -1168,7 +1202,8 @@
             list.appendChild(div);
           });
         } else {
-          list.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">トッピングはありません</div>';
+          // トッピングがない場合は標準トッピングのみ
+          standardDiv.classList.add('selected');
         }
       } else {
         document.getElementById('topping-list').innerHTML = '<div style="text-align:center;color:#999;padding:20px;">トッピングはありません</div>';
@@ -1204,7 +1239,7 @@
       const toppingNames = selectedToppings.map(t => {
         toppingPrice += t.price || 0;
         return t.name;
-      }).join(', ') || 'なし';
+      }).join(', ') || '標準トッピング';  // 🆕 「なし」→「標準トッピング」
       
       cart.push({
         id: currentItem.id,
@@ -1338,18 +1373,33 @@
         
         const ordersSnapshot = await getDocs(collection(db, 'orders'));
         let maxOrderNumber = 618;
+        let hasActiveOrders = false;
         
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
-          const orderDate = data.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
           
-          if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
-            maxOrderNumber = data.orderNumber;
+          // 削除されていない注文があるかチェック
+          if (!data.deleted) {
+            hasActiveOrders = true;
+            
+            // 削除されていない注文のみから最大番号を取得
+            const orderDate = data.timestamp.toDate();
+            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+            
+            if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
+              maxOrderNumber = data.orderNumber;
+            }
           }
         });
         
-        const orderNumber = maxOrderNumber + 1;
+        // 削除されていない注文が0件なら619番から開始
+        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
+        
+        console.log('注文番号生成:', {
+          hasActiveOrders,
+          maxOrderNumber,
+          nextOrderNumber: orderNumber
+        });
         
         let totalAmount = 0;
         cart.forEach(item => {
