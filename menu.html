@@ -703,6 +703,11 @@
       setInterval(updateTopWaitingCount, 10000);
       watchSoldOutItems();
       
+      // settingsの変更を監視（手動カウントの変更を反映）
+      onSnapshot(collection(db, 'settings'), () => {
+        updateTopWaitingCount();
+      });
+      
       console.log('初期化完了');
     };
 
@@ -758,6 +763,9 @@
       
       const ordersRef = collection(db, 'orders');
       allOrdersUnsubscribe = onSnapshot(ordersRef, async (snapshot) => {
+        // 待ち人数を更新
+        await updateTopWaitingCount();
+        
         const orderSnap = await getDoc(orderRef);
         if (orderSnap.exists()) {
           const currentData = orderSnap.data();
@@ -904,9 +912,18 @@
         
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
-          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
-            validOrders.add(data.orderNumber);
-          }
+          
+          // 削除済みの注文は除外
+          if (data.deleted) return;
+          
+          // 完了済み・キャンセル済みは除外
+          if (data.completedAt || data.cancelledAt) return;
+          
+          // deleteAtがある場合、削除予定時刻を過ぎていたら除外
+          if (data.deleteAt && data.deleteAt.toDate() <= now) return;
+          
+          // 有効な注文としてカウント
+          validOrders.add(data.orderNumber);
         });
         
         const settingsSnapshot = await getDocs(collection(db, 'settings'));
@@ -917,12 +934,19 @@
           }
         });
         
-        const totalWaiting = 1 + validOrders.size + manualCount;
+        // 待ち人数 = 有効注文数 + 手動追加 + 1（最低1組）
+        // 注文が0の時は1組、注文が1つあれば2組
+        const totalWaiting = validOrders.size + manualCount + 1;
         const waitingElem = document.getElementById('top-waiting');
         if (waitingElem) {
           waitingElem.textContent = totalWaiting;
         }
-        console.log('待ち人数更新:', totalWaiting);
+        console.log('待ち人数更新:', {
+          有効注文数: validOrders.size,
+          手動追加: manualCount,
+          表示待ち人数: totalWaiting,
+          計算式: `${validOrders.size} + ${manualCount} + 1`
+        });
       } catch (e) {
         console.error('待ち人数取得エラー:', e);
       }
