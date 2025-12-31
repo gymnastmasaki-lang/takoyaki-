@@ -1076,19 +1076,6 @@
         </button>
       </div>
       
-      <!-- 値引き入力 -->
-      <div style="margin: 20px 0; padding: 15px; background: #fff3cd; border-radius: 10px; border-left: 4px solid #ffc107;">
-        <label style="display: block; margin-bottom: 10px; font-weight: bold; color: #856404;">
-          💰 値引き金額
-        </label>
-        <input type="number" id="discountAmount" placeholder="0" value="0" 
-               style="width: 100%; padding: 12px; font-size: 18px; border: 2px solid #ffc107; border-radius: 8px; text-align: center;"
-               oninput="updatePaymentTotal()">
-        <div style="text-align: center; margin-top: 10px; font-size: 14px; color: #856404;">
-          請求額: <span id="finalPaymentAmount" style="font-size: 20px; font-weight: bold; color: #667eea;">¥0</span>
-        </div>
-      </div>
-      
       <div id="cashInputSection" class="cash-input-section hidden">
         <label>お預かり金額</label>
         <input type="number" id="cashReceived" placeholder="0" oninput="calculateChange()">
@@ -1439,18 +1426,13 @@
       });
       
       // カテゴリを初期化
-      console.log('🔵 カテゴリ初期化中...');
       initializeCategories();
       
       // メニュー項目を表示
-      console.log('🔵 メニュー表示中... menuData.length:', menuData.length);
       displayMenuItems();
-      console.log('✅ メニュー表示完了');
       
       // リアルタイム更新を開始
       startRealtimeUpdates();
-      
-      console.log('✅✅ 初期化完了');
     }
     
     // テーブルボタンの色を更新
@@ -1525,32 +1507,12 @@
     
     // メニュー項目を表示
     function displayMenuItems(categoryFilter = 'all') {
-      console.log('📋 displayMenuItems呼び出し:', { categoryFilter, menuDataLength: menuData.length });
-      
       const container = document.getElementById('menuItemsList');
-      if (!container) {
-        console.error('❌ menuItemsListが見つかりません');
-        return;
-      }
-      
       container.innerHTML = '';
-      
-      if (menuData.length === 0) {
-        container.innerHTML = '<div class="loading">メニューデータがありません</div>';
-        console.warn('⚠️ menuDataが空です');
-        return;
-      }
       
       const filteredMenu = categoryFilter === 'all' 
         ? menuData 
         : menuData.filter(item => item.category === categoryFilter);
-      
-      console.log('✅ フィルタ後のメニュー数:', filteredMenu.length);
-      
-      if (filteredMenu.length === 0) {
-        container.innerHTML = '<div class="loading">該当する商品がありません</div>';
-        return;
-      }
       
       filteredMenu.forEach(item => {
         const div = document.createElement('div');
@@ -1573,8 +1535,6 @@
         
         container.appendChild(div);
       });
-      
-      console.log('✅ メニュー表示完了');
     }
     
     // 一時的な選択中のアイテム
@@ -1587,22 +1547,10 @@
       const item = menuData.find(m => m.id === itemId);
       
       if (checkbox.checked) {
+        // トッピング選択モーダルを表示
         currentSelectingItem = { ...item };
         selectedToppings = [];
-        
-        // toppingsIdが空または存在しない場合は、トッピング選択をスキップして直接カートに追加
-        if (!item.toppingsId || item.toppingsId.trim() === '') {
-          manualCart.push({
-            ...currentSelectingItem,
-            toppings: '標準トッピング',
-            toppingPrice: 0
-          });
-          updateManualCart();
-          currentSelectingItem = null;
-        } else {
-          // トッピング選択モーダルを表示
-          showToppingModal(item);
-        }
+        showToppingModal(item);
       } else {
         manualCart = manualCart.filter(i => i.id !== itemId);
         updateManualCart();
@@ -1647,8 +1595,8 @@
       }
       
       toppingsData.forEach(topping => {
-        // toppingsIdに含まれている場合のみ表示（空の場合は表示しない）
-        if (allowedToppingIds.length > 0 && allowedToppingIds.includes(topping.id)) {
+        // toppingsIdが空または含まれている場合に表示
+        if (allowedToppingIds.length === 0 || allowedToppingIds.includes(topping.id)) {
           const div = document.createElement('div');
           div.className = 'topping-item';
           div.style.cursor = 'pointer';
@@ -2756,7 +2704,10 @@
           const orderDate = data.timestamp.toDate();
           const orderDateStr = `${orderDate.getFullYear()}-${String(orderDate.getMonth()+1).padStart(2,'0')}-${String(orderDate.getDate()).padStart(2,'0')}`;
           
-          // 注文データは税率計算のみに使用（値引きはdailySalesから取得）
+          if (orderDateStr === dateStr) {
+            // 値引き
+            discountTotal += data.discount || 0;
+          }
         });
         
         console.log('📊 集計結果:', {
@@ -2765,9 +2716,6 @@
           tax10Total,
           drawerOpenCount
         });
-        
-        // 値引き合計を取得
-        const discountTotal = settlementData.totalDiscount || 0;
         
         // 税金計算（税込価格から内税を計算）
         // 8%: 税込価格 / 1.08 = 税抜価格、税込価格 - 税抜価格 = 消費税
@@ -3432,12 +3380,6 @@
         return;
       }
       
-      // 値引き金額を初期化
-      document.getElementById('discountAmount').value = '0';
-      
-      // 請求額を表示
-      updatePaymentTotal();
-      
       document.getElementById('paymentModal').classList.remove('hidden');
       selectedPaymentMethod = null;
       document.querySelectorAll('.payment-method-btn').forEach(btn => {
@@ -3445,31 +3387,6 @@
       });
       document.getElementById('cashInputSection').classList.add('hidden');
       document.getElementById('completePaymentBtn').disabled = true;
-    };
-    
-    // 請求額を更新
-    window.updatePaymentTotal = function() {
-      let total = 0;
-      currentOrders.forEach(order => {
-        if (order.items && Array.isArray(order.items)) {
-          order.items.forEach(item => {
-            const basePrice = item.price || 0;
-            const toppingPrice = item.toppingPrice || 0;
-            const quantity = item.quantity || 1;
-            total += (basePrice + toppingPrice) * quantity;
-          });
-        }
-      });
-      
-      const discount = parseInt(document.getElementById('discountAmount').value) || 0;
-      const finalAmount = Math.max(0, total - discount);
-      
-      document.getElementById('finalPaymentAmount').textContent = '¥' + finalAmount.toLocaleString();
-      
-      // おつり計算も更新
-      if (selectedPaymentMethod === 'cash') {
-        calculateChange();
-      }
     };
     
     // 支払い方法選択
@@ -3493,23 +3410,6 @@
     // おつり計算
     window.calculateChange = function() {
       cashReceived = parseInt(document.getElementById('cashReceived').value) || 0;
-      
-      // 値引き後の金額を計算
-      let total = 0;
-      currentOrders.forEach(order => {
-        if (order.items && Array.isArray(order.items)) {
-          order.items.forEach(item => {
-            const basePrice = item.price || 0;
-            const toppingPrice = item.toppingPrice || 0;
-            const quantity = item.quantity || 1;
-            total += (basePrice + toppingPrice) * quantity;
-          });
-        }
-      });
-      
-      const discount = parseInt(document.getElementById('discountAmount').value) || 0;
-      totalAmountToPay = Math.max(0, total - discount);
-      
       changeAmount = cashReceived - totalAmountToPay;
       
       document.getElementById('changeAmount').textContent = `¥${changeAmount.toLocaleString()}`;
@@ -3568,27 +3468,17 @@
               const tableNumber = selectedTable || order.tableNumber || '';
               const itemName = item.name || '';
               
-              console.log('🔍 税率判定:', {
-                商品: itemName,
-                テーブル: tableNumber,
-                selectedTable: selectedTable,
-                orderTableNumber: order.tableNumber
-              });
-              
               // 【10%】店内テーブル: c1, c2, T-M, T-H のみ
               if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
                 tax10Total += itemTotal;
-                console.log('→ 10%適用');
               }
               // 【10%】レジ袋（どのテーブルでも）
               else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
                 tax10Total += itemTotal;
-                console.log('→ 10%適用（レジ袋）');
               }
               // 【8%】その他すべて（即会計、テイクアウト、予約1-5など）
               else {
                 tax8Total += itemTotal;
-                console.log('→ 8%適用');
               }
             });
           }
@@ -3597,12 +3487,8 @@
         console.log('📦 会計商品点数:', itemCount);
         console.log('💰 税率別売上:', { tax8Total, tax10Total });
         
-        // 値引き金額を取得
-        const discountAmount = parseInt(document.getElementById('discountAmount').value) || 0;
-        console.log('💸 値引き金額:', discountAmount);
-        
         // 🆕 日次売上を更新（商品点数と税率別売上も記録）
-        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount, tax8Total, tax10Total, discountAmount);
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount, tax8Total, tax10Total);
         
         // 支払いデータを保存（レシート印刷用）
         lastPaymentData = {
@@ -3610,7 +3496,6 @@
           orderNumbers: orderNumbers,
           items: currentOrders.flatMap(o => o.items),
           totalAmount: totalAmountToPay,
-          discountAmount: discountAmount,
           paymentMethod: selectedPaymentMethod,
           cashReceived: selectedPaymentMethod === 'cash' ? cashReceived : totalAmountToPay,
           change: selectedPaymentMethod === 'cash' ? changeAmount : 0,
@@ -3872,7 +3757,7 @@
     };
     
     // 日次売上更新関数
-    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0) {
+    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total) {
       try {
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
@@ -3892,7 +3777,6 @@
             totalItems: (data.totalItems || 0) + itemCount,
             tax8Total: (data.tax8Total || 0) + tax8Total,
             tax10Total: (data.tax10Total || 0) + tax10Total,
-            totalDiscount: (data.totalDiscount || 0) + discountAmount,
             cashSales: data.cashSales || 0,
             emoneSales: data.emoneSales || 0,
             creditSales: data.creditSales || 0,
@@ -3919,7 +3803,6 @@
             totalItems: itemCount,
             tax8Total: tax8Total,
             tax10Total: tax10Total,
-            totalDiscount: discountAmount,
             cashSales: paymentMethod === 'cash' ? totalAmount : 0,
             emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
             creditSales: paymentMethod === 'credit' ? totalAmount : 0,
