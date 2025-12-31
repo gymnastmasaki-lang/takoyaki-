@@ -2907,37 +2907,42 @@
         const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
         
         const todayStart = new Date(jstNow);
-        todayStart.setHours(1, 0, 0, 0);
-        if (jstNow < todayStart) {
+        todayStart.setHours(3, 0, 0, 0);
+        if (jstNow.getHours() < 3) {
           todayStart.setDate(todayStart.getDate() - 1);
         }
         
+        console.log('🕐 今日の開始時刻（3時基準）:', todayStart.toLocaleString('ja-JP'));
+        
         const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
         let maxOrderNumber = 618;
-        let hasActiveOrders = false;
+        let todayOrderCount = 0;
         
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
           
-          // 削除されていない注文があるかチェック
-          if (!data.deleted) {
-            hasActiveOrders = true;
-            
-            // 削除されていない注文のみから最大番号を取得
-            const orderDate = data.timestamp.toDate();
-            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-            
-            if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
-              maxOrderNumber = data.orderNumber;
+          if (!data.timestamp) return;
+          
+          const orderDate = data.timestamp.toDate();
+          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+          
+          // 今日の注文のみをチェック
+          if (jstOrderDate >= todayStart) {
+            // 削除されていない注文をカウント
+            if (!data.deleted) {
+              todayOrderCount++;
+              if (data.orderNumber > maxOrderNumber) {
+                maxOrderNumber = data.orderNumber;
+              }
             }
           }
         });
         
-        // 削除されていない注文が0件なら619番から開始
-        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
+        // 今日の注文が0件なら619番から開始
+        const orderNumber = todayOrderCount > 0 ? (maxOrderNumber + 1) : 619;
         
-        console.log('注文番号生成:', {
-          hasActiveOrders,
+        console.log('📊 注文番号生成:', {
+          todayOrderCount,
           maxOrderNumber,
           nextOrderNumber: orderNumber
         });
