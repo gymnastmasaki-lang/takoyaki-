@@ -2549,8 +2549,9 @@
           console.error('❌ 担当者集計エラー:', e);
         }
         
-        // 商品数と税金を計算
-        let totalItems = 0;
+        // 🆕 商品点数は dailySales から取得（会計時に記録済み）
+        let totalItems = settlementData.totalItems || 0;
+        console.log('📦 商品点数（dailySalesから）:', totalItems);
         let tax8Total = 0;
         let tax10Total = 0;
         let discountTotal = 0;
@@ -2625,6 +2626,13 @@
           tax10Total,
           drawerOpenCount
         });
+        
+        // 🆕 商品データがない場合は、売上総額から税金を概算
+        // テイクアウト（即会計）が多いと想定して8%で計算
+        if (tax8Total === 0 && tax10Total === 0 && settlementData.totalSales > 0) {
+          console.log('⚠️ 商品データなし - 売上総額から税金を概算（8%想定）');
+          tax8Total = settlementData.totalSales;
+        }
         
         // 税金計算（税込価格から内税を計算）
         // 8%: 税込価格 / 1.08 = 税抜価格、税込価格 - 税抜価格 = 消費税
@@ -3351,18 +3359,6 @@
       try {
         const now = window.Timestamp.now();
         
-        // 🔍 デバッグ: 会計前の注文データを確認
-        console.log('🔍 会計前の currentOrders:', currentOrders);
-        currentOrders.forEach((order, index) => {
-          console.log(`注文 ${index + 1}:`, {
-            id: order.id,
-            orderNumber: order.orderNumber,
-            items: order.items,
-            itemsLength: order.items ? order.items.length : 'なし',
-            totalAmount: order.totalAmount
-          });
-        });
-        
         // 注文番号リストを取得
         const orderNumbers = currentOrders.map(o => o.orderNumber);
         
@@ -3376,20 +3372,19 @@
           });
         }
         
-        // 🔍 デバッグ: 会計後のデータを確認
-        console.log('🔍 会計完了後の注文データ確認:');
-        for (const order of currentOrders) {
-          const updatedDoc = await window.getDoc(doc(db, 'orders', order.id));
-          const updatedData = updatedDoc.data();
-          console.log('注文ID:', order.id);
-          console.log('  - paidAt:', updatedData.paidAt);
-          console.log('  - items:', updatedData.items);
-          console.log('  - items.length:', updatedData.items ? updatedData.items.length : 'なし');
-          console.log('  - staffName:', updatedData.staffName);
-        }
+        // 商品点数をカウント
+        let itemCount = 0;
+        currentOrders.forEach(order => {
+          if (order.items && Array.isArray(order.items)) {
+            order.items.forEach(item => {
+              itemCount += item.quantity || 0;
+            });
+          }
+        });
+        console.log('📦 会計商品点数:', itemCount);
         
-        // 🆕 日次売上を更新
-        await updateDailySales(totalAmountToPay, selectedPaymentMethod);
+        // 🆕 日次売上を更新（商品点数も記録）
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount);
         
         // 支払いデータを保存（レシート印刷用）
         lastPaymentData = {
@@ -3459,7 +3454,7 @@
         const now = lastPaymentData.timestamp;
         const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
         builder.createTextElement({data: `日時: ${dateStr}\n`});
-        builder.createTextElement({data: `担当: レジ係\n`});
+        builder.createTextElement({data: `担当: ${lastPaymentData.staffName || 'レジ係'}\n`});
         builder.createTextElement({data: `テーブル: ${lastPaymentData.tableNumber}\n`});
         builder.createTextElement({data: `注文No: ${lastPaymentData.orderNumbers.join(',')}\n`});
         builder.createRuledLineElement({thickness: 'thin'});
@@ -3658,12 +3653,12 @@
     };
     
     // 日次売上更新関数
-    window.updateDailySales = async function(totalAmount, paymentMethod) {
+    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount) {
       try {
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         
-        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod });
+        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount });
         
         const salesRef = doc(db, 'dailySales', dateStr);
         const salesDoc = await getDoc(salesRef);
@@ -3675,6 +3670,7 @@
           const updates = {
             totalSales: (data.totalSales || 0) + totalAmount,
             customerCount: (data.customerCount || 0) + 1,
+            totalItems: (data.totalItems || 0) + itemCount,  // 商品点数を加算
             cashSales: data.cashSales || 0,
             emoneSales: data.emoneSales || 0,
             creditSales: data.creditSales || 0,
@@ -3698,6 +3694,7 @@
             date: dateStr,
             totalSales: totalAmount,
             customerCount: 1,
+            totalItems: itemCount,  // 商品点数を記録
             cashSales: paymentMethod === 'cash' ? totalAmount : 0,
             emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
             creditSales: paymentMethod === 'credit' ? totalAmount : 0,
