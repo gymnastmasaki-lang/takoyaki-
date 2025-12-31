@@ -699,8 +699,18 @@
 
     async function loadOrders() {
       const orders = [];
+      console.log('🔄 注文データ読み込み開始');
       (await getDocs(collection(db, 'orders'))).forEach(doc => {
         const d = doc.data();
+        
+        console.log('📋 注文データ:', {
+          id: doc.id,
+          orderNumber: d.orderNumber,
+          tableNumber: d.tableNumber,
+          hasItems: !!d.items,
+          itemsLength: d.items ? d.items.length : 0,
+          items: d.items
+        });
         
         // deletedフラグが立っている注文はスキップ
         if (d.deleted) return;
@@ -1017,37 +1027,49 @@
     }
     
     async function confirmPayment() {
+      console.log('🔵 confirmPayment開始');
+      console.log('selectedPaymentMethod:', selectedPaymentMethod);
+      console.log('currentPaymentOrder:', currentPaymentOrder);
+      
       if (!selectedPaymentMethod) {
+        console.log('❌ 支払い方法未選択');
         showToast('支払い方法を選択してください');
         return;
       }
       
       if (!currentPaymentOrder) {
+        console.log('❌ 注文情報が見つかりません');
         showToast('エラー: 注文情報が見つかりません');
         return;
       }
       
       try {
         const order = currentPaymentOrder;
+        console.log('📝 注文データ:', order);
         
         // 担当者名（コントローラーからは固定）
         const staffName = 'コントローラー';
         
         // 注文を会計済みに更新
+        console.log('💾 Firestore更新中...');
         await updateDoc(doc(db, 'orders', order.id), {
           paidAt: Timestamp.now(),
           notifiedPaid: true,
           paymentMethod: selectedPaymentMethod,
           staffName: staffName
         });
+        console.log('✅ Firestore更新完了');
         
         // 商品点数をカウント
         let itemCount = 0;
         let tax8Total = 0;
         let tax10Total = 0;
         
+        console.log('🔍 order.items:', order.items);
+        
         if (order.items && Array.isArray(order.items)) {
           order.items.forEach(item => {
+            console.log('📦 商品:', item);
             itemCount += item.quantity || 0;
             
             // 商品ごとの金額を計算（トッピング込み）
@@ -1060,32 +1082,45 @@
             const tableNumber = order.tableNumber || '';
             const itemName = item.name || '';
             
+            console.log('🔍 税率判定:', {
+              商品: itemName,
+              テーブル: tableNumber,
+              金額: itemTotal
+            });
+            
             // 【10%】店内テーブル: c1, c2, T-M, T-H のみ
             if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
               tax10Total += itemTotal;
+              console.log('→ 10%適用');
             }
             // 【10%】レジ袋（どのテーブルでも）
             else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
               tax10Total += itemTotal;
+              console.log('→ 10%適用（レジ袋）');
             }
             // 【8%】その他すべて（即会計、テイクアウト、予約1-5など）
             else {
               tax8Total += itemTotal;
+              console.log('→ 8%適用');
             }
           });
+        } else {
+          console.log('❌ order.itemsが配列ではない or 存在しない');
         }
         
         console.log('📦 会計商品点数:', itemCount);
         console.log('💰 税率別売上:', { tax8Total, tax10Total });
         
         // 日次売上を更新
+        console.log('💾 日次売上更新中...');
         await updateDailySales(order.totalAmount, selectedPaymentMethod, itemCount, tax8Total, tax10Total);
+        console.log('✅ 日次売上更新完了');
         
         closePaymentModal();
         showToast('✓ 会計済みにしました');
         loadOrders();
       } catch (e) {
-        console.error(e);
+        console.error('❌ エラー発生:', e);
         showToast('エラー: ' + e.message);
       }
     }
