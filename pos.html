@@ -894,7 +894,6 @@
         </div>
       </div>
       <div class="header-right">
-        <button onclick="openDrawer()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FFC107 0%, #FFA000 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px; box-shadow: 0 4px 15px rgba(255,193,7,0.3);">💰 ドロア開</button>
         <button onclick="showCustomerCountModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #00bcd4 0%, #0097a7 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">👥 客数</button>
         <button onclick="showSalesModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">💰 売上</button>
         <button onclick="showHistoryModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">📜 履歴</button>
@@ -2414,62 +2413,6 @@
       document.getElementById('salesModal').classList.add('hidden');
     };
     
-    // ========== ドロアオープン機能 ==========
-    
-    // ドロアオープン
-    window.openDrawer = async function() {
-      try {
-        const now = new Date();
-        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-        
-        // 担当者を取得
-        const staffSelect = document.getElementById('staffSelect');
-        const staffName = staffSelect.value || 'レジ係';
-        
-        // dailySalesのドロアオープン数を更新
-        const salesRef = doc(db, 'dailySales', dateStr);
-        const salesDoc = await getDoc(salesRef);
-        
-        if (salesDoc.exists()) {
-          const data = salesDoc.data();
-          await updateDoc(salesRef, {
-            drawerOpenCount: (data.drawerOpenCount || 0) + 1,
-            updatedAt: Timestamp.now()
-          });
-        } else {
-          // 今日の売上データがない場合は新規作成
-          await setDoc(salesRef, {
-            date: dateStr,
-            totalSales: 0,
-            customerCount: 0,
-            totalItems: 0,
-            tax8Total: 0,
-            tax10Total: 0,
-            cashSales: 0,
-            emoneSales: 0,
-            creditSales: 0,
-            drawerOpenCount: 1,
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now()
-          });
-        }
-        
-        // ドロア開閉ログを記録
-        await addDoc(collection(db, 'drawer_logs'), {
-          timestamp: Timestamp.now(),
-          staffName: staffName,
-          action: 'open'
-        });
-        
-        console.log('💰 ドロア開: 担当者', staffName);
-        alert('ドロアを開きました\n担当者: ' + staffName);
-        
-      } catch (error) {
-        console.error('❌ ドロア開エラー:', error);
-        alert('ドロア開に失敗しました: ' + error.message);
-      }
-    };
-    
     // ========== 精算機能 ==========
     
     // 精算モーダルを表示
@@ -2606,22 +2549,12 @@
           console.error('❌ 担当者集計エラー:', e);
         }
         
-        // 🆕 商品点数と税率別売上は dailySales から取得（会計時に記録済み）
-        let totalItems = settlementData.totalItems || 0;
-        let tax8Total = settlementData.tax8Total || 0;
-        let tax10Total = settlementData.tax10Total || 0;
-        let drawerOpenCount = settlementData.drawerOpenCount || 0;  // dailySalesから取得
-        console.log('📦 商品点数（dailySalesから）:', totalItems);
-        console.log('💰 税率別売上（dailySalesから）:', { tax8Total, tax10Total });
-        console.log('🔓 ドロアオープン数（dailySalesから）:', drawerOpenCount);
-        
-        // 商品データがない場合の補正（後方互換性のため）
-        if (tax8Total === 0 && tax10Total === 0 && settlementData.totalSales > 0) {
-          console.log('⚠️ 税率別売上なし - 売上総額から8%で概算');
-          tax8Total = settlementData.totalSales;
-        }
-        
+        // 商品数と税金を計算
+        let totalItems = 0;
+        let tax8Total = 0;
+        let tax10Total = 0;
         let discountTotal = 0;
+        let drawerOpenCount = 0;
         
         ordersSnapshot.forEach(docSnap => {
           const data = docSnap.data();
@@ -2631,8 +2564,58 @@
           const orderDateStr = `${orderDate.getFullYear()}-${String(orderDate.getMonth()+1).padStart(2,'0')}-${String(orderDate.getDate()).padStart(2,'0')}`;
           
           if (orderDateStr === dateStr) {
+            console.log('📦 注文データ:', {
+              orderNumber: data.orderNumber,
+              tableNumber: data.tableNumber,
+              items: data.items,
+              totalAmount: data.totalAmount
+            });
+            
+            // 商品数をカウント
+            if (data.items && data.items.length > 0) {
+              data.items.forEach(item => {
+                totalItems += item.quantity || 0;
+                
+                // 税率別に分類
+                const itemTotal = (item.price || 0) * (item.quantity || 0);
+                const itemName = item.name || '';
+                const tableNumber = data.tableNumber || '';
+                
+                console.log('  商品:', {
+                  name: itemName,
+                  price: item.price,
+                  quantity: item.quantity,
+                  total: itemTotal,
+                  table: tableNumber
+                });
+                
+                // 店内テーブル（c1, c2, T-M, T-H）は全て10%
+                if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
+                  tax10Total += itemTotal;
+                  console.log('    → 10%（店内）');
+                }
+                // レジ袋は常に10%（即会計、テイクアウト、予約テーブル）
+                else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
+                  tax10Total += itemTotal;
+                  console.log('    → 10%（レジ袋）');
+                }
+                // その他全て8%（即会計、テイクアウト、予約テーブル）
+                else {
+                  tax8Total += itemTotal;
+                  console.log('    → 8%（その他）');
+                }
+              });
+            } else {
+              console.warn('⚠️ 商品データなし');
+            }
+            
             // 値引き
             discountTotal += data.discount || 0;
+            
+            // ドロアオープン数（現金支払い時にカウント）
+            if (data.paymentMethod === 'cash') {
+              drawerOpenCount++;
+            }
           }
         });
         
@@ -3361,9 +3344,13 @@
         return;
       }
       
-      // 担当者を取得（未選択の場合はデフォルト値）
+      // 担当者を確認
       const staffSelect = document.getElementById('staffSelect');
-      const staffName = staffSelect.value || 'レジ係';
+      const staffName = staffSelect.value;
+      if (!staffName) {
+        alert('担当者を選択してください');
+        return;
+      }
       
       try {
         const now = window.Timestamp.now();
@@ -3381,46 +3368,8 @@
           });
         }
         
-        // 商品点数をカウント
-        let itemCount = 0;
-        let tax8Total = 0;
-        let tax10Total = 0;
-        currentOrders.forEach(order => {
-          if (order.items && Array.isArray(order.items)) {
-            order.items.forEach(item => {
-              itemCount += item.quantity || 0;
-              
-              // 商品ごとの金額を計算（トッピング込み）
-              const basePrice = item.price || 0;
-              const toppingPrice = item.toppingPrice || 0;
-              const totalPrice = basePrice + toppingPrice;
-              const itemTotal = totalPrice * (item.quantity || 0);
-              
-              // テーブル番号による税率判定
-              const tableNumber = selectedTable || order.tableNumber || '';
-              const itemName = item.name || '';
-              
-              // ?table= で始まるテーブル（店内）は全て10%
-              if (tableNumber.match(/^\?table=/)) {
-                tax10Total += itemTotal;
-              }
-              // レジ袋は常に10%
-              else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
-                tax10Total += itemTotal;
-              }
-              // その他は8%（即会計、テイクアウト、予約テーブル）
-              else {
-                tax8Total += itemTotal;
-              }
-            });
-          }
-        });
-        
-        console.log('📦 会計商品点数:', itemCount);
-        console.log('💰 税率別売上:', { tax8Total, tax10Total });
-        
-        // 🆕 日次売上を更新（商品点数と税率別売上も記録）
-        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount, tax8Total, tax10Total);
+        // 🆕 日次売上を更新
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod);
         
         // 支払いデータを保存（レシート印刷用）
         lastPaymentData = {
@@ -3490,7 +3439,7 @@
         const now = lastPaymentData.timestamp;
         const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
         builder.createTextElement({data: `日時: ${dateStr}\n`});
-        builder.createTextElement({data: `担当: ${lastPaymentData.staffName || 'レジ係'}\n`});
+        builder.createTextElement({data: `担当: レジ係\n`});
         builder.createTextElement({data: `テーブル: ${lastPaymentData.tableNumber}\n`});
         builder.createTextElement({data: `注文No: ${lastPaymentData.orderNumbers.join(',')}\n`});
         builder.createRuledLineElement({thickness: 'thin'});
@@ -3689,12 +3638,12 @@
     };
     
     // 日次売上更新関数
-    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total) {
+    window.updateDailySales = async function(totalAmount, paymentMethod) {
       try {
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         
-        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount, tax8Total, tax10Total });
+        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod });
         
         const salesRef = doc(db, 'dailySales', dateStr);
         const salesDoc = await getDoc(salesRef);
@@ -3706,9 +3655,6 @@
           const updates = {
             totalSales: (data.totalSales || 0) + totalAmount,
             customerCount: (data.customerCount || 0) + 1,
-            totalItems: (data.totalItems || 0) + itemCount,
-            tax8Total: (data.tax8Total || 0) + tax8Total,
-            tax10Total: (data.tax10Total || 0) + tax10Total,
             cashSales: data.cashSales || 0,
             emoneSales: data.emoneSales || 0,
             creditSales: data.creditSales || 0,
@@ -3732,13 +3678,9 @@
             date: dateStr,
             totalSales: totalAmount,
             customerCount: 1,
-            totalItems: itemCount,
-            tax8Total: tax8Total,
-            tax10Total: tax10Total,
             cashSales: paymentMethod === 'cash' ? totalAmount : 0,
             emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
             creditSales: paymentMethod === 'credit' ? totalAmount : 0,
-            drawerOpenCount: 0,  // ドロアオープン数を初期化
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
           };
