@@ -2576,21 +2576,16 @@
               data.items.forEach(item => {
                 totalItems += item.quantity || 0;
                 
-                // 税率別に分類（トッピング料金も含める）
-                const basePrice = item.price || 0;
-                const toppingPrice = item.toppingPrice || 0;
-                const totalPrice = basePrice + toppingPrice;
-                const itemTotal = totalPrice * (item.quantity || 0);
+                // 税率別に分類
+                const itemTotal = (item.price || 0) * (item.quantity || 0);
                 const itemName = item.name || '';
                 const tableNumber = data.tableNumber || '';
                 
                 console.log('  商品:', {
                   name: itemName,
-                  basePrice: basePrice,
-                  toppingPrice: toppingPrice,
-                  totalPrice: totalPrice,
+                  price: item.price,
                   quantity: item.quantity,
-                  itemTotal: itemTotal,
+                  total: itemTotal,
                   table: tableNumber
                 });
                 
@@ -2630,9 +2625,6 @@
           tax10Total,
           drawerOpenCount
         });
-        
-        // 診断用アラート
-        alert(`【診断情報】\n\n処理した注文データ:\n- 商品合計点数: ${totalItems}点\n- 8%対象: ¥${tax8Total}\n- 10%対象: ¥${tax10Total}\n- ドロア開閉: ${drawerOpenCount}回\n\nもし点数が0の場合、注文データに商品情報（items）が含まれていません。`);
         
         // 税金計算（税込価格から内税を計算）
         // 8%: 税込価格 / 1.08 = 税抜価格、税込価格 - 税抜価格 = 消費税
@@ -3359,6 +3351,18 @@
       try {
         const now = window.Timestamp.now();
         
+        // 🔍 デバッグ: 会計前の注文データを確認
+        console.log('🔍 会計前の currentOrders:', currentOrders);
+        currentOrders.forEach((order, index) => {
+          console.log(`注文 ${index + 1}:`, {
+            id: order.id,
+            orderNumber: order.orderNumber,
+            items: order.items,
+            itemsLength: order.items ? order.items.length : 'なし',
+            totalAmount: order.totalAmount
+          });
+        });
+        
         // 注文番号リストを取得
         const orderNumbers = currentOrders.map(o => o.orderNumber);
         
@@ -3370,6 +3374,18 @@
             paymentMethod: selectedPaymentMethod,
             staffName: staffName  // 担当者名を追加
           });
+        }
+        
+        // 🔍 デバッグ: 会計後のデータを確認
+        console.log('🔍 会計完了後の注文データ確認:');
+        for (const order of currentOrders) {
+          const updatedDoc = await window.getDoc(doc(db, 'orders', order.id));
+          const updatedData = updatedDoc.data();
+          console.log('注文ID:', order.id);
+          console.log('  - paidAt:', updatedData.paidAt);
+          console.log('  - items:', updatedData.items);
+          console.log('  - items.length:', updatedData.items ? updatedData.items.length : 'なし');
+          console.log('  - staffName:', updatedData.staffName);
         }
         
         // 🆕 日次売上を更新
@@ -3443,7 +3459,7 @@
         const now = lastPaymentData.timestamp;
         const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
         builder.createTextElement({data: `日時: ${dateStr}\n`});
-        builder.createTextElement({data: `担当: ${lastPaymentData.staffName || 'レジ係'}\n`});
+        builder.createTextElement({data: `担当: レジ係\n`});
         builder.createTextElement({data: `テーブル: ${lastPaymentData.tableNumber}\n`});
         builder.createTextElement({data: `注文No: ${lastPaymentData.orderNumbers.join(',')}\n`});
         builder.createRuledLineElement({thickness: 'thin'});
