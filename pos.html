@@ -2549,8 +2549,9 @@
           console.error('❌ 担当者集計エラー:', e);
         }
         
-        // 商品数と税金を計算
-        let totalItems = 0;
+        // 🆕 商品点数は dailySales から取得（会計時に記録済み）
+        let totalItems = settlementData.totalItems || 0;
+        console.log('📦 商品点数（dailySalesから）:', totalItems);
         let tax8Total = 0;
         let tax10Total = 0;
         let discountTotal = 0;
@@ -2625,6 +2626,13 @@
           tax10Total,
           drawerOpenCount
         });
+        
+        // 🆕 商品データがない場合は、売上総額から税金を概算
+        // テイクアウト（即会計）が多いと想定して8%で計算
+        if (tax8Total === 0 && tax10Total === 0 && settlementData.totalSales > 0) {
+          console.log('⚠️ 商品データなし - 売上総額から税金を概算（8%想定）');
+          tax8Total = settlementData.totalSales;
+        }
         
         // 税金計算（税込価格から内税を計算）
         // 8%: 税込価格 / 1.08 = 税抜価格、税込価格 - 税抜価格 = 消費税
@@ -2907,42 +2915,37 @@
         const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
         
         const todayStart = new Date(jstNow);
-        todayStart.setHours(3, 0, 0, 0);
-        if (jstNow.getHours() < 3) {
+        todayStart.setHours(1, 0, 0, 0);
+        if (jstNow < todayStart) {
           todayStart.setDate(todayStart.getDate() - 1);
         }
         
-        console.log('🕐 今日の開始時刻（3時基準）:', todayStart.toLocaleString('ja-JP'));
-        
         const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
         let maxOrderNumber = 618;
-        let todayOrderCount = 0;
+        let hasActiveOrders = false;
         
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
           
-          if (!data.timestamp) return;
-          
-          const orderDate = data.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-          
-          // 今日の注文のみをチェック
-          if (jstOrderDate >= todayStart) {
-            // 削除されていない注文をカウント
-            if (!data.deleted) {
-              todayOrderCount++;
-              if (data.orderNumber > maxOrderNumber) {
-                maxOrderNumber = data.orderNumber;
-              }
+          // 削除されていない注文があるかチェック
+          if (!data.deleted) {
+            hasActiveOrders = true;
+            
+            // 削除されていない注文のみから最大番号を取得
+            const orderDate = data.timestamp.toDate();
+            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+            
+            if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
+              maxOrderNumber = data.orderNumber;
             }
           }
         });
         
-        // 今日の注文が0件なら619番から開始
-        const orderNumber = todayOrderCount > 0 ? (maxOrderNumber + 1) : 619;
+        // 削除されていない注文が0件なら619番から開始
+        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
         
-        console.log('📊 注文番号生成:', {
-          todayOrderCount,
+        console.log('注文番号生成:', {
+          hasActiveOrders,
           maxOrderNumber,
           nextOrderNumber: orderNumber
         });
@@ -3349,13 +3352,9 @@
         return;
       }
       
-      // 担当者を確認
+      // 担当者を取得（未選択の場合はデフォルト値）
       const staffSelect = document.getElementById('staffSelect');
-      const staffName = staffSelect.value;
-      if (!staffName) {
-        alert('担当者を選択してください');
-        return;
-      }
+      const staffName = staffSelect.value || 'レジ係';
       
       try {
         const now = window.Timestamp.now();
@@ -3373,8 +3372,19 @@
           });
         }
         
-        // 🆕 日次売上を更新
-        await updateDailySales(totalAmountToPay, selectedPaymentMethod);
+        // 商品点数をカウント
+        let itemCount = 0;
+        currentOrders.forEach(order => {
+          if (order.items && Array.isArray(order.items)) {
+            order.items.forEach(item => {
+              itemCount += item.quantity || 0;
+            });
+          }
+        });
+        console.log('📦 会計商品点数:', itemCount);
+        
+        // 🆕 日次売上を更新（商品点数も記録）
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount);
         
         // 支払いデータを保存（レシート印刷用）
         lastPaymentData = {
@@ -3444,7 +3454,7 @@
         const now = lastPaymentData.timestamp;
         const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
         builder.createTextElement({data: `日時: ${dateStr}\n`});
-        builder.createTextElement({data: `担当: レジ係\n`});
+        builder.createTextElement({data: `担当: ${lastPaymentData.staffName || 'レジ係'}\n`});
         builder.createTextElement({data: `テーブル: ${lastPaymentData.tableNumber}\n`});
         builder.createTextElement({data: `注文No: ${lastPaymentData.orderNumbers.join(',')}\n`});
         builder.createRuledLineElement({thickness: 'thin'});
@@ -3643,12 +3653,12 @@
     };
     
     // 日次売上更新関数
-    window.updateDailySales = async function(totalAmount, paymentMethod) {
+    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount) {
       try {
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         
-        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod });
+        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount });
         
         const salesRef = doc(db, 'dailySales', dateStr);
         const salesDoc = await getDoc(salesRef);
@@ -3660,6 +3670,7 @@
           const updates = {
             totalSales: (data.totalSales || 0) + totalAmount,
             customerCount: (data.customerCount || 0) + 1,
+            totalItems: (data.totalItems || 0) + itemCount,  // 商品点数を加算
             cashSales: data.cashSales || 0,
             emoneSales: data.emoneSales || 0,
             creditSales: data.creditSales || 0,
@@ -3683,6 +3694,7 @@
             date: dateStr,
             totalSales: totalAmount,
             customerCount: 1,
+            totalItems: itemCount,  // 商品点数を記録
             cashSales: paymentMethod === 'cash' ? totalAmount : 0,
             emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
             creditSales: paymentMethod === 'credit' ? totalAmount : 0,
