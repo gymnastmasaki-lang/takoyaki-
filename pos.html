@@ -3455,12 +3455,93 @@
       const container = document.getElementById('taxRateItemsList');
       container.innerHTML = '';
       
+      console.log('🔍 displayTaxRateItems呼び出し');
+      console.log('🔍 currentOrders:', currentOrders);
+      
+      let hasItems = false;
+      
       currentOrders.forEach(order => {
-        if (!order.items || !Array.isArray(order.items)) return;
+        console.log('🔍 注文:', {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          hasItems: !!order.items,
+          itemsIsArray: Array.isArray(order.items),
+          itemsLength: order.items ? order.items.length : 0
+        });
+        
+        if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
+          console.warn('⚠️ この注文にはitemsがありません');
+          
+          // itemsがない場合は注文全体を1つの項目として表示
+          const orderTotal = order.totalAmount || 0;
+          const uniqueId = `${order.id}-whole`;
+          
+          const itemDiv = document.createElement('div');
+          itemDiv.style.cssText = 'padding: 12px; margin-bottom: 10px; background: white; border-radius: 8px; border: 2px solid #e0e0e0;';
+          
+          // 商品名と金額
+          const headerDiv = document.createElement('div');
+          headerDiv.style.cssText = 'font-weight: bold; margin-bottom: 8px; color: #333;';
+          headerDiv.innerHTML = `
+            注文 #${order.orderNumber}
+            <span style="float: right; color: #667eea;">¥${orderTotal.toLocaleString()}</span>
+          `;
+          itemDiv.appendChild(headerDiv);
+          
+          // ラジオボタンコンテナ
+          const radioContainer = document.createElement('div');
+          radioContainer.style.cssText = 'display: flex; gap: 15px; justify-content: center;';
+          
+          // 8%ラベル
+          const label8 = document.createElement('label');
+          label8.style.cssText = 'display: flex; align-items: center; cursor: pointer; padding: 8px 15px; border-radius: 6px; background: #fff3e0; border: 2px solid #FF9800;';
+          const radio8 = document.createElement('input');
+          radio8.type = 'radio';
+          radio8.name = `tax-${uniqueId}`;
+          radio8.value = '8';
+          radio8.checked = true;
+          radio8.style.cssText = 'margin-right: 8px; width: 20px; height: 20px; cursor: pointer;';
+          radio8.addEventListener('change', updateTaxSummary);
+          const span8 = document.createElement('span');
+          span8.style.cssText = 'font-weight: bold; color: #F57C00;';
+          span8.textContent = '8%（持ち帰り）';
+          label8.appendChild(radio8);
+          label8.appendChild(span8);
+          
+          // 10%ラベル
+          const label10 = document.createElement('label');
+          label10.style.cssText = 'display: flex; align-items: center; cursor: pointer; padding: 8px 15px; border-radius: 6px; background: #e3f2fd; border: 2px solid #2196F3;';
+          const radio10 = document.createElement('input');
+          radio10.type = 'radio';
+          radio10.name = `tax-${uniqueId}`;
+          radio10.value = '10';
+          radio10.style.cssText = 'margin-right: 8px; width: 20px; height: 20px; cursor: pointer;';
+          radio10.addEventListener('change', updateTaxSummary);
+          const span10 = document.createElement('span');
+          span10.style.cssText = 'font-weight: bold; color: #1976D2;';
+          span10.textContent = '10%（店内）';
+          label10.appendChild(radio10);
+          label10.appendChild(span10);
+          
+          radioContainer.appendChild(label8);
+          radioContainer.appendChild(label10);
+          itemDiv.appendChild(radioContainer);
+          
+          container.appendChild(itemDiv);
+          hasItems = true;
+          return;
+        }
         
         order.items.forEach((item, idx) => {
           const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
           const uniqueId = `${order.id}-${idx}`;
+          
+          console.log('📦 商品追加:', {
+            name: item.name,
+            quantity: item.quantity,
+            total: itemTotal,
+            uniqueId: uniqueId
+          });
           
           const itemDiv = document.createElement('div');
           itemDiv.style.cssText = 'padding: 12px; margin-bottom: 10px; background: white; border-radius: 8px; border: 2px solid #e0e0e0;';
@@ -3514,8 +3595,16 @@
           itemDiv.appendChild(radioContainer);
           
           container.appendChild(itemDiv);
+          hasItems = true;
         });
       });
+      
+      if (!hasItems) {
+        console.error('❌ 商品リストが空です！');
+        container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">商品情報が見つかりません</div>';
+      } else {
+        console.log('✅ 商品リスト表示完了');
+      }
       
       updateTaxSummary();
     }
@@ -3525,13 +3614,39 @@
       let tax8Total = 0;
       let tax10Total = 0;
       
+      console.log('📊 updateTaxSummary呼び出し');
+      
       currentOrders.forEach(order => {
-        if (!order.items || !Array.isArray(order.items)) return;
+        // itemsがない場合は注文全体で判定
+        if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
+          const orderTotal = order.totalAmount || 0;
+          const uniqueId = `${order.id}-whole`;
+          const selected = document.querySelector(`input[name="tax-${uniqueId}"]:checked`);
+          
+          console.log('🔍 注文全体:', {
+            orderNumber: order.orderNumber,
+            total: orderTotal,
+            selectedTax: selected ? selected.value : 'なし'
+          });
+          
+          if (selected && selected.value === '8') {
+            tax8Total += orderTotal;
+          } else if (selected && selected.value === '10') {
+            tax10Total += orderTotal;
+          }
+          return;
+        }
         
         order.items.forEach((item, idx) => {
           const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
           const uniqueId = `${order.id}-${idx}`;
           const selected = document.querySelector(`input[name="tax-${uniqueId}"]:checked`);
+          
+          console.log('🔍 商品:', {
+            name: item.name,
+            total: itemTotal,
+            selectedTax: selected ? selected.value : 'なし'
+          });
           
           if (selected && selected.value === '8') {
             tax8Total += itemTotal;
@@ -3540,6 +3655,8 @@
           }
         });
       });
+      
+      console.log('📊 集計結果:', { tax8Total, tax10Total });
       
       document.getElementById('tax8Summary').textContent = '¥' + tax8Total.toLocaleString();
       document.getElementById('tax10Summary').textContent = '¥' + tax10Total.toLocaleString();
@@ -3649,9 +3766,25 @@
             console.warn('⚠️ order.itemsが空です。totalAmountから推測して1点とカウントします。');
             itemCount += 1;
             
-            // デフォルトで8%（持ち帰り）
-            tax8Total += order.totalAmount || 0;
-            console.log('→ 8%適用（itemsなし、デフォルト）:', order.totalAmount);
+            // 選択された税率を取得
+            const uniqueId = `${order.id}-whole`;
+            const selectedTaxRate = document.querySelector(`input[name="tax-${uniqueId}"]:checked`);
+            const taxRate = selectedTaxRate ? selectedTaxRate.value : '8';
+            const orderTotal = order.totalAmount || 0;
+            
+            console.log('🔍 税率判定（注文全体）:', {
+              注文番号: order.orderNumber,
+              金額: orderTotal,
+              選択された税率: taxRate + '%'
+            });
+            
+            if (taxRate === '8') {
+              tax8Total += orderTotal;
+              console.log('→ 8%適用（itemsなし）');
+            } else {
+              tax10Total += orderTotal;
+              console.log('→ 10%適用（itemsなし）');
+            }
             return;
           }
           
