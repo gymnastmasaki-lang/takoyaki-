@@ -3269,7 +3269,7 @@
       }
       
       let itemsHtml = '';
-      if (order.items && Array.isArray(order.items)) {
+      if (order.items && Array.isArray(order.items) && order.items.length > 0) {
         order.items.forEach(item => {
           const itemBasePrice = item.price;
           const itemWithTopping = itemBasePrice + (item.toppingPrice || 0);
@@ -3295,6 +3295,14 @@
             </div>
           `;
         });
+      } else {
+        // itemsがない場合は警告表示
+        itemsHtml = `
+          <div style="padding: 10px; background: #fff3cd; border-radius: 8px; color: #856404;">
+            ⚠️ 商品詳細が記録されていません<br>
+            合計金額: ¥${(order.totalAmount || 0).toLocaleString()}
+          </div>
+        `;
       }
       
       card.innerHTML = `
@@ -3509,10 +3517,31 @@
         currentOrders.forEach(order => {
           console.log('🔍 注文データ:', {
             orderNumber: order.orderNumber,
+            tableNumber: order.tableNumber,
             hasItems: !!order.items,
+            itemsIsArray: Array.isArray(order.items),
             itemsLength: order.items ? order.items.length : 0,
             items: order.items
           });
+          
+          // itemsがない場合は注文データから推測
+          if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
+            console.warn('⚠️ order.itemsが空です。totalAmountから推測して1点とカウントします。');
+            itemCount += 1;
+            
+            // テーブル番号で税率判定
+            const tableNumber = order.tableNumber || '';
+            const orderTotal = order.totalAmount || 0;
+            
+            if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
+              tax10Total += orderTotal;
+              console.log('→ 10%適用（店内テーブル）:', orderTotal);
+            } else {
+              tax8Total += orderTotal;
+              console.log('→ 8%適用（持ち帰り）:', orderTotal);
+            }
+            return; // 次の注文へ
+          }
           
           if (order.items && Array.isArray(order.items)) {
             order.items.forEach(item => {
@@ -3562,12 +3591,6 @@
         
         console.log('📦 会計商品点数:', itemCount);
         console.log('💰 税率別売上:', { tax8Total, tax10Total });
-        
-        // itemCountが0の場合は客数をカウント（後方互換性）
-        if (itemCount === 0 && currentOrders.length > 0) {
-          itemCount = currentOrders.length;
-          console.log('⚠️ items配列が空のため、客数をカウント:', itemCount);
-        }
         
         // 値引き金額を取得
         const discountAmount = parseInt(document.getElementById('discountAmount').value) || 0;
