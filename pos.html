@@ -1064,6 +1064,22 @@
         </div>
       </div>
       
+      <!-- 税率選択セクション -->
+      <div id="taxRateSection" style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 10px; border-left: 4px solid #4CAF50; max-height: 400px; overflow-y: auto;">
+        <h4 style="margin: 0 0 15px 0; color: #2e7d32; font-size: 16px;">📋 税率を選択してください</h4>
+        <div id="taxRateItemsList"></div>
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #4CAF50; font-weight: bold;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+            <span>8%対象:</span>
+            <span id="tax8Summary" style="color: #FF9800;">¥0</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>10%対象:</span>
+            <span id="tax10Summary" style="color: #2196F3;">¥0</span>
+          </div>
+        </div>
+      </div>
+      
       <div class="payment-methods">
         <button class="payment-method-btn" onclick="selectPaymentMethod('cash')">
           💵 現金
@@ -3419,6 +3435,9 @@
       // 値引き金額を初期化
       document.getElementById('discountAmount').value = '0';
       
+      // 税率選択リストを生成
+      displayTaxRateItems();
+      
       // 請求額を表示
       updatePaymentTotal();
       
@@ -3429,6 +3448,69 @@
       });
       document.getElementById('cashInputSection').classList.add('hidden');
       document.getElementById('completePaymentBtn').disabled = true;
+    };
+    
+    // 税率選択リストを表示
+    function displayTaxRateItems() {
+      const container = document.getElementById('taxRateItemsList');
+      container.innerHTML = '';
+      
+      currentOrders.forEach(order => {
+        if (!order.items || !Array.isArray(order.items)) return;
+        
+        order.items.forEach((item, idx) => {
+          const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
+          const uniqueId = `${order.id}-${idx}`;
+          
+          const itemDiv = document.createElement('div');
+          itemDiv.style.cssText = 'padding: 12px; margin-bottom: 10px; background: white; border-radius: 8px; border: 2px solid #e0e0e0;';
+          itemDiv.innerHTML = `
+            <div style="font-weight: bold; margin-bottom: 8px; color: #333;">
+              ${item.name} ×${item.quantity}
+              <span style="float: right; color: #667eea;">¥${itemTotal.toLocaleString()}</span>
+            </div>
+            <div style="display: flex; gap: 15px; justify-content: center;">
+              <label style="display: flex; align-items: center; cursor: pointer; padding: 8px 15px; border-radius: 6px; background: #fff3e0; border: 2px solid #FF9800;">
+                <input type="radio" name="tax-${uniqueId}" value="8" onchange="updateTaxSummary()" checked style="margin-right: 8px; cursor: pointer;">
+                <span style="font-weight: bold; color: #F57C00;">8%（持ち帰り）</span>
+              </label>
+              <label style="display: flex; align-items: center; cursor: pointer; padding: 8px 15px; border-radius: 6px; background: #e3f2fd; border: 2px solid #2196F3;">
+                <input type="radio" name="tax-${uniqueId}" value="10" onchange="updateTaxSummary()" style="margin-right: 8px; cursor: pointer;">
+                <span style="font-weight: bold; color: #1976D2;">10%（店内）</span>
+              </label>
+            </div>
+          `;
+          
+          container.appendChild(itemDiv);
+        });
+      });
+      
+      updateTaxSummary();
+    }
+    
+    // 税率別集計を更新
+    window.updateTaxSummary = function() {
+      let tax8Total = 0;
+      let tax10Total = 0;
+      
+      currentOrders.forEach(order => {
+        if (!order.items || !Array.isArray(order.items)) return;
+        
+        order.items.forEach((item, idx) => {
+          const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
+          const uniqueId = `${order.id}-${idx}`;
+          const selected = document.querySelector(`input[name="tax-${uniqueId}"]:checked`);
+          
+          if (selected && selected.value === '8') {
+            tax8Total += itemTotal;
+          } else if (selected && selected.value === '10') {
+            tax10Total += itemTotal;
+          }
+        });
+      });
+      
+      document.getElementById('tax8Summary').textContent = '¥' + tax8Total.toLocaleString();
+      document.getElementById('tax10Summary').textContent = '¥' + tax10Total.toLocaleString();
     };
     
     // 値引き後の請求額を更新
@@ -3512,7 +3594,7 @@
           });
         }
         
-        // 商品点数をカウント
+        // 商品点数をカウント & 選択された税率で集計
         let itemCount = 0;
         let tax8Total = 0;
         let tax10Total = 0;
@@ -3535,25 +3617,14 @@
             console.warn('⚠️ order.itemsが空です。totalAmountから推測して1点とカウントします。');
             itemCount += 1;
             
-            // テーブル番号で税率判定（逆順：デフォルト10%）
-            const tableNumber = order.tableNumber || '';
-            const orderTotal = order.totalAmount || 0;
-            
-            // 【8%】即会計、テイクアウト、予約1-5のみ
-            if (tableNumber.match(/^(即会計|テイクアウト|予約[1-5])$/)) {
-              tax8Total += orderTotal;
-              console.log('→ 8%適用（持ち帰り）:', orderTotal);
-            }
-            // 【10%】その他すべて（店内テーブル、レジ袋など）
-            else {
-              tax10Total += orderTotal;
-              console.log('→ 10%適用（店内 or レジ袋）:', orderTotal);
-            }
-            return; // 次の注文へ
+            // デフォルトで8%（持ち帰り）
+            tax8Total += order.totalAmount || 0;
+            console.log('→ 8%適用（itemsなし、デフォルト）:', order.totalAmount);
+            return;
           }
           
           if (order.items && Array.isArray(order.items)) {
-            order.items.forEach(item => {
+            order.items.forEach((item, idx) => {
               console.log('📦 商品:', {
                 name: item.name,
                 quantity: item.quantity,
@@ -3569,25 +3640,23 @@
               const totalPrice = basePrice + toppingPrice;
               const itemTotal = totalPrice * (item.quantity || 0);
               
-              // テーブル番号による税率判定
-              const tableNumber = selectedTable || order.tableNumber || '';
-              const itemName = item.name || '';
+              // 選択された税率を取得
+              const uniqueId = `${order.id}-${idx}`;
+              const selectedTaxRate = document.querySelector(`input[name="tax-${uniqueId}"]:checked`);
+              const taxRate = selectedTaxRate ? selectedTaxRate.value : '8';
               
               console.log('🔍 税率判定:', {
-                商品: itemName,
-                テーブル: tableNumber,
-                金額: itemTotal
+                商品: item.name,
+                金額: itemTotal,
+                選択された税率: taxRate + '%'
               });
               
-              // 【8%】即会計、テイクアウト、予約1-5のみ（持ち帰り）
-              if (tableNumber.match(/^(即会計|テイクアウト|予約[1-5])$/)) {
+              if (taxRate === '8') {
                 tax8Total += itemTotal;
-                console.log('→ 8%適用（持ち帰り）');
-              }
-              // 【10%】その他すべて（店内テーブル c1, c2, T-M, T-H、レジ袋など）
-              else {
+                console.log('→ 8%適用');
+              } else {
                 tax10Total += itemTotal;
-                console.log('→ 10%適用（店内 or レジ袋）');
+                console.log('→ 10%適用');
               }
             });
           }
