@@ -2707,9 +2707,15 @@
         let tax8Total = settlementData.tax8Total || 0;
         let tax10Total = settlementData.tax10Total || 0;
         let drawerOpenCount = settlementData.drawerOpenCount || 0;  // dailySalesから取得
+        
+        // 平均客単価を計算
+        const customerCount = settlementData.customerCount || 0;
+        const averageSpend = customerCount > 0 ? Math.round(settlementData.totalSales / customerCount) : 0;
+        
         console.log('📦 商品点数（dailySalesから）:', totalItems);
         console.log('💰 税率別売上（dailySalesから）:', { tax8Total, tax10Total });
         console.log('🔓 ドロアオープン数（dailySalesから）:', drawerOpenCount);
+        console.log('💵 平均客単価:', averageSpend);
         
         // 商品データがない場合の補正（後方互換性のため）
         if (tax8Total === 0 && tax10Total === 0 && settlementData.totalSales > 0) {
@@ -2766,7 +2772,7 @@
 
 日付: ${dateStr}
 客数: ${settlementData.customerCount}組
-総売上点数: ${totalItems}点
+平均客単価: ¥${averageSpend.toLocaleString()}
 合計売上: ¥${settlementData.totalSales.toLocaleString()}
 
 -------------------------------------
@@ -3529,16 +3535,19 @@
             console.warn('⚠️ order.itemsが空です。totalAmountから推測して1点とカウントします。');
             itemCount += 1;
             
-            // テーブル番号で税率判定
+            // テーブル番号で税率判定（逆順：デフォルト10%）
             const tableNumber = order.tableNumber || '';
             const orderTotal = order.totalAmount || 0;
             
-            if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
-              tax10Total += orderTotal;
-              console.log('→ 10%適用（店内テーブル）:', orderTotal);
-            } else {
+            // 【8%】即会計、テイクアウト、予約1-5のみ
+            if (tableNumber.match(/^(即会計|テイクアウト|予約[1-5])$/)) {
               tax8Total += orderTotal;
               console.log('→ 8%適用（持ち帰り）:', orderTotal);
+            }
+            // 【10%】その他すべて（店内テーブル、レジ袋など）
+            else {
+              tax10Total += orderTotal;
+              console.log('→ 10%適用（店内 or レジ袋）:', orderTotal);
             }
             return; // 次の注文へ
           }
@@ -3570,20 +3579,15 @@
                 金額: itemTotal
               });
               
-              // 【10%】店内テーブル: c1, c2, T-M, T-H のみ
-              if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
-                tax10Total += itemTotal;
-                console.log('→ 10%適用（店内テーブル）');
-              }
-              // 【10%】レジ袋（どのテーブルでも）
-              else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
-                tax10Total += itemTotal;
-                console.log('→ 10%適用（レジ袋）');
-              }
-              // 【8%】即会計、テイクアウト、予約1-5など全て
-              else {
+              // 【8%】即会計、テイクアウト、予約1-5のみ（持ち帰り）
+              if (tableNumber.match(/^(即会計|テイクアウト|予約[1-5])$/)) {
                 tax8Total += itemTotal;
                 console.log('→ 8%適用（持ち帰り）');
+              }
+              // 【10%】その他すべて（店内テーブル c1, c2, T-M, T-H、レジ袋など）
+              else {
+                tax10Total += itemTotal;
+                console.log('→ 10%適用（店内 or レジ袋）');
               }
             });
           }
