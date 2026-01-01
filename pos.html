@@ -2739,8 +2739,20 @@
           tax8Total = settlementData.totalSales;
         }
         
-        // 値引き金額はdailySalesから取得
-        const discountTotal = settlementData.totalDiscount || 0;
+        let discountTotal = 0;
+        
+        ordersSnapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          if (!data.timestamp || !data.paidAt || data.deleted) return;
+          
+          const orderDate = data.timestamp.toDate();
+          const orderDateStr = `${orderDate.getFullYear()}-${String(orderDate.getMonth()+1).padStart(2,'0')}-${String(orderDate.getDate()).padStart(2,'0')}`;
+          
+          if (orderDateStr === dateStr) {
+            // 値引き
+            discountTotal += data.discount || 0;
+          }
+        });
         
         console.log('📊 集計結果:', {
           totalItems,
@@ -3945,7 +3957,6 @@
             tax8Total: (data.tax8Total || 0) + tax8Total,
             tax10Total: (data.tax10Total || 0) + tax10Total,
             totalDiscount: (data.totalDiscount || 0) + discountAmount,
-            drawerOpenCount: data.drawerOpenCount || 0,  // 現在の値を保持
             cashSales: data.cashSales || 0,
             emoneSales: data.emoneSales || 0,
             creditSales: data.creditSales || 0,
@@ -3955,7 +3966,6 @@
           // 支払い方法別の売上を加算
           if (paymentMethod === 'cash') {
             updates.cashSales += totalAmount;
-            updates.drawerOpenCount += 1;  // 現金支払い時にドロアオープン
           } else if (paymentMethod === 'emoney') {
             updates.emoneSales += totalAmount;
           } else if (paymentMethod === 'credit') {
@@ -3977,7 +3987,7 @@
             cashSales: paymentMethod === 'cash' ? totalAmount : 0,
             emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
             creditSales: paymentMethod === 'credit' ? totalAmount : 0,
-            drawerOpenCount: paymentMethod === 'cash' ? 1 : 0,  // 現金支払い時のみ1
+            drawerOpenCount: 0,  // ドロアオープン数を初期化
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
           };
