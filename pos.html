@@ -1084,6 +1084,15 @@
         </div>
       </div>
       
+      <!-- 値引き入力欄 -->
+      <div style="margin: 20px 0; padding: 15px; background: #fff3cd; border-radius: 10px;">
+        <label style="font-weight: bold; color: #856404;">💰 値引き金額</label>
+        <input type="number" id="discountAmount" placeholder="0" value="0" style="width: 100%; padding: 10px; font-size: 16px; border: 2px solid #ffc107; border-radius: 8px; margin-top: 8px;" oninput="updatePaymentTotal()">
+        <div style="text-align: center; margin-top: 10px; font-size: 18px; font-weight: bold; color: #333;">
+          請求額: <span id="finalPaymentAmount" style="color: #4CAF50;">¥0</span>
+        </div>
+      </div>
+      
       <button class="btn btn-primary" onclick="completePayment()" id="completePaymentBtn" disabled>会計完了</button>
       <button class="btn btn-secondary" onclick="closePaymentModal()">キャンセル</button>
     </div>
@@ -2663,7 +2672,7 @@
         console.log('📋 取得した注文数:', ordersSnapshot.size);
         
         // 担当者名を集計（会計ごとに記録された担当者）
-        let staffName = '担当者不明';
+        let staffName = '高田';
         const staffCounts = {};
         try {
           console.log('👤 担当者集計開始');
@@ -2687,7 +2696,7 @@
             .map(([name, count]) => `${name}(${count}件)`)
             .join(', ');
           
-          staffName = staffList || '担当者不明';
+          staffName = staffList || '高田';
           console.log('最終担当者:', staffName);
         } catch (e) {
           console.error('❌ 担当者集計エラー:', e);
@@ -3393,6 +3402,12 @@
         return;
       }
       
+      // 値引き金額を初期化
+      document.getElementById('discountAmount').value = '0';
+      
+      // 請求額を表示
+      updatePaymentTotal();
+      
       document.getElementById('paymentModal').classList.remove('hidden');
       selectedPaymentMethod = null;
       document.querySelectorAll('.payment-method-btn').forEach(btn => {
@@ -3400,6 +3415,25 @@
       });
       document.getElementById('cashInputSection').classList.add('hidden');
       document.getElementById('completePaymentBtn').disabled = true;
+    };
+    
+    // 値引き後の請求額を更新
+    window.updatePaymentTotal = function() {
+      let total = 0;
+      currentOrders.forEach(order => {
+        total += order.totalAmount || 0;
+      });
+      
+      const discount = parseInt(document.getElementById('discountAmount').value) || 0;
+      const finalAmount = Math.max(0, total - discount);
+      totalAmountToPay = finalAmount;
+      
+      document.getElementById('finalPaymentAmount').textContent = '¥' + finalAmount.toLocaleString();
+      
+      // 現金の場合はおつり計算も更新
+      if (selectedPaymentMethod === 'cash') {
+        calculateChange();
+      }
     };
     
     // 支払い方法選択
@@ -3423,6 +3457,8 @@
     // おつり計算
     window.calculateChange = function() {
       cashReceived = parseInt(document.getElementById('cashReceived').value) || 0;
+      
+      // 値引き後の金額を使用
       changeAmount = cashReceived - totalAmountToPay;
       
       document.getElementById('changeAmount').textContent = `¥${changeAmount.toLocaleString()}`;
@@ -3444,7 +3480,7 @@
       
       // 担当者を取得（未選択の場合はデフォルト値）
       const staffSelect = document.getElementById('staffSelect');
-      const staffName = staffSelect.value || 'レジ係';
+      const staffName = staffSelect.value || '高田';
       
       try {
         const now = window.Timestamp.now();
@@ -3527,8 +3563,18 @@
         console.log('📦 会計商品点数:', itemCount);
         console.log('💰 税率別売上:', { tax8Total, tax10Total });
         
+        // itemCountが0の場合は客数をカウント（後方互換性）
+        if (itemCount === 0 && currentOrders.length > 0) {
+          itemCount = currentOrders.length;
+          console.log('⚠️ items配列が空のため、客数をカウント:', itemCount);
+        }
+        
+        // 値引き金額を取得
+        const discountAmount = parseInt(document.getElementById('discountAmount').value) || 0;
+        console.log('💸 値引き金額:', discountAmount);
+        
         // 🆕 日次売上を更新（商品点数と税率別売上も記録）
-        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount, tax8Total, tax10Total);
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount, tax8Total, tax10Total, discountAmount);
         
         // 支払いデータを保存（レシート印刷用）
         lastPaymentData = {
@@ -3536,6 +3582,7 @@
           orderNumbers: orderNumbers,
           items: currentOrders.flatMap(o => o.items),
           totalAmount: totalAmountToPay,
+          discountAmount: discountAmount,
           paymentMethod: selectedPaymentMethod,
           cashReceived: selectedPaymentMethod === 'cash' ? cashReceived : totalAmountToPay,
           change: selectedPaymentMethod === 'cash' ? changeAmount : 0,
@@ -3797,7 +3844,7 @@
     };
     
     // 日次売上更新関数
-    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total) {
+    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0) {
       try {
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
@@ -3817,6 +3864,7 @@
             totalItems: (data.totalItems || 0) + itemCount,
             tax8Total: (data.tax8Total || 0) + tax8Total,
             tax10Total: (data.tax10Total || 0) + tax10Total,
+            totalDiscount: (data.totalDiscount || 0) + discountAmount,
             cashSales: data.cashSales || 0,
             emoneSales: data.emoneSales || 0,
             creditSales: data.creditSales || 0,
@@ -3843,6 +3891,7 @@
             totalItems: itemCount,
             tax8Total: tax8Total,
             tax10Total: tax10Total,
+            totalDiscount: discountAmount,
             cashSales: paymentMethod === 'cash' ? totalAmount : 0,
             emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
             creditSales: paymentMethod === 'credit' ? totalAmount : 0,
