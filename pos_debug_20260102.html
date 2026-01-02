@@ -1,0 +1,4083 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>粉もん屋 八 下赤塚店 - レジシステム</title>
+  
+  <!-- Star mC-Print3 SDK -->
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/v1.1.0/StarWebPrintTrader.js"></script>
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/v1.2.0/StarWebPrintBuilder.js"></script>
+  
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, query, where, getDocs, updateDoc, doc, Timestamp, onSnapshot, addDoc, orderBy, getDoc, setDoc, limit, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    
+    const firebaseConfig = {
+      apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+      authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+      projectId: "takoyaki-order-system-bacd7",
+      storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+      messagingSenderId: "104494752890",
+      appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    
+    // グローバルに公開
+    window.db = db;
+    window.collection = collection;
+    window.query = query;
+    window.where = where;
+    window.getDocs = getDocs;
+    window.updateDoc = updateDoc;
+    window.doc = doc;
+    window.Timestamp = Timestamp;
+    window.onSnapshot = onSnapshot;
+    window.addDoc = addDoc;
+    window.orderBy = orderBy;
+    window.getDoc = getDoc;
+    window.setDoc = setDoc;
+    window.limit = limit;
+    window.deleteDoc = deleteDoc;
+    
+    // 初期化完了フラグ
+    window.firebaseReady = true;
+    console.log('✅ Firebase初期化完了');
+    
+    // 初期化完了イベントを発行
+    window.dispatchEvent(new Event('firebaseReady'));
+    
+    // 担当者リストを読み込む
+    loadStaffList();
+  </script>
+  
+  <script>
+    // 担当者リストを読み込む（kanri.htmlの従業員リストから）
+    async function loadStaffList() {
+      try {
+        const staffSelect = document.getElementById('staffSelect');
+        const staffSnapshot = await getDocs(collection(db, 'kintai_employees'));
+        
+        // リセット
+        staffSelect.innerHTML = '<option value="">選択してください</option>';
+        
+        staffSnapshot.forEach(doc => {
+          const data = doc.data();
+          const option = document.createElement('option');
+          option.value = data.name || '';
+          option.textContent = data.name || '';
+          staffSelect.appendChild(option);
+        });
+        
+        console.log('✅ 担当者リスト読み込み完了');
+      } catch (e) {
+        console.error('❌ 担当者リスト読み込みエラー:', e);
+      }
+    }
+  </script>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    
+    .header {
+      background: white;
+      padding: 25px;
+      border-radius: 20px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+      margin-bottom: 25px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .header-left h1 {
+      font-size: 32px;
+      color: #333;
+      margin-bottom: 5px;
+    }
+    
+    .header-left .status {
+      font-size: 18px;
+      color: #666;
+    }
+    
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+    
+    .auto-print-toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #f8f9fa;
+      padding: 12px 20px;
+      border-radius: 12px;
+    }
+    
+    .auto-print-toggle label {
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .toggle-switch {
+      position: relative;
+      width: 60px;
+      height: 30px;
+    }
+    
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: .4s;
+      border-radius: 30px;
+    }
+    
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 22px;
+      width: 22px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    
+    input:checked + .toggle-slider {
+      background-color: #4CAF50;
+    }
+    
+    input:checked + .toggle-slider:before {
+      transform: translateX(30px);
+    }
+    
+    .toggle-status {
+      font-weight: bold;
+      min-width: 50px;
+    }
+    
+    .toggle-status.on {
+      color: #4CAF50;
+    }
+    
+    .toggle-status.off {
+      color: #999;
+    }
+    
+    .main-content {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 25px;
+    }
+    
+    @media (max-width: 1024px) {
+      .main-content {
+        grid-template-columns: 1fr;
+      }
+      
+      .header {
+        flex-direction: column;
+        gap: 15px;
+      }
+    }
+    
+    .section {
+      background: white;
+      border-radius: 20px;
+      padding: 25px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+    }
+    
+    .section h2 {
+      font-size: 24px;
+      color: #333;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 3px solid #667eea;
+    }
+    
+    /* テーブルボタングリッド */
+    .table-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+    
+    @media (max-width: 768px) {
+      .table-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+    
+    .table-btn {
+      padding: 20px;
+      font-size: 18px;
+      font-weight: bold;
+      border: none;
+      border-radius: 15px;
+      cursor: pointer;
+      transition: all 0.3s;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+      position: relative;
+    }
+    
+    .table-btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+    }
+    
+    .table-btn:active {
+      transform: translateY(0);
+    }
+    
+    .table-btn.has-orders {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+    
+    .order-badge {
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      background: #ff4444;
+      color: white;
+      font-size: 12px;
+      font-weight: bold;
+      min-width: 24px;
+      height: 24px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid white;
+      animation: pulse 1.5s infinite;
+      box-shadow: 0 2px 8px rgba(255, 68, 68, 0.5);
+    }
+    
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.15); }
+    }
+    
+    /* 注文詳細 */
+    .order-details {
+      background: #f8f9fa;
+      border-radius: 15px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .order-card {
+      background: white;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 15px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      border-left: 5px solid #667eea;
+    }
+    
+    .order-card.completed {
+      border-left-color: #4CAF50;
+      opacity: 0.7;
+    }
+    
+    .order-card.cancelled {
+      border-left-color: #f44336;
+      opacity: 0.7;
+    }
+    
+    .order-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #f0f0f0;
+    }
+    
+    .order-number {
+      font-size: 24px;
+      font-weight: bold;
+      color: #667eea;
+    }
+    
+    .order-time {
+      font-size: 14px;
+      color: #999;
+    }
+    
+    .order-status {
+      display: inline-block;
+      padding: 5px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      margin-left: 10px;
+    }
+    
+    .order-status.pending {
+      background: #fff3cd;
+      color: #856404;
+    }
+    
+    .order-status.completed {
+      background: #d4edda;
+      color: #155724;
+    }
+    
+    .order-status.cancelled {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    
+    .order-items {
+      margin: 15px 0;
+    }
+    
+    .order-item {
+      padding: 10px 0;
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .order-item:last-child {
+      border-bottom: none;
+    }
+    
+    .order-item-detailed {
+      padding: 15px;
+      margin-bottom: 15px;
+      background: #f8f9fa;
+      border-radius: 10px;
+      border-left: 4px solid #667eea;
+    }
+    
+    .item-name {
+      font-weight: 500;
+      color: #333;
+    }
+    
+    .item-details {
+      font-size: 14px;
+      color: #666;
+      margin-top: 5px;
+    }
+    
+    .item-price {
+      font-weight: bold;
+      color: #667eea;
+    }
+    
+    .order-total {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 3px solid #667eea;
+      font-size: 24px;
+      font-weight: bold;
+    }
+    
+    .total-label {
+      color: #333;
+    }
+    
+    .total-amount {
+      color: #667eea;
+      font-size: 28px;
+    }
+    
+    /* 注文アクションボタン */
+    .order-actions {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 2px dashed #ddd;
+    }
+    
+    .order-action-btn {
+      padding: 12px;
+      font-size: 14px;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .order-action-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    
+    .pay-btn {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .complete-btn {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      color: white;
+    }
+    
+    .cancel-btn {
+      background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+      color: white;
+    }
+    
+    .delete-btn {
+      background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+      color: white;
+    }
+    
+    /* ボタン */
+    .btn {
+      width: 100%;
+      padding: 18px;
+      font-size: 18px;
+      font-weight: bold;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+      margin: 8px 0;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    }
+    
+    .btn:active {
+      transform: translateY(0);
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      color: white;
+    }
+    
+    .btn-danger {
+      background: linear-gradient(135deg, #f44336 0%, #da190b 100%);
+      color: white;
+    }
+    
+    .btn-secondary {
+      background: #e0e0e0;
+      color: #333;
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    /* 手動入力セクション */
+    .manual-input {
+      background: #f8f9fa;
+      border-radius: 15px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .input-group {
+      margin-bottom: 15px;
+    }
+    
+    .input-group label {
+      display: block;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 8px;
+    }
+    
+    .input-group input,
+    .input-group select {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      transition: border-color 0.3s;
+    }
+    
+    .input-group input:focus,
+    .input-group select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    .menu-items-list {
+      max-height: 300px;
+      overflow-y: auto;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      padding: 10px;
+      background: white;
+    }
+    
+    .menu-item-checkbox {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      margin-bottom: 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    
+    .menu-item-checkbox:hover {
+      background: #f0f0f0;
+    }
+    
+    .menu-item-checkbox input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      margin-right: 10px;
+      cursor: pointer;
+    }
+    
+    .menu-item-info {
+      flex: 1;
+    }
+    
+    .menu-item-name-small {
+      font-weight: 500;
+      color: #333;
+    }
+    
+    .menu-item-price-small {
+      color: #667eea;
+      font-weight: bold;
+    }
+    
+    .selected-items {
+      margin-top: 15px;
+      padding: 15px;
+      background: white;
+      border-radius: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    
+    .selected-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      margin-bottom: 8px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+    
+    .selected-item-detailed {
+      padding: 15px;
+      margin-bottom: 15px;
+      background: #f8f9fa;
+      border-radius: 10px;
+      border-left: 4px solid #667eea;
+    }
+    
+    .quantity-input {
+      width: 60px;
+      padding: 5px;
+      text-align: center;
+      border: 2px solid #ddd;
+      border-radius: 5px;
+    }
+    
+    .remove-btn {
+      padding: 5px 12px;
+      background: #f44336;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .edit-btn {
+      padding: 5px 12px;
+      background: #FF9800;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .edit-btn:hover {
+      background: #F57C00;
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+      font-size: 18px;
+    }
+    
+    /* 支払い方法選択モーダル */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .modal {
+      background: white;
+      border-radius: 20px;
+      padding: 30px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    }
+    
+    .modal h3 {
+      font-size: 24px;
+      color: #333;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    
+    .payment-methods {
+      display: grid;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    
+    .payment-method-btn {
+      padding: 20px;
+      font-size: 20px;
+      font-weight: bold;
+      border: 3px solid #ddd;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+      background: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    
+    .payment-method-btn:hover {
+      border-color: #667eea;
+      background: #f8f9fa;
+    }
+    
+    .payment-method-btn.selected {
+      border-color: #667eea;
+      background: #e8eaf6;
+    }
+    
+    .cash-input-section {
+      margin-top: 20px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 12px;
+    }
+    
+    .cash-input-section label {
+      display: block;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+    
+    .cash-input-section input {
+      width: 100%;
+      padding: 15px;
+      font-size: 24px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      text-align: right;
+    }
+    
+    .change-display {
+      margin-top: 15px;
+      padding: 15px;
+      background: #fff;
+      border-radius: 8px;
+      text-align: center;
+      font-size: 20px;
+      font-weight: bold;
+    }
+    
+    .change-amount {
+      color: #4CAF50;
+      font-size: 28px;
+    }
+    
+    /* レシート完了画面 */
+    .receipt-actions {
+      display: grid;
+      gap: 15px;
+      margin-top: 20px;
+    }
+    
+    .receipt-btn {
+      padding: 20px;
+      font-size: 18px;
+      font-weight: bold;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    
+    .receipt-btn.print {
+      background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+      color: white;
+    }
+    
+    .receipt-btn.invoice {
+      background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+      color: white;
+    }
+    
+    .receipt-btn.back {
+      background: #e0e0e0;
+      color: #333;
+    }
+    
+    /* トッピング選択 */
+    .topping-item {
+      display: flex;
+      align-items: center;
+      padding: 15px;
+      background: white;
+      border: 2px solid #ddd;
+      border-radius: 12px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    .topping-item:hover {
+      border-color: #667eea;
+      transform: translateX(5px);
+    }
+    
+    .topping-item input[type="checkbox"] {
+      width: 24px;
+      height: 24px;
+      margin-right: 15px;
+      cursor: pointer;
+    }
+    
+    .topping-item-info {
+      flex: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .topping-item-name {
+      font-size: 16px;
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .topping-item-price {
+      font-size: 18px;
+      font-weight: bold;
+      color: #667eea;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+    }
+    
+    /* カスタムアラート */
+    .custom-alert-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 99999;
+      align-items: center;
+      justify-content: center;
+      animation: fadeIn 0.3s;
+    }
+    .custom-alert-overlay.show {
+      display: flex;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideUp {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .custom-alert-box {
+      background: white;
+      border-radius: 25px;
+      padding: 40px 30px;
+      max-width: 400px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      animation: slideUp 0.4s;
+    }
+    .custom-alert-icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+      animation: bounce 0.6s;
+    }
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+    .custom-alert-title {
+      font-size: 24px;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 15px;
+    }
+    .custom-alert-message {
+      font-size: 16px;
+      color: #666;
+      margin-bottom: 30px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .custom-alert-button {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      color: white;
+      border: none;
+      padding: 15px 50px;
+      font-size: 18px;
+      font-weight: bold;
+      border-radius: 25px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+      transition: all 0.3s;
+    }
+    .custom-alert-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(76, 175, 80, 0.6);
+    }
+    .custom-alert-button:active {
+      transform: translateY(0);
+    }
+  </style>
+  
+  <script>
+    // タップ音を再生する関数
+    function playBeep() {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 800; // 800Hzのビープ音
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    }
+    
+    // クリックイベントにビープ音を追加
+    document.addEventListener('DOMContentLoaded', function() {
+      document.addEventListener('click', function(e) {
+        // ボタン、チェックボックス、.table-btn、.menu-item-checkbox、.topping-itemをクリックしたらビープ音
+        if (e.target.closest('button') || 
+            e.target.closest('.table-btn') || 
+            e.target.closest('.menu-item-checkbox') || 
+            e.target.closest('.topping-item') ||
+            e.target.type === 'checkbox') {
+          playBeep();
+        }
+      });
+    });
+  </script>
+</head>
+<body>
+  <div class="container">
+    <!-- ヘッダー -->
+    <div class="header">
+      <div class="header-left">
+        <div class="status">
+          <label for="staffSelect" style="margin-right: 10px; font-weight: bold;">担当者:</label>
+          <select id="staffSelect" style="padding: 8px 12px; font-size: 16px; border: 2px solid #667eea; border-radius: 8px; background: white; cursor: pointer;">
+            <option value="">選択してください</option>
+          </select>
+        </div>
+      </div>
+      <div class="header-right">
+        <button onclick="openDrawer()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FFC107 0%, #FFA000 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px; box-shadow: 0 4px 15px rgba(255,193,7,0.3);">💰 ドロア開</button>
+        <button onclick="showCustomerCountModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #00bcd4 0%, #0097a7 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">👥 客数</button>
+        <button onclick="showSalesModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">💰 売上</button>
+        <button onclick="showHistoryModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">📜 履歴</button>
+        <button onclick="showMonthlyReportModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">📊 月次レポート</button>
+        <div class="auto-print-toggle">
+          <label>レシート自動発行</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="autoPrintToggle" checked onchange="toggleAutoPrint()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-status on" id="autoPrintStatus">ON</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="main-content">
+      <!-- 左側: テーブル選択と注文詳細 -->
+      <div class="section">
+        <h2>📋 テーブル選択</h2>
+        <div class="table-grid" id="tableGrid">
+          <!-- JavaScriptで生成 -->
+        </div>
+        
+        <div id="orderSection" class="hidden">
+          <h2>📝 注文詳細 - <span id="selectedTableLabel"></span></h2>
+          <div id="ordersList">
+            <div class="loading">読み込み中...</div>
+          </div>
+          
+          <div id="totalSection" class="hidden">
+            <div class="order-total">
+              <span class="total-label">合計金額:</span>
+              <span class="total-amount" id="totalAmount">¥0</span>
+            </div>
+            <button class="btn btn-primary" onclick="showPaymentModal()">💰 会計処理</button>
+            <button class="btn btn-secondary" onclick="clearSelection()">← テーブル選択に戻る</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 右側: 手動入力 -->
+      <div class="section">
+        <h2>✍️ 手動レジ入力</h2>
+        <div class="manual-input">
+          <div class="input-group">
+            <label>テーブル番号</label>
+            <select id="manualTable">
+              <option value="">選択してください</option>
+            </select>
+          </div>
+          
+          <div class="input-group">
+            <label>カテゴリ選択</label>
+            <select id="categoryFilter" onchange="filterMenuByCategory()">
+              <option value="all">全ての商品</option>
+            </select>
+          </div>
+          
+          <div class="input-group">
+            <label>商品を選択</label>
+            <div class="menu-items-list" id="menuItemsList">
+              <div class="loading">メニュー読み込み中...</div>
+            </div>
+          </div>
+          
+          <div class="selected-items" id="selectedItems"></div>
+          
+          <div class="input-group">
+            <label>合計金額: <span id="manualTotal" style="color: #667eea; font-size: 20px;">¥0</span></label>
+          </div>
+          
+          <button class="btn btn-primary" onclick="submitManualOrder()" id="manualSubmitBtn" disabled>注文を追加</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 支払い方法選択モーダル -->
+  <div id="paymentModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>💳 支払い方法を選択</h3>
+      
+      <!-- 分割会計ボタン -->
+      <div style="margin-bottom: 20px; padding: 15px; background: #f0f8ff; border-radius: 10px; border-left: 4px solid #667eea;">
+        <button class="btn" style="width: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;" onclick="showSplitPaymentModal()">
+          ✂️ 分割会計
+        </button>
+        <div style="font-size: 12px; color: #666; margin-top: 8px; text-align: center;">
+          複数の注文を選択して一緒に会計
+        </div>
+      </div>
+      
+      <!-- 税率選択セクション -->
+      <div id="taxRateSection" style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 10px; border-left: 4px solid #4CAF50; max-height: 200px; overflow-y: auto;">
+        <h4 style="margin: 0 0 15px 0; color: #2e7d32; font-size: 16px;">📋 各商品の税率を選択</h4>
+        <div id="taxRateItemsList"></div>
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #4CAF50; font-weight: bold; font-size: 14px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+            <span>8%対象:</span>
+            <span id="tax8Summary" style="color: #FF9800;">¥0</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>10%対象:</span>
+            <span id="tax10Summary" style="color: #2196F3;">¥0</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="payment-methods">
+        <button class="payment-method-btn" onclick="selectPaymentMethod('cash')">
+          💵 現金
+        </button>
+        <button class="payment-method-btn" onclick="selectPaymentMethod('emoney')">
+          📱 電子マネー
+        </button>
+        <button class="payment-method-btn" onclick="selectPaymentMethod('credit')">
+          💳 クレジットカード
+        </button>
+      </div>
+      
+      <div id="cashInputSection" class="cash-input-section hidden">
+        <label>お預かり金額</label>
+        <input type="number" id="cashReceived" placeholder="0" oninput="calculateChange()">
+        <div class="change-display" id="changeDisplay">
+          おつり: <span class="change-amount" id="changeAmount">¥0</span>
+        </div>
+      </div>
+      
+      <!-- 値引き入力欄 -->
+      <div style="margin: 20px 0; padding: 15px; background: #fff3cd; border-radius: 10px;">
+        <label style="font-weight: bold; color: #856404;">💰 値引き金額</label>
+        <input type="number" id="discountAmount" placeholder="0" value="0" style="width: 100%; padding: 10px; font-size: 16px; border: 2px solid #ffc107; border-radius: 8px; margin-top: 8px;" oninput="updatePaymentTotal()">
+        <div style="text-align: center; margin-top: 10px; font-size: 18px; font-weight: bold; color: #333;">
+          請求額: <span id="finalPaymentAmount" style="color: #4CAF50;">¥0</span>
+        </div>
+      </div>
+      
+      <button class="btn btn-primary" onclick="completePayment()" id="completePaymentBtn" disabled>会計完了</button>
+      <button class="btn btn-secondary" onclick="closePaymentModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- レシート完了モーダル -->
+  <div id="receiptCompleteModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>✅ 会計完了</h3>
+      <div style="text-align: center; margin: 20px 0; font-size: 18px; color: #4CAF50;">
+        会計が完了しました
+      </div>
+      <div class="receipt-actions">
+        <button class="receipt-btn print" onclick="printReceipt()">🖨️ レシート発行</button>
+        <button class="receipt-btn invoice" onclick="printInvoice()">📄 領収書発行</button>
+        <button class="receipt-btn back" onclick="closeReceiptModal()">← 戻る</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- トッピング選択モーダル -->
+  <div id="toppingModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>🍴 トッピングを選択</h3>
+      <div id="toppingModalItemName" style="font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #667eea;"></div>
+      <div id="toppingsList" style="max-height: 400px; overflow-y: auto;">
+        <!-- トッピングリスト -->
+      </div>
+      <button class="btn btn-primary" onclick="confirmTopping()">決定</button>
+      <button class="btn btn-secondary" onclick="closeToppingModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 予約メモモーダル -->
+  <div id="reservationMemoModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 500px;">
+      <h3>📝 予約メモ</h3>
+      <div style="margin: 20px 0;">
+        <label style="display: block; margin-bottom: 10px; font-weight: bold;">
+          <span id="reservationTableName"></span>のメモ
+        </label>
+        <textarea id="reservationMemoText" rows="5" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; resize: vertical;"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="saveReservationMemo()">💾 保存</button>
+      <button class="btn btn-secondary" onclick="closeReservationMemoModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 分割会計モーダル -->
+  <div id="splitPaymentModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+      <h3>✂️ 分割会計</h3>
+      <p style="color: #666; margin-bottom: 20px;">一緒に会計する注文を選択してください</p>
+      
+      <div id="splitOrdersList" style="margin-bottom: 20px;">
+        <!-- 注文リストが動的に生成される -->
+      </div>
+      
+      <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: bold;">
+          <span>選択した注文の合計:</span>
+          <span id="splitTotalAmount" style="color: #667eea;">¥0</span>
+        </div>
+      </div>
+      
+      <button class="btn btn-primary" onclick="proceedToSplitPayment()" id="splitPaymentBtn" disabled>選択した注文を会計</button>
+      <button class="btn btn-secondary" onclick="closeSplitPaymentModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 履歴モーダル -->
+  <div id="historyModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+      <h3>📜 注文履歴</h3>
+      
+      <div style="margin: 20px 0; display: flex; gap: 10px; flex-wrap: wrap;">
+        <select id="historyDateFilter" onchange="filterHistory()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <option value="today">今日</option>
+          <option value="yesterday">昨日</option>
+          <option value="week">今週</option>
+          <option value="month">今月</option>
+          <option value="all">全期間</option>
+        </select>
+        
+        <select id="historyStatusFilter" onchange="filterHistory()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <option value="all">すべて</option>
+          <option value="deleted">削除済み</option>
+          <option value="paid">会計済み</option>
+          <option value="completed">完了</option>
+          <option value="cancelled">キャンセル</option>
+        </select>
+        
+        <button onclick="refreshHistory()" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">🔄 更新</button>
+      </div>
+      
+      <div id="historyList" style="max-height: 60vh; overflow-y: auto;">
+        <!-- 履歴リスト -->
+      </div>
+      
+      <button class="btn btn-secondary" onclick="closeHistoryModal()">閉じる</button>
+    </div>
+  </div>
+  
+  <!-- 客数モーダル -->
+  <div id="customerCountModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 600px;">
+      <h3>👥 本日の客数</h3>
+      
+      <div id="customerCountContent" style="padding: 20px;">
+        <!-- 客数表示 -->
+      </div>
+      
+      <button class="btn btn-secondary" onclick="closeCustomerCountModal()">閉じる</button>
+    </div>
+  </div>
+  
+  <!-- 売上モーダル -->
+  <div id="salesModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 700px;">
+      <h3>💰 本日の売上</h3>
+      
+      <div style="margin: 20px 0; display: flex; gap: 10px;">
+        <select id="salesDateFilter" onchange="calculateSales()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px; flex: 1;">
+          <option value="today">今日</option>
+          <option value="yesterday">昨日</option>
+          <option value="week">今週</option>
+          <option value="month">今月</option>
+        </select>
+        <button onclick="showSettlementModal()" style="padding: 8px 16px; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">🔄 精算</button>
+      </div>
+      
+      <div id="salesContent">
+        <!-- 売上表示 -->
+      </div>
+      
+      <button class="btn btn-secondary" onclick="closeSalesModal()">閉じる</button>
+    </div>
+  </div>
+  
+  <!-- 精算モーダル -->
+  <div id="settlementModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 500px;">
+      <h3 style="color: #ff6b6b;">🔄 精算確認</h3>
+      
+      <div style="margin: 20px 0; padding: 20px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 8px;">
+        <p style="margin: 0 0 10px 0; font-weight: bold; color: #856404;">注意事項:</p>
+        <ul style="margin: 0; padding-left: 20px; color: #856404;">
+          <li>本日の売上データを確定します</li>
+          <li>精算ジャーナル（テキストファイル）をダウンロードします</li>
+          <li>売上は午前3時に自動的にリセットされます</li>
+        </ul>
+      </div>
+      
+      <div id="settlementSummary" style="margin: 20px 0;">
+        <!-- 精算サマリー -->
+      </div>
+      
+      <button class="btn" style="width: 100%; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; margin-bottom: 10px;" onclick="confirmSettlement()">精算を実行</button>
+      <button class="btn btn-secondary" onclick="closeSettlementModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 月次レポートモーダル -->
+  <div id="monthlyReportModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <h3>📊 月次レポート</h3>
+      
+      <div style="margin: 20px 0; display: flex; gap: 10px; align-items: center;">
+        <select id="reportYear" onchange="generateMonthlyReport()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <!-- JavaScriptで生成 -->
+        </select>
+        
+        <select id="reportMonth" onchange="generateMonthlyReport()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          <option value="1">1月</option>
+          <option value="2">2月</option>
+          <option value="3">3月</option>
+          <option value="4">4月</option>
+          <option value="5">5月</option>
+          <option value="6">6月</option>
+          <option value="7">7月</option>
+          <option value="8">8月</option>
+          <option value="9">9月</option>
+          <option value="10">10月</option>
+          <option value="11">11月</option>
+          <option value="12">12月</option>
+        </select>
+        
+        <button onclick="generateMonthlyReport()" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">📊 集計</button>
+      </div>
+      
+      <div id="monthlyReportContent">
+        <!-- レポート内容 -->
+      </div>
+      
+      <button class="btn btn-secondary" onclick="closeMonthlyReportModal()">閉じる</button>
+    </div>
+  </div>
+  
+  
+  <script>
+    let selectedTable = null;
+    let currentOrders = [];
+    let menuItems = [];
+    let manualCart = [];
+    let autoPrintEnabled = true;
+    let selectedPaymentMethod = null;
+    let totalAmountToPay = 0;
+    let cashReceived = 0;
+    let changeAmount = 0;
+    let lastPaymentData = null;
+    let currentReservationTable = null; // 予約メモ編集中のテーブル
+    
+    // プリンターIPアドレス（画像から）
+    const PRINTER_IP = '192.168.244.41';
+    
+    // メニューデータ（Firebaseから取得）
+    let menuData = [];
+    let toppingsData = [];
+    let reservationMemos = {}; // 予約メモを保存
+    
+    // テーブル定義
+    const TABLES = [
+      '即会計', 'テイクアウト', 'c1', 'c2', 'T-H', 'T-M', 
+      '予約1', '予約2', '予約3', '予約4', '予約5'
+    ];
+    
+    // 初期化
+    window.addEventListener('load', async () => {
+      await initializeSystem();
+    });
+    
+    async function initializeSystem() {
+      // Firebaseからメニューを取得
+      try {
+        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
+        menuData = [];
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          menuData.push({
+            id: data.id || doc.id, // data.idを優先、なければdoc.id
+            docId: doc.id, // ドキュメントIDも保持
+            name: data.name || '',
+            price: data.price || 0,
+            category: data.category || 'その他',
+            taxRate: data.taxRate || 10,
+            toppingsId: data.toppingsId || '', // カンマ区切りのトッピングID文字列
+            toppings: data.toppings || [] // 配列形式（互換性のため）
+          });
+        });
+        
+        // menu.htmlと同じソート方法：文字列比較
+        console.log('ソート前のメニューID:', menuData.map(m => m.id).join(', '));
+        menuData.sort((a, b) => {
+          if (a.id < b.id) return -1;
+          if (a.id > b.id) return 1;
+          return 0;
+        });
+        
+        console.log('✅ メニューを読み込みました:', menuData.length, '件');
+        console.log('ソート後のメニューID:', menuData.map(m => m.id).join(', '));
+      } catch (e) {
+        console.error('❌ メニューの読み込みに失敗:', e);
+      }
+      
+      // Firebaseからトッピングを取得
+      try {
+        const toppingsSnapshot = await window.getDocs(window.collection(window.db, 'toppings'));
+        toppingsData = [];
+        toppingsSnapshot.forEach(doc => {
+          const data = doc.data();
+          toppingsData.push({
+            id: data.id || doc.id, // data.idを優先
+            docId: doc.id,
+            name: data.name || '',
+            price: data.price || 0,
+            order: data.order || 99 // 並び順フィールド
+          });
+        });
+        
+        // menu.htmlと同じソート方法：orderフィールドでソート
+        console.log('ソート前のトッピングID:', toppingsData.map(t => t.id).join(', '));
+        toppingsData.sort((a, b) => a.order - b.order);
+        
+        console.log('✅ トッピングを読み込みました:', toppingsData.length, '件');
+        console.log('ソート後のトッピングID:', toppingsData.map(t => t.id).join(', '));
+      } catch (e) {
+        console.error('❌ トッピングの読み込みに失敗:', e);
+      }
+      
+      // テーブルボタンを生成
+      const tableGrid = document.getElementById('tableGrid');
+      tableGrid.innerHTML = '';
+      TABLES.forEach(table => {
+        const btn = document.createElement('button');
+        btn.className = 'table-btn';
+        
+        // 予約テーブルの場合はメモアイコンを追加
+        if (table.startsWith('予約')) {
+          btn.style.position = 'relative';
+          
+          // メモがある場合は背景色を変更
+          if (reservationMemos[table]) {
+            btn.style.background = 'linear-gradient(135deg, #FF9800 0%, #FF5722 100%)';
+            btn.style.color = 'white';
+          }
+          
+          const memoIcon = document.createElement('span');
+          memoIcon.innerHTML = '📝';
+          memoIcon.style.position = 'absolute';
+          memoIcon.style.top = '5px';
+          memoIcon.style.right = '5px';
+          memoIcon.style.fontSize = '16px';
+          memoIcon.style.cursor = 'pointer';
+          memoIcon.style.zIndex = '10';
+          memoIcon.onclick = (e) => {
+            e.stopPropagation(); // テーブル選択を防ぐ
+            showReservationMemoModal(table);
+          };
+          btn.appendChild(memoIcon);
+        }
+        
+        const tableLabel = document.createElement('span');
+        tableLabel.textContent = table;
+        btn.appendChild(tableLabel);
+        
+        
+        btn.onclick = () => selectTable(table);
+        
+        btn.id = `table-${table}`;
+        tableGrid.appendChild(btn);
+      });
+      
+      // 手動入力用のテーブル選択肢を生成
+      const manualTable = document.getElementById('manualTable');
+      TABLES.forEach(table => {
+        const option = document.createElement('option');
+        option.value = table;
+        option.textContent = `テーブル ${table}`;
+        manualTable.appendChild(option);
+      });
+      
+      // カテゴリを初期化
+      initializeCategories();
+      
+      // メニュー項目を表示
+      displayMenuItems();
+      
+      // リアルタイム更新を開始
+      startRealtimeUpdates();
+    }
+    
+    // テーブルボタンの色を更新
+    function updateTableButtons() {
+      TABLES.forEach(table => {
+        if (table.startsWith('予約')) {
+          const btn = document.getElementById(`table-${table}`);
+          if (btn) {
+            if (reservationMemos[table]) {
+              // メモがある場合はオレンジ色
+              btn.style.background = 'linear-gradient(135deg, #FF9800 0%, #FF5722 100%)';
+              btn.style.color = 'white';
+            } else {
+              // メモがない場合は通常色
+              btn.style.background = '';
+              btn.style.color = '';
+            }
+          }
+        }
+      });
+    }
+    
+    // 自動印刷トグル
+    window.toggleAutoPrint = function() {
+      autoPrintEnabled = document.getElementById('autoPrintToggle').checked;
+      const status = document.getElementById('autoPrintStatus');
+      status.textContent = autoPrintEnabled ? 'ON' : 'OFF';
+      status.className = autoPrintEnabled ? 'toggle-status on' : 'toggle-status off';
+    };
+    
+    // カテゴリを初期化
+    function initializeCategories() {
+      const categoryFilter = document.getElementById('categoryFilter');
+      
+      // カテゴリごとの最小IDを計算
+      const categoryInfo = new Map();
+      menuData.forEach(item => {
+        if (!item.category) return;
+        const cat = item.category;
+        if (!categoryInfo.has(cat)) {
+          categoryInfo.set(cat, { minId: item.id });
+        } else {
+          const info = categoryInfo.get(cat);
+          if (item.id < info.minId) {
+            info.minId = item.id;
+          }
+        }
+      });
+      
+      // 最小IDでソート
+      const sortedCategories = Array.from(categoryInfo.entries())
+        .sort((a, b) => a[1].minId.localeCompare(b[1].minId))
+        .map(entry => entry[0]);
+      
+      // 既存のオプションをクリア（「全ての商品」以外）
+      categoryFilter.innerHTML = '<option value="all">全ての商品</option>';
+      
+      // カテゴリを追加
+      sortedCategories.forEach(category => {
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = category;
+        categoryFilter.appendChild(option);
+      });
+    }
+    
+    // カテゴリでフィルタ
+    window.filterMenuByCategory = function() {
+      const selectedCategory = document.getElementById('categoryFilter').value;
+      displayMenuItems(selectedCategory);
+    };
+    
+    // メニュー項目を表示
+    function displayMenuItems(categoryFilter = 'all') {
+      const container = document.getElementById('menuItemsList');
+      container.innerHTML = '';
+      
+      const filteredMenu = categoryFilter === 'all' 
+        ? menuData 
+        : menuData.filter(item => item.category === categoryFilter);
+      
+      filteredMenu.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'menu-item-checkbox';
+        div.style.cursor = 'pointer';
+        div.innerHTML = `
+          <input type="checkbox" id="menu-${item.id}" value="${item.id}" style="pointer-events: none;">
+          <div class="menu-item-info">
+            <div class="menu-item-name-small">${item.name}</div>
+            <div class="menu-item-price-small">¥${item.price.toLocaleString()}</div>
+          </div>
+        `;
+        
+        // div全体をクリック可能に
+        div.onclick = () => {
+          const checkbox = document.getElementById(`menu-${item.id}`);
+          checkbox.checked = !checkbox.checked;
+          toggleMenuItem(item.id);
+        };
+        
+        container.appendChild(div);
+      });
+    }
+    
+    // 一時的な選択中のアイテム
+    let currentSelectingItem = null;
+    let selectedToppings = [];
+    
+    // メニュー項目の選択切り替え
+    window.toggleMenuItem = function(itemId) {
+      const checkbox = document.getElementById(`menu-${itemId}`);
+      const item = menuData.find(m => m.id === itemId);
+      
+      if (checkbox.checked) {
+        currentSelectingItem = { ...item };
+        selectedToppings = [];
+        
+        // toppingsIdが空または存在しない場合は、トッピング選択をスキップして直接カートに追加
+        if (!item.toppingsId || item.toppingsId.trim() === '') {
+          manualCart.push({
+            ...currentSelectingItem,
+            toppings: '標準トッピング',
+            toppingPrice: 0,
+            quantity: 1
+          });
+          updateManualCart();
+          currentSelectingItem = null;
+        } else {
+          // トッピング選択モーダルを表示
+          showToppingModal(item);
+        }
+      } else {
+        manualCart = manualCart.filter(i => i.id !== itemId);
+        updateManualCart();
+      }
+    };
+    
+    // トッピング選択モーダルを表示
+    function showToppingModal(item) {
+      document.getElementById('toppingModalItemName').textContent = item.name;
+      const list = document.getElementById('toppingsList');
+      list.innerHTML = '';
+      
+      // 「なし」オプション
+      const noneDiv = document.createElement('div');
+      noneDiv.className = 'topping-item';
+      noneDiv.style.cursor = 'pointer';
+      noneDiv.innerHTML = `
+        <input type="checkbox" id="topping-none" style="pointer-events: none;">
+        <div class="topping-item-info">
+          <span class="topping-item-name">標準トッピング</span>
+          <span class="topping-item-price">¥0</span>
+        </div>
+      `;
+      
+      // div全体をクリック可能に
+      noneDiv.onclick = () => {
+        const checkbox = document.getElementById('topping-none');
+        checkbox.checked = !checkbox.checked;
+        selectNoneTopping(checkbox);
+      };
+      
+      list.appendChild(noneDiv);
+      
+      // toppingsIdからトッピングIDのリストを取得
+      let allowedToppingIds = [];
+      if (item.toppingsId && typeof item.toppingsId === 'string') {
+        // カンマ区切り文字列から配列に変換
+        allowedToppingIds = item.toppingsId.split(',').map(id => id.trim());
+      } else if (item.toppings && Array.isArray(item.toppings)) {
+        // 配列形式の場合
+        allowedToppingIds = item.toppings;
+      }
+      
+      toppingsData.forEach(topping => {
+        // toppingsIdに含まれている場合のみ表示（空の場合は表示しない）
+        if (allowedToppingIds.length > 0 && allowedToppingIds.includes(topping.id)) {
+          const div = document.createElement('div');
+          div.className = 'topping-item';
+          div.style.cursor = 'pointer';
+          div.innerHTML = `
+            <input type="checkbox" id="topping-${topping.id}" value="${topping.id}" style="pointer-events: none;">
+            <div class="topping-item-info">
+              <span class="topping-item-name">${topping.name}</span>
+              <span class="topping-item-price">+¥${topping.price.toLocaleString()}</span>
+            </div>
+          `;
+          
+          // div全体をクリック可能に
+          div.onclick = () => {
+            const checkbox = document.getElementById(`topping-${topping.id}`);
+            checkbox.checked = !checkbox.checked;
+            selectTopping(checkbox);
+          };
+          
+          list.appendChild(div);
+        }
+      });
+      
+      // デフォルトで「なし」を選択
+      document.getElementById('topping-none').checked = true;
+      
+      document.getElementById('toppingModal').classList.remove('hidden');
+    }
+    
+    // 「なし」トッピングを選択
+    window.selectNoneTopping = function(checkbox) {
+      if (checkbox.checked) {
+        // 他のトッピングをすべてクリア
+        selectedToppings = [];
+        toppingsData.forEach(t => {
+          const cb = document.getElementById(`topping-${t.id}`);
+          if (cb) cb.checked = false;
+        });
+      }
+    };
+    
+    // トッピングを選択
+    window.selectTopping = function(checkbox) {
+      const noneCheckbox = document.getElementById('topping-none');
+      
+      if (checkbox.checked) {
+        // 「なし」のチェックを外す
+        noneCheckbox.checked = false;
+        
+        // 選択されたトッピングを追加
+        const toppingId = checkbox.value;
+        const topping = toppingsData.find(t => t.id === toppingId);
+        if (topping && !selectedToppings.find(t => t.id === toppingId)) {
+          selectedToppings.push(topping);
+        }
+      } else {
+        // 選択解除
+        selectedToppings = selectedToppings.filter(t => t.id !== checkbox.value);
+        
+        // トッピングが何も選択されていない場合は「なし」を選択
+        if (selectedToppings.length === 0) {
+          noneCheckbox.checked = true;
+        }
+      }
+    };
+    
+    // トッピング選択を確定
+    window.confirmTopping = function() {
+      if (!currentSelectingItem) return;
+      
+      let toppingNames = 'なし';
+      let toppingPrice = 0;
+      
+      if (selectedToppings.length > 0) {
+        toppingNames = selectedToppings.map(t => t.name).join(', ');
+        toppingPrice = selectedToppings.reduce((sum, t) => sum + t.price, 0);
+      }
+      
+      // 編集モードかどうかを確認
+      if (currentSelectingItem.editIndex !== undefined) {
+        // 既存アイテムを更新
+        manualCart[currentSelectingItem.editIndex].toppings = toppingNames;
+        manualCart[currentSelectingItem.editIndex].toppingPrice = toppingPrice;
+      } else {
+        // 新規アイテムを追加
+        manualCart.push({
+          ...currentSelectingItem,
+          quantity: 1,
+          toppings: toppingNames,
+          toppingPrice: toppingPrice
+        });
+      }
+      
+      closeToppingModal();
+      updateManualCart();
+    };
+    
+    // トッピングモーダルを閉じる
+    window.closeToppingModal = function() {
+      // チェックボックスをクリア
+      if (currentSelectingItem) {
+        const checkbox = document.getElementById(`menu-${currentSelectingItem.id}`);
+        if (checkbox && manualCart.filter(i => i.id === currentSelectingItem.id).length === 0) {
+          checkbox.checked = false;
+        }
+      }
+      
+      document.getElementById('toppingModal').classList.add('hidden');
+      currentSelectingItem = null;
+      selectedToppings = [];
+    };
+    
+    // 予約メモモーダルを表示
+    window.showReservationMemoModal = function(tableName) {
+      currentReservationTable = tableName;
+      document.getElementById('reservationTableName').textContent = tableName;
+      document.getElementById('reservationMemoText').value = reservationMemos[tableName] || '';
+      document.getElementById('reservationMemoModal').classList.remove('hidden');
+    };
+    
+    // 予約メモを保存
+    window.saveReservationMemo = function() {
+      if (!currentReservationTable) return;
+      
+      const memo = document.getElementById('reservationMemoText').value.trim();
+      if (memo) {
+        reservationMemos[currentReservationTable] = memo;
+        alert(`✅ ${currentReservationTable}のメモを保存しました`);
+      } else {
+        delete reservationMemos[currentReservationTable];
+        alert(`✅ ${currentReservationTable}のメモを削除しました`);
+      }
+      
+      // ボタンの色を更新
+      updateTableButtons();
+      
+      closeReservationMemoModal();
+    };
+    
+    // 予約メモモーダルを閉じる
+    window.closeReservationMemoModal = function() {
+      document.getElementById('reservationMemoModal').classList.add('hidden');
+      currentReservationTable = null;
+    };
+    
+    // 分割会計モーダルを表示
+    let selectedSplitOrders = [];
+    window.showSplitPaymentModal = function() {
+      // 未払いの注文のみを表示
+      const unpaidOrders = currentOrders.filter(o => !o.paidAt && !o.cancelledAt);
+      
+      if (unpaidOrders.length === 0) {
+        alert('⚠️ 会計可能な注文がありません');
+        return;
+      }
+      
+      const list = document.getElementById('splitOrdersList');
+      list.innerHTML = '';
+      selectedSplitOrders = [];
+      
+      unpaidOrders.forEach(order => {
+        const div = document.createElement('div');
+        div.style.cssText = `
+          padding: 15px;
+          margin-bottom: 10px;
+          border: 2px solid #ddd;
+          border-radius: 10px;
+          cursor: pointer;
+          transition: all 0.2s;
+        `;
+        
+        div.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <input type="checkbox" id="split-${order.id}" style="width: 20px; height: 20px; margin-right: 10px;">
+              <strong style="font-size: 18px;">#${order.orderNumber}</strong>
+              <span style="color: #666; margin-left: 10px;">${new Date(order.timestamp.toDate()).toLocaleTimeString('ja-JP', {hour: '2-digit', minute: '2-digit'})}</span>
+            </div>
+            <div style="font-size: 20px; font-weight: bold; color: #667eea;">¥${order.totalAmount.toLocaleString()}</div>
+          </div>
+        `;
+        
+        const checkbox = div.querySelector('input');
+        div.onclick = () => {
+          checkbox.checked = !checkbox.checked;
+          updateSplitSelection();
+        };
+        checkbox.onclick = (e) => e.stopPropagation();
+        checkbox.onchange = updateSplitSelection;
+        
+        list.appendChild(div);
+      });
+      
+      document.getElementById('paymentModal').classList.add('hidden');
+      document.getElementById('splitPaymentModal').classList.remove('hidden');
+      updateSplitSelection();
+    };
+    
+    // 分割会計の選択を更新
+    function updateSplitSelection() {
+      selectedSplitOrders = [];
+      let total = 0;
+      
+      currentOrders.forEach(order => {
+        const checkbox = document.getElementById(`split-${order.id}`);
+        if (checkbox && checkbox.checked) {
+          selectedSplitOrders.push(order);
+          total += order.totalAmount || 0;
+        }
+      });
+      
+      document.getElementById('splitTotalAmount').textContent = `¥${total.toLocaleString()}`;
+      document.getElementById('splitPaymentBtn').disabled = selectedSplitOrders.length === 0;
+    }
+    
+    // 分割会計を実行
+    window.proceedToSplitPayment = function() {
+      if (selectedSplitOrders.length === 0) {
+        alert('⚠️ 注文を選択してください');
+        return;
+      }
+      
+      // 選択した注文をcurrentOrdersにセット
+      currentOrders = selectedSplitOrders;
+      totalAmountToPay = selectedSplitOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      
+      // 分割会計モーダルを閉じて支払いモーダルを表示
+      document.getElementById('splitPaymentModal').classList.add('hidden');
+      document.getElementById('paymentModal').classList.remove('hidden');
+      
+      // 支払い方法をリセット
+      selectedPaymentMethod = null;
+      document.querySelectorAll('.payment-method-btn').forEach(btn => {
+        btn.classList.remove('selected');
+      });
+      document.getElementById('cashInputSection').classList.add('hidden');
+      document.getElementById('completePaymentBtn').disabled = true;
+    };
+    
+    // 分割会計モーダルを閉じる
+    window.closeSplitPaymentModal = function() {
+      document.getElementById('splitPaymentModal').classList.add('hidden');
+      document.getElementById('paymentModal').classList.remove('hidden');
+      selectedSplitOrders = [];
+    };
+    
+    // ========== 履歴機能 ==========
+    
+    let historyOrders = [];
+    
+    // 履歴モーダルを表示
+    window.showHistoryModal = async function() {
+      document.getElementById('historyModal').classList.remove('hidden');
+      await loadHistory();
+    };
+    
+    // 履歴を読み込み
+    async function loadHistory() {
+      try {
+        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+        historyOrders = [];
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          historyOrders.push({
+            id: doc.id,
+            orderNumber: data.orderNumber || 0,
+            timestamp: data.timestamp,
+            tableNumber: data.tableNumber || '',
+            items: data.items || [],
+            totalAmount: data.totalAmount || 0,
+            paidAt: data.paidAt || null,
+            completedAt: data.completedAt || null,
+            cancelledAt: data.cancelledAt || null,
+            deleted: data.deleted || false,
+            deletedAt: data.deletedAt || null
+          });
+        });
+        
+        // 注文番号で降順ソート（新しい順）
+        historyOrders.sort((a, b) => b.orderNumber - a.orderNumber);
+        
+        filterHistory();
+      } catch (e) {
+        console.error('履歴読み込みエラー:', e);
+        alert('❌ 履歴の読み込みに失敗しました');
+      }
+    }
+    
+    // 履歴をフィルタ表示
+    window.filterHistory = function() {
+      const dateFilter = document.getElementById('historyDateFilter').value;
+      const statusFilter = document.getElementById('historyStatusFilter').value;
+      
+      const now = new Date();
+      const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+      
+      let filtered = historyOrders.filter(order => {
+        // 日付フィルタ
+        const orderDate = order.timestamp.toDate();
+        const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+        
+        let dateMatch = true;
+        if (dateFilter === 'today') {
+          const todayStart = new Date(jstNow);
+          todayStart.setHours(3, 0, 0, 0);
+          if (jstNow.getHours() < 3) {
+            todayStart.setDate(todayStart.getDate() - 1);
+          }
+          dateMatch = jstOrderDate >= todayStart;
+        } else if (dateFilter === 'yesterday') {
+          const yesterdayStart = new Date(jstNow);
+          yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          yesterdayStart.setHours(3, 0, 0, 0);
+          if (jstNow.getHours() < 3) {
+            yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          }
+          const yesterdayEnd = new Date(yesterdayStart);
+          yesterdayEnd.setDate(yesterdayEnd.getDate() + 1);
+          dateMatch = jstOrderDate >= yesterdayStart && jstOrderDate < yesterdayEnd;
+        } else if (dateFilter === 'week') {
+          const weekAgo = new Date(jstNow);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          dateMatch = jstOrderDate >= weekAgo;
+        } else if (dateFilter === 'month') {
+          const monthStart = new Date(jstNow);
+          monthStart.setDate(1);
+          monthStart.setHours(0, 0, 0, 0);
+          dateMatch = jstOrderDate >= monthStart;
+        }
+        
+        // ステータスフィルタ
+        let statusMatch = true;
+        if (statusFilter === 'deleted') {
+          statusMatch = order.deleted;
+        } else if (statusFilter === 'paid') {
+          statusMatch = order.paidAt && !order.deleted;
+        } else if (statusFilter === 'completed') {
+          statusMatch = order.completedAt && !order.deleted;
+        } else if (statusFilter === 'cancelled') {
+          statusMatch = order.cancelledAt && !order.deleted;
+        }
+        
+        return dateMatch && statusMatch;
+      });
+      
+      displayHistory(filtered);
+    };
+    
+    // 履歴を表示
+    function displayHistory(orders) {
+      const container = document.getElementById('historyList');
+      
+      if (orders.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">該当する履歴がありません</div>';
+        return;
+      }
+      
+      container.innerHTML = '';
+      
+      orders.forEach(order => {
+        const card = document.createElement('div');
+        card.style.cssText = `
+          background: white;
+          border-radius: 12px;
+          padding: 15px;
+          margin-bottom: 15px;
+          border: 2px solid #ddd;
+        `;
+        
+        // ステータスバッジ
+        let badges = [];
+        if (order.deleted) badges.push('<span style="background: #666; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">🗑️ 削除済み</span>');
+        if (order.paidAt) badges.push('<span style="background: #2196F3; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">💳 会計済</span>');
+        if (order.completedAt) badges.push('<span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">✓ 完了</span>');
+        if (order.cancelledAt) badges.push('<span style="background: #f44336; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">✕ キャンセル</span>');
+        
+        const orderDate = order.timestamp.toDate();
+        const dateStr = orderDate.toLocaleString('ja-JP');
+        
+        let itemsHtml = '';
+        order.items.forEach(item => {
+          itemsHtml += `<div style="padding: 5px 0; border-bottom: 1px solid #eee;">
+            ${item.name} ×${item.quantity} - ¥${((item.price + (item.toppingPrice || 0)) * item.quantity).toLocaleString()}
+          </div>`;
+        });
+        
+        // アクションボタン（会計済みの場合のみ表示）
+        let actionsHtml = '';
+        if (order.paidAt) {
+          actionsHtml = `
+            <div style="display: flex; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 2px solid #eee;">
+              <button onclick="reprintReceipt('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                🖨️ レシート再印刷
+              </button>
+              <button onclick="reprintInvoice('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                📄 領収書再印刷
+              </button>
+            </div>
+          `;
+        }
+        
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div>
+              <strong style="font-size: 18px;">#${order.orderNumber}</strong>
+              <span style="color: #666; margin-left: 10px;">${order.tableNumber}</span>
+            </div>
+            <div>${badges.join('')}</div>
+          </div>
+          <div style="font-size: 12px; color: #999; margin-bottom: 10px;">${dateStr}</div>
+          <div style="max-height: 150px; overflow-y: auto; margin: 10px 0;">
+            ${itemsHtml}
+          </div>
+          <div style="text-align: right; font-size: 18px; font-weight: bold; color: #667eea; margin-top: 10px;">
+            合計: ¥${order.totalAmount.toLocaleString()}
+          </div>
+          ${actionsHtml}
+        `;
+        
+        container.appendChild(card);
+      });
+    }
+    
+    // 履歴からレシートを再印刷
+    window.reprintReceipt = async function(orderId) {
+      try {
+        const orderDoc = await window.getDoc(doc(db, 'orders', orderId));
+        if (!orderDoc.exists()) {
+          alert('⚠️ 注文が見つかりません');
+          return;
+        }
+        
+        const orderData = orderDoc.data();
+        
+        // lastPaymentDataを再構築
+        lastPaymentData = {
+          orderNumbers: [orderData.orderNumber],
+          tableNumber: orderData.tableNumber,
+          items: orderData.items,
+          totalAmount: orderData.totalAmount,
+          paymentMethod: 'cash', // デフォルト
+          timestamp: orderData.paidAt || orderData.timestamp
+        };
+        
+        await printReceipt();
+        alert('✅ レシートを再印刷しました');
+      } catch (e) {
+        console.error('再印刷エラー:', e);
+        alert('レシートの再印刷に失敗しました: ' + e.message);
+      }
+    };
+    
+    // 履歴から領収書を再印刷
+    window.reprintInvoice = async function(orderId) {
+      try {
+        const orderDoc = await window.getDoc(doc(db, 'orders', orderId));
+        if (!orderDoc.exists()) {
+          alert('⚠️ 注文が見つかりません');
+          return;
+        }
+        
+        const orderData = orderDoc.data();
+        
+        // lastPaymentDataを再構築
+        lastPaymentData = {
+          orderNumbers: [orderData.orderNumber],
+          tableNumber: orderData.tableNumber,
+          items: orderData.items,
+          totalAmount: orderData.totalAmount,
+          paymentMethod: 'cash', // デフォルト
+          timestamp: orderData.paidAt || orderData.timestamp
+        };
+        
+        await printInvoice();
+        alert('✅ 領収書を再印刷しました');
+      } catch (e) {
+        console.error('再印刷エラー:', e);
+        alert('領収書の再印刷に失敗しました: ' + e.message);
+      }
+    };
+    
+    // 履歴を更新
+    window.refreshHistory = async function() {
+      await loadHistory();
+    };
+    
+    // 履歴モーダルを閉じる
+    window.closeHistoryModal = function() {
+      document.getElementById('historyModal').classList.add('hidden');
+    };
+    
+    // ========== 月次レポート機能 ==========
+    
+    // 月次レポートモーダルを表示
+    window.showMonthlyReportModal = function() {
+      // 年の選択肢を生成
+      const yearSelect = document.getElementById('reportYear');
+      const currentYear = new Date().getFullYear();
+      yearSelect.innerHTML = '';
+      for (let year = currentYear; year >= currentYear - 5; year--) {
+        const option = document.createElement('option');
+        option.value = year;
+        option.textContent = `${year}年`;
+        yearSelect.appendChild(option);
+      }
+      
+      // 現在の月を選択
+      const currentMonth = new Date().getMonth() + 1;
+      document.getElementById('reportMonth').value = currentMonth;
+      
+      document.getElementById('monthlyReportModal').classList.remove('hidden');
+      generateMonthlyReport();
+    };
+    
+    // 月次レポートを生成
+    window.generateMonthlyReport = async function() {
+      const year = parseInt(document.getElementById('reportYear').value);
+      const month = parseInt(document.getElementById('reportMonth').value);
+      
+      const container = document.getElementById('monthlyReportContent');
+      container.innerHTML = '<div style="text-align: center; padding: 40px;">集計中...</div>';
+      
+      try {
+        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+        
+        let totalSales = 0;
+        let totalOrders = 0;
+        let paidOrders = 0;
+        let cancelledOrders = 0;
+        let deletedOrders = 0;
+        let itemCounts = {};
+        let categoryCounts = {};
+        let dailySales = {};
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          const orderDate = data.timestamp.toDate();
+          
+          if (orderDate.getFullYear() === year && orderDate.getMonth() + 1 === month) {
+            totalOrders++;
+            
+            if (data.deleted) {
+              deletedOrders++;
+            }
+            if (data.paidAt) {
+              paidOrders++;
+              totalSales += data.totalAmount || 0;
+              
+              // 日別売上
+              const day = orderDate.getDate();
+              dailySales[day] = (dailySales[day] || 0) + (data.totalAmount || 0);
+            }
+            if (data.cancelledAt) {
+              cancelledOrders++;
+            }
+            
+            // 商品集計
+            if (data.items && data.paidAt) {
+              data.items.forEach(item => {
+                itemCounts[item.name] = (itemCounts[item.name] || 0) + item.quantity;
+                
+                // カテゴリ集計
+                const category = item.category || 'その他';
+                categoryCounts[category] = (categoryCounts[category] || 0) + item.quantity;
+              });
+            }
+          }
+        });
+        
+        // 人気商品トップ10
+        const topItems = Object.entries(itemCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10);
+        
+        // カテゴリ別売上
+        const categoryList = Object.entries(categoryCounts)
+          .sort((a, b) => b[1] - a[1]);
+        
+        // 日別売上グラフ用データ
+        const daysInMonth = new Date(year, month, 0).getDate();
+        let dailyChart = '';
+        for (let day = 1; day <= daysInMonth; day++) {
+          const sales = dailySales[day] || 0;
+          const barHeight = sales > 0 ? Math.max(20, (sales / Math.max(...Object.values(dailySales))) * 100) : 0;
+          dailyChart += `
+            <div style="display: flex; align-items: flex-end; margin-right: 2px;">
+              <div style="width: 20px; height: ${barHeight}px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 3px 3px 0 0;" title="${day}日: ¥${sales.toLocaleString()}"></div>
+            </div>
+          `;
+        }
+        
+        container.innerHTML = `
+          <div style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+            <h4 style="margin-bottom: 15px; color: #667eea;">📈 売上サマリー</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+              <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">総売上</div>
+                <div style="font-size: 28px; font-weight: bold;">¥${totalSales.toLocaleString()}</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">会計済み注文</div>
+                <div style="font-size: 28px; font-weight: bold;">${paidOrders}件</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">総注文数</div>
+                <div style="font-size: 28px; font-weight: bold;">${totalOrders}件</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; padding: 15px; border-radius: 10px;">
+                <div style="font-size: 14px; opacity: 0.9;">平均単価</div>
+                <div style="font-size: 28px; font-weight: bold;">¥${paidOrders > 0 ? Math.round(totalSales / paidOrders).toLocaleString() : 0}</div>
+              </div>
+            </div>
+          </div>
+          
+          <div style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+            <h4 style="margin-bottom: 15px; color: #667eea;">📊 日別売上推移</h4>
+            <div style="display: flex; height: 150px; align-items: flex-end; justify-content: space-between; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+              ${dailyChart}
+            </div>
+          </div>
+          
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+            <div style="background: white; border-radius: 12px; padding: 20px;">
+              <h4 style="margin-bottom: 15px; color: #667eea;">🏆 人気商品トップ10</h4>
+              ${topItems.map((item, idx) => `
+                <div style="display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee;">
+                  <span>${idx + 1}. ${item[0]}</span>
+                  <strong>${item[1]}個</strong>
+                </div>
+              `).join('')}
+            </div>
+            
+            <div style="background: white; border-radius: 12px; padding: 20px;">
+              <h4 style="margin-bottom: 15px; color: #667eea;">📦 カテゴリ別販売数</h4>
+              ${categoryList.map(cat => `
+                <div style="display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee;">
+                  <span>${cat[0]}</span>
+                  <strong>${cat[1]}個</strong>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          
+          <div style="background: white; border-radius: 12px; padding: 20px; margin-top: 20px;">
+            <h4 style="margin-bottom: 15px; color: #667eea;">📋 その他の統計</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+              <div style="padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                <div style="font-size: 12px; color: #666;">キャンセル数</div>
+                <div style="font-size: 20px; font-weight: bold;">${cancelledOrders}件</div>
+              </div>
+              <div style="padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                <div style="font-size: 12px; color: #666;">削除数</div>
+                <div style="font-size: 20px; font-weight: bold;">${deletedOrders}件</div>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        console.error('レポート生成エラー:', e);
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: red;">レポートの生成に失敗しました</div>';
+      }
+    };
+    
+    // 月次レポートモーダルを閉じる
+    window.closeMonthlyReportModal = function() {
+      document.getElementById('monthlyReportModal').classList.add('hidden');
+    };
+    
+    // ========== 客数機能 ==========
+    
+    // 客数モーダルを表示
+    window.showCustomerCountModal = async function() {
+      document.getElementById('customerCountModal').classList.remove('hidden');
+      await calculateCustomerCount();
+    };
+    
+    // 客数を計算
+    async function calculateCustomerCount() {
+      const container = document.getElementById('customerCountContent');
+      container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
+      
+      try {
+        console.log('=== 客数計算開始 ===');
+        
+        // Firebase初期化を待つ
+        if (!window.firebaseReady) {
+          console.log('⏳ Firebase初期化待機中...');
+          await new Promise(resolve => {
+            window.addEventListener('firebaseReady', resolve, { once: true });
+          });
+          console.log('✅ Firebase初期化完了を確認');
+        }
+        
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        
+        console.log('日付キー:', dateStr);
+        
+        const salesRef = window.doc(window.db, 'dailySales', dateStr);
+        const salesDoc = await window.getDoc(salesRef);
+        
+        let customerCount = 0;
+        if (salesDoc.exists()) {
+          customerCount = salesDoc.data().customerCount || 0;
+          console.log('取得した客数:', customerCount);
+        } else {
+          console.log('本日のデータなし');
+        }
+        
+        console.log('最終客数:', customerCount);
+        
+        container.innerHTML = `
+          <div style="text-align: center;">
+            <div style="font-size: 80px; font-weight: bold; color: #00bcd4; margin: 20px 0;">
+              ${customerCount}
+            </div>
+            <div style="font-size: 24px; color: #666;">
+              組
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        console.error('客数計算エラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red;">エラーが発生しました</div>';
+      }
+    }
+    
+    // 客数モーダルを閉じる
+    window.closeCustomerCountModal = function() {
+      document.getElementById('customerCountModal').classList.add('hidden');
+    };
+    
+    // ========== 売上機能 ==========
+    
+    // 売上モーダルを表示
+    window.showSalesModal = function() {
+      document.getElementById('salesModal').classList.remove('hidden');
+      calculateSales();
+    };
+    
+    // 売上を計算
+    window.calculateSales = async function() {
+      const container = document.getElementById('salesContent');
+      const filter = document.getElementById('salesDateFilter').value;
+      container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
+      
+      try {
+        // Firebase初期化を待つ
+        if (!window.firebaseReady) {
+          await new Promise(resolve => {
+            window.addEventListener('firebaseReady', resolve, { once: true });
+          });
+        }
+        
+        let totalSales = 0;
+        let cashSales = 0;
+        let emoneSales = 0;
+        let creditSales = 0;
+        let orderCount = 0;
+        
+        // 今日の場合は日次売上データから取得
+        if (filter === 'today') {
+          const now = new Date();
+          const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+          
+          const salesRef = window.doc(window.db, 'dailySales', dateStr);
+          const salesDoc = await window.getDoc(salesRef);
+          
+          if (salesDoc.exists()) {
+            const data = salesDoc.data();
+            totalSales = data.totalSales || 0;
+            cashSales = data.cashSales || 0;
+            emoneSales = data.emoneSales || 0;
+            creditSales = data.creditSales || 0;
+            orderCount = data.customerCount || 0; // 注文数 = 客数
+          }
+        } else {
+          // 他の期間は従来通り全注文をループ
+          const now = new Date();
+          const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+          
+          let startDate = new Date(jstNow);
+          startDate.setHours(3, 0, 0, 0);
+          
+          if (filter === 'yesterday') {
+            startDate.setDate(startDate.getDate() - 1);
+            if (jstNow.getHours() < 3) {
+              startDate.setDate(startDate.getDate() - 1);
+            }
+          } else if (filter === 'week') {
+            startDate.setDate(startDate.getDate() - 7);
+          } else if (filter === 'month') {
+            startDate.setDate(1);
+          }
+          
+          const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+          
+          ordersSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (!data.timestamp) return;
+            
+            const orderDate = data.timestamp.toDate();
+            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+            
+            // 指定期間の注文で、会計済み（削除されていない）もの
+            if (jstOrderDate >= startDate && data.paidAt && !data.deleted) {
+              totalSales += data.totalAmount || 0;
+              orderCount++;
+              
+              // 支払い方法別
+              if (data.paymentMethod === 'cash') cashSales += data.totalAmount || 0;
+              else if (data.paymentMethod === 'emoney') emoneSales += data.totalAmount || 0;
+              else if (data.paymentMethod === 'credit') creditSales += data.totalAmount || 0;
+            }
+          });
+        }
+        
+        console.log('最終売上:', totalSales, '注文数:', orderCount);
+        
+        // 売上目標達成率を計算（今日の場合のみ）
+        let targetSection = '';
+        if (filter === 'today') {
+          const now = new Date();
+          const dayOfWeek = now.getDay(); // 0=日曜, 6=土曜
+          const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+          const targetSales = isWeekend ? 70000 : 50000;
+          const achievementRate = Math.round((totalSales / targetSales) * 100);
+          
+          const rateColor = achievementRate >= 100 ? '#4CAF50' : achievementRate >= 80 ? '#FF9800' : '#f44336';
+          
+          targetSection = `
+            <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white;">
+              <h4 style="margin: 0 0 10px 0;">📊 売上目標</h4>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <span>目標金額（${isWeekend ? '土日祝' : '平日'}）</span>
+                <strong>¥${targetSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                <span>現在の売上</span>
+                <strong>¥${totalSales.toLocaleString()}</strong>
+              </div>
+              <div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.2); border-radius: 8px;">
+                <div style="font-size: 32px; font-weight: bold; color: ${rateColor};">
+                  ${achievementRate}%
+                </div>
+                <div style="font-size: 14px; opacity: 0.9;">達成率</div>
+              </div>
+            </div>
+          `;
+        }
+        
+        container.innerHTML = `
+          <div style="background: white; border-radius: 12px; padding: 20px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 15px; border-radius: 10px; text-align: center;">
+                <div style="font-size: 14px; opacity: 0.9;">総売上</div>
+                <div style="font-size: 28px; font-weight: bold;">¥${totalSales.toLocaleString()}</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; padding: 15px; border-radius: 10px; text-align: center;">
+                <div style="font-size: 14px; opacity: 0.9;">注文数</div>
+                <div style="font-size: 28px; font-weight: bold;">${orderCount}件</div>
+              </div>
+            </div>
+            
+            ${targetSection}
+            
+            <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
+              <h4 style="margin: 0 0 15px 0;">支払い方法別</h4>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+                <span>💵 現金</span>
+                <strong>¥${cashSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+                <span>💳 カード</span>
+                <strong>¥${creditSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0;">
+                <span>📱 電子マネー</span>
+                <strong>¥${emoneSales.toLocaleString()}</strong>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        console.error('売上計算エラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red;">エラーが発生しました</div>';
+      }
+    };
+    
+    // 売上モーダルを閉じる
+    window.closeSalesModal = function() {
+      document.getElementById('salesModal').classList.add('hidden');
+    };
+    
+    // ========== ドロアオープン機能 ==========
+    
+    // ドロアオープン
+    window.openDrawer = async function() {
+      try {
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        
+        // 担当者を取得
+        const staffSelect = document.getElementById('staffSelect');
+        const staffName = staffSelect.value || 'レジ係';
+        
+        // dailySalesのドロアオープン数を更新
+        const salesRef = doc(db, 'dailySales', dateStr);
+        const salesDoc = await getDoc(salesRef);
+        
+        if (salesDoc.exists()) {
+          const data = salesDoc.data();
+          await updateDoc(salesRef, {
+            drawerOpenCount: (data.drawerOpenCount || 0) + 1,
+            updatedAt: Timestamp.now()
+          });
+        } else {
+          // 今日の売上データがない場合は新規作成
+          await setDoc(salesRef, {
+            date: dateStr,
+            totalSales: 0,
+            customerCount: 0,
+            totalItems: 0,
+            tax8Total: 0,
+            tax10Total: 0,
+            cashSales: 0,
+            emoneSales: 0,
+            creditSales: 0,
+            drawerOpenCount: 1,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now()
+          });
+        }
+        
+        // ドロア開閉ログを記録
+        await addDoc(collection(db, 'drawer_logs'), {
+          timestamp: Timestamp.now(),
+          staffName: staffName,
+          action: 'open'
+        });
+        
+        console.log('💰 ドロア開: 担当者', staffName);
+        alert('💰 ドロアを開きました\n担当者: ' + staffName);
+        
+      } catch (error) {
+        console.error('❌ ドロア開エラー:', error);
+        alert('ドロア開に失敗しました: ' + error.message);
+      }
+    };
+    
+    // ========== 精算機能 ==========
+    
+    // 精算モーダルを表示
+    window.showSettlementModal = async function() {
+      // Firebase初期化を待つ
+      if (!window.firebaseReady) {
+        await new Promise(resolve => {
+          window.addEventListener('firebaseReady', resolve, { once: true });
+        });
+      }
+      
+      const container = document.getElementById('settlementSummary');
+      container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
+      
+      document.getElementById('settlementModal').classList.remove('hidden');
+      
+      try {
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        
+        // 日次売上データから取得
+        const salesRef = window.doc(window.db, 'dailySales', dateStr);
+        const salesDoc = await window.getDoc(salesRef);
+        
+        let settlementData = {
+          totalSales: 0,
+          customerCount: 0,
+          cashSales: 0,
+          emoneSales: 0,
+          creditSales: 0
+        };
+        
+        if (salesDoc.exists()) {
+          const data = salesDoc.data();
+          settlementData = {
+            totalSales: data.totalSales || 0,
+            customerCount: data.customerCount || 0,
+            cashSales: data.cashSales || 0,
+            emoneSales: data.emoneSales || 0,
+            creditSales: data.creditSales || 0
+          };
+        }
+        
+        // settlementDataをグローバルに保存（CSV生成で使用）
+        window.currentSettlementData = settlementData;
+        window.currentSettlementDate = dateStr;
+        
+        container.innerHTML = `
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 10px;">
+            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 2px solid #ddd;">
+              <span style="font-size: 16px;">総売上</span>
+              <strong style="font-size: 20px; color: #4CAF50;">¥${settlementData.totalSales.toLocaleString()}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+              <span>客数</span>
+              <strong>${settlementData.customerCount}組</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+              <span>💵 現金</span>
+              <strong>¥${settlementData.cashSales.toLocaleString()}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+              <span>💳 カード</span>
+              <strong>¥${settlementData.creditSales.toLocaleString()}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 10px 0;">
+              <span>📱 電子マネー</span>
+              <strong>¥${settlementData.emoneSales.toLocaleString()}</strong>
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        console.error('精算サマリーエラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red;">エラーが発生しました</div>';
+      }
+    };
+    
+    // 精算を実行（CSVダウンロード）
+    window.confirmSettlement = async function() {
+      // Firebase初期化を待つ
+      if (!window.firebaseReady) {
+        await new Promise(resolve => {
+          window.addEventListener('firebaseReady', resolve, { once: true });
+        });
+      }
+      
+      // 精算ジャーナルを即座にダウンロード
+      try {
+        const settlementData = window.currentSettlementData;
+        const dateStr = window.currentSettlementDate;
+        
+        if (!settlementData) {
+          alert('⚠️ 精算データが見つかりません');
+          return;
+        }
+        
+        console.log('🔍 精算処理開始:', { dateStr, settlementData });
+        
+        // 今日の全注文を取得
+        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+        console.log('📋 取得した注文数:', ordersSnapshot.size);
+        
+        // 担当者名を集計（会計ごとに記録された担当者）
+        let staffName = '高田';
+        const staffCounts = {};
+        try {
+          console.log('👤 担当者集計開始');
+          ordersSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (!data.timestamp || !data.paidAt || data.deleted) return;
+            
+            const orderDate = data.timestamp.toDate();
+            const orderDateStr = `${orderDate.getFullYear()}-${String(orderDate.getMonth()+1).padStart(2,'0')}-${String(orderDate.getDate()).padStart(2,'0')}`;
+            
+            if (orderDateStr === dateStr && data.staffName) {
+              staffCounts[data.staffName] = (staffCounts[data.staffName] || 0) + 1;
+              console.log('  担当者カウント:', data.staffName, staffCounts);
+            }
+          });
+          
+          console.log('担当者集計:', staffCounts);
+          
+          // 担当者リストを作成
+          const staffList = Object.entries(staffCounts)
+            .map(([name, count]) => `${name}(${count}件)`)
+            .join(', ');
+          
+          staffName = staffList || '高田';
+          console.log('最終担当者:', staffName);
+        } catch (e) {
+          console.error('❌ 担当者集計エラー:', e);
+        }
+        
+        // 🆕 商品点数と税率別売上は dailySales から取得（会計時に記録済み）
+        let totalItems = settlementData.totalItems || 0;
+        let tax8Total = settlementData.tax8Total || 0;
+        let tax10Total = settlementData.tax10Total || 0;
+        let drawerOpenCount = settlementData.drawerOpenCount || 0;  // dailySalesから取得
+        
+        // 平均客単価を計算
+        const customerCount = settlementData.customerCount || 0;
+        const averageSpend = customerCount > 0 ? Math.round(settlementData.totalSales / customerCount) : 0;
+        
+        console.log('📦 商品点数（dailySalesから）:', totalItems);
+        console.log('💰 税率別売上（dailySalesから）:', { tax8Total, tax10Total });
+        console.log('🔓 ドロアオープン数（dailySalesから）:', drawerOpenCount);
+        console.log('💵 平均客単価:', averageSpend);
+        
+        // 商品データがない場合の補正（後方互換性のため）
+        if (tax8Total === 0 && tax10Total === 0 && settlementData.totalSales > 0) {
+          console.log('⚠️ 税率別売上なし - 売上総額から8%で概算');
+          tax8Total = settlementData.totalSales;
+        }
+        
+        // 値引き金額はdailySalesから取得
+        const discountTotal = settlementData.totalDiscount || 0;
+        
+        console.log('📊 集計結果:', {
+          totalItems,
+          tax8Total,
+          tax10Total,
+          drawerOpenCount
+        });
+        
+        // 税金計算（税込価格から内税を計算）
+        // 8%: 税込価格 / 1.08 = 税抜価格、税込価格 - 税抜価格 = 消費税
+        // 10%: 税込価格 / 1.10 = 税抜価格、税込価格 - 税抜価格 = 消費税
+        const tax8Excluded = Math.floor(tax8Total / 1.08);
+        const tax10Excluded = Math.floor(tax10Total / 1.10);
+        const tax8Amount = tax8Total - tax8Excluded;
+        const tax10Amount = tax10Total - tax10Excluded;
+        const totalTax = tax8Amount + tax10Amount;
+        const taxExcludedTotal = tax8Excluded + tax10Excluded;
+        
+        console.log('💰 税金詳細:', {
+          tax8Total: tax8Total + '円（税込）',
+          tax8Excluded: tax8Excluded + '円（税抜）',
+          tax8Amount: tax8Amount + '円（消費税）',
+          tax10Total: tax10Total + '円（税込）',
+          tax10Excluded: tax10Excluded + '円（税抜）',
+          tax10Amount: tax10Amount + '円（消費税）'
+        });
+        
+        // テキストファイルを生成（見やすい形式）
+        const textContent = `
+=====================================
+      精算ジャーナル
+=====================================
+
+日付: ${dateStr}
+客数: ${settlementData.customerCount}組
+平均客単価: ¥${averageSpend.toLocaleString()}
+合計売上: ¥${settlementData.totalSales.toLocaleString()}
+
+-------------------------------------
+内訳
+-------------------------------------
+現金: ¥${settlementData.cashSales.toLocaleString()}
+電子マネー: ¥${settlementData.emoneSales.toLocaleString()}
+クレジットカード: ¥${settlementData.creditSales.toLocaleString()}
+値引き: ¥${discountTotal.toLocaleString()}
+
+-------------------------------------
+税金
+-------------------------------------
+8%商品合計（税抜）: ¥${tax8Excluded.toLocaleString()}
+10%商品合計（税抜）: ¥${tax10Excluded.toLocaleString()}
+8%消費税: ¥${tax8Amount.toLocaleString()}
+10%消費税: ¥${tax10Amount.toLocaleString()}
+消費税合計: ¥${totalTax.toLocaleString()}
+税抜合計: ¥${taxExcludedTotal.toLocaleString()}
+税込合計: ¥${settlementData.totalSales.toLocaleString()}
+
+-------------------------------------
+その他
+-------------------------------------
+ドロアオープン数: ${drawerOpenCount}回
+担当者: ${staffName}
+
+=====================================
+`;
+        
+        // テキストファイルをダウンロード（UTF-8 BOM付き）
+        const bom = '\uFEFF';
+        const blob = new Blob([bom + textContent], { type: 'text/plain;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `精算ジャーナル_${dateStr}.txt`;
+        link.click();
+        URL.revokeObjectURL(url);
+        
+        // 精算記録をFirebaseに保存
+        await window.addDoc(window.collection(window.db, 'settlements'), {
+          date: dateStr,
+          timestamp: window.Timestamp.now(),
+          totalSales: settlementData.totalSales,
+          customerCount: settlementData.customerCount,
+          cashSales: settlementData.cashSales,
+          emoneSales: settlementData.emoneSales,
+          creditSales: settlementData.creditSales,
+          totalItems: totalItems,
+          discountTotal: discountTotal,
+          drawerOpenCount: drawerOpenCount,
+          staffName: staffName,
+          tax8Excluded: tax8Excluded,
+          tax10Excluded: tax10Excluded,
+          tax8Amount: tax8Amount,
+          tax10Amount: tax10Amount,
+          totalTax: totalTax,
+          taxExcludedTotal: taxExcludedTotal
+        });
+        
+        alert('✅ 精算ジャーナルをダウンロードしました');
+        closeSettlementModal();
+      } catch (e) {
+        console.error('精算エラー:', e);
+        alert('精算に失敗しました: ' + e.message);
+      }
+    };
+    
+    // 精算モーダルを閉じる
+    window.closeSettlementModal = function() {
+      document.getElementById('settlementModal').classList.add('hidden');
+    };
+    
+    // 手動カートの表示更新
+    function updateManualCart() {
+      const container = document.getElementById('selectedItems');
+      const submitBtn = document.getElementById('manualSubmitBtn');
+      const manualTable = document.getElementById('manualTable');
+      
+      if (manualCart.length === 0) {
+        container.innerHTML = '<div class="empty-state">商品を選択してください</div>';
+        submitBtn.disabled = true;
+        document.getElementById('manualTotal').textContent = '¥0';
+        return;
+      }
+      
+      container.innerHTML = '';
+      let total = 0;
+      
+      manualCart.forEach((item, index) => {
+        const itemBasePrice = item.price;
+        const itemWithTopping = itemBasePrice + (item.toppingPrice || 0);
+        const itemTotal = itemWithTopping * item.quantity;
+        total += itemTotal;
+        
+        // トッピングを改行で表示
+        let toppingsHtml = '';
+        if (item.toppings && item.toppings !== 'なし') {
+          const toppingList = item.toppings.split(', ');
+          toppingsHtml = toppingList.map(t => `<div style="font-size: 12px; color: #666; padding-left: 10px;">　${t}</div>`).join('');
+        }
+        
+        const div = document.createElement('div');
+        div.className = 'selected-item-detailed';
+        div.innerHTML = `
+          <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+            <div style="font-weight: bold;">${item.name} ×${item.quantity}</div>
+            <div>¥${itemBasePrice.toLocaleString()}</div>
+          </div>
+          ${toppingsHtml}
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 5px; border-top: 1px dashed #ddd;">
+            <div style="display: flex; gap: 5px;">
+              <input type="number" class="quantity-input" min="1" value="${item.quantity}" 
+                     onchange="updateQuantity(${index}, this.value)">
+              <button class="edit-btn" onclick="editCartItem(${index})">修正</button>
+              <button class="remove-btn" onclick="removeFromManualCart(${index})">削除</button>
+            </div>
+            <div style="font-weight: bold; color: #667eea;">¥${itemWithTopping.toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
+          </div>
+        `;
+        container.appendChild(div);
+      });
+      
+      document.getElementById('manualTotal').textContent = `¥${total.toLocaleString()}`;
+      submitBtn.disabled = manualCart.length === 0 || !manualTable.value;
+    }
+    
+    // カート内アイテムを修正
+    window.editCartItem = function(index) {
+      const item = manualCart[index];
+      
+      // 現在のトッピング情報を保持
+      currentSelectingItem = { ...item };
+      currentSelectingItem.editIndex = index;
+      
+      // 現在選択されているトッピングを復元
+      selectedToppings = [];
+      if (item.toppings && item.toppings !== 'なし') {
+        const toppingNames = item.toppings.split(', ');
+        toppingNames.forEach(name => {
+          const topping = toppingsData.find(t => t.name === name);
+          if (topping) {
+            selectedToppings.push(topping);
+          }
+        });
+      }
+      
+      // トッピングモーダルを表示
+      showToppingModalForEdit(item, index);
+    };
+    
+    // 修正用トッピングモーダル
+    function showToppingModalForEdit(item, index) {
+      document.getElementById('toppingModalItemName').textContent = item.name + ' (修正)';
+      const list = document.getElementById('toppingsList');
+      list.innerHTML = '';
+      
+      // 「なし」オプション
+      const noneDiv = document.createElement('div');
+      noneDiv.className = 'topping-item';
+      noneDiv.style.cursor = 'pointer';
+      noneDiv.innerHTML = `
+        <input type="checkbox" id="topping-none" style="pointer-events: none;">
+        <div class="topping-item-info">
+          <span class="topping-item-name">標準トッピング</span>
+          <span class="topping-item-price">¥0</span>
+        </div>
+      `;
+      
+      // div全体をクリック可能に
+      noneDiv.onclick = () => {
+        const checkbox = document.getElementById('topping-none');
+        checkbox.checked = !checkbox.checked;
+        selectNoneTopping(checkbox);
+      };
+      
+      list.appendChild(noneDiv);
+      
+      // toppingsIdからトッピングIDのリストを取得
+      let allowedToppingIds = [];
+      if (item.toppingsId && typeof item.toppingsId === 'string') {
+        allowedToppingIds = item.toppingsId.split(',').map(id => id.trim());
+      } else if (item.toppings && Array.isArray(item.toppings)) {
+        allowedToppingIds = item.toppings;
+      }
+      
+      toppingsData.forEach(topping => {
+        // toppingsIdが空または含まれている場合に表示
+        if (allowedToppingIds.length === 0 || allowedToppingIds.includes(topping.id)) {
+          const isSelected = selectedToppings.some(t => t.id === topping.id);
+          const div = document.createElement('div');
+          div.className = 'topping-item';
+          div.style.cursor = 'pointer';
+          div.innerHTML = `
+            <input type="checkbox" id="topping-${topping.id}" value="${topping.id}" 
+                   style="pointer-events: none;" ${isSelected ? 'checked' : ''}>
+            <div class="topping-item-info">
+              <span class="topping-item-name">${topping.name}</span>
+              <span class="topping-item-price">+¥${topping.price.toLocaleString()}</span>
+            </div>
+          `;
+          
+          // div全体をクリック可能に
+          div.onclick = () => {
+            const checkbox = document.getElementById(`topping-${topping.id}`);
+            checkbox.checked = !checkbox.checked;
+            selectTopping(checkbox);
+          };
+          
+          list.appendChild(div);
+        }
+      });
+      
+      // トッピングが選択されていない場合は「なし」を選択
+      if (selectedToppings.length === 0) {
+        document.getElementById('topping-none').checked = true;
+      }
+      
+      document.getElementById('toppingModal').classList.remove('hidden');
+    }
+    
+    // 数量更新
+    window.updateQuantity = function(index, value) {
+      const qty = parseInt(value) || 1;
+      manualCart[index].quantity = Math.max(1, qty);
+      updateManualCart();
+    };
+    
+    // カートから削除
+    window.removeFromManualCart = function(index) {
+      const item = manualCart[index];
+      const checkbox = document.getElementById(`menu-${item.id}`);
+      if (checkbox) checkbox.checked = false;
+      
+      manualCart.splice(index, 1);
+      updateManualCart();
+    };
+    
+    // 手動注文を送信
+    window.submitManualOrder = async function() {
+      const tableNumber = document.getElementById('manualTable').value;
+      
+      if (!tableNumber || manualCart.length === 0) {
+        alert('⚠️ テーブル番号と商品を選択してください');
+        return;
+      }
+      
+      try {
+        const now = new Date();
+        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        
+        const todayStart = new Date(jstNow);
+        todayStart.setHours(1, 0, 0, 0);
+        if (jstNow < todayStart) {
+          todayStart.setDate(todayStart.getDate() - 1);
+        }
+        
+        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+        let maxOrderNumber = 618;
+        let hasActiveOrders = false;
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          
+          // 削除されていない注文があるかチェック
+          if (!data.deleted) {
+            hasActiveOrders = true;
+            
+            // 削除されていない注文のみから最大番号を取得
+            const orderDate = data.timestamp.toDate();
+            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+            
+            if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
+              maxOrderNumber = data.orderNumber;
+            }
+          }
+        });
+        
+        // 削除されていない注文が0件なら619番から開始
+        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
+        
+        console.log('注文番号生成:', {
+          hasActiveOrders,
+          maxOrderNumber,
+          nextOrderNumber: orderNumber
+        });
+        
+        let totalAmount = 0;
+        manualCart.forEach(item => {
+          totalAmount += item.price * item.quantity;
+        });
+        
+        const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
+        
+        const orderData = {
+          orderNumber: orderNumber,
+          timestamp: window.Timestamp.fromDate(now),
+          tableNumber: tableNumber,
+          items: manualCart,
+          totalAmount: totalAmount,
+          status: 'pending',
+          deleteAt: window.Timestamp.fromDate(deleteAt),
+          cancelledAt: null,
+          completedAt: null,
+          paidAt: null,
+          notifiedComplete: false,
+          notifiedCancel: false,
+          notifiedPaid: false,
+          manualEntry: true
+        };
+        
+        const docRef = await window.addDoc(window.collection(window.db, 'orders'), orderData);
+        
+        await window.updateDoc(docRef, {
+          orderId: docRef.id
+        });
+        
+        alert(`🎉 注文 #${orderNumber} を追加しました！\nテーブル: ${tableNumber}\n合計: ¥${totalAmount.toLocaleString()}`);
+        
+        manualCart = [];
+        document.getElementById('manualTable').value = '';
+        document.querySelectorAll('#menuItemsList input[type="checkbox"]').forEach(cb => cb.checked = false);
+        updateManualCart();
+        
+      } catch (e) {
+        console.error('注文エラー:', e);
+        alert('注文の追加に失敗しました: ' + e.message);
+      }
+    };
+    
+    // リアルタイム更新を開始
+    function startRealtimeUpdates() {
+      TABLES.forEach(table => {
+        monitorTable(table);
+      });
+    }
+    
+    // テーブルの注文を監視
+    async function monitorTable(tableNum) {
+      const q = query(
+        window.collection(window.db, 'orders'),
+        where('tableNumber', '==', String(tableNum))
+      );
+      
+      onSnapshot(q, (snapshot) => {
+        const unpaidOrders = snapshot.docs.filter(doc => {
+          const data = doc.data();
+          // 削除済み、会計済み、キャンセル済みを除外
+          return !data.deleted && !data.paidAt && !data.cancelledAt;
+        });
+        
+        const hasActiveOrders = unpaidOrders.length > 0;
+        const orderCount = unpaidOrders.length;
+        
+        const btn = document.getElementById(`table-${tableNum}`);
+        if (btn) {
+          // has-ordersクラスの更新
+          if (hasActiveOrders) {
+            btn.classList.add('has-orders');
+          } else {
+            btn.classList.remove('has-orders');
+          }
+          
+          // 既存のバッジを削除
+          const existingBadge = btn.querySelector('.order-badge');
+          if (existingBadge) {
+            existingBadge.remove();
+          }
+          
+          // 注文がある場合はバッジを追加
+          if (orderCount > 0) {
+            const badge = document.createElement('span');
+            badge.className = 'order-badge';
+            badge.textContent = orderCount;
+            btn.appendChild(badge);
+          }
+        }
+        
+        if (selectedTable === tableNum) {
+          loadOrders(tableNum);
+        }
+      });
+    }
+    
+    // テーブルを選択
+    window.selectTable = async function(tableNum) {
+      selectedTable = tableNum;
+      document.getElementById('selectedTableLabel').textContent = `テーブル ${tableNum}`;
+      document.getElementById('orderSection').classList.remove('hidden');
+      
+      await loadOrders(tableNum);
+    };
+    
+    // 注文を読み込み
+    async function loadOrders(tableNum) {
+      const container = document.getElementById('ordersList');
+      container.innerHTML = '<div class="loading">読み込み中...</div>';
+      
+      try {
+        const q = query(
+          window.collection(window.db, 'orders'),
+          where('tableNumber', '==', String(tableNum))
+        );
+        
+        const snapshot = await window.getDocs(q);
+        
+        if (snapshot.empty) {
+          container.innerHTML = '<div class="empty-state">このテーブルに注文はありません</div>';
+          document.getElementById('totalSection').classList.add('hidden');
+          return;
+        }
+        
+        container.innerHTML = '';
+        currentOrders = [];
+        let totalAmount = 0;
+        let hasUnpaidOrders = false;
+        
+        // 注文を配列に変換してソート
+        const orders = [];
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          orders.push({ id: doc.id, ...data });
+        });
+        
+        // 注文番号でソート（古い順: 619→620→621）
+        orders.sort((a, b) => {
+          return a.orderNumber - b.orderNumber;
+        });
+        
+        // 削除されていない注文のみ表示
+        console.log('全注文数:', orders.length);
+        orders.forEach(order => {
+          console.log(`注文#${order.orderNumber}: deleted=${order.deleted}, paidAt=${order.paidAt}, cancelledAt=${order.cancelledAt}`);
+          
+          // deletedフラグが立っている注文はスキップ（履歴では表示）
+          if (order.deleted) {
+            console.log(`  → スキップ（削除済み）`);
+            return;
+          }
+          
+          const card = createOrderCard(order);
+          container.appendChild(card);
+          
+          // 未払い注文のみ合計に含める
+          if (!order.cancelledAt && !order.paidAt) {
+            currentOrders.push(order);
+            totalAmount += order.totalAmount || 0;
+            hasUnpaidOrders = true;
+          }
+        });
+        
+        console.log('表示された注文数:', container.children.length);
+        
+        // 注文が1つも表示されなかった場合
+        if (container.children.length === 0) {
+          container.innerHTML = '<div class="empty-state">このテーブルに注文はありません</div>';
+        }
+        
+        if (!hasUnpaidOrders) {
+          document.getElementById('totalSection').classList.add('hidden');
+        } else {
+          document.getElementById('totalAmount').textContent = `¥${totalAmount.toLocaleString()}`;
+          document.getElementById('totalSection').classList.remove('hidden');
+          totalAmountToPay = totalAmount;
+        }
+        
+      } catch (e) {
+        console.error('注文読み込みエラー:', e);
+        console.error('エラー詳細:', e.message);
+        container.innerHTML = '<div class="empty-state">エラーが発生しました: ' + e.message + '</div>';
+      }
+    }
+    
+    // 注文カードを作成
+    function createOrderCard(order) {
+      const card = document.createElement('div');
+      card.className = 'order-card';
+      
+      if (order.completedAt) card.classList.add('completed');
+      if (order.cancelledAt) card.classList.add('cancelled');
+      
+      let timeStr = '--:--';
+      try {
+        if (order.timestamp && order.timestamp.toDate) {
+          const timestamp = order.timestamp.toDate();
+          timeStr = `${timestamp.getHours()}:${String(timestamp.getMinutes()).padStart(2, '0')}`;
+        }
+      } catch (e) {
+        console.error('Timestamp変換エラー:', e);
+      }
+      
+      let statusHtml = '';
+      if (order.cancelledAt) {
+        statusHtml = '<span class="order-status cancelled">キャンセル</span>';
+      } else if (order.completedAt) {
+        statusHtml = '<span class="order-status completed">提供済み</span>';
+      } else {
+        statusHtml = '<span class="order-status pending">調理中</span>';
+      }
+      
+      let itemsHtml = '';
+      if (order.items && Array.isArray(order.items) && order.items.length > 0) {
+        order.items.forEach(item => {
+          const itemBasePrice = item.price;
+          const itemWithTopping = itemBasePrice + (item.toppingPrice || 0);
+          const itemTotal = itemWithTopping * item.quantity;
+          
+          // トッピングを改行で表示
+          let toppingsHtml = '';
+          if (item.toppings && item.toppings !== 'なし') {
+            const toppingList = item.toppings.split(', ');
+            toppingsHtml = toppingList.map(t => `<div style="font-size: 12px; color: #666; padding-left: 10px;">　${t}</div>`).join('');
+          }
+          
+          itemsHtml += `
+            <div class="order-item-detailed">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <div style="font-weight: bold;">${item.name} ×${item.quantity}</div>
+                <div>¥${itemBasePrice.toLocaleString()}</div>
+              </div>
+              ${toppingsHtml}
+              <div style="display: flex; justify-content: flex-end; margin-top: 5px; padding-top: 5px; border-top: 1px dashed #ddd;">
+                <div style="font-weight: bold; color: #667eea;">¥${itemWithTopping.toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
+              </div>
+            </div>
+          `;
+        });
+      } else {
+        // itemsがない場合は警告表示
+        itemsHtml = `
+          <div style="padding: 10px; background: #fff3cd; border-radius: 8px; color: #856404;">
+            ⚠️ 商品詳細が記録されていません<br>
+            合計金額: ¥${(order.totalAmount || 0).toLocaleString()}
+          </div>
+        `;
+      }
+      
+      card.innerHTML = `
+        <div class="order-header">
+          <div>
+            <span class="order-number">#${order.orderNumber || '---'}</span>
+            ${statusHtml}
+          </div>
+          <div class="order-time">${timeStr}</div>
+        </div>
+        <div class="order-items">
+          ${itemsHtml}
+        </div>
+        <div class="order-total">
+          <span class="total-label">合計:</span>
+          <span class="total-amount">¥${(order.totalAmount || 0).toLocaleString()}</span>
+        </div>
+        <div class="order-actions">
+          ${!order.paidAt && !order.cancelledAt ? `<button class="order-action-btn pay-btn" onclick="payOrderIndividual('${order.id}', ${order.totalAmount || 0})">💰 会計</button>` : ''}
+          <button class="order-action-btn complete-btn" onclick="completeOrder('${order.id}')">✅ 完了</button>
+          <button class="order-action-btn cancel-btn" onclick="cancelOrder('${order.id}')">❌ キャンセル</button>
+          ${order.completedAt || order.cancelledAt ? `<button class="order-action-btn delete-btn" onclick="deleteOrder('${order.id}')">🗑️ 削除</button>` : ''}
+        </div>
+      `;
+      
+      return card;
+    }
+    
+    // 個別注文の会計
+    window.payOrderIndividual = function(orderId, amount) {
+      const order = currentOrders.find(o => o.id === orderId);
+      if (!order) {
+        alert('⚠️ 注文が見つかりません');
+        return;
+      }
+      
+      // 単一注文を選択して会計モーダルを表示
+      currentOrders = [order];
+      totalAmountToPay = amount;
+      
+      // 値引き金額を初期化
+      document.getElementById('discountAmount').value = '0';
+      
+      // 税率選択リストを生成
+      buildTaxRateSelectionList();
+      
+      // 請求額を表示
+      updatePaymentTotal();
+      
+      document.getElementById('paymentModal').classList.remove('hidden');
+      selectedPaymentMethod = null;
+      document.querySelectorAll('.payment-method-btn').forEach(btn => {
+        btn.classList.remove('selected');
+      });
+      document.getElementById('cashInputSection').classList.add('hidden');
+      document.getElementById('completePaymentBtn').disabled = true;
+    };
+    
+    // 注文を完了にする
+    window.completeOrder = async function(orderId) {
+      try {
+        await window.updateDoc(doc(db, 'orders', orderId), {
+          completedAt: window.Timestamp.now()
+        });
+        alert('✅ 注文を完了にしました');
+        await loadOrders(selectedTable);
+      } catch (e) {
+        console.error('完了エラー:', e);
+        alert('❌ エラーが発生しました');
+      }
+    };
+    
+    // 注文をキャンセルする
+    window.cancelOrder = async function(orderId) {
+      try {
+        await window.updateDoc(doc(db, 'orders', orderId), {
+          cancelledAt: window.Timestamp.now()
+        });
+        alert('✅ 注文をキャンセルしました');
+        await loadOrders(selectedTable);
+      } catch (e) {
+        console.error('キャンセルエラー:', e);
+        alert('❌ エラーが発生しました');
+      }
+    };
+    
+    // 注文を削除する
+    window.deleteOrder = async function(orderId) {
+      console.log('削除開始: orderId =', orderId);
+      console.log('selectedTable =', selectedTable);
+      
+      try {
+        // deleteDocではなくdeletedフラグを立てる（Firebaseルールで削除が許可されていない可能性があるため）
+        console.log('updateDoc実行中...');
+        await window.updateDoc(doc(db, 'orders', orderId), {
+          deleted: true,
+          deletedAt: window.Timestamp.now()
+        });
+        console.log('updateDoc成功');
+        alert('🗑️ 注文を削除しました');
+        console.log('loadOrders実行中...');
+        await loadOrders(selectedTable);
+        console.log('loadOrders完了');
+      } catch (e) {
+        console.error('削除エラー:', e);
+        console.error('エラー詳細:', e.message, e.code);
+        alert('❌ エラーが発生しました: ' + e.message);
+      }
+    };
+    
+    // 支払いモーダルを表示
+    window.showPaymentModal = function() {
+      if (currentOrders.length === 0) {
+        alert('⚠️ 会計する注文がありません');
+        return;
+      }
+      
+      // 値引き金額を初期化
+      document.getElementById('discountAmount').value = '0';
+      
+      // 税率選択リストを生成
+      buildTaxRateSelectionList();
+      
+      // 請求額を表示
+      updatePaymentTotal();
+      
+      document.getElementById('paymentModal').classList.remove('hidden');
+      selectedPaymentMethod = null;
+      document.querySelectorAll('.payment-method-btn').forEach(btn => {
+        btn.classList.remove('selected');
+      });
+      document.getElementById('cashInputSection').classList.add('hidden');
+      document.getElementById('completePaymentBtn').disabled = true;
+    };
+    
+    // 税率選択リストを構築
+    function buildTaxRateSelectionList() {
+      const container = document.getElementById('taxRateItemsList');
+      container.innerHTML = '';
+      
+      console.log('🔵 buildTaxRateSelectionList開始');
+      console.log('currentOrders:', currentOrders);
+      
+      if (!container) {
+        console.error('❌ taxRateItemsListコンテナが見つかりません');
+        return;
+      }
+      
+      if (currentOrders.length === 0) {
+        console.warn('❌ currentOrdersが空です');
+        container.innerHTML = '<div style="padding: 15px; text-align: center; color: #666;">注文がありません</div>';
+        return;
+      }
+      
+      let itemIndex = 0;
+      
+      currentOrders.forEach((order, orderIdx) => {
+        if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
+          // itemsがない場合は注文全体として表示
+          const orderTotal = order.totalAmount || 0;
+          addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, orderTotal, itemIndex);
+          itemIndex++;
+        } else {
+          // 各商品を表示
+          order.items.forEach((item, itemIdx) => {
+            const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
+            addTaxRateItem(container, item.name, item.quantity, itemTotal, itemIndex);
+            itemIndex++;
+          });
+        }
+      });
+      
+      calculateTaxSummary();
+    }
+    
+    // 税率選択項目を追加
+    function addTaxRateItem(container, itemName, quantity, itemTotal, index) {
+      const itemDiv = document.createElement('div');
+      itemDiv.style.cssText = 'padding: 10px; margin-bottom: 8px; background: white; border-radius: 6px; border: 1px solid #ddd;';
+      
+      const headerDiv = document.createElement('div');
+      headerDiv.style.cssText = 'display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: bold; font-size: 14px;';
+      headerDiv.innerHTML = `
+        <span>${itemName} ×${quantity}</span>
+        <span style="color: #667eea;">¥${itemTotal.toLocaleString()}</span>
+      `;
+      itemDiv.appendChild(headerDiv);
+      
+      const radioDiv = document.createElement('div');
+      radioDiv.style.cssText = 'display: flex; gap: 10px; justify-content: center;';
+      
+      // 8%ラジオボタン
+      const label8 = document.createElement('label');
+      label8.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 6px 10px; border-radius: 4px; background: #fff3e0; border: 2px solid #FF9800; font-size: 13px;';
+      const radio8 = document.createElement('input');
+      radio8.type = 'radio';
+      radio8.name = `taxRate${index}`;
+      radio8.value = '8';
+      radio8.checked = true;
+      radio8.dataset.amount = itemTotal;
+      radio8.dataset.index = index;
+      radio8.style.cssText = 'margin-right: 5px; width: 18px; height: 18px;';
+      radio8.onchange = calculateTaxSummary;
+      label8.appendChild(radio8);
+      label8.appendChild(document.createTextNode('8%持ち帰り'));
+      
+      // 10%ラジオボタン
+      const label10 = document.createElement('label');
+      label10.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 6px 10px; border-radius: 4px; background: #e3f2fd; border: 2px solid #2196F3; font-size: 13px;';
+      const radio10 = document.createElement('input');
+      radio10.type = 'radio';
+      radio10.name = `taxRate${index}`;
+      radio10.value = '10';
+      radio10.dataset.amount = itemTotal;
+      radio10.dataset.index = index;
+      radio10.style.cssText = 'margin-right: 5px; width: 18px; height: 18px;';
+      radio10.onchange = calculateTaxSummary;
+      label10.appendChild(radio10);
+      label10.appendChild(document.createTextNode('10%店内'));
+      
+      radioDiv.appendChild(label8);
+      radioDiv.appendChild(label10);
+      itemDiv.appendChild(radioDiv);
+      
+      container.appendChild(itemDiv);
+    }
+    
+    // 税率別集計を計算
+    function calculateTaxSummary() {
+      let tax8Total = 0;
+      let tax10Total = 0;
+      
+      const radios = document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked');
+      radios.forEach(radio => {
+        const amount = parseFloat(radio.dataset.amount) || 0;
+        if (radio.value === '8') {
+          tax8Total += amount;
+        } else if (radio.value === '10') {
+          tax10Total += amount;
+        }
+      });
+      
+      document.getElementById('tax8Summary').textContent = '¥' + tax8Total.toLocaleString();
+      document.getElementById('tax10Summary').textContent = '¥' + tax10Total.toLocaleString();
+    }
+    
+    // 値引き後の請求額を更新
+    window.updatePaymentTotal = function() {
+      let total = 0;
+      currentOrders.forEach(order => {
+        total += order.totalAmount || 0;
+      });
+      
+      const discount = parseInt(document.getElementById('discountAmount').value) || 0;
+      const finalAmount = Math.max(0, total - discount);
+      totalAmountToPay = finalAmount;
+      
+      document.getElementById('finalPaymentAmount').textContent = '¥' + finalAmount.toLocaleString();
+      
+      // 現金の場合はおつり計算も更新
+      if (selectedPaymentMethod === 'cash') {
+        calculateChange();
+      }
+    };
+    
+    // 支払い方法選択
+    window.selectPaymentMethod = function(method) {
+      selectedPaymentMethod = method;
+      
+      document.querySelectorAll('.payment-method-btn').forEach(btn => {
+        btn.classList.remove('selected');
+      });
+      event.target.classList.add('selected');
+      
+      if (method === 'cash') {
+        document.getElementById('cashInputSection').classList.remove('hidden');
+        document.getElementById('completePaymentBtn').disabled = true;
+      } else {
+        document.getElementById('cashInputSection').classList.add('hidden');
+        document.getElementById('completePaymentBtn').disabled = false;
+      }
+    };
+    
+    // おつり計算
+    window.calculateChange = function() {
+      cashReceived = parseInt(document.getElementById('cashReceived').value) || 0;
+      
+      // 値引き後の金額を使用
+      changeAmount = cashReceived - totalAmountToPay;
+      
+      document.getElementById('changeAmount').textContent = `¥${changeAmount.toLocaleString()}`;
+      
+      document.getElementById('completePaymentBtn').disabled = cashReceived < totalAmountToPay;
+    };
+    
+    // 会計完了
+    window.completePayment = async function() {
+      if (!selectedPaymentMethod) {
+        alert('⚠️ 支払い方法を選択してください');
+        return;
+      }
+      
+      if (selectedPaymentMethod === 'cash' && cashReceived < totalAmountToPay) {
+        alert('⚠️ お預かり金額が不足しています');
+        return;
+      }
+      
+      // 担当者を取得（未選択の場合はデフォルト値）
+      const staffSelect = document.getElementById('staffSelect');
+      const staffName = staffSelect.value || '高田';
+      
+      try {
+        const now = window.Timestamp.now();
+        
+        // 注文番号リストを取得
+        const orderNumbers = currentOrders.map(o => o.orderNumber);
+        
+        // 全ての注文に支払い済みフラグと担当者を設定
+        for (const order of currentOrders) {
+          await window.updateDoc(doc(db, 'orders', order.id), {
+            paidAt: now,
+            notifiedPaid: true,
+            paymentMethod: selectedPaymentMethod,
+            staffName: staffName  // 担当者名を追加
+          });
+        }
+        
+        // 商品点数をカウント & 選択された税率で集計
+        let itemCount = 0;
+        let tax8Total = 0;
+        let tax10Total = 0;
+        
+        // 選択された税率から集計
+        const radios = document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked');
+        console.log('📻 選択されたラジオボタン数:', radios.length);
+        alert(`📻 ラジオボタン数: ${radios.length}`);
+        
+        radios.forEach((radio, idx) => {
+          const amount = parseFloat(radio.dataset.amount) || 0;
+          const taxRate = radio.value;
+          console.log(`📻 ラジオ${idx}: 税率=${taxRate}%, 金額=${amount}`);
+          alert(`ラジオ${idx}: ${taxRate}% = ¥${amount}`);
+          
+          if (taxRate === '8') {
+            tax8Total += amount;
+          } else if (taxRate === '10') {
+            tax10Total += amount;
+          }
+        });
+        
+        console.log('💰 税率別集計結果:', { tax8Total, tax10Total });
+        alert(`税率集計:\n8%: ¥${tax8Total}\n10%: ¥${tax10Total}`);
+        
+        // 商品点数をカウント
+        currentOrders.forEach(order => {
+          if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
+            itemCount += 1;
+          } else {
+            order.items.forEach(item => {
+              itemCount += item.quantity || 0;
+            });
+          }
+        });
+        
+        console.log('📦 会計商品点数:', itemCount);
+        console.log('💰 税率別売上:', { tax8Total, tax10Total });
+        
+        // 値引き金額を取得
+        const discountAmount = parseInt(document.getElementById('discountAmount').value) || 0;
+        console.log('💸 値引き金額:', discountAmount);
+        alert(`💸 値引き金額: ¥${discountAmount}`);
+        
+        // 🆕 日次売上を更新（商品点数と税率別売上も記録）
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount, tax8Total, tax10Total, discountAmount);
+        
+        // 支払いデータを保存（レシート印刷用）
+        lastPaymentData = {
+          tableNumber: selectedTable,
+          orderNumbers: orderNumbers,
+          items: currentOrders.flatMap(o => o.items),
+          totalAmount: totalAmountToPay,
+          discountAmount: discountAmount,
+          paymentMethod: selectedPaymentMethod,
+          cashReceived: selectedPaymentMethod === 'cash' ? cashReceived : totalAmountToPay,
+          change: selectedPaymentMethod === 'cash' ? changeAmount : 0,
+          timestamp: new Date(),
+          staffName: staffName  // 担当者名を追加
+        };
+        
+        // モーダルを閉じる
+        closePaymentModal();
+        
+        // 自動印刷が有効なら印刷
+        if (autoPrintEnabled) {
+          await printReceipt();
+        } else {
+          // レシート完了画面を表示
+          document.getElementById('receiptCompleteModal').classList.remove('hidden');
+        }
+        
+        // 表示をクリア
+        await loadOrders(selectedTable);
+        
+      } catch (e) {
+        console.error('会計エラー:', e);
+        alert('会計処理に失敗しました: ' + e.message);
+      }
+    };
+    
+    // 支払いモーダルを閉じる
+    window.closePaymentModal = function() {
+      document.getElementById('paymentModal').classList.add('hidden');
+      document.getElementById('cashReceived').value = '';
+      calculateChange();
+    };
+    
+    // レシート印刷（58mm幅対応）
+    window.printReceipt = async function() {
+      if (!lastPaymentData) {
+        alert('印刷するデータがありません');
+        return;
+      }
+      
+      try {
+        const builder = new StarWebPrintBuilder();
+        const request = builder.createInitializationElement();
+        
+        // 58mm幅設定
+        builder.createPeripheralElement({channel: 1, on: 100, off: 100});
+        
+        // レシート作成
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: '粉もん屋 八\n'});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        builder.createTextElement({data: '下赤塚店\n'});
+        builder.createTextElement({data: '東京都板橋区赤塚新町\n'});
+        builder.createTextElement({data: 'TEL: 03-XXXX-XXXX\n'});
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        builder.createAlignmentElement({position: 'left'});
+        const now = lastPaymentData.timestamp;
+        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        builder.createTextElement({data: `日時: ${dateStr}\n`});
+        builder.createTextElement({data: `担当: ${lastPaymentData.staffName || 'レジ係'}\n`});
+        builder.createTextElement({data: `テーブル: ${lastPaymentData.tableNumber}\n`});
+        builder.createTextElement({data: `注文No: ${lastPaymentData.orderNumbers.join(',')}\n`});
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        // 商品明細
+        let itemCount = 0;
+        let tax8Total = 0;
+        let tax10Total = 0;
+        
+        lastPaymentData.items.forEach(item => {
+          const subtotal = item.price * item.quantity;
+          itemCount += item.quantity;
+          
+          // 税率別集計
+          if (item.taxRate === 8) {
+            tax8Total += subtotal;
+          } else {
+            tax10Total += subtotal;
+          }
+          
+          // 商品名を32文字以内に調整
+          const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
+          builder.createTextElement({data: `${itemName}\n`});
+          
+          // 単価×数量＝小計の形式（58mm幅に最適化）
+          const priceInfo = `@${item.price} x${item.quantity}`;
+          const subtotalStr = `${subtotal.toLocaleString()}円`;
+          const spaces = ' '.repeat(Math.max(1, 32 - priceInfo.length - subtotalStr.length));
+          builder.createTextElement({data: `${priceInfo}${spaces}${subtotalStr}\n`});
+          
+          if (item.toppings && item.toppings !== 'なし') {
+            builder.createTextElement({data: ` TP:${item.toppings}\n`});
+          }
+        });
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        builder.createTextElement({data: `小計${' '.repeat(20)}${lastPaymentData.totalAmount.toLocaleString()}円\n`});
+        builder.createTextElement({data: `点数: ${itemCount}点\n`});
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        // 税額計算
+        const tax8Amount = Math.floor(tax8Total * 8 / 108);
+        const tax10Amount = Math.floor(tax10Total * 10 / 110);
+        
+        if (tax8Total > 0) {
+          builder.createTextElement({data: `8%対象${' '.repeat(16)}${tax8Total.toLocaleString()}円\n`});
+          builder.createTextElement({data: `(内消費税${' '.repeat(15)}${tax8Amount.toLocaleString()}円)\n`});
+        }
+        if (tax10Total > 0) {
+          builder.createTextElement({data: `10%対象${' '.repeat(15)}${tax10Total.toLocaleString()}円\n`});
+          builder.createTextElement({data: `(内消費税${' '.repeat(15)}${tax10Amount.toLocaleString()}円)\n`});
+        }
+        
+        builder.createRuledLineElement({thickness: 'medium'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: `合計 ${lastPaymentData.totalAmount.toLocaleString()}円\n`});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        builder.createRuledLineElement({thickness: 'medium'});
+        
+        // 支払い情報
+        let paymentMethodStr = '';
+        if (lastPaymentData.paymentMethod === 'cash') {
+          paymentMethodStr = '現金';
+          builder.createTextElement({data: `お預り${' '.repeat(18)}${lastPaymentData.cashReceived.toLocaleString()}円\n`});
+          builder.createTextElement({data: `おつり${' '.repeat(18)}${lastPaymentData.change.toLocaleString()}円\n`});
+        } else if (lastPaymentData.paymentMethod === 'emoney') {
+          paymentMethodStr = '電子マネー';
+        } else if (lastPaymentData.paymentMethod === 'credit') {
+          paymentMethodStr = 'クレジットカード';
+        }
+        builder.createTextElement({data: `支払: ${paymentMethodStr}\n`});
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({data: '\nありがとうございました\n'});
+        builder.createTextElement({data: 'またのご来店を\n'});
+        builder.createTextElement({data: 'お待ちしております\n\n\n'});
+        
+        builder.createCutPaperElement({feed: true});
+        
+        const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
+        
+        const trader = new StarWebPrintTrader({url: url});
+        trader.onReceive = function(response) {
+          console.log('印刷成功:', response);
+          alert('レシートを印刷しました');
+          closeReceiptModal();
+        };
+        trader.onError = function(response) {
+          console.error('印刷エラー:', response);
+          alert('印刷に失敗しました: ' + response.status);
+        };
+        
+        trader.sendMessage({request: request});
+        
+      } catch (e) {
+        console.error('印刷エラー:', e);
+        alert('印刷処理でエラーが発生しました: ' + e.message);
+      }
+    };
+    
+    // 領収書印刷（印鑑欄付き・58mm幅対応）
+    window.printInvoice = async function() {
+      if (!lastPaymentData) {
+        alert('印刷するデータがありません');
+        return;
+      }
+      
+      try {
+        const builder = new StarWebPrintBuilder();
+        const request = builder.createInitializationElement();
+        
+        // 58mm幅設定
+        builder.createPeripheralElement({channel: 1, on: 100, off: 100});
+        
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: '領 収 書\n\n'});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        
+        builder.createAlignmentElement({position: 'left'});
+        const now = lastPaymentData.timestamp;
+        const dateStr = `${now.getFullYear()}年${String(now.getMonth()+1).padStart(2,'0')}月${String(now.getDate()).padStart(2,'0')}日`;
+        builder.createTextElement({data: `${dateStr}\n\n`});
+        
+        builder.createTextElement({data: 'お客様\n\n'});
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: `¥${lastPaymentData.totalAmount.toLocaleString()}-\n`});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        builder.createAlignmentElement({position: 'left'});
+        builder.createTextElement({data: '\n上記正に領収いたしました\n\n'});
+        builder.createTextElement({data: '但し 飲食代として\n\n\n'});
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        builder.createAlignmentElement({position: 'right'});
+        builder.createTextElement({data: '粉もん屋 八 下赤塚店\n'});
+        builder.createTextElement({data: '東京都板橋区赤塚新町\n'});
+        builder.createTextElement({data: 'TEL: 03-XXXX-XXXX\n\n'});
+        
+        // 印鑑欄を作成（テキストで◯を描画）
+        builder.createAlignmentElement({position: 'right'});
+        builder.createTextElement({data: '        ◯◯◯\n'});
+        builder.createTextElement({data: '       ◯   ◯\n'});
+        builder.createTextElement({data: '      ◯  印 ◯\n'});
+        builder.createTextElement({data: '       ◯   ◯\n'});
+        builder.createTextElement({data: '        ◯◯◯\n\n'});
+        
+        builder.createAlignmentElement({position: 'left'});
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        builder.createTextElement({data: `\nテーブル: ${lastPaymentData.tableNumber}\n`});
+        builder.createTextElement({data: `注文No: ${lastPaymentData.orderNumbers.join(',')}\n`});
+        
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({data: '\n\n'});
+        
+        builder.createCutPaperElement({feed: true});
+        
+        const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
+        
+        const trader = new StarWebPrintTrader({url: url});
+        trader.onReceive = function(response) {
+          console.log('印刷成功:', response);
+          alert('領収書を印刷しました');
+          closeReceiptModal();
+        };
+        trader.onError = function(response) {
+          console.error('印刷エラー:', response);
+          alert('印刷に失敗しました: ' + response.status);
+        };
+        
+        trader.sendMessage({request: request});
+        
+      } catch (e) {
+        console.error('印刷エラー:', e);
+        alert('印刷処理でエラーが発生しました: ' + e.message);
+      }
+    };
+    
+    // レシート完了モーダルを閉じる
+    window.closeReceiptModal = function() {
+      document.getElementById('receiptCompleteModal').classList.add('hidden');
+      clearSelection();
+    };
+    
+    // 選択をクリア
+    window.clearSelection = function() {
+      selectedTable = null;
+      currentOrders = [];
+      document.getElementById('orderSection').classList.add('hidden');
+    };
+    
+    // 日次売上更新関数
+    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0) {
+      try {
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        
+        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount, tax8Total, tax10Total });
+        
+        const salesRef = doc(db, 'dailySales', dateStr);
+        const salesDoc = await getDoc(salesRef);
+        
+        if (salesDoc.exists()) {
+          const data = salesDoc.data();
+          console.log('既存データ:', data);
+          
+          const updates = {
+            totalSales: (data.totalSales || 0) + totalAmount,
+            customerCount: (data.customerCount || 0) + 1,
+            totalItems: (data.totalItems || 0) + itemCount,
+            tax8Total: (data.tax8Total || 0) + tax8Total,
+            tax10Total: (data.tax10Total || 0) + tax10Total,
+            totalDiscount: (data.totalDiscount || 0) + discountAmount,
+            drawerOpenCount: data.drawerOpenCount || 0,  // 現在の値を保持
+            cashSales: data.cashSales || 0,
+            emoneSales: data.emoneSales || 0,
+            creditSales: data.creditSales || 0,
+            updatedAt: Timestamp.now()
+          };
+          
+          // 支払い方法別の売上を加算
+          if (paymentMethod === 'cash') {
+            updates.cashSales += totalAmount;
+            updates.drawerOpenCount += 1;  // 現金支払い時にドロアオープン
+          } else if (paymentMethod === 'emoney') {
+            updates.emoneSales += totalAmount;
+          } else if (paymentMethod === 'credit') {
+            updates.creditSales += totalAmount;
+          }
+          
+          await updateDoc(salesRef, updates);
+          console.log('✅ 既存売上データ更新:', updates);
+          
+        } else {
+          const newData = {
+            date: dateStr,
+            totalSales: totalAmount,
+            customerCount: 1,
+            totalItems: itemCount,
+            tax8Total: tax8Total,
+            tax10Total: tax10Total,
+            totalDiscount: discountAmount,
+            cashSales: paymentMethod === 'cash' ? totalAmount : 0,
+            emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
+            creditSales: paymentMethod === 'credit' ? totalAmount : 0,
+            drawerOpenCount: paymentMethod === 'cash' ? 1 : 0,  // 現金支払い時のみ1
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now()
+          };
+          
+          await setDoc(salesRef, newData);
+          console.log('✅ 新規売上データ作成:', newData);
+        }
+        
+        // 更新後のデータを取得して確認
+        const updatedDoc = await getDoc(salesRef);
+        console.log('更新後のデータ:', updatedDoc.data());
+        
+      } catch (error) {
+        console.error('❌ 日次売上更新エラー:', error);
+        throw error;
+      }
+    };
+    
+    // カスタムアラート関数
+    function showCustomAlert(message, title = '通知', icon = '📢') {
+      document.getElementById('customAlertIcon').textContent = icon;
+      document.getElementById('customAlertTitle').textContent = title;
+      document.getElementById('customAlertMessage').textContent = message;
+      document.getElementById('customAlert').classList.add('show');
+    }
+    
+    function closeCustomAlert() {
+      document.getElementById('customAlert').classList.remove('show');
+    }
+    
+    // 全てのalertをshowCustomAlertに置き換え
+    window.alert = function(message) {
+      let title = '通知';
+      let icon = '📢';
+      
+      // メッセージに応じてアイコンを変更
+      if (message.includes('成功') || message.includes('完了') || message.includes('✓') || message.includes('✅')) {
+        icon = '✅';
+        title = '完了';
+      } else if (message.includes('エラー') || message.includes('失敗') || message.includes('❌')) {
+        icon = '❌';
+        title = 'エラー';
+      } else if (message.includes('警告') || message.includes('⚠️')) {
+        icon = '⚠️';
+        title = '警告';
+      } else if (message.includes('削除') || message.includes('🗑️')) {
+        icon = '🗑️';
+        title = '削除';
+      } else if (message.includes('追加') || message.includes('注文')) {
+        icon = '🎉';
+        title = '完了';
+      }
+      
+      showCustomAlert(message, title, icon);
+    };
+  </script>
+  
+  <!-- カスタムアラート -->
+  <div id="customAlert" class="custom-alert-overlay">
+    <div class="custom-alert-box">
+      <div class="custom-alert-icon" id="customAlertIcon">📢</div>
+      <div class="custom-alert-title" id="customAlertTitle">通知</div>
+      <div class="custom-alert-message" id="customAlertMessage"></div>
+      <button class="custom-alert-button" onclick="closeCustomAlert()">OK</button>
+    </div>
+  </div>
+  
+</body>
+</html>
