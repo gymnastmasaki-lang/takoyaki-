@@ -2673,7 +2673,6 @@
         });
       }
       
-      // 精算ジャーナルを即座にダウンロード
       try {
         const settlementData = window.currentSettlementData;
         const dateStr = window.currentSettlementDate;
@@ -2683,124 +2682,101 @@
           return;
         }
         
-        console.log('🔍 精算処理開始:', { dateStr, settlementData });
+        console.log('🔍 精算ジャーナル生成開始');
+        console.log('📊 settlementData:', settlementData);
         
-        // 今日の全注文を取得
-        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
-        console.log('📋 取得した注文数:', ordersSnapshot.size);
+        // ===== 現在時刻を取得 =====
+        const now = new Date();
+        const outputTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
         
-        // 担当者名を集計（会計ごとに記録された担当者）
-        let staffName = '高田';
-        const staffCounts = {};
-        try {
-          console.log('👤 担当者集計開始');
-          ordersSnapshot.forEach(docSnap => {
-            const data = docSnap.data();
-            if (!data.timestamp || !data.paidAt || data.deleted) return;
-            
-            const orderDate = data.timestamp.toDate();
-            const orderDateStr = `${orderDate.getFullYear()}-${String(orderDate.getMonth()+1).padStart(2,'0')}-${String(orderDate.getDate()).padStart(2,'0')}`;
-            
-            if (orderDateStr === dateStr && data.staffName) {
-              staffCounts[data.staffName] = (staffCounts[data.staffName] || 0) + 1;
-              console.log('  担当者カウント:', data.staffName, staffCounts);
-            }
-          });
-          
-          console.log('担当者集計:', staffCounts);
-          
-          // 担当者リストを作成
-          const staffList = Object.entries(staffCounts)
-            .map(([name, count]) => `${name}(${count}件)`)
-            .join(', ');
-          
-          staffName = staffList || '高田';
-          console.log('最終担当者:', staffName);
-        } catch (e) {
-          console.error('❌ 担当者集計エラー:', e);
-        }
+        // ===== 担当者を取得 =====
+        const staffSelect = document.getElementById('staffSelect');
+        const staffName = staffSelect.value || '未選択';
         
-        // 🆕 商品点数と税率別売上は dailySales から取得（会計時に記録済み）
-        let totalItems = settlementData.totalItems || 0;
-        let tax8Total = settlementData.tax8Total || 0;
-        let tax10Total = settlementData.tax10Total || 0;
-        let drawerOpenCount = settlementData.drawerOpenCount || 0;  // dailySalesから取得
-        
-        // 平均客単価を計算
+        // ===== dailySalesから基本データを取得 =====
         const customerCount = settlementData.customerCount || 0;
-        const averageSpend = customerCount > 0 ? Math.round(settlementData.totalSales / customerCount) : 0;
+        const totalItems = settlementData.totalItems || 0;
+        const totalSales = settlementData.totalSales || 0;
+        const averageSpend = customerCount > 0 ? Math.round(totalSales / customerCount) : 0;
         
-        console.log('📦 商品点数（dailySalesから）:', totalItems);
-        console.log('💰 税率別売上（dailySalesから）:', { tax8Total, tax10Total });
-        console.log('🔓 ドロアオープン数（dailySalesから）:', drawerOpenCount);
-        console.log('💵 平均客単価:', averageSpend);
-        
-        // 商品データがない場合の補正（後方互換性のため）
-        if (tax8Total === 0 && tax10Total === 0 && settlementData.totalSales > 0) {
-          console.log('⚠️ 税率別売上なし - 売上総額から8%で概算');
-          tax8Total = settlementData.totalSales;
-        }
-        
-        // 値引き金額はdailySalesから取得
+        // ===== 売上内訳 =====
+        const cashSales = settlementData.cashSales || 0;
+        const emoneSales = settlementData.emoneSales || 0;
+        const creditSales = settlementData.creditSales || 0;
         const discountTotal = settlementData.totalDiscount || 0;
-        console.log('💸 値引き金額（dailySalesから）:', discountTotal);
-        console.log('💸 settlementData:', settlementData);
         
-        console.log('📊 集計結果:', {
-          totalItems,
-          tax8Total,
-          tax10Total,
-          drawerOpenCount
-        });
+        // ===== 税金内訳（内税） =====
+        const tax8TotalWithTax = settlementData.tax8Total || 0;  // 8%商品合計（税込）
+        const tax10TotalWithTax = settlementData.tax10Total || 0; // 10%商品合計（税込）
         
-        // 税金計算（税込価格から内税を計算）
-        // 8%: 税込価格 / 1.08 = 税抜価格、税込価格 - 税抜価格 = 消費税
-        // 10%: 税込価格 / 1.10 = 税抜価格、税込価格 - 税抜価格 = 消費税
-        const tax8Excluded = Math.floor(tax8Total / 1.08);
-        const tax10Excluded = Math.floor(tax10Total / 1.10);
-        const tax8Amount = tax8Total - tax8Excluded;
-        const tax10Amount = tax10Total - tax10Excluded;
-        const totalTax = tax8Amount + tax10Amount;
-        const taxExcludedTotal = tax8Excluded + tax10Excluded;
+        // 税抜価格を計算（内税なので税込価格から逆算）
+        const tax8Excluded = Math.floor(tax8TotalWithTax / 1.08);  // 8%商品合計（税抜）
+        const tax10Excluded = Math.floor(tax10TotalWithTax / 1.10); // 10%商品合計（税抜）
         
-        console.log('💰 税金詳細:', {
-          tax8Total: tax8Total + '円（税込）',
-          tax8Excluded: tax8Excluded + '円（税抜）',
-          tax8Amount: tax8Amount + '円（消費税）',
-          tax10Total: tax10Total + '円（税込）',
-          tax10Excluded: tax10Excluded + '円（税抜）',
-          tax10Amount: tax10Amount + '円（消費税）'
-        });
+        // 消費税額を計算
+        const tax8Amount = tax8TotalWithTax - tax8Excluded;  // 8%の消費税
+        const tax10Amount = tax10TotalWithTax - tax10Excluded; // 10%の消費税
         
-        // テキストファイルを生成（見やすい形式）
-        const textContent = `
+        // 合計
+        const totalTax = tax8Amount + tax10Amount;  // 消費税の合計
+        const taxExcludedTotal = tax8Excluded + tax10Excluded;  // 税抜合計
+        const taxIncludedTotal = totalSales;  // 税込合計（総売上と同じ）
+        
+        // ===== ドロアオープン数 =====
+        const drawerOpenCount = settlementData.drawerOpenCount || 0;
+        
+        // ===== デバッグログ =====
+        console.log('📅 日付:', dateStr);
+        console.log('🕐 出力時刻:', outputTime);
+        console.log('👥 客数:', customerCount);
+        console.log('📦 総売上点数:', totalItems);
+        console.log('💰 平均客単価:', averageSpend);
+        console.log('💵 合計売上:', totalSales);
+        console.log('💸 値引き:', discountTotal);
+        console.log('🏪 8%商品（税込）:', tax8TotalWithTax);
+        console.log('🏪 8%商品（税抜）:', tax8Excluded);
+        console.log('🏪 8%消費税:', tax8Amount);
+        console.log('🏪 10%商品（税込）:', tax10TotalWithTax);
+        console.log('🏪 10%商品（税抜）:', tax10Excluded);
+        console.log('🏪 10%消費税:', tax10Amount);
+        console.log('🔓 ドロアオープン数:', drawerOpenCount);
+        console.log('👤 担当者:', staffName);
+        
+        // ===== ジャーナルテキストを生成 =====
+        const journalText = `
 =====================================
       精算ジャーナル
 =====================================
 
 日付: ${dateStr}
-客数: ${settlementData.customerCount}組
+出力時刻: ${outputTime}
+客数: ${customerCount}組
+総売上点数: ${totalItems}点
 平均客単価: ¥${averageSpend.toLocaleString()}
-合計売上: ¥${settlementData.totalSales.toLocaleString()}
+合計売上: ¥${totalSales.toLocaleString()}
 
 -------------------------------------
-内訳
+売上内訳
 -------------------------------------
-現金: ¥${settlementData.cashSales.toLocaleString()}
-電子マネー: ¥${settlementData.emoneSales.toLocaleString()}
-クレジットカード: ¥${settlementData.creditSales.toLocaleString()}
+現金: ¥${cashSales.toLocaleString()}
+電子マネー: ¥${emoneSales.toLocaleString()}
+クレジットカード: ¥${creditSales.toLocaleString()}
 値引き: ¥${discountTotal.toLocaleString()}
 
 -------------------------------------
-税金
+税金内訳（内税）
 -------------------------------------
-8%商品合計（税抜）: ¥${tax8Excluded.toLocaleString()}
-10%商品合計（税抜）: ¥${tax10Excluded.toLocaleString()}
-8%消費税: ¥${tax8Amount.toLocaleString()}
-10%消費税: ¥${tax10Amount.toLocaleString()}
-消費税合計: ¥${totalTax.toLocaleString()}
+8%の商品合計（税抜）: ¥${tax8Excluded.toLocaleString()}
+8%の商品合計（税込）: ¥${tax8TotalWithTax.toLocaleString()}
+8%の消費税: ¥${tax8Amount.toLocaleString()}
+
+10%の商品合計（税抜）: ¥${tax10Excluded.toLocaleString()}
+10%の商品合計（税込）: ¥${tax10TotalWithTax.toLocaleString()}
+10%の消費税: ¥${tax10Amount.toLocaleString()}
+
+消費税の合計: ¥${totalTax.toLocaleString()}
 税抜合計: ¥${taxExcludedTotal.toLocaleString()}
-税込合計: ¥${settlementData.totalSales.toLocaleString()}
+税込合計: ¥${taxIncludedTotal.toLocaleString()}
 
 -------------------------------------
 その他
@@ -2811,9 +2787,9 @@
 =====================================
 `;
         
-        // テキストファイルをダウンロード（UTF-8 BOM付き）
-        const bom = '\uFEFF';
-        const blob = new Blob([bom + textContent], { type: 'text/plain;charset=utf-8;' });
+        // ===== テキストファイルをダウンロード =====
+        const bom = '\uFEFF';  // UTF-8 BOM
+        const blob = new Blob([bom + journalText], { type: 'text/plain;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -2821,31 +2797,38 @@
         link.click();
         URL.revokeObjectURL(url);
         
-        // 精算記録をFirebaseに保存
+        // ===== 精算記録をFirebaseに保存 =====
         await window.addDoc(window.collection(window.db, 'settlements'), {
           date: dateStr,
+          outputTime: outputTime,
           timestamp: window.Timestamp.now(),
-          totalSales: settlementData.totalSales,
-          customerCount: settlementData.customerCount,
-          cashSales: settlementData.cashSales,
-          emoneSales: settlementData.emoneSales,
-          creditSales: settlementData.creditSales,
+          customerCount: customerCount,
           totalItems: totalItems,
+          averageSpend: averageSpend,
+          totalSales: totalSales,
+          cashSales: cashSales,
+          emoneSales: emoneSales,
+          creditSales: creditSales,
           discountTotal: discountTotal,
-          drawerOpenCount: drawerOpenCount,
-          staffName: staffName,
+          tax8TotalWithTax: tax8TotalWithTax,
           tax8Excluded: tax8Excluded,
-          tax10Excluded: tax10Excluded,
           tax8Amount: tax8Amount,
+          tax10TotalWithTax: tax10TotalWithTax,
+          tax10Excluded: tax10Excluded,
           tax10Amount: tax10Amount,
           totalTax: totalTax,
-          taxExcludedTotal: taxExcludedTotal
+          taxExcludedTotal: taxExcludedTotal,
+          taxIncludedTotal: taxIncludedTotal,
+          drawerOpenCount: drawerOpenCount,
+          staffName: staffName
         });
         
+        console.log('✅ 精算ジャーナル生成完了');
         alert('✅ 精算ジャーナルをダウンロードしました');
         closeSettlementModal();
+        
       } catch (e) {
-        console.error('精算エラー:', e);
+        console.error('❌ 精算エラー:', e);
         alert('精算に失敗しました: ' + e.message);
       }
     };
@@ -3707,6 +3690,14 @@
         console.log('💸 値引き金額:', discountAmount);
         console.log('💸 値引き後金額:', totalAmountToPay);
         
+        console.log('📊 updateDailySalesに渡すパラメータ:');
+        console.log('  - totalAmount:', totalAmountToPay);
+        console.log('  - paymentMethod:', selectedPaymentMethod);
+        console.log('  - itemCount:', itemCount);
+        console.log('  - tax8Total:', tax8Total);
+        console.log('  - tax10Total:', tax10Total);
+        console.log('  - discountAmount:', discountAmount);
+        
         // 🆕 日次売上を更新（値引き後の金額で売上を記録し、値引き額も別途記録）
         await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount, tax8Total, tax10Total, discountAmount);
         
@@ -4005,6 +3996,10 @@
             creditSales: data.creditSales || 0,
             updatedAt: Timestamp.now()
           };
+          
+          console.log('💡 更新前 - tax8Total:', data.tax8Total || 0, 'tax10Total:', data.tax10Total || 0, 'totalDiscount:', data.totalDiscount || 0);
+          console.log('💡 追加分 - tax8Total:', tax8Total, 'tax10Total:', tax10Total, 'discountAmount:', discountAmount);
+          console.log('💡 更新後 - tax8Total:', updates.tax8Total, 'tax10Total:', updates.tax10Total, 'totalDiscount:', updates.totalDiscount);
           
           // 支払い方法別の売上を加算
           if (paymentMethod === 'cash') {
