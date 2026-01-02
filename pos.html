@@ -2590,6 +2590,7 @@
     // ========== 精算機能 ==========
     
     // 精算モーダルを表示
+    // 精算モーダルを表示
     window.showSettlementModal = async function() {
       // Firebase初期化を待つ
       if (!window.firebaseReady) {
@@ -2607,58 +2608,100 @@
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         
-        // 日次売上データから取得
+        // 日次売上データから取得（リアルタイム監視）
         const salesRef = window.doc(window.db, 'dailySales', dateStr);
-        const salesDoc = await window.getDoc(salesRef);
         
-        let settlementData = {
-          totalSales: 0,
-          customerCount: 0,
-          totalItems: 0,
-          cashSales: 0,
-          emoneSales: 0,
-          creditSales: 0,
-          totalDiscount: 0,
-          tax8Total: 0,
-          tax10Total: 0,
-          drawerOpenCount: 0
-        };
-        
-        if (salesDoc.exists()) {
-          const data = salesDoc.data();
-          settlementData = {
-            totalSales: data.totalSales || 0,
-            customerCount: data.customerCount || 0,
-            totalItems: data.totalItems || 0,
-            cashSales: data.cashSales || 0,
-            emoneSales: data.emoneSales || 0,
-            creditSales: data.creditSales || 0,
-            totalDiscount: data.totalDiscount || 0,
-            tax8Total: data.tax8Total || 0,
-            tax10Total: data.tax10Total || 0,
-            drawerOpenCount: data.drawerOpenCount || 0
+        // リアルタイム監視を設定
+        const unsubscribe = window.onSnapshot(salesRef, (doc) => {
+          let settlementData = {
+            totalSales: 0,
+            customerCount: 0,
+            totalItems: 0,
+            cashSales: 0,
+            emoneSales: 0,
+            creditSales: 0,
+            totalDiscount: 0,
+            tax8Total: 0,
+            tax10Total: 0,
+            drawerOpenCount: 0
           };
-        }
+          
+          if (doc.exists()) {
+            const data = doc.data();
+            settlementData = {
+              totalSales: data.totalSales || 0,
+              customerCount: data.customerCount || 0,
+              totalItems: data.totalItems || 0,
+              cashSales: data.cashSales || 0,
+              emoneSales: data.emoneSales || 0,
+              creditSales: data.creditSales || 0,
+              totalDiscount: data.totalDiscount || 0,
+              tax8Total: data.tax8Total || 0,
+              tax10Total: data.tax10Total || 0,
+              drawerOpenCount: data.drawerOpenCount || 0
+            };
+          }
+          
+          // settlementDataをグローバルに保存（ジャーナル生成で使用）
+          window.currentSettlementData = settlementData;
+          window.currentSettlementDate = dateStr;
+          
+          // 表示を更新
+          updateSettlementDisplay(container, settlementData);
+        });
         
-        // settlementDataをグローバルに保存（CSV生成で使用）
-        window.currentSettlementData = settlementData;
-        window.currentSettlementDate = dateStr;
+        // モーダルを閉じる時にリアルタイム監視を解除
+        window.currentSettlementUnsubscribe = unsubscribe;
         
-        container.innerHTML = `
-          <div style="background: #f8f9fa; padding: 20px; border-radius: 10px;">
-            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 2px solid #ddd;">
-              <span style="font-size: 16px;">総売上</span>
-              <strong style="font-size: 20px; color: #4CAF50;">¥${settlementData.totalSales.toLocaleString()}</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
-              <span>客数</span>
-              <strong>${settlementData.customerCount}組</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
-              <span>💵 現金</span>
-              <strong>¥${settlementData.cashSales.toLocaleString()}</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+      } catch (e) {
+        console.error('精算サマリーエラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red;">エラーが発生しました</div>';
+      }
+    };
+    
+    // 精算表示を更新
+    function updateSettlementDisplay(container, settlementData) {
+      container.innerHTML = `
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 10px;">
+          <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 2px solid #ddd;">
+            <span style="font-size: 16px;">総売上</span>
+            <strong style="font-size: 20px; color: #4CAF50;">¥${settlementData.totalSales.toLocaleString()}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+            <span>客数</span>
+            <strong>${settlementData.customerCount}組</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+            <span>総売上点数</span>
+            <strong>${settlementData.totalItems}点</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+            <span>💵 現金</span>
+            <strong>¥${settlementData.cashSales.toLocaleString()}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+            <span>💳 カード</span>
+            <strong>¥${settlementData.creditSales.toLocaleString()}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+            <span>📱 電子マネー</span>
+            <strong>¥${settlementData.emoneSales.toLocaleString()}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+            <span>💸 値引き</span>
+            <strong style="color: #f44336;">¥${settlementData.totalDiscount.toLocaleString()}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+            <span>🏪 8%商品</span>
+            <strong>¥${settlementData.tax8Total.toLocaleString()}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 10px 0;">
+            <span>🏪 10%商品</span>
+            <strong>¥${settlementData.tax10Total.toLocaleString()}</strong>
+          </div>
+        </div>
+      `;
+    }>
               <span>💳 カード</span>
               <strong>¥${settlementData.creditSales.toLocaleString()}</strong>
             </div>
@@ -2758,8 +2801,7 @@
       精算ジャーナル
 =====================================
 
-日付: ${dateStr}
-出力時刻: ${outputTime}
+出力日時: ${outputTime}
 客数: ${customerCount}組
 総売上点数: ${totalItems}点
 平均客単価: ¥${averageSpend.toLocaleString()}
@@ -2846,6 +2888,12 @@
     // 精算モーダルを閉じる
     window.closeSettlementModal = function() {
       document.getElementById('settlementModal').classList.add('hidden');
+      
+      // リアルタイム監視を解除
+      if (window.currentSettlementUnsubscribe) {
+        window.currentSettlementUnsubscribe();
+        window.currentSettlementUnsubscribe = null;
+      }
     };
     
     // 手動カートの表示更新
@@ -4005,15 +4053,15 @@
             tax10Total: (data.tax10Total || 0) + tax10Total,
             totalDiscount: (data.totalDiscount || 0) + discountAmount,
             drawerOpenCount: data.drawerOpenCount || 0,  // 現在の値を保持
-            cashSales: data.cashSales || 0,
-            emoneSales: data.emoneSales || 0,
-            creditSales: data.creditSales || 0,
+            cashSales: (data.cashSales || 0),  // 既存値を保持
+            emoneSales: (data.emoneSales || 0),  // 既存値を保持
+            creditSales: (data.creditSales || 0),  // 既存値を保持
             updatedAt: Timestamp.now()
           };
           
-          console.log('💡 更新前 - tax8Total:', data.tax8Total || 0, 'tax10Total:', data.tax10Total || 0, 'totalDiscount:', data.totalDiscount || 0);
-          console.log('💡 追加分 - tax8Total:', tax8Total, 'tax10Total:', tax10Total, 'discountAmount:', discountAmount);
-          console.log('💡 更新後 - tax8Total:', updates.tax8Total, 'tax10Total:', updates.tax10Total, 'totalDiscount:', updates.totalDiscount);
+          console.log('💡 更新前 - totalItems:', data.totalItems || 0, 'tax8Total:', data.tax8Total || 0, 'tax10Total:', data.tax10Total || 0, 'totalDiscount:', data.totalDiscount || 0);
+          console.log('💡 追加分 - itemCount:', itemCount, 'tax8Total:', tax8Total, 'tax10Total:', tax10Total, 'discountAmount:', discountAmount);
+          console.log('💡 更新後 - totalItems:', updates.totalItems, 'tax8Total:', updates.tax8Total, 'tax10Total:', updates.tax10Total, 'totalDiscount:', updates.totalDiscount);
           
           // 支払い方法別の売上を加算
           if (paymentMethod === 'cash') {
