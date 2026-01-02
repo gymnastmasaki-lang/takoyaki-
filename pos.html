@@ -3445,12 +3445,12 @@
       document.getElementById('completePaymentBtn').disabled = true;
     };
     
-    // 税率選択リストを構築（テーブル番号で自動判定）
+    // 税率選択リストを構築
     function buildTaxRateSelectionList() {
       const container = document.getElementById('taxRateItemsList');
       container.innerHTML = '';
       
-      console.log('🔵 buildTaxRateSelectionList開始（自動判定）');
+      console.log('🔵 buildTaxRateSelectionList開始');
       console.log('currentOrders:', currentOrders);
       console.log('currentOrders.length:', currentOrders.length);
       
@@ -3465,72 +3465,35 @@
         return;
       }
       
-      let tax8Total = 0;
-      let tax10Total = 0;
+      let itemIndex = 0;
       
       currentOrders.forEach((order, orderIdx) => {
         console.log(`📦 注文${orderIdx}:`, order);
-        const tableNumber = order.tableNumber || '';
-        
         if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
           // itemsがない場合は注文全体として表示
           const orderTotal = order.totalAmount || 0;
           console.log(`  注文全体として追加: #${order.orderNumber}, 金額:${orderTotal}`);
-          
-          // テーブル番号で税率判定
-          const taxRate = determineTaxRate(tableNumber, '');
-          if (taxRate === 10) {
-            tax10Total += orderTotal;
-          } else {
-            tax8Total += orderTotal;
-          }
-          
-          addTaxRateItemDisplay(container, `注文 #${order.orderNumber}`, 1, orderTotal, taxRate, tableNumber);
+          addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, orderTotal, itemIndex);
+          itemIndex++;
         } else {
           // 各商品を表示
           order.items.forEach((item, itemIdx) => {
             const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
-            const itemName = item.name || '';
-            console.log(`  商品追加: ${itemName} x${item.quantity}, 金額:${itemTotal}, テーブル:${tableNumber}`);
-            
-            // テーブル番号と商品名で税率判定
-            const taxRate = determineTaxRate(tableNumber, itemName);
-            if (taxRate === 10) {
-              tax10Total += itemTotal;
-            } else {
-              tax8Total += itemTotal;
-            }
-            
-            addTaxRateItemDisplay(container, itemName, item.quantity, itemTotal, taxRate, tableNumber);
+            console.log(`  商品追加: ${item.name} x${item.quantity}, 金額:${itemTotal}`);
+            addTaxRateItem(container, item.name, item.quantity, itemTotal, itemIndex);
+            itemIndex++;
           });
         }
       });
       
-      console.log(`✅ 税率自動判定完了: 8%=¥${tax8Total}, 10%=¥${tax10Total}`);
-      
-      // サマリー表示を更新
-      document.getElementById('tax8Summary').textContent = '¥' + tax8Total.toLocaleString();
-      document.getElementById('tax10Summary').textContent = '¥' + tax10Total.toLocaleString();
+      console.log(`✅ 税率選択項目を${itemIndex}個生成しました`);
+      calculateTaxSummary();
     }
     
-    // テーブル番号と商品名で税率を判定
-    function determineTaxRate(tableNumber, itemName) {
-      // 【10%】店内テーブル: c1, c2, T-M, T-H
-      if (tableNumber.match(/^(c1|c2|T-M|T-H)$/i)) {
-        return 10;
-      }
+    // 税率選択項目を追加
+    function addTaxRateItem(container, itemName, quantity, itemTotal, index) {
+      console.log(`  addTaxRateItem: ${itemName}, 数量:${quantity}, 金額:${itemTotal}, index:${index}`);
       
-      // 【10%】レジ袋（どのテーブルでも）
-      if (itemName.includes('レジ袋') || itemName.includes('袋')) {
-        return 10;
-      }
-      
-      // 【8%】その他（即会計、テイクアウト、予約1-5など全て）
-      return 8;
-    }
-    
-    // 税率表示項目を追加（判定結果のみ表示、選択不可）
-    function addTaxRateItemDisplay(container, itemName, quantity, itemTotal, taxRate, tableNumber) {
       const itemDiv = document.createElement('div');
       itemDiv.style.cssText = 'padding: 10px; margin-bottom: 8px; background: white; border-radius: 6px; border: 1px solid #ddd;';
       
@@ -3542,30 +3505,67 @@
       `;
       itemDiv.appendChild(headerDiv);
       
-      // テーブル情報と税率を表示
-      const infoDiv = document.createElement('div');
-      infoDiv.style.cssText = 'display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #666;';
+      const radioDiv = document.createElement('div');
+      radioDiv.style.cssText = 'display: flex; gap: 10px; justify-content: center;';
       
-      const tableInfo = document.createElement('span');
-      tableInfo.textContent = `テーブル: ${tableNumber || '未設定'}`;
+      // 8%ラジオボタン
+      const label8 = document.createElement('label');
+      label8.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 6px 10px; border-radius: 4px; background: #fff3e0; border: 2px solid #FF9800; font-size: 13px;';
+      const radio8 = document.createElement('input');
+      radio8.type = 'radio';
+      radio8.name = `taxRate${index}`;
+      radio8.value = '8';
+      radio8.checked = false;  // デフォルトは10%に変更
+      radio8.dataset.amount = itemTotal;
+      radio8.dataset.index = index;
+      radio8.style.cssText = 'margin-right: 5px; width: 18px; height: 18px;';
+      radio8.onchange = calculateTaxSummary;
+      label8.appendChild(radio8);
+      label8.appendChild(document.createTextNode('8%持ち帰り'));
       
-      const taxBadge = document.createElement('span');
-      taxBadge.style.cssText = `padding: 4px 12px; border-radius: 4px; font-weight: bold; ${
-        taxRate === 10 
-          ? 'background: #e3f2fd; color: #2196F3; border: 2px solid #2196F3;' 
-          : 'background: #fff3e0; color: #FF9800; border: 2px solid #FF9800;'
-      }`;
-      taxBadge.textContent = taxRate === 10 ? '10%（店内/袋）' : '8%（持ち帰り）';
+      // 10%ラジオボタン
+      const label10 = document.createElement('label');
+      label10.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 6px 10px; border-radius: 4px; background: #e3f2fd; border: 2px solid #2196F3; font-size: 13px;';
+      const radio10 = document.createElement('input');
+      radio10.type = 'radio';
+      radio10.name = `taxRate${index}`;
+      radio10.value = '10';
+      radio10.checked = true;  // デフォルトは10%（店内飲食）
+      radio10.dataset.amount = itemTotal;
+      radio10.dataset.index = index;
+      radio10.style.cssText = 'margin-right: 5px; width: 18px; height: 18px;';
+      radio10.onchange = calculateTaxSummary;
+      label10.appendChild(radio10);
+      label10.appendChild(document.createTextNode('10%店内'));
       
-      infoDiv.appendChild(tableInfo);
-      infoDiv.appendChild(taxBadge);
-      itemDiv.appendChild(infoDiv);
+      console.log(`    ラジオボタン生成: taxRate${index}, 8%=${radio8.checked}, 10%=${radio10.checked}`);
+      
+      radioDiv.appendChild(label8);
+      radioDiv.appendChild(label10);
+      itemDiv.appendChild(radioDiv);
       
       container.appendChild(itemDiv);
     }
     
+    // 税率別集計を計算
+    function calculateTaxSummary() {
+      let tax8Total = 0;
+      let tax10Total = 0;
+      
+      const radios = document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked');
+      radios.forEach(radio => {
+        const amount = parseFloat(radio.dataset.amount) || 0;
+        if (radio.value === '8') {
+          tax8Total += amount;
+        } else if (radio.value === '10') {
+          tax10Total += amount;
+        }
+      });
+      
+      document.getElementById('tax8Summary').textContent = '¥' + tax8Total.toLocaleString();
+      document.getElementById('tax10Summary').textContent = '¥' + tax10Total.toLocaleString();
+    }
     
-
     // 値引き後の請求額を更新
     window.updatePaymentTotal = function() {
       let total = 0;
@@ -3651,52 +3651,42 @@
           });
         }
         
-        // 商品点数をカウント & テーブル番号で税率を自動判定
+        // 商品点数をカウント & 選択された税率で集計
         let itemCount = 0;
         let tax8Total = 0;
         let tax10Total = 0;
         
-        console.log('💰 税率自動判定開始');
+        // 選択された税率から集計
+        const radios = document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked');
+        console.log('📻 選択されたラジオボタン数:', radios.length);
         
-        currentOrders.forEach(order => {
-          const tableNumber = order.tableNumber || '';
-          console.log(`📦 注文 #${order.orderNumber}, テーブル: ${tableNumber}`);
+        radios.forEach((radio, idx) => {
+          const amount = parseFloat(radio.dataset.amount) || 0;
+          const taxRate = radio.value;
+          console.log(`📻 ラジオ${idx}: 税率=${taxRate}%, 金額=${amount}`);
           
+          if (taxRate === '8') {
+            tax8Total += amount;
+          } else if (taxRate === '10') {
+            tax10Total += amount;
+          }
+        });
+        
+        console.log('💰 税率別集計結果:', { tax8Total, tax10Total });
+        
+        // 商品点数をカウント
+        currentOrders.forEach(order => {
           if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
             itemCount += 1;
-            const orderTotal = order.totalAmount || 0;
-            const taxRate = determineTaxRate(tableNumber, '');
-            if (taxRate === 10) {
-              tax10Total += orderTotal;
-            } else {
-              tax8Total += orderTotal;
-            }
-            console.log(`  注文全体: ¥${orderTotal}, 税率: ${taxRate}%`);
           } else {
             order.items.forEach(item => {
               itemCount += item.quantity || 0;
-              const itemName = item.name || '';
-              const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
-              const taxRate = determineTaxRate(tableNumber, itemName);
-              
-              if (taxRate === 10) {
-                tax10Total += itemTotal;
-              } else {
-                tax8Total += itemTotal;
-              }
-              console.log(`  ${itemName}: ¥${itemTotal}, 税率: ${taxRate}%`);
             });
           }
         });
         
         console.log('📦 会計商品点数:', itemCount);
-        console.log('💰 税率別集計結果:', { tax8Total, tax10Total });
-        
-        // デバッグ用アラート
-        alert(`デバッグ情報:
-商品点数: ${itemCount}点
-8%: ¥${tax8Total}
-10%: ¥${tax10Total}`);
+        console.log('💰 税率別売上:', { tax8Total, tax10Total });
         
         // 元の合計金額を計算（値引き前）
         let originalTotal = 0;
@@ -3996,14 +3986,6 @@
         
         console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount });
         
-        // 重要なパラメータを再確認
-        if (itemCount === 0) {
-          console.error('❌ 警告: itemCountが0です！');
-        }
-        if (tax8Total === 0 && tax10Total === 0) {
-          console.error('❌ 警告: 税率別売上が両方とも0です！');
-        }
-        
         const salesRef = doc(db, 'dailySales', dateStr);
         const salesDoc = await getDoc(salesRef);
         
@@ -4025,9 +4007,9 @@
             updatedAt: Timestamp.now()
           };
           
-          console.log('💡 更新前 - totalItems:', data.totalItems || 0, 'cashSales:', data.cashSales || 0, 'emoneSales:', data.emoneSales || 0, 'creditSales:', data.creditSales || 0);
-          console.log('💡 追加分 - itemCount:', itemCount, 'totalAmount:', totalAmount, 'paymentMethod:', paymentMethod);
-          console.log('💡 更新後（加算前） - totalItems:', updates.totalItems, 'cashSales:', updates.cashSales, 'emoneSales:', updates.emoneSales, 'creditSales:', updates.creditSales);
+          console.log('💡 更新前 - totalItems:', data.totalItems || 0, 'tax8Total:', data.tax8Total || 0, 'tax10Total:', data.tax10Total || 0, 'totalDiscount:', data.totalDiscount || 0);
+          console.log('💡 追加分 - itemCount:', itemCount, 'tax8Total:', tax8Total, 'tax10Total:', tax10Total, 'discountAmount:', discountAmount);
+          console.log('💡 更新後 - totalItems:', updates.totalItems, 'tax8Total:', updates.tax8Total, 'tax10Total:', updates.tax10Total, 'totalDiscount:', updates.totalDiscount);
           
           // 支払い方法別の売上を加算
           if (paymentMethod === 'cash') {
