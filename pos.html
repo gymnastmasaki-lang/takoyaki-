@@ -2877,6 +2877,61 @@
         console.log('🔓 ドロアオープン数:', drawerOpenCount);
         console.log('👤 担当者:', staffName);
         
+        // ===== AIコメントを生成 =====
+        let aiComment = '';
+        try {
+          console.log('🤖 AIコメント生成開始...');
+          const prompt = `あなたは飲食店の経営コンサルタントです。以下の本日の売上データを分析し、簡潔な感想とアドバイス、今後の売上向上のための具体的な提案を日本語で提供してください。
+
+【本日の売上データ】
+- 客数: ${customerCount}組
+- 総売上点数: ${totalItems}点
+- 平均客単価: ${averageSpend}円
+- 合計売上: ${totalSales}円
+- 現金: ${cashSales}円
+- 電子マネー: ${emoneSales}円
+- クレジットカード: ${creditSales}円
+- 値引き: ${discountTotal}円
+
+【出力形式】
+以下の3つのセクションで回答してください：
+1. 本日の売上の感想（2-3文）
+2. 気づいた点とアドバイス（2-3文）
+3. 売上向上のための具体的な提案（箇条書きで3-4点）
+
+簡潔で実践的なアドバイスをお願いします。`;
+
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-20250514',
+              max_tokens: 1000,
+              messages: [{
+                role: 'user',
+                content: prompt
+              }]
+            })
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.content && data.content[0] && data.content[0].text) {
+              aiComment = data.content[0].text;
+              console.log('✅ AIコメント生成成功');
+            }
+          } else {
+            console.log('⚠️ AIコメント生成失敗（APIエラー）');
+            aiComment = '※ AIコメントの生成に失敗しました';
+          }
+        } catch (error) {
+          console.error('❌ AIコメント生成エラー:', error);
+          aiComment = '※ AIコメントの生成中にエラーが発生しました';
+        }
+        
         // ===== ジャーナルテキストを生成 =====
         const journalText = `
 =====================================
@@ -2920,6 +2975,11 @@
 担当者: ${staffName}
 
 =====================================
+      Claudeからのコメント
+=====================================
+${aiComment}
+
+=====================================
 `;
         
         // ===== テキストファイルをダウンロード =====
@@ -2955,7 +3015,8 @@
           taxExcludedTotal: taxExcludedTotal,
           taxIncludedTotal: taxIncludedTotal,
           drawerOpenCount: drawerOpenCount,
-          staffName: staffName
+          staffName: staffName,
+          aiComment: aiComment
         });
         
         console.log('✅ 精算ジャーナル生成完了');
