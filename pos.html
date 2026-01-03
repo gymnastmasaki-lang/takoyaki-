@@ -923,6 +923,52 @@
     .custom-alert-button:active {
       transform: translateY(0);
     }
+    
+    /* 品切れページ用スタイル */
+    .soldout-item {
+      background: white;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .soldout-item.sold-out {
+      background: #f5f5f5;
+      opacity: 0.7;
+    }
+    .soldout-item-name {
+      font-size: 16px;
+      font-weight: bold;
+      color: #333;
+    }
+    .soldout-badge {
+      background: #f44336;
+      color: white;
+      padding: 5px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: bold;
+      margin-top: 5px;
+      display: inline-block;
+    }
+    .soldout-toggle-btn {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      color: white;
+    }
+    .soldout-toggle-btn.set-soldout {
+      background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+    }
+    .soldout-toggle-btn.set-available {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    }
   </style>
   
   <script>
@@ -973,6 +1019,11 @@
         </div>
       </div>
       <div class="header-right">
+        <button onclick="loadOrders(selectedTable)" style="padding: 12px 24px; font-size: 16px; background: #FFFF00; color: #333; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">更新</button>
+        <button onclick="increaseWaiting()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">待1</button>
+        <button onclick="showSoldOutPage()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">品切</button>
+        <button id="bulk-soldout-btn" onclick="toggleBulkSoldOut()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">一括</button>
+        <button id="time-override-btn" onclick="toggleTimeOverride()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">時外</button>
         <button onclick="openDrawer()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FFC107 0%, #FFA000 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px; box-shadow: 0 4px 15px rgba(255,193,7,0.3);">ドロア開</button>
         <button onclick="showCustomerCountModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #00bcd4 0%, #0097a7 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">客数</button>
         <button onclick="showSalesModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">売上</button>
@@ -993,6 +1044,14 @@
       <!-- 左側: テーブル選択と注文詳細 -->
       <div class="section">
         <h2>📋 テーブル選択</h2>
+        
+        <!-- 手動待ち人数カード -->
+        <div style="background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: space-between; gap: 15px;">
+          <div style="font-size: 16px; font-weight: bold; color: #333; white-space: nowrap;">手動待ち人数</div>
+          <div style="font-size: 32px; font-weight: bold; color: #FF9800; flex: 1; text-align: center;" id="manual-count">0</div>
+          <button onclick="resetWaiting()" style="padding: 12px 25px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; white-space: nowrap;">リセット</button>
+        </div>
+        
         <div class="table-grid" id="tableGrid">
           <!-- JavaScriptで生成 -->
         </div>
@@ -1322,6 +1381,8 @@
     let changeAmount = 0;
     let lastPaymentData = null;
     let currentReservationTable = null; // 予約メモ編集中のテーブル
+    let allMenuItems = [];
+    let isBulkSoldOut = false;
     
     // プリンターIPアドレス（画像から）
     const PRINTER_IP = '192.168.244.41';
@@ -4264,6 +4325,274 @@
       
       showCustomAlert(message, title, icon);
     };
+    
+    // ========== コントローラー機能 ==========
+    
+    // 待ち人数+1
+    window.increaseWaiting = async function() {
+      try {
+        const ref = window.doc(window.db, 'settings', 'waiting');
+        const snapshot = await window.getDocs(window.collection(window.db, 'settings'));
+        let count = 0;
+        snapshot.forEach(d => { if (d.id === 'waiting') count = d.data().manualCount || 0; });
+        await window.setDoc(ref, { manualCount: count + 1 });
+        showToast('待ち+1');
+      } catch (e) {
+        console.error(e);
+        alert('エラー: ' + e.message);
+      }
+    };
+    
+    // 待ち人数リセット
+    window.resetWaiting = async function() {
+      try {
+        await window.setDoc(window.doc(window.db, 'settings', 'waiting'), { manualCount: 0 });
+        showToast('リセット');
+      } catch (e) {
+        console.error(e);
+        alert('エラー: ' + e.message);
+      }
+    };
+    
+    // 待ち人数を監視
+    function watchWaiting() {
+      const unsubscribe = window.onSnapshot(
+        window.doc(window.db, 'settings', 'waiting'),
+        (doc) => {
+          if (doc.exists()) {
+            const count = doc.data().manualCount || 0;
+            document.getElementById('manual-count').textContent = count;
+          }
+        }
+      );
+      return unsubscribe;
+    }
+    
+    // 品切れページ表示
+    window.showSoldOutPage = async function() {
+      try {
+        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
+        allMenuItems = [];
+        const categories = new Set();
+        
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          allMenuItems.push({
+            id: data.id,
+            name: data.name,
+            price: data.price,
+            category: data.category
+          });
+          if (data.category) categories.add(data.category);
+        });
+        
+        const select = document.getElementById('soldout-category-select');
+        select.innerHTML = '<option value="">全ての商品</option>';
+        Array.from(categories).sort().forEach(cat => {
+          const opt = document.createElement('option');
+          opt.value = cat;
+          opt.textContent = cat;
+          select.appendChild(opt);
+        });
+        
+        select.onchange = () => {
+          const filtered = select.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === select.value);
+          displaySoldOutItems(filtered);
+        };
+        
+        await displaySoldOutItems(allMenuItems);
+        document.getElementById('page-soldout').style.display = 'block';
+      } catch (e) {
+        console.error(e);
+        alert('エラー: ' + e.message);
+      }
+    };
+    
+    // 品切れページから戻る
+    window.backFromSoldOut = function() {
+      document.getElementById('page-soldout').style.display = 'none';
+    };
+    
+    // 品切れ商品リスト表示
+    async function displaySoldOutItems(items) {
+      const list = document.getElementById('soldout-menu-list');
+      list.innerHTML = '';
+      
+      const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
+      const soldOutIds = new Set();
+      soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
+      
+      items.sort((a, b) => {
+        const numA = parseInt(a.id.replace(/\D/g, ''));
+        const numB = parseInt(b.id.replace(/\D/g, ''));
+        return numA - numB;
+      });
+      
+      items.forEach(item => {
+        const isSoldOut = soldOutIds.has(item.id);
+        const div = document.createElement('div');
+        div.className = 'soldout-item' + (isSoldOut ? ' sold-out' : '');
+        
+        div.innerHTML = `
+          <div>
+            <div class="soldout-item-name">${item.name}</div>
+            <div style="font-size:14px;color:#666;">¥${item.price.toLocaleString()}</div>
+            ${isSoldOut ? '<span class="soldout-badge">品切れ中</span>' : ''}
+          </div>
+          <button class="soldout-toggle-btn ${isSoldOut ? 'set-available' : 'set-soldout'}" 
+                  onclick="toggleSoldOut('${item.id}', ${!isSoldOut})">
+            ${isSoldOut ? '販売再開' : '品切れ'}
+          </button>
+        `;
+        
+        list.appendChild(div);
+      });
+    }
+    
+    // 個別品切れ切り替え
+    window.toggleSoldOut = async function(menuId, setSoldOut) {
+      try {
+        if (setSoldOut) {
+          await window.setDoc(window.doc(window.db, 'sold_out', menuId), {
+            menuId: menuId,
+            timestamp: window.Timestamp.now()
+          });
+          showToast('品切れに設定');
+        } else {
+          await window.deleteDoc(window.doc(window.db, 'sold_out', menuId));
+          showToast('販売再開');
+        }
+        
+        const sel = document.getElementById('soldout-category-select');
+        const filtered = sel.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === sel.value);
+        await displaySoldOutItems(filtered);
+      } catch (e) {
+        console.error(e);
+        alert('エラー: ' + e.message);
+      }
+    };
+    
+    // 一括品切れ切り替え
+    window.toggleBulkSoldOut = async function() {
+      const btn = document.getElementById('bulk-soldout-btn');
+      
+      if (!isBulkSoldOut) {
+        if (!confirm('全商品を品切れに設定しますか?')) return;
+        
+        try {
+          const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
+          const promises = [];
+          
+          menuSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data.id) {
+              promises.push(window.setDoc(window.doc(window.db, 'sold_out', data.id), {
+                menuId: data.id,
+                timestamp: window.Timestamp.now()
+              }));
+            }
+          });
+          
+          await Promise.all(promises);
+          isBulkSoldOut = true;
+          btn.textContent = '再販';
+          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          showToast('全商品を品切れに設定');
+        } catch (e) {
+          console.error(e);
+          alert('エラー: ' + e.message);
+        }
+      } else {
+        if (!confirm('全商品を販売再開しますか?')) return;
+        
+        try {
+          const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
+          const promises = [];
+          soldOutSnapshot.forEach(docSnap => promises.push(window.deleteDoc(docSnap.ref)));
+          
+          await Promise.all(promises);
+          isBulkSoldOut = false;
+          btn.textContent = '一括';
+          btn.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
+          showToast('全商品を販売再開');
+        } catch (e) {
+          console.error(e);
+          alert('エラー: ' + e.message);
+        }
+      }
+    };
+    
+    // 時間外設定切り替え
+    window.toggleTimeOverride = async function() {
+      const btn = document.getElementById('time-override-btn');
+      
+      try {
+        const settingsRef = window.doc(window.db, 'settings', 'timeOverride');
+        const settingsSnap = await window.getDoc(settingsRef);
+        const currentOverride = settingsSnap.exists() ? settingsSnap.data().enabled : false;
+        
+        const newOverride = !currentOverride;
+        
+        await window.setDoc(settingsRef, {
+          enabled: newOverride,
+          timestamp: window.Timestamp.now()
+        });
+        
+        if (newOverride) {
+          btn.textContent = '営業';
+          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          showToast('営業時間外でも注文可能にしました');
+        } else {
+          btn.textContent = '時外';
+          btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
+          showToast('営業時間外チェックを有効にしました');
+        }
+      } catch (e) {
+        console.error(e);
+        alert('エラー: ' + e.message);
+      }
+    };
+    
+    // 時間外設定を読み込み
+    async function loadTimeOverrideStatus() {
+      try {
+        const settingsRef = window.doc(window.db, 'settings', 'timeOverride');
+        const settingsSnap = await window.getDoc(settingsRef);
+        const overrideEnabled = settingsSnap.exists() ? settingsSnap.data().enabled : false;
+        
+        const btn = document.getElementById('time-override-btn');
+        if (overrideEnabled) {
+          btn.textContent = '営業';
+          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+        } else {
+          btn.textContent = '時外';
+          btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
+        }
+      } catch (e) {
+        console.error('時間オーバーライド読み込みエラー:', e);
+      }
+    }
+    
+    // トースト表示
+    function showToast(msg) {
+      const toast = document.createElement('div');
+      toast.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.9);color:white;padding:30px 50px;border-radius:15px;font-size:24px;font-weight:bold;z-index:10001;';
+      toast.textContent = msg;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 2000);
+    }
+    
+    // 初期化時に監視を開始
+    if (window.firebaseReady) {
+      watchWaiting();
+      loadTimeOverrideStatus();
+    } else {
+      window.addEventListener('firebaseReady', () => {
+        watchWaiting();
+        loadTimeOverrideStatus();
+      });
+    }
+    
   </script>
   
   <!-- カスタムアラート -->
@@ -4273,6 +4602,26 @@
       <div class="custom-alert-title" id="customAlertTitle">通知</div>
       <div class="custom-alert-message" id="customAlertMessage"></div>
       <button class="custom-alert-button" onclick="closeCustomAlert()">OK</button>
+    </div>
+  </div>
+  
+  <!-- 品切れページ -->
+  <div id="page-soldout" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); z-index: 10000; padding: 20px; overflow-y: auto;">
+    <div style="max-width: 1200px; margin: 0 auto;">
+      <button onclick="backFromSoldOut()" style="padding: 15px 30px; font-size: 18px; background: #FFFF00; color: #333; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">← 戻る</button>
+      
+      <div style="background: white; color: #667eea; padding: 15px 20px; border-radius: 15px; margin-bottom: 15px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+        <h1 style="font-size: 20px; font-weight: bold; margin: 0;">品切れ設定</h1>
+      </div>
+      
+      <div style="background: white; padding: 15px; border-radius: 15px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+        <label style="display: block; font-size: 16px; font-weight: bold; margin-bottom: 10px;">カテゴリを選んでください</label>
+        <select id="soldout-category-select" style="width: 100%; padding: 15px; font-size: 18px; border: 3px solid #9C27B0; border-radius: 12px;">
+          <option value="">全ての商品</option>
+        </select>
+      </div>
+      
+      <div id="soldout-menu-list"></div>
     </div>
   </div>
   
