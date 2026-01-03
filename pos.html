@@ -1384,6 +1384,11 @@
     let allMenuItems = [];
     let isBulkSoldOut = false;
     
+    // 音声通知用
+    let audioEnabled = false;
+    let lastOrderCount = 0;
+    let isFirstOrderLoad = true;
+    
     // プリンターIPアドレス（画像から）
     const PRINTER_IP = '192.168.244.41';
     
@@ -1521,6 +1526,11 @@
       
       // リアルタイム更新を開始
       startRealtimeUpdates();
+      
+      // 音声通知を初期化
+      showAudioEnablePopup();
+      watchOrders();
+      watchStaffCalls();
     }
     
     // テーブルボタンの色を更新
@@ -4654,7 +4664,194 @@ ${aiComment}
       });
     }
     
+    // ========== 音声通知機能 ==========
+    
+    function showAudioEnablePopup() {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:20000;display:flex;align-items:center;justify-content:center;';
+      
+      const popup = document.createElement('div');
+      popup.style.cssText = 'background:white;padding:40px;border-radius:20px;max-width:500px;text-align:center;box-shadow:0 10px 50px rgba(0,0,0,0.5);';
+      popup.innerHTML = `
+        <h2 style="font-size:24px;font-weight:bold;margin-bottom:20px;color:#667eea;">🔔 通知音を有効にしますか？</h2>
+        <p style="margin-bottom:30px;font-size:16px;color:#666;">注文・呼び出し・お会計の通知音を有効にすると、<br>注文が入った時や呼び出しがあった時に音でお知らせします。</p>
+        <button id="enableAudioBtn" style="padding:15px 40px;font-size:18px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;border:none;border-radius:12px;cursor:pointer;font-weight:bold;box-shadow:0 4px 15px rgba(102,126,234,0.4);">音を有効にする</button>
+        <button id="skipAudioBtn" style="padding:15px 40px;font-size:16px;background:#ccc;color:#666;border:none;border-radius:12px;cursor:pointer;margin-left:10px;">スキップ</button>
+      `;
+      
+      popup.querySelector('#enableAudioBtn').onclick = () => {
+        audioEnabled = true;
+        // ダミー音声を再生してブラウザの制限を解除
+        const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGGi77eifTRAMUKjj8LZjHAY4ktfyzXksBS');
+        audio.volume = 0.01;
+        audio.play().catch(e => console.log('ダミー音声再生失敗:', e));
+        overlay.remove();
+        showToast('🔔 通知音が有効になりました');
+      };
+      
+      popup.querySelector('#skipAudioBtn').onclick = () => {
+        audioEnabled = false;
+        overlay.remove();
+      };
+      
+      overlay.appendChild(popup);
+      document.body.appendChild(overlay);
+    }
+    
+    function playOrderSound() {
+      if (!audioEnabled) return;
+      try {
+        const audio = new Audio('./order.wav');
+        audio.volume = 1.0;
+        audio.play().catch(e => console.log('音声再生失敗:', e));
+      } catch (e) {
+        console.log('音声エラー:', e);
+      }
+    }
+    
+    function playCallSound() {
+      if (!audioEnabled) return;
+      try {
+        const audio = new Audio('./call.wav');
+        audio.volume = 1.0;
+        audio.play().catch(e => console.log('音声再生失敗:', e));
+      } catch (e) {
+        console.log('音声エラー:', e);
+      }
+    }
+    
+    function playBillSound() {
+      if (!audioEnabled) return;
+      try {
+        const audio = new Audio('./okaikei.wav');
+        audio.volume = 1.0;
+        audio.play().catch(e => console.log('音声再生失敗:', e));
+      } catch (e) {
+        console.log('音声エラー:', e);
+      }
+    }
+    
+    function watchOrders() {
+      const unsubscribe = window.onSnapshot(
+        window.collection(window.db, 'orders'), 
+        (snapshot) => {
+          const currentCount = snapshot.size;
+          
+          if (!isFirstOrderLoad && currentCount > lastOrderCount) {
+            playOrderSound();
+          }
+          
+          lastOrderCount = currentCount;
+          isFirstOrderLoad = false;
+        }
+      );
+      
+      return unsubscribe;
+    }
+    
+    function watchStaffCalls() {
+      let isFirstLoad = true;
+      let lastCallsSnapshot = [];
+      
+      const unsubscribe = window.onSnapshot(
+        window.collection(window.db, 'staff_calls'),
+        (snapshot) => {
+          const calls = [];
+          snapshot.forEach(doc => calls.push({ id: doc.id, ...doc.data() }));
+          calls.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+          
+          // 新しい呼び出しがあるかチェック
+          if (!isFirstLoad && calls.length > 0) {
+            const isBill = calls[0].type === 'bill';
+            
+            // ポップアップを表示
+            showStaffCallPopup(calls[0], isBill);
+            
+            // 音声を再生
+            if (isBill) playBillSound();
+            else playCallSound();
+          }
+          isFirstLoad = false;
+          lastCallsSnapshot = calls;
+        }
+      );
+      
+      return unsubscribe;
+    }
+    
+    function showStaffCallPopup(call, isBill) {
+      // 既存のポップアップがあれば削除
+      const existing = document.getElementById('staff-call-popup');
+      if (existing) existing.remove();
+      
+      const overlay = document.createElement('div');
+      overlay.id = 'staff-call-popup';
+      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:20000;display:flex;align-items:center;justify-content:center;animation:fadeIn 0.3s;';
+      
+      const popup = document.createElement('div');
+      popup.style.cssText = `
+        background:${isBill ? 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)' : 'linear-gradient(135deg, #FF9800 0%, #F57C00 100%)'};
+        padding:60px;
+        border-radius:30px;
+        text-align:center;
+        box-shadow:0 20px 60px rgba(0,0,0,0.5);
+        color:white;
+        animation:bounceIn 0.5s;
+      `;
+      
+      const orderNumberHtml = call.orderNumber 
+        ? `<div style="font-size:36px;margin-top:20px;font-weight:bold;">注文番号: #${call.orderNumber}</div>` 
+        : '';
+      
+      popup.innerHTML = `
+        <div style="font-size:80px;margin-bottom:20px;">${isBill ? '💳' : '📞'}</div>
+        <div style="font-size:48px;font-weight:bold;margin-bottom:20px;">
+          ${isBill ? 'お会計です' : '呼び出し'}
+        </div>
+        <div style="font-size:64px;font-weight:bold;background:rgba(255,255,255,0.3);padding:20px;border-radius:15px;margin-bottom:20px;">
+          ${call.tableNumber || 'テイクアウト'}
+        </div>
+        ${orderNumberHtml}
+        <button onclick="dismissStaffCallPopup('${call.id}')" style="
+          margin-top:30px;
+          padding:20px 60px;
+          font-size:24px;
+          background:white;
+          color:${isBill ? '#2196F3' : '#FF9800'};
+          border:none;
+          border-radius:15px;
+          cursor:pointer;
+          font-weight:bold;
+          box-shadow:0 4px 15px rgba(0,0,0,0.3);
+        ">対応完了</button>
+      `;
+      
+      overlay.appendChild(popup);
+      document.body.appendChild(overlay);
+    }
+    
+    window.dismissStaffCallPopup = async function(callId) {
+      await window.deleteDoc(window.doc(window.db, 'staff_calls', callId));
+      const popup = document.getElementById('staff-call-popup');
+      if (popup) popup.remove();
+      showToast('✓ 対応完了');
+    };
+    
   </script>
+  
+  <style>
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    
+    @keyframes bounceIn {
+      0% { transform: scale(0.3); opacity: 0; }
+      50% { transform: scale(1.05); }
+      70% { transform: scale(0.9); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+  </style>
   
   <!-- カスタムアラート -->
   <div id="customAlert" class="custom-alert-overlay">
