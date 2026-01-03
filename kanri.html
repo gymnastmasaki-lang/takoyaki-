@@ -94,6 +94,8 @@
             const [editingTime, setEditingTime] = useState(null);
             const [editingValue, setEditingValue] = useState('');
             const [editingMemo, setEditingMemo] = useState('');
+            const [editingIsHoliday, setEditingIsHoliday] = useState(false);
+            const [editingHourlyRate, setEditingHourlyRate] = useState('');
             const [isLoading, setIsLoading] = useState(false);
             const [error, setError] = useState(null);
 
@@ -245,7 +247,8 @@
                 const workHours = calculateWorkHours(record);
                 if (workHours === 0) return { base: 0, overtime: 0, holiday: 0, total: 0 };
                 
-                const hourlyRate = employee.hourlyRate || 0;
+                // 日別の時給を優先、なければ従業員のデフォルト時給を使用
+                const hourlyRate = record.hourlyRate || employee.hourlyRate || 0;
                 let basePay = 0;
                 let overtimePay = 0;
                 let holidayPay = 0;
@@ -370,6 +373,14 @@
                 setEditingTime({ employeeId, dateKey, field });
                 setEditingValue(currentValue || '');
                 setEditingMemo('');
+                
+                // 既存の勤怠データから休日フラグと時給を読み込む
+                const dayData = attendanceData[employeeId]?.[dateKey];
+                setEditingIsHoliday(dayData?.isHoliday || false);
+                
+                // 従業員のデフォルト時給を取得
+                const employee = employees.find(e => e.id === employeeId);
+                setEditingHourlyRate(dayData?.hourlyRate || employee?.hourlyRate || '');
             };
 
             const saveEditedTime = async () => {
@@ -414,6 +425,8 @@
                     
                     const oldValue = currentData[field];
                     currentData[field] = editingValue || null;
+                    currentData.isHoliday = editingIsHoliday; // 休日フラグを更新
+                    currentData.hourlyRate = parseFloat(editingHourlyRate) || employee?.hourlyRate || 0; // 時給を更新
                     
                     if (!currentData.editHistory) {
                         currentData.editHistory = [];
@@ -423,6 +436,8 @@
                         field,
                         oldValue,
                         newValue: editingValue || null,
+                        isHoliday: editingIsHoliday,
+                        hourlyRate: currentData.hourlyRate,
                         memo: editingMemo || '',
                         timestamp: new Date().toISOString(),
                         editor: '管理者'
@@ -434,6 +449,8 @@
                     setEditingTime(null);
                     setEditingValue('');
                     setEditingMemo('');
+                    setEditingIsHoliday(false);
+                    setEditingHourlyRate('');
                 } catch (err) {
                     console.error('時刻保存エラー:', err);
                     alert('時刻の保存に失敗しました: ' + err.message);
@@ -446,6 +463,8 @@
                 setEditingTime(null);
                 setEditingValue('');
                 setEditingMemo('');
+                setEditingIsHoliday(false);
+                setEditingHourlyRate('');
             };
 
             const exportToCSV = (employeeId) => {
@@ -797,6 +816,30 @@
                                                                             placeholder="HH:MM"
                                                                             autoFocus
                                                                         />
+                                                                        <label className="flex items-center gap-1 mt-1 text-xs">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={editingIsHoliday}
+                                                                                onChange={(e) => setEditingIsHoliday(e.target.checked)}
+                                                                                className="rounded"
+                                                                            />
+                                                                            <span className="text-red-600 font-bold">休日出勤（割増35%）</span>
+                                                                        </label>
+                                                                        <div className="flex items-center gap-1 mt-1">
+                                                                            <span className="text-xs">時給:</span>
+                                                                            <input
+                                                                                type="number"
+                                                                                value={editingHourlyRate}
+                                                                                onChange={(e) => setEditingHourlyRate(e.target.value)}
+                                                                                onKeyDown={(e) => {
+                                                                                    if (e.key === 'Enter') saveEditedTime();
+                                                                                    if (e.key === 'Escape') cancelEditingTime();
+                                                                                }}
+                                                                                className="flex-1 p-1 text-xs border border-gray-300 rounded"
+                                                                                placeholder="時給(円)"
+                                                                            />
+                                                                            <span className="text-xs">円</span>
+                                                                        </div>
                                                                         <input
                                                                             type="text"
                                                                             value={editingMemo}
