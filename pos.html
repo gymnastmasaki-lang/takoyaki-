@@ -2073,14 +2073,44 @@
         
         const orderData = orderDoc.data();
         
+        // 商品リストを作成（税率情報はデフォルトで10%）
+        const itemsWithTaxRate = [];
+        
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            itemsWithTaxRate.push({
+              name: item.name,
+              quantity: item.quantity,
+              price: item.price + (item.toppingPrice || 0),
+              toppings: item.toppings || 'なし',
+              taxRate: 10  // デフォルト
+            });
+          });
+        }
+        
+        // レジ袋を追加
+        if (orderData.bagNeeded && orderData.bagQuantity > 0) {
+          const bagTotal = orderData.bagPrice || (orderData.bagQuantity * 3);
+          itemsWithTaxRate.push({
+            name: '🛍️ レジ袋',
+            quantity: orderData.bagQuantity,
+            price: 3,
+            toppings: 'なし',
+            taxRate: 10
+          });
+        }
+        
         // lastPaymentDataを再構築
         lastPaymentData = {
           orderNumbers: [orderData.orderNumber],
           tableNumber: orderData.tableNumber,
-          items: orderData.items,
+          items: itemsWithTaxRate,
           totalAmount: orderData.totalAmount,
-          paymentMethod: 'cash', // デフォルト
-          timestamp: orderData.paidAt || orderData.timestamp
+          paymentMethod: orderData.paymentMethod || 'cash',
+          staffName: orderData.staffName || 'レジ係',
+          cashReceived: orderData.totalAmount,
+          change: 0,
+          timestamp: orderData.paidAt ? orderData.paidAt.toDate() : orderData.timestamp.toDate()
         };
         
         await printReceipt();
@@ -2102,14 +2132,43 @@
         
         const orderData = orderDoc.data();
         
+        // 商品リストを作成
+        const itemsWithTaxRate = [];
+        
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            itemsWithTaxRate.push({
+              name: item.name,
+              quantity: item.quantity,
+              price: item.price + (item.toppingPrice || 0),
+              toppings: item.toppings || 'なし',
+              taxRate: 10
+            });
+          });
+        }
+        
+        // レジ袋を追加
+        if (orderData.bagNeeded && orderData.bagQuantity > 0) {
+          itemsWithTaxRate.push({
+            name: '🛍️ レジ袋',
+            quantity: orderData.bagQuantity,
+            price: 3,
+            toppings: 'なし',
+            taxRate: 10
+          });
+        }
+        
         // lastPaymentDataを再構築
         lastPaymentData = {
           orderNumbers: [orderData.orderNumber],
           tableNumber: orderData.tableNumber,
-          items: orderData.items,
+          items: itemsWithTaxRate,
           totalAmount: orderData.totalAmount,
-          paymentMethod: 'cash', // デフォルト
-          timestamp: orderData.paidAt || orderData.timestamp
+          paymentMethod: orderData.paymentMethod || 'cash',
+          staffName: orderData.staffName || 'レジ係',
+          cashReceived: orderData.totalAmount,
+          change: 0,
+          timestamp: orderData.paidAt ? orderData.paidAt.toDate() : orderData.timestamp.toDate()
         };
         
         await printInvoice();
@@ -3314,6 +3373,22 @@
         `;
       }
       
+      // レジ袋情報を追加
+      if (order.bagNeeded && order.bagQuantity > 0) {
+        const bagTotal = order.bagPrice || (order.bagQuantity * 3);
+        itemsHtml += `
+          <div class="order-item-detailed" style="background: #fff3e0;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+              <div style="font-weight: bold;">🛍️ レジ袋 ×${order.bagQuantity}</div>
+              <div>¥3</div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 5px; padding-top: 5px; border-top: 1px dashed #ddd;">
+              <div style="font-weight: bold; color: #667eea;">¥3 × ${order.bagQuantity} = ¥${bagTotal.toLocaleString()}</div>
+            </div>
+          </div>
+        `;
+      }
+      
       card.innerHTML = `
         <div class="order-header">
           <div>
@@ -3448,6 +3523,21 @@
     };
     
     // 税率選択リストを構築
+    
+    // テーブル番号に基づいてデフォルト税率を決定
+    function determineDefaultTaxRate(tableNumber) {
+      // 即会計、テイクアウト、予約テーブル: 8%
+      if (tableNumber === '即会計' || tableNumber === 'テイクアウト' || tableNumber === '予約テーブル') {
+        return 8;
+      }
+      // c1, c2, T-M, T-H: 10%
+      if (tableNumber === 'c1' || tableNumber === 'c2' || tableNumber === 'T-M' || tableNumber === 'T-H') {
+        return 10;
+      }
+      // それ以外のテーブル: 10%（デフォルト）
+      return 10;
+    }
+    
     function buildTaxRateSelectionList() {
       const container = document.getElementById('taxRateItemsList');
       container.innerHTML = '';
@@ -3475,16 +3565,30 @@
           // itemsがない場合は注文全体として表示
           const orderTotal = order.totalAmount || 0;
           console.log(`  注文全体として追加: #${order.orderNumber}, 金額:${orderTotal}`);
-          addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, orderTotal, itemIndex);
+          
+          // テーブル番号に基づいてデフォルト税率を決定
+          const defaultTaxRate = determineDefaultTaxRate(order.tableNumber);
+          addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, orderTotal, itemIndex, defaultTaxRate);
           itemIndex++;
         } else {
           // 各商品を表示
           order.items.forEach((item, itemIdx) => {
             const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
             console.log(`  商品追加: ${item.name} x${item.quantity}, 金額:${itemTotal}`);
-            addTaxRateItem(container, item.name, item.quantity, itemTotal, itemIndex);
+            
+            // テーブル番号に基づいてデフォルト税率を決定
+            const defaultTaxRate = determineDefaultTaxRate(order.tableNumber);
+            addTaxRateItem(container, item.name, item.quantity, itemTotal, itemIndex, defaultTaxRate);
             itemIndex++;
           });
+          
+          // レジ袋を追加（デフォルトは10%）
+          if (order.bagNeeded && order.bagQuantity > 0) {
+            const bagTotal = order.bagPrice || (order.bagQuantity * 3);
+            console.log(`  レジ袋追加: ${order.bagQuantity}枚, 金額:${bagTotal}`);
+            addTaxRateItem(container, '🛍️ レジ袋', order.bagQuantity, bagTotal, itemIndex, 10);
+            itemIndex++;
+          }
         }
       });
       
@@ -3493,8 +3597,8 @@
     }
     
     // 税率選択項目を追加
-    function addTaxRateItem(container, itemName, quantity, itemTotal, index) {
-      console.log(`  addTaxRateItem: ${itemName}, 数量:${quantity}, 金額:${itemTotal}, index:${index}`);
+    function addTaxRateItem(container, itemName, quantity, itemTotal, index, defaultTaxRate = 10) {
+      console.log(`  addTaxRateItem: ${itemName}, 数量:${quantity}, 金額:${itemTotal}, index:${index}, デフォルト税率:${defaultTaxRate}%`);
       
       const itemDiv = document.createElement('div');
       itemDiv.style.cssText = 'padding: 10px; margin-bottom: 8px; background: white; border-radius: 6px; border: 1px solid #ddd;';
@@ -3517,7 +3621,7 @@
       radio8.type = 'radio';
       radio8.name = `taxRate${index}`;
       radio8.value = '8';
-      radio8.checked = false;  // デフォルトは10%に変更
+      radio8.checked = (defaultTaxRate === 8);
       radio8.dataset.amount = itemTotal;
       radio8.dataset.index = index;
       radio8.style.cssText = 'margin-right: 5px; width: 18px; height: 18px;';
@@ -3532,7 +3636,7 @@
       radio10.type = 'radio';
       radio10.name = `taxRate${index}`;
       radio10.value = '10';
-      radio10.checked = true;  // デフォルトは10%（店内飲食）
+      radio10.checked = (defaultTaxRate === 10);
       radio10.dataset.amount = itemTotal;
       radio10.dataset.index = index;
       radio10.style.cssText = 'margin-right: 5px; width: 18px; height: 18px;';
@@ -3721,11 +3825,60 @@
         // 🆕 日次売上を更新（値引き後の金額で売上を記録し、値引き額も別途記録）
         await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount, tax8Total, tax10Total, discountAmount);
         
+        // 商品リストを税率情報付きで作成
+        const itemsWithTaxRate = [];
+        let itemIndex = 0;
+        
+        currentOrders.forEach(order => {
+          if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
+            // itemsがない場合
+            const radio = document.querySelector(`input[name="taxRate${itemIndex}"]:checked`);
+            const taxRate = radio ? parseInt(radio.value) : 10;
+            itemsWithTaxRate.push({
+              name: `注文 #${order.orderNumber}`,
+              quantity: 1,
+              price: order.totalAmount || 0,
+              toppings: 'なし',
+              taxRate: taxRate
+            });
+            itemIndex++;
+          } else {
+            // 各商品を追加
+            order.items.forEach(item => {
+              const radio = document.querySelector(`input[name="taxRate${itemIndex}"]:checked`);
+              const taxRate = radio ? parseInt(radio.value) : 10;
+              itemsWithTaxRate.push({
+                name: item.name,
+                quantity: item.quantity,
+                price: item.price + (item.toppingPrice || 0),
+                toppings: item.toppings || 'なし',
+                taxRate: taxRate
+              });
+              itemIndex++;
+            });
+            
+            // レジ袋を追加
+            if (order.bagNeeded && order.bagQuantity > 0) {
+              const radio = document.querySelector(`input[name="taxRate${itemIndex}"]:checked`);
+              const taxRate = radio ? parseInt(radio.value) : 10;
+              const bagTotal = order.bagPrice || (order.bagQuantity * 3);
+              itemsWithTaxRate.push({
+                name: '🛍️ レジ袋',
+                quantity: order.bagQuantity,
+                price: 3,
+                toppings: 'なし',
+                taxRate: taxRate
+              });
+              itemIndex++;
+            }
+          }
+        });
+        
         // 支払いデータを保存（レシート印刷用）
         lastPaymentData = {
           tableNumber: selectedTable,
           orderNumbers: orderNumbers,
-          items: currentOrders.flatMap(o => o.items),
+          items: itemsWithTaxRate,
           totalAmount: totalAmountToPay,
           discountAmount: discountAmount,
           paymentMethod: selectedPaymentMethod,
