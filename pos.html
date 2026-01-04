@@ -3918,6 +3918,34 @@ ${aiComment}
         // 注文番号リストを取得
         const orderNumbers = currentOrders.map(o => o.orderNumber);
         
+        // ★★★ Firestoreから最新のデータを再取得 ★★★
+        console.log('🔄 Firestoreから注文データを再取得します');
+        const freshOrders = [];
+        for (const order of currentOrders) {
+          const docRef = doc(db, 'orders', order.id);
+          const docSnap = await window.getDoc(docRef);
+          if (docSnap.exists()) {
+            const freshData = docSnap.data();
+            freshOrders.push({ id: order.id, ...freshData });
+            console.log(`📋 注文#${freshData.orderNumber}の最新データ:`, freshData);
+            console.log(`  - items存在: ${!!freshData.items}`);
+            console.log(`  - items長さ: ${freshData.items ? freshData.items.length : 0}`);
+            if (freshData.items && freshData.items.length > 0) {
+              freshData.items.forEach((item, idx) => {
+                console.log(`    [${idx}] ${item.name} x${item.quantity}`);
+              });
+            }
+          } else {
+            console.error(`❌ 注文ID ${order.id} が見つかりません`);
+            freshOrders.push(order); // 元のデータを使用
+          }
+        }
+        
+        // currentOrdersを最新データで上書き
+        const originalOrders = currentOrders;
+        currentOrders = freshOrders;
+        console.log('✅ currentOrdersを最新データで更新しました');
+        
         // 全ての注文に支払い済みフラグと担当者を設定
         for (const order of currentOrders) {
           await window.updateDoc(doc(db, 'orders', order.id), {
@@ -3942,34 +3970,35 @@ ${aiComment}
             id: order.id,
             orderNumber: order.orderNumber,
             hasItems: !!order.items,
+            itemsType: typeof order.items,
+            itemsIsArray: Array.isArray(order.items),
             itemsLength: order.items ? order.items.length : 0,
-            bagQuantity: order.bagQuantity || 0
+            bagQuantity: order.bagQuantity || 0,
+            totalAmount: order.totalAmount || 0
           });
           
           console.log('🔍 order.items:', order.items);
+          console.log('🔍 order全体:', order);
           
           if (order.items && Array.isArray(order.items) && order.items.length > 0) {
-            // itemsが存在する場合は、各商品の数量を加算
+            // itemsが存在し、配列で、要素がある場合
+            console.log(`✅ order.itemsが存在します（${order.items.length}個）`);
             order.items.forEach((item, itemIdx) => {
               console.log(`📦 商品${itemIdx + 1}:`, item);
               const quantity = item.quantity || 0;
               itemCount += quantity;
-              console.log(`  → ${item.name} x ${quantity}点を加算`);
+              console.log(`  → ${item.name} x ${quantity}点を加算 (累計: ${itemCount}点)`);
             });
           } else {
-            // itemsが存在しない場合は、注文全体を1点としてカウント（レジ袋を除く）
-            console.log('⚠️ order.itemsが存在しないため、注文全体を1点としてカウント');
+            // itemsが存在しない、または空の場合
+            console.log('⚠️ order.itemsが存在しない、または空です');
+            console.log('⚠️ 注文全体を1点としてカウントします');
             itemCount += 1;
+            console.log(`  → 注文 #${order.orderNumber} を1点として加算 (累計: ${itemCount}点)`);
           }
-          
-          // レジ袋は商品点数に含めない（お客様の要望）
-          // if (order.bagNeeded && order.bagQuantity > 0) {
-          //   itemCount += order.bagQuantity;
-          //   console.log(`🛍️ レジ袋: ${order.bagQuantity}点を加算`);
-          // }
         });
         
-        console.log('📦 会計商品点数:', itemCount);
+        console.log('📦 最終商品点数:', itemCount);
         
         // 選択された税率から集計
         const radios = document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked');
