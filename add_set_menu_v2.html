@@ -2,13 +2,22 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>セットメニュー追加（シンプル版）</title>
+  <title>セットメニュー追加（1個ずつ）</title>
   <style>
     body {
       font-family: Arial, sans-serif;
       padding: 20px;
-      max-width: 800px;
+      max-width: 900px;
       margin: 0 auto;
+    }
+    h1 {
+      color: #333;
+    }
+    .controls {
+      margin: 20px 0;
+      padding: 20px;
+      background: #f0f0f0;
+      border-radius: 8px;
     }
     button {
       padding: 15px 30px;
@@ -18,7 +27,7 @@
       border: none;
       border-radius: 8px;
       cursor: pointer;
-      margin: 10px;
+      margin: 5px;
     }
     button:hover {
       background: #45a049;
@@ -27,34 +36,63 @@
       background: #ccc;
       cursor: not-allowed;
     }
+    .stop-btn {
+      background: #f44336;
+    }
+    .stop-btn:hover {
+      background: #da190b;
+    }
     #result {
       margin-top: 20px;
       padding: 20px;
-      background: #f5f5f5;
+      background: #fff;
+      border: 2px solid #ddd;
       border-radius: 8px;
-      white-space: pre-wrap;
-      font-family: monospace;
-      max-height: 500px;
+      max-height: 600px;
       overflow-y: auto;
+      font-family: monospace;
+      font-size: 14px;
     }
-    .error {
-      color: red;
-      font-weight: bold;
+    .log-item {
+      padding: 5px 0;
+      border-bottom: 1px solid #eee;
     }
     .success {
-      color: green;
+      color: #4CAF50;
       font-weight: bold;
+    }
+    .error {
+      color: #f44336;
+      font-weight: bold;
+    }
+    .info {
+      color: #2196F3;
+    }
+    .progress {
+      margin: 20px 0;
+      font-size: 18px;
+      font-weight: bold;
+      color: #333;
+    }
+    .current-item {
+      background: #fff3cd;
+      padding: 10px;
+      border-radius: 5px;
+      margin: 10px 0;
+      border-left: 4px solid #ffc107;
     }
   </style>
 </head>
 <body>
-  <h1>セットメニュー追加（シンプル版）</h1>
-  <p>処理を3つのステップに分けて実行します。</p>
+  <h1>セットメニュー追加（1個ずつ確認）</h1>
   
-  <div>
-    <button id="btn1" onclick="step1()">ステップ1: トッピング追加（23個）</button>
-    <button id="btn2" onclick="step2()" disabled>ステップ2: メニュー追加（3個）</button>
-    <button id="btn3" onclick="checkResult()" disabled>ステップ3: 結果確認</button>
+  <div class="controls">
+    <div class="progress" id="progress">準備完了</div>
+    <div class="current-item" id="current" style="display: none;"></div>
+    
+    <button id="startBtn" onclick="startAdding()">追加開始</button>
+    <button id="stopBtn" onclick="stopAdding()" class="stop-btn" disabled>一時停止</button>
+    <button onclick="clearLog()">ログクリア</button>
   </div>
   
   <div id="result"></div>
@@ -80,104 +118,167 @@
     window.addDoc = addDoc;
     window.getDocs = getDocs;
     
-    console.log('Firebase初期化完了');
+    console.log('✅ Firebase初期化完了');
   </script>
 
   <script>
-    function log(message, isError = false) {
+    let isRunning = false;
+    let shouldStop = false;
+    
+    // 追加するデータ
+    const allData = {
+      toppings: [
+        // ドリンク（10個）
+        { id: 'OTUMAMI_DRINK01', name: '【ドリンク】生ビール', price: 0, order: 101 },
+        { id: 'OTUMAMI_DRINK02', name: '【ドリンク】チューハイプレーン', price: 0, order: 102 },
+        { id: 'OTUMAMI_DRINK03', name: '【ドリンク】チューハイゆず', price: 0, order: 103 },
+        { id: 'OTUMAMI_DRINK04', name: '【ドリンク】チューハイグレープフルーツ', price: 0, order: 104 },
+        { id: 'OTUMAMI_DRINK05', name: '【ドリンク】チューハイ青りんご', price: 0, order: 105 },
+        { id: 'OTUMAMI_DRINK06', name: '【ドリンク】チューハイ梅', price: 0, order: 106 },
+        { id: 'OTUMAMI_DRINK07', name: '【ドリンク】チューハイカルピス', price: 0, order: 107 },
+        { id: 'OTUMAMI_DRINK08', name: '【ドリンク】角ハイ', price: 0, order: 108 },
+        { id: 'OTUMAMI_DRINK09', name: '【ドリンク】ジムビーム', price: 0, order: 109 },
+        { id: 'OTUMAMI_DRINK10', name: '【ドリンク】ウーロンハイ', price: 0, order: 110 },
+        // たこ焼き味（5個）
+        { id: 'OTUMAMI_TASTE01', name: '【たこ焼き味】ソース', price: 0, order: 201 },
+        { id: 'OTUMAMI_TASTE02', name: '【たこ焼き味】しょうゆ', price: 0, order: 202 },
+        { id: 'OTUMAMI_TASTE03', name: '【たこ焼き味】塩', price: 0, order: 203 },
+        { id: 'OTUMAMI_TASTE04', name: '【たこ焼き味】ポン酢', price: 30, order: 204 },
+        { id: 'OTUMAMI_TASTE05', name: '【たこ焼き味】みそだれ', price: 30, order: 205 },
+        // 一品（6個）
+        { id: 'OTUMAMI_SIDE01', name: '【一品】枝豆', price: 0, order: 301 },
+        { id: 'OTUMAMI_SIDE02', name: '【一品】揚げにんにく', price: 0, order: 302 },
+        { id: 'OTUMAMI_SIDE03', name: '【一品】ごま油キムチ', price: 0, order: 303 },
+        { id: 'OTUMAMI_SIDE04', name: '【一品】冷奴', price: 0, order: 304 },
+        { id: 'OTUMAMI_SIDE05', name: '【一品】ポテトフライ', price: 0, order: 305 },
+        { id: 'OTUMAMI_SIDE06', name: '【一品】唐揚げ2個', price: 0, order: 306 },
+        // オプション（2個）
+        { id: 'OTUMAMI_OPT01', name: '【オプション】生ビールお得ジョッキに変更', price: 150, order: 401 },
+        { id: 'OTUMAMI_OPT02', name: '【オプション】その他メガに変更', price: 300, order: 402 }
+      ],
+      menus: [] // メニューは後で追加
+    };
+    
+    function log(message, type = 'info') {
       const resultDiv = document.getElementById('result');
       const timestamp = new Date().toLocaleTimeString();
-      const className = isError ? 'error' : '';
-      resultDiv.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+      const div = document.createElement('div');
+      div.className = `log-item ${type}`;
+      div.textContent = `[${timestamp}] ${message}`;
+      resultDiv.appendChild(div);
       resultDiv.scrollTop = resultDiv.scrollHeight;
       console.log(message);
     }
     
-    async function step1() {
-      const btn = document.getElementById('btn1');
-      btn.disabled = true;
+    function updateProgress(current, total, phase) {
+      const progressDiv = document.getElementById('progress');
+      progressDiv.textContent = `${phase}: ${current}/${total}`;
+    }
+    
+    function showCurrent(item) {
+      const currentDiv = document.getElementById('current');
+      currentDiv.style.display = 'block';
+      currentDiv.textContent = `処理中: ${item.name || item.id}`;
+    }
+    
+    function clearLog() {
+      document.getElementById('result').innerHTML = '';
+      log('ログをクリアしました', 'info');
+    }
+    
+    function stopAdding() {
+      shouldStop = true;
+      document.getElementById('stopBtn').disabled = true;
+      log('⏸️ 一時停止します...', 'info');
+    }
+    
+    async function startAdding() {
+      if (isRunning) {
+        alert('既に実行中です');
+        return;
+      }
       
-      const resultDiv = document.getElementById('result');
-      resultDiv.innerHTML = '';
-      log('ステップ1: トッピング追加開始...');
+      isRunning = true;
+      shouldStop = false;
+      document.getElementById('startBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+      
+      log('🚀 追加処理を開始します', 'info');
+      log('', 'info');
       
       try {
-        const toppings = [
-          // ドリンク（10個）
-          { id: 'OTUMAMI_DRINK01', name: '【ドリンク】生ビール', price: 0, order: 101 },
-          { id: 'OTUMAMI_DRINK02', name: '【ドリンク】チューハイプレーン', price: 0, order: 102 },
-          { id: 'OTUMAMI_DRINK03', name: '【ドリンク】チューハイゆず', price: 0, order: 103 },
-          { id: 'OTUMAMI_DRINK04', name: '【ドリンク】チューハイグレープフルーツ', price: 0, order: 104 },
-          { id: 'OTUMAMI_DRINK05', name: '【ドリンク】チューハイ青りんご', price: 0, order: 105 },
-          { id: 'OTUMAMI_DRINK06', name: '【ドリンク】チューハイ梅', price: 0, order: 106 },
-          { id: 'OTUMAMI_DRINK07', name: '【ドリンク】チューハイカルピス', price: 0, order: 107 },
-          { id: 'OTUMAMI_DRINK08', name: '【ドリンク】角ハイ', price: 0, order: 108 },
-          { id: 'OTUMAMI_DRINK09', name: '【ドリンク】ジムビーム', price: 0, order: 109 },
-          { id: 'OTUMAMI_DRINK10', name: '【ドリンク】ウーロンハイ', price: 0, order: 110 },
-          // たこ焼き味（5個）
-          { id: 'OTUMAMI_TASTE01', name: '【たこ焼き味】ソース', price: 0, order: 201 },
-          { id: 'OTUMAMI_TASTE02', name: '【たこ焼き味】しょうゆ', price: 0, order: 202 },
-          { id: 'OTUMAMI_TASTE03', name: '【たこ焼き味】塩', price: 0, order: 203 },
-          { id: 'OTUMAMI_TASTE04', name: '【たこ焼き味】ポン酢', price: 30, order: 204 },
-          { id: 'OTUMAMI_TASTE05', name: '【たこ焼き味】みそだれ', price: 30, order: 205 },
-          // 一品（6個）
-          { id: 'OTUMAMI_SIDE01', name: '【一品】枝豆', price: 0, order: 301 },
-          { id: 'OTUMAMI_SIDE02', name: '【一品】揚げにんにく', price: 0, order: 302 },
-          { id: 'OTUMAMI_SIDE03', name: '【一品】ごま油キムチ', price: 0, order: 303 },
-          { id: 'OTUMAMI_SIDE04', name: '【一品】冷奴', price: 0, order: 304 },
-          { id: 'OTUMAMI_SIDE05', name: '【一品】ポテトフライ', price: 0, order: 305 },
-          { id: 'OTUMAMI_SIDE06', name: '【一品】唐揚げ2個', price: 0, order: 306 },
-          // オプション（2個）
-          { id: 'OTUMAMI_OPT01', name: '【オプション】生ビールお得ジョッキに変更', price: 150, order: 401 },
-          { id: 'OTUMAMI_OPT02', name: '【オプション】その他メガに変更', price: 300, order: 402 }
-        ];
+        // フェーズ1: トッピング追加
+        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+        log('📦 フェーズ1: トッピング追加', 'info');
+        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
         
-        log(`追加するトッピング数: ${toppings.length}個`);
-        
+        const toppings = allData.toppings;
         let successCount = 0;
         let errorCount = 0;
         
         for (let i = 0; i < toppings.length; i++) {
+          if (shouldStop) {
+            log('⏸️ 処理を一時停止しました', 'info');
+            break;
+          }
+          
           const topping = toppings[i];
+          updateProgress(i + 1, toppings.length, 'トッピング追加');
+          showCurrent(topping);
+          
           try {
-            await window.addDoc(window.collection(window.db, 'toppings'), topping);
+            const docRef = await window.addDoc(window.collection(window.db, 'toppings'), topping);
             successCount++;
+            log(`✅ ${topping.name} (ID: ${topping.id})`, 'success');
             
-            if (i % 5 === 0 || i === toppings.length - 1) {
-              log(`進捗: ${i + 1}/${toppings.length}`);
-            }
-            
-            // 少し待機（レート制限対策）
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // 1秒待機（確認しやすく、レート制限回避）
+            await new Promise(resolve => setTimeout(resolve, 1000));
             
           } catch (error) {
             errorCount++;
-            log(`❌ エラー: ${topping.name} - ${error.message}`, true);
+            log(`❌ エラー: ${topping.name} - ${error.message}`, 'error');
+            
+            // エラーが出たら2秒待機
+            await new Promise(resolve => setTimeout(resolve, 2000));
           }
         }
         
-        log(`✅ トッピング追加完了: ${successCount}個成功, ${errorCount}個失敗`);
+        log('', 'info');
+        log(`トッピング追加完了: 成功=${successCount}, 失敗=${errorCount}`, 'info');
+        log('', 'info');
         
-        if (successCount > 0) {
-          document.getElementById('btn2').disabled = false;
-          log('→ ステップ2のボタンが有効になりました');
+        if (shouldStop) {
+          isRunning = false;
+          document.getElementById('startBtn').disabled = false;
+          document.getElementById('stopBtn').disabled = true;
+          document.getElementById('current').style.display = 'none';
+          return;
         }
         
-      } catch (error) {
-        log(`❌ エラー: ${error.message}`, true);
-        console.error('エラー:', error);
-      }
-    }
-    
-    async function step2() {
-      const btn = document.getElementById('btn2');
-      btn.disabled = true;
-      
-      log('');
-      log('ステップ2: メニュー追加開始...');
-      
-      try {
-        // トッピングIDリストを作成
+        // フェーズ2: 既存のたこ焼き味トッピングID取得
+        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+        log('🔍 フェーズ2: 既存トッピング確認', 'info');
+        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+        
+        const toppingsSnapshot = await window.getDocs(window.collection(window.db, 'toppings'));
+        let tasteTopping = '';
+        
+        toppingsSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.name && data.name.includes('ソース') && !data.id.startsWith('OTUMAMI_')) {
+            if (!tasteTopping) {
+              tasteTopping = data.id;
+              log(`既存のたこ焼き味トッピングID: ${tasteTopping}`, 'info');
+            }
+          }
+        });
+        
+        if (!tasteTopping) {
+          tasteTopping = 'OTUMAMI_TASTE01,OTUMAMI_TASTE02,OTUMAMI_TASTE03,OTUMAMI_TASTE04,OTUMAMI_TASTE05';
+          log(`既存トッピングが見つからないため、新規ID使用: ${tasteTopping}`, 'info');
+        }
+        
+        // おつまみセット用のトッピングIDリスト
         const toppingIds = [];
         for (let i = 1; i <= 10; i++) {
           toppingIds.push(`OTUMAMI_DRINK${String(i).padStart(2, '0')}`);
@@ -189,27 +290,14 @@
           toppingIds.push(`OTUMAMI_SIDE${String(i).padStart(2, '0')}`);
         }
         toppingIds.push('OTUMAMI_OPT01', 'OTUMAMI_OPT02');
-        
         const otumamisetToppingIds = toppingIds.join(',');
         
-        // 既存のたこ焼き味トッピングIDを取得
-        const toppingsSnapshot = await window.getDocs(window.collection(window.db, 'toppings'));
-        let tasteTopping = '';
+        log('', 'info');
         
-        toppingsSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.name && data.name.includes('ソース') && !data.id.startsWith('OTUMAMI_')) {
-            if (!tasteTopping) {
-              tasteTopping = data.id;
-            }
-          }
-        });
-        
-        if (!tasteTopping) {
-          tasteTopping = 'OTUMAMI_TASTE01,OTUMAMI_TASTE02,OTUMAMI_TASTE03,OTUMAMI_TASTE04,OTUMAMI_TASTE05';
-        }
-        
-        log(`たこ焼き味トッピングID: ${tasteTopping}`);
+        // フェーズ3: メニュー追加
+        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+        log('🍽️ フェーズ3: メニュー追加', 'info');
+        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
         
         const menus = [
           {
@@ -241,58 +329,58 @@
           }
         ];
         
-        for (const menu of menus) {
-          const docRef = await window.addDoc(window.collection(window.db, 'menu'), menu);
-          log(`✅ メニュー追加: ${menu.name} (${menu.price}円)`);
+        for (let i = 0; i < menus.length; i++) {
+          if (shouldStop) {
+            log('⏸️ 処理を一時停止しました', 'info');
+            break;
+          }
           
-          await new Promise(resolve => setTimeout(resolve, 100));
+          const menu = menus[i];
+          updateProgress(i + 1, menus.length, 'メニュー追加');
+          showCurrent(menu);
+          
+          try {
+            const docRef = await window.addDoc(window.collection(window.db, 'menu'), menu);
+            log(`✅ ${menu.name} (${menu.price}円)`, 'success');
+            
+            // 1秒待機
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+          } catch (error) {
+            log(`❌ エラー: ${menu.name} - ${error.message}`, 'error');
+            
+            // エラーが出たら2秒待機
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
         }
         
-        log('✅ 全メニュー追加完了');
-        document.getElementById('btn3').disabled = false;
-        log('→ ステップ3のボタンが有効になりました');
+        log('', 'info');
+        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'success');
+        log('🎉 全ての処理が完了しました！', 'success');
+        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'success');
+        log('', 'info');
+        log('✅ 追加されたメニュー:', 'success');
+        log('  - Aセット (1000円)', 'success');
+        log('  - Bセット (1250円)', 'success');
+        log('  - おつまみセット (1000円)', 'success');
+        log('', 'info');
+        log('📱 メニューアプリを再読み込みして確認してください', 'info');
         
       } catch (error) {
-        log(`❌ エラー: ${error.message}`, true);
-        console.error('エラー:', error);
+        log(`❌ 致命的エラー: ${error.message}`, 'error');
+        console.error('エラー詳細:', error);
       }
-    }
-    
-    async function checkResult() {
-      log('');
-      log('ステップ3: 結果確認中...');
       
-      try {
-        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
-        let setMenuCount = 0;
-        
-        menuSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.category === 'セット') {
-            setMenuCount++;
-            log(`- ${data.name} (${data.price}円)`);
-          }
-        });
-        
-        log('');
-        log(`✅ セットメニュー: ${setMenuCount}件`);
-        log('');
-        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        log('✅ 全ての処理が完了しました！');
-        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        log('');
-        log('メニューアプリを再読み込みして確認してください。');
-        log('テーブルURLから確認: ?table=T-M など');
-        
-      } catch (error) {
-        log(`❌ エラー: ${error.message}`, true);
-        console.error('エラー:', error);
-      }
+      isRunning = false;
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+      document.getElementById('current').style.display = 'none';
+      updateProgress(0, 0, '完了');
     }
     
-    window.step1 = step1;
-    window.step2 = step2;
-    window.checkResult = checkResult;
+    window.startAdding = startAdding;
+    window.stopAdding = stopAdding;
+    window.clearLog = clearLog;
   </script>
 </body>
 </html>
