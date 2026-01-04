@@ -3614,9 +3614,80 @@ ${aiComment}
       console.log('selectedTable =', selectedTable);
       
       try {
-        // deleteDocではなくdeletedフラグを立てる（Firebaseルールで削除が許可されていない可能性があるため）
+        // ★★★ 削除前にFirestoreから注文データを取得 ★★★
+        console.log('注文データ取得中...');
+        const orderRef = doc(db, 'orders', orderId);
+        const orderSnap = await window.getDoc(orderRef);
+        
+        if (!orderSnap.exists()) {
+          alert('注文が見つかりません');
+          return;
+        }
+        
+        const orderData = orderSnap.data();
+        console.log('注文データ:', orderData);
+        
+        // ★★★ 会計済みの注文のみ商品点数をカウント ★★★
+        if (orderData.paidAt && !orderData.deleted) {
+          console.log('📦 会計済み注文の商品点数をカウントします');
+          
+          let itemCount = 0;
+          let tax8Total = 0;
+          let tax10Total = 0;
+          
+          // 商品点数をカウント
+          if (orderData.items && Array.isArray(orderData.items) && orderData.items.length > 0) {
+            orderData.items.forEach(item => {
+              const qty = item.quantity || 0;
+              itemCount += qty;
+              console.log(`  → ${item.name} x${qty}点`);
+              
+              // 商品ごとの金額を計算（トッピング込み）
+              const basePrice = item.price || 0;
+              const toppingPrice = item.toppingPrice || 0;
+              const totalPrice = basePrice + toppingPrice;
+              const itemTotal = totalPrice * qty;
+              
+              // テーブル番号による税率判定
+              const tableNumber = orderData.tableNumber || '';
+              const itemName = item.name || '';
+              
+              // 【10%】店内テーブル: c1, c2, T-M, T-H のみ
+              if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
+                tax10Total += itemTotal;
+              }
+              // 【10%】レジ袋
+              else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
+                tax10Total += itemTotal;
+              }
+              // 【8%】即会計、テイクアウト、予約など
+              else {
+                tax8Total += itemTotal;
+              }
+            });
+          } else {
+            // itemsがない場合は1点としてカウント
+            itemCount = 1;
+            console.log('  → 注文全体を1点としてカウント');
+          }
+          
+          console.log('📦 商品点数:', itemCount);
+          console.log('💰 税率別売上:', { tax8Total, tax10Total });
+          
+          // 日次売上を更新
+          const paymentMethod = orderData.paymentMethod || 'cash';
+          const totalAmount = orderData.totalAmount || 0;
+          
+          console.log('💾 日次売上更新中...');
+          await updateDailySales(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, 0);
+          console.log('✅ 日次売上更新完了');
+        } else {
+          console.log('⚠️ 未会計または既に削除済みの注文のためカウントしません');
+        }
+        
+        // deleteDocではなくdeletedフラグを立てる
         console.log('updateDoc実行中...');
-        await window.updateDoc(doc(db, 'orders', orderId), {
+        await window.updateDoc(orderRef, {
           deleted: true,
           deletedAt: window.Timestamp.now()
         });
@@ -3892,37 +3963,6 @@ ${aiComment}
           });
         }
         
-        // ★★★ Firestoreから最新データを再取得して確実にitemsを含める ★★★
-        console.log('🔄 Firestoreから最新の注文データを取得します');
-        const freshOrders = [];
-        for (const order of currentOrders) {
-          const docRef = doc(db, 'orders', order.id);
-          const docSnap = await window.getDoc(docRef);
-          if (docSnap.exists()) {
-            const freshData = docSnap.data();
-            freshOrders.push({
-              id: order.id,
-              ...freshData
-            });
-            console.log(`📋 注文#${freshData.orderNumber}:`, {
-              items存在: !!freshData.items,
-              items長さ: freshData.items ? freshData.items.length : 0
-            });
-            if (freshData.items && freshData.items.length > 0) {
-              freshData.items.forEach((item, idx) => {
-                console.log(`  [${idx}] ${item.name} x${item.quantity || 0}`);
-              });
-            }
-          } else {
-            console.error(`❌ 注文が見つかりません: ${order.id}`);
-            freshOrders.push(order);
-          }
-        }
-        
-        // currentOrdersを最新データで更新
-        currentOrders = freshOrders;
-        console.log('✅ 最新データ取得完了、currentOrders更新済み');
-        
         // 商品点数をカウント & 選択された税率で集計
         let itemCount = 0;
         let tax8Total = 0;
@@ -3947,44 +3987,15 @@ ${aiComment}
         console.log('💰 税率別集計結果:', { tax8Total, tax10Total });
         
         // 商品点数をカウント
-        console.log('📦 商品点数カウント開始');
-        currentOrders.forEach((order, idx) => {
-          console.log(`📋 注文${idx + 1}: #${order.orderNumber}`);
-          console.log(`  - order.items:`, order.items);
-          console.log(`  - items存在: ${!!order.items}`);
-          console.log(`  - items配列: ${Array.isArray(order.items)}`);
-          console.log(`  - items長さ: ${order.items ? order.items.length : 0}`);
-          
+        currentOrders.forEach(order => {
           if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
             itemCount += 1;
-            console.log(`  → 注文全体を1点としてカウント (累計: ${itemCount}点)`);
           } else {
-            order.items.forEach((item, itemIdx) => {
-              const qty = item.quantity || 0;
-              itemCount += qty;
-              console.log(`  → [${itemIdx}] ${item.name} x${qty}点を加算 (累計: ${itemCount}点)`);
+            order.items.forEach(item => {
+              itemCount += item.quantity || 0;
             });
           }
         });
-        
-        console.log('📦 最終商品点数:', itemCount);
-        
-        // ★★★ デバッグ用アラート ★★★
-        let debugMsg = `【商品点数カウント結果】\n\n`;
-        debugMsg += `注文数: ${currentOrders.length}件\n`;
-        debugMsg += `総商品点数: ${itemCount}点\n\n`;
-        debugMsg += `--- 各注文の詳細 ---\n`;
-        currentOrders.forEach((order, idx) => {
-          debugMsg += `\n注文${idx + 1}: #${order.orderNumber}\n`;
-          debugMsg += `  items存在: ${order.items ? 'はい' : 'いいえ'}\n`;
-          debugMsg += `  items長さ: ${order.items ? order.items.length : 0}\n`;
-          if (order.items && order.items.length > 0) {
-            order.items.forEach((item, itemIdx) => {
-              debugMsg += `    [${itemIdx}] ${item.name} x${item.quantity || 0}\n`;
-            });
-          }
-        });
-        alert(debugMsg);
         
         console.log('📦 会計商品点数:', itemCount);
         console.log('💰 税率別売上:', { tax8Total, tax10Total });
@@ -4009,7 +4020,7 @@ ${aiComment}
         console.log('💸 値引き金額:', discountAmount);
         console.log('💸 値引き後金額:', totalAmountToPay);
         
-        console.log('📊 updateDailySalesに渡すパラメータ:');
+        console.log('📊 商品点数は削除時にカウントします');
         console.log('  - totalAmount:', totalAmountToPay);
         console.log('  - paymentMethod:', selectedPaymentMethod);
         console.log('  - itemCount:', itemCount);
@@ -4017,8 +4028,8 @@ ${aiComment}
         console.log('  - tax10Total:', tax10Total);
         console.log('  - discountAmount:', discountAmount);
         
-        // 🆕 日次売上を更新（値引き後の金額で売上を記録し、値引き額も別途記録）
-        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount, tax8Total, tax10Total, discountAmount);
+        // ★★★ 商品点数のカウントは削除時に行うため、ここでは呼び出さない ★★★
+        // await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCount, tax8Total, tax10Total, discountAmount);
         
         // 商品リストを税率情報付きで作成
         const itemsWithTaxRate = [];
