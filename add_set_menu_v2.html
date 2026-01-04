@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>セットメニュー追加</title>
+  <title>セットメニュー追加（シンプル版）</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -11,8 +11,8 @@
       margin: 0 auto;
     }
     button {
-      padding: 20px 40px;
-      font-size: 18px;
+      padding: 15px 30px;
+      font-size: 16px;
       background: #4CAF50;
       color: white;
       border: none;
@@ -23,6 +23,10 @@
     button:hover {
       background: #45a049;
     }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
     #result {
       margin-top: 20px;
       padding: 20px;
@@ -30,6 +34,8 @@
       border-radius: 8px;
       white-space: pre-wrap;
       font-family: monospace;
+      max-height: 500px;
+      overflow-y: auto;
     }
     .error {
       color: red;
@@ -42,20 +48,20 @@
   </style>
 </head>
 <body>
-  <h1>セットメニュー追加スクリプト</h1>
-  <p>このスクリプトでFirestoreにセットメニューを追加します。</p>
+  <h1>セットメニュー追加（シンプル版）</h1>
+  <p>処理を3つのステップに分けて実行します。</p>
   
   <div>
-    <button onclick="checkExisting()">既存データを確認</button>
-    <button onclick="addSetMenus()">セットメニューを追加</button>
-    <button onclick="deleteSetMenus()">セットメニューを削除</button>
+    <button id="btn1" onclick="step1()">ステップ1: トッピング追加（23個）</button>
+    <button id="btn2" onclick="step2()" disabled>ステップ2: メニュー追加（3個）</button>
+    <button id="btn3" onclick="checkResult()" disabled>ステップ3: 結果確認</button>
   </div>
   
   <div id="result"></div>
 
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-    import { getFirestore, collection, addDoc, getDocs, query, where, deleteDoc, doc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+    import { getFirestore, collection, addDoc, getDocs } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyDihde65cnLva8l9tvi4u0oUM0gQ49bWNk",
@@ -73,10 +79,6 @@
     window.collection = collection;
     window.addDoc = addDoc;
     window.getDocs = getDocs;
-    window.query = query;
-    window.where = where;
-    window.deleteDoc = deleteDoc;
-    window.doc = doc;
     
     console.log('Firebase初期化完了');
   </script>
@@ -87,147 +89,21 @@
       const timestamp = new Date().toLocaleTimeString();
       const className = isError ? 'error' : '';
       resultDiv.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+      resultDiv.scrollTop = resultDiv.scrollHeight;
       console.log(message);
     }
     
-    async function checkExisting() {
+    async function step1() {
+      const btn = document.getElementById('btn1');
+      btn.disabled = true;
+      
       const resultDiv = document.getElementById('result');
       resultDiv.innerHTML = '';
-      log('既存データ確認中...');
+      log('ステップ1: トッピング追加開始...');
       
       try {
-        // メニュー確認
-        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
-        log(`✅ メニュー数: ${menuSnapshot.size}件`);
-        
-        let hasSetMenu = false;
-        menuSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.category === 'セット') {
-            hasSetMenu = true;
-            log(`  - ${data.name} (${data.price}円) [ID: ${data.id}]`);
-          }
-        });
-        
-        if (!hasSetMenu) {
-          log('⚠️ セットメニューは存在しません');
-        }
-        
-        // トッピング確認
-        const toppingsSnapshot = await window.getDocs(window.collection(window.db, 'toppings'));
-        log(`✅ トッピング数: ${toppingsSnapshot.size}件`);
-        
-        const toppings = [];
-        toppingsSnapshot.forEach(doc => {
-          toppings.push(doc.data());
-        });
-        
-        log('最初の5件のトッピング:');
-        toppings.slice(0, 5).forEach(t => {
-          log(`  - ${t.name} (${t.price}円) [ID: ${t.id}]`);
-        });
-        
-      } catch (error) {
-        log(`❌ エラー: ${error.message}`, true);
-        console.error('エラー:', error);
-      }
-    }
-    
-    async function deleteSetMenus() {
-      const resultDiv = document.getElementById('result');
-      resultDiv.innerHTML = '';
-      
-      if (!confirm('セットメニューと関連トッピングを削除しますか？')) {
-        return;
-      }
-      
-      log('削除処理開始...');
-      
-      try {
-        // セットメニューを削除
-        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
-        let deletedMenus = 0;
-        
-        for (const docSnapshot of menuSnapshot.docs) {
-          const data = docSnapshot.data();
-          if (data.id && (data.id.startsWith('SET') || data.category === 'セット')) {
-            await window.deleteDoc(window.doc(window.db, 'menu', docSnapshot.id));
-            deletedMenus++;
-            log(`削除: ${data.name}`);
-          }
-        }
-        
-        log(`✅ メニュー削除完了: ${deletedMenus}件`);
-        
-        // トッピングを削除
-        const toppingsSnapshot = await window.getDocs(window.collection(window.db, 'toppings'));
-        let deletedToppings = 0;
-        
-        for (const docSnapshot of toppingsSnapshot.docs) {
-          const data = docSnapshot.data();
-          if (data.id && (data.id.startsWith('OTUMAMI_') || data.id.startsWith('TASTE'))) {
-            await window.deleteDoc(window.doc(window.db, 'toppings', docSnapshot.id));
-            deletedToppings++;
-          }
-        }
-        
-        log(`✅ トッピング削除完了: ${deletedToppings}件`);
-        log('✅ 全ての削除処理が完了しました', false);
-        
-      } catch (error) {
-        log(`❌ エラー: ${error.message}`, true);
-        console.error('エラー:', error);
-      }
-    }
-    
-    async function addSetMenus() {
-      const resultDiv = document.getElementById('result');
-      resultDiv.innerHTML = '';
-      log('セットメニュー追加処理開始...');
-      
-      try {
-        // 1. 既存のトッピングを確認
-        log('既存トッピング確認中...');
-        const toppingsSnapshot = await window.getDocs(window.collection(window.db, 'toppings'));
-        const existingToppings = [];
-        toppingsSnapshot.forEach(doc => {
-          existingToppings.push(doc.data());
-        });
-        log(`既存トッピング数: ${existingToppings.length}件`);
-        
-        // たこ焼き味トッピングのIDを探す（既存のものを使用）
-        let tasteTopping = '';
-        for (const t of existingToppings) {
-          if (t.name && t.name.includes('ソース')) {
-            tasteTopping = t.id;
-            log(`既存のたこ焼き味トッピングID: ${tasteTopping}`);
-            break;
-          }
-        }
-        
-        if (!tasteTopping) {
-          log('⚠️ たこ焼き味トッピングが見つかりません。新規作成します。');
-          
-          const tasteToppings = [
-            { id: 'TASTE01', name: 'ソース', price: 0, order: 1 },
-            { id: 'TASTE02', name: 'しょうゆ', price: 0, order: 2 },
-            { id: 'TASTE03', name: '塩', price: 0, order: 3 },
-            { id: 'TASTE04', name: 'ポン酢', price: 30, order: 4 },
-            { id: 'TASTE05', name: 'みそだれ', price: 30, order: 5 }
-          ];
-          
-          for (const topping of tasteToppings) {
-            const docRef = await window.addDoc(window.collection(window.db, 'toppings'), topping);
-            log(`✅ トッピング追加: ${topping.name} (Firestore ID: ${docRef.id})`);
-          }
-          tasteTopping = 'TASTE01,TASTE02,TASTE03,TASTE04,TASTE05';
-        }
-        
-        // 2. おつまみセット用の全トッピングを作成
-        log('おつまみセット用トッピング追加中...');
-        
-        const otumamisetToppings = [
-          // ドリンク
+        const toppings = [
+          // ドリンク（10個）
           { id: 'OTUMAMI_DRINK01', name: '【ドリンク】生ビール', price: 0, order: 101 },
           { id: 'OTUMAMI_DRINK02', name: '【ドリンク】チューハイプレーン', price: 0, order: 102 },
           { id: 'OTUMAMI_DRINK03', name: '【ドリンク】チューハイゆず', price: 0, order: 103 },
@@ -238,39 +114,104 @@
           { id: 'OTUMAMI_DRINK08', name: '【ドリンク】角ハイ', price: 0, order: 108 },
           { id: 'OTUMAMI_DRINK09', name: '【ドリンク】ジムビーム', price: 0, order: 109 },
           { id: 'OTUMAMI_DRINK10', name: '【ドリンク】ウーロンハイ', price: 0, order: 110 },
-          // たこ焼き味
+          // たこ焼き味（5個）
           { id: 'OTUMAMI_TASTE01', name: '【たこ焼き味】ソース', price: 0, order: 201 },
           { id: 'OTUMAMI_TASTE02', name: '【たこ焼き味】しょうゆ', price: 0, order: 202 },
           { id: 'OTUMAMI_TASTE03', name: '【たこ焼き味】塩', price: 0, order: 203 },
           { id: 'OTUMAMI_TASTE04', name: '【たこ焼き味】ポン酢', price: 30, order: 204 },
           { id: 'OTUMAMI_TASTE05', name: '【たこ焼き味】みそだれ', price: 30, order: 205 },
-          // 一品
+          // 一品（6個）
           { id: 'OTUMAMI_SIDE01', name: '【一品】枝豆', price: 0, order: 301 },
           { id: 'OTUMAMI_SIDE02', name: '【一品】揚げにんにく', price: 0, order: 302 },
           { id: 'OTUMAMI_SIDE03', name: '【一品】ごま油キムチ', price: 0, order: 303 },
           { id: 'OTUMAMI_SIDE04', name: '【一品】冷奴', price: 0, order: 304 },
           { id: 'OTUMAMI_SIDE05', name: '【一品】ポテトフライ', price: 0, order: 305 },
           { id: 'OTUMAMI_SIDE06', name: '【一品】唐揚げ2個', price: 0, order: 306 },
-          // オプション
+          // オプション（2個）
           { id: 'OTUMAMI_OPT01', name: '【オプション】生ビールお得ジョッキに変更', price: 150, order: 401 },
           { id: 'OTUMAMI_OPT02', name: '【オプション】その他メガに変更', price: 300, order: 402 }
         ];
         
-        for (const topping of otumamisetToppings) {
-          const docRef = await window.addDoc(window.collection(window.db, 'toppings'), topping);
-          log(`✅ トッピング追加: ${topping.name} (Firestore ID: ${docRef.id})`);
+        log(`追加するトッピング数: ${toppings.length}個`);
+        
+        let successCount = 0;
+        let errorCount = 0;
+        
+        for (let i = 0; i < toppings.length; i++) {
+          const topping = toppings[i];
+          try {
+            await window.addDoc(window.collection(window.db, 'toppings'), topping);
+            successCount++;
+            
+            if (i % 5 === 0 || i === toppings.length - 1) {
+              log(`進捗: ${i + 1}/${toppings.length}`);
+            }
+            
+            // 少し待機（レート制限対策）
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+          } catch (error) {
+            errorCount++;
+            log(`❌ エラー: ${topping.name} - ${error.message}`, true);
+          }
         }
         
-        log('✅ 全トッピング追加完了');
+        log(`✅ トッピング追加完了: ${successCount}個成功, ${errorCount}個失敗`);
         
-        // 3. おつまみセット用のトッピングIDリストを作成
-        const otumamisetToppingIds = otumamisetToppings.map(t => t.id).join(',');
-        log(`おつまみセットトッピングID: ${otumamisetToppingIds.substring(0, 50)}...`);
+        if (successCount > 0) {
+          document.getElementById('btn2').disabled = false;
+          log('→ ステップ2のボタンが有効になりました');
+        }
         
-        // 4. セットメニューを作成
-        log('メニュー追加中...');
+      } catch (error) {
+        log(`❌ エラー: ${error.message}`, true);
+        console.error('エラー:', error);
+      }
+    }
+    
+    async function step2() {
+      const btn = document.getElementById('btn2');
+      btn.disabled = true;
+      
+      log('');
+      log('ステップ2: メニュー追加開始...');
+      
+      try {
+        // トッピングIDリストを作成
+        const toppingIds = [];
+        for (let i = 1; i <= 10; i++) {
+          toppingIds.push(`OTUMAMI_DRINK${String(i).padStart(2, '0')}`);
+        }
+        for (let i = 1; i <= 5; i++) {
+          toppingIds.push(`OTUMAMI_TASTE${String(i).padStart(2, '0')}`);
+        }
+        for (let i = 1; i <= 6; i++) {
+          toppingIds.push(`OTUMAMI_SIDE${String(i).padStart(2, '0')}`);
+        }
+        toppingIds.push('OTUMAMI_OPT01', 'OTUMAMI_OPT02');
         
-        const setMenus = [
+        const otumamisetToppingIds = toppingIds.join(',');
+        
+        // 既存のたこ焼き味トッピングIDを取得
+        const toppingsSnapshot = await window.getDocs(window.collection(window.db, 'toppings'));
+        let tasteTopping = '';
+        
+        toppingsSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.name && data.name.includes('ソース') && !data.id.startsWith('OTUMAMI_')) {
+            if (!tasteTopping) {
+              tasteTopping = data.id;
+            }
+          }
+        });
+        
+        if (!tasteTopping) {
+          tasteTopping = 'OTUMAMI_TASTE01,OTUMAMI_TASTE02,OTUMAMI_TASTE03,OTUMAMI_TASTE04,OTUMAMI_TASTE05';
+        }
+        
+        log(`たこ焼き味トッピングID: ${tasteTopping}`);
+        
+        const menus = [
           {
             id: 'SET001',
             category: 'セット',
@@ -300,36 +241,58 @@
           }
         ];
         
-        for (const menu of setMenus) {
+        for (const menu of menus) {
           const docRef = await window.addDoc(window.collection(window.db, 'menu'), menu);
-          log(`✅ メニュー追加: ${menu.name} (${menu.price}円) [Firestore ID: ${docRef.id}]`);
+          log(`✅ メニュー追加: ${menu.name} (${menu.price}円)`);
+          
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
         
-        log('', false);
-        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', false);
-        log('✅ 全ての処理が完了しました！', false);
-        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', false);
-        log('', false);
-        log('追加されたメニュー:', false);
-        log('- Aセット (1000円) - たこ焼き味を選択', false);
-        log('- Bセット (1250円) - たこ焼き味を選択', false);
-        log('- おつまみセット (1000円) - ドリンク・たこ焼き味・一品・オプションを選択', false);
-        log('', false);
-        log('注意:', false);
-        log('- menu.htmlからの注文では非表示', false);
-        log('- ?table=からの注文では表示（店内のみ設定）', false);
-        log('- メニューアプリを再読み込みして確認してください', false);
+        log('✅ 全メニュー追加完了');
+        document.getElementById('btn3').disabled = false;
+        log('→ ステップ3のボタンが有効になりました');
         
       } catch (error) {
         log(`❌ エラー: ${error.message}`, true);
-        log(`エラー詳細: ${error.stack}`, true);
         console.error('エラー:', error);
       }
     }
     
-    window.checkExisting = checkExisting;
-    window.addSetMenus = addSetMenus;
-    window.deleteSetMenus = deleteSetMenus;
+    async function checkResult() {
+      log('');
+      log('ステップ3: 結果確認中...');
+      
+      try {
+        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
+        let setMenuCount = 0;
+        
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.category === 'セット') {
+            setMenuCount++;
+            log(`- ${data.name} (${data.price}円)`);
+          }
+        });
+        
+        log('');
+        log(`✅ セットメニュー: ${setMenuCount}件`);
+        log('');
+        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        log('✅ 全ての処理が完了しました！');
+        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        log('');
+        log('メニューアプリを再読み込みして確認してください。');
+        log('テーブルURLから確認: ?table=T-M など');
+        
+      } catch (error) {
+        log(`❌ エラー: ${error.message}`, true);
+        console.error('エラー:', error);
+      }
+    }
+    
+    window.step1 = step1;
+    window.step2 = step2;
+    window.checkResult = checkResult;
   </script>
 </body>
 </html>
