@@ -3629,9 +3629,15 @@ ${aiComment}
     // 注文を完了にする
     window.completeOrder = async function(orderId) {
       try {
+        // 注文を完了にする
         await window.updateDoc(doc(db, 'orders', orderId), {
           completedAt: window.Timestamp.now()
         });
+        
+        // 客数を+1
+        console.log('👥 客数をカウント');
+        await updateDailySales(0, 'cash', 0, 0, 0, 0, 1);
+        
         await loadOrders(selectedTable);
       } catch (e) {
         console.error('完了エラー:', e);
@@ -3718,12 +3724,12 @@ ${aiComment}
           console.log('📦 商品点数:', itemCount);
           console.log('💰 税率別売上:', { tax8Total, tax10Total });
           
-          // 日次売上を更新（商品点数のみ、売上金額・税金・値引きは会計時に記録済み）
+          // 日次売上を更新（商品点数のみ、売上金額・税金・値引き・客数は他で記録済み）
           const paymentMethod = orderData.paymentMethod || 'cash';
           
           console.log('💾 商品点数のみ更新中...');
           console.log('  - itemCount:', itemCount);
-          await updateDailySales(0, paymentMethod, itemCount, 0, 0, 0);
+          await updateDailySales(0, paymentMethod, itemCount, 0, 0, 0, 0);
           console.log('✅ 商品点数更新完了');
         } else {
           console.log('⚠️ 未会計または既に削除済みの注文のためカウントしません');
@@ -4063,16 +4069,17 @@ ${aiComment}
         console.log('💸 値引き金額:', discountAmount);
         console.log('💸 値引き後金額:', totalAmountToPay);
         
-        console.log('📊 売上金額は会計時、商品点数は削除時にカウントします');
+        console.log('📊 売上金額は会計時、商品点数は削除時、客数は完了時にカウントします');
         console.log('  - totalAmount:', totalAmountToPay);
         console.log('  - paymentMethod:', selectedPaymentMethod);
         console.log('  - itemCount: 0（削除時にカウント）');
+        console.log('  - customerCountIncrement: 0（完了時にカウント）');
         console.log('  - tax8Total:', tax8Total);
         console.log('  - tax10Total:', tax10Total);
         console.log('  - discountAmount:', discountAmount);
         
-        // ★ 売上金額と値引きを記録（商品点数は削除時にカウントするため0） ★
-        await updateDailySales(totalAmountToPay, selectedPaymentMethod, 0, tax8Total, tax10Total, discountAmount);
+        // ★ 売上金額と値引きを記録（商品点数は削除時、客数は完了時にカウントするため0） ★
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod, 0, tax8Total, tax10Total, discountAmount, 0);
         
         // 商品リストを税率情報付きで作成
         const itemsWithTaxRate = [];
@@ -4389,12 +4396,12 @@ ${aiComment}
     };
     
     // 日次売上更新関数
-    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0) {
+    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0, customerCountIncrement = 0) {
       try {
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         
-        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount });
+        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount, customerCountIncrement });
         
         // デバッグ: itemCountが0の場合は警告
         if (itemCount === 0) {
@@ -4411,7 +4418,7 @@ ${aiComment}
           
           const updates = {
             totalSales: (data.totalSales || 0) + totalAmount,
-            customerCount: (data.customerCount || 0) + 1,
+            customerCount: (data.customerCount || 0) + customerCountIncrement,
             totalItems: (data.totalItems || 0) + itemCount,
             tax8Total: (data.tax8Total || 0) + tax8Total,
             tax10Total: (data.tax10Total || 0) + tax10Total,
@@ -4444,7 +4451,7 @@ ${aiComment}
           const newData = {
             date: dateStr,
             totalSales: totalAmount,
-            customerCount: 1,
+            customerCount: customerCountIncrement,
             totalItems: itemCount,
             tax8Total: tax8Total,
             tax10Total: tax10Total,
