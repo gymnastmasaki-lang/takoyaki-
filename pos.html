@@ -12,6 +12,9 @@
   <script src="https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/v1.1.0/StarWebPrintTrader.js"></script>
   <script src="https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/v1.2.0/StarWebPrintBuilder.js"></script>
   
+  <!-- html2canvas for PNG export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
@@ -1410,7 +1413,7 @@
         <p style="margin: 0 0 10px 0; font-weight: bold; color: #856404;">注意事項:</p>
         <ul style="margin: 0; padding-left: 20px; color: #856404;">
           <li>本日の売上データを確定します</li>
-          <li>精算ジャーナル（テキストファイル）をダウンロードします</li>
+          <li>精算ジャーナル（PNG画像）をダウンロードします</li>
           <li>売上は午前3時に自動的にリセットされます</li>
         </ul>
       </div>
@@ -3055,15 +3058,40 @@ ${aiComment}
 =====================================
 `;
         
-        // ===== テキストファイルをダウンロード =====
-        const bom = '\uFEFF';  // UTF-8 BOM
-        const blob = new Blob([bom + journalText], { type: 'text/plain;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `精算ジャーナル_${dateStr}.txt`;
-        link.click();
-        URL.revokeObjectURL(url);
+        // ===== HTML要素を作成してPNG画像として保存 =====
+        const journalDiv = document.createElement('div');
+        journalDiv.style.cssText = `
+          font-family: 'Courier New', monospace;
+          font-size: 14px;
+          line-height: 1.6;
+          padding: 30px;
+          background: white;
+          color: black;
+          white-space: pre-wrap;
+          width: 800px;
+          position: absolute;
+          left: -9999px;
+        `;
+        journalDiv.textContent = journalText;
+        document.body.appendChild(journalDiv);
+        
+        // html2canvasで画像化
+        const canvas = await html2canvas(journalDiv, {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          logging: false
+        });
+        
+        // PNG画像としてダウンロード
+        canvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `精算ジャーナル_${dateStr}.png`;
+          link.click();
+          URL.revokeObjectURL(url);
+          document.body.removeChild(journalDiv);
+        });
         
         // ===== 精算記録をFirebaseに保存 =====
         await window.addDoc(window.collection(window.db, 'settlements'), {
