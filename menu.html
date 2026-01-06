@@ -880,11 +880,19 @@
       
       orderStatusUnsubscribe = onSnapshot(orderRef, async (docSnap) => {
         if (!docSnap.exists()) {
-          console.log('注文が削除されました');
+          console.log('注文が削除されました（物理削除）');
+          clearOrderFromStorage();
           return;
         }
         
         const data = docSnap.data();
+        
+        // deletedフラグが立っている場合も削除として扱う
+        if (data.deleted) {
+          console.log('注文が削除されました（論理削除）');
+          clearOrderFromStorage();
+          return;
+        }
         
         updateOrderStatusDisplay(data);
         
@@ -932,8 +940,8 @@
 
     // 自分の順番を計算して更新
     async function updateMyPosition(currentOrderData, ordersSnapshot = null) {
-      if (currentOrderData.completedAt || currentOrderData.cancelledAt) {
-        // 完了またはキャンセル済みの場合は計算不要
+      if (currentOrderData.deleted || currentOrderData.cancelledAt) {
+        // 削除またはキャンセル済みの場合は計算不要
         return;
       }
       
@@ -945,13 +953,13 @@
           ordersSnapshot = await getDocs(collection(db, 'orders'));
         }
         
-        // 有効な注文（未完了・未キャンセル・削除予定時刻前）を抽出
+        // 有効な注文（未削除・未キャンセル・削除予定時刻前）を抽出
         const validOrders = [];
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
           if (data.deleteAt && 
               data.deleteAt.toDate() > now && 
-              !data.completedAt && 
+              !data.deleted && 
               !data.cancelledAt) {
             validOrders.push({
               orderNumber: data.orderNumber,
@@ -988,7 +996,10 @@
       // 待ち順番の表示要素を取得
       const waitingElement = document.getElementById('waiting');
       
-      if (orderData.completedAt) {
+      if (orderData.deleted) {
+        // 削除済みの場合はLocalStorageをクリア
+        clearOrderFromStorage();
+      } else if (orderData.completedAt) {
         statusBox.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
         statusBox.style.borderColor = '#4CAF50';
         statusBox.style.color = 'white';
@@ -997,8 +1008,6 @@
         if (waitingElement) {
           waitingElement.textContent = '1';
         }
-        // LocalStorageをクリア
-        clearOrderFromStorage();
       } else if (orderData.cancelledAt) {
         statusBox.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
         statusBox.style.borderColor = '#f44336';
