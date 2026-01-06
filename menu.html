@@ -645,8 +645,94 @@
     const urlParams = new URLSearchParams(window.location.search);
     const tableNumber = urlParams.get('table') || 'テイクアウト';
 
+    // LocalStorageから注文情報を復元
+    function restoreOrderFromStorage() {
+      const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
+      if (savedOrder) {
+        try {
+          const orderData = JSON.parse(savedOrder);
+          console.log('📦 注文情報を復元:', orderData);
+          
+          // 注文情報を画面に表示
+          document.getElementById('order-num').textContent = orderData.orderNumber;
+          document.getElementById('waiting').textContent = orderData.myPosition;
+          document.getElementById('order-total').textContent = '¥' + orderData.totalAmount.toLocaleString();
+          document.getElementById('eat-style').textContent = orderData.tableNumber;
+          
+          const list = document.getElementById('order-items');
+          list.innerHTML = '';
+          orderData.items.forEach(item => {
+            const subtotal = (item.price + item.toppingPrice) * item.quantity;
+            const div = document.createElement('div');
+            div.className = 'order-item';
+            div.innerHTML = `
+              <div class="order-item-header">
+                <div class="order-item-name">${item.name}</div>
+                <div class="order-item-price">¥${subtotal.toLocaleString()}</div>
+              </div>
+              <div class="order-item-details">数量: ${item.quantity}個</div>
+              <div class="order-item-details" style="color: #4CAF50;">トッピング: ${item.toppings}</div>
+            `;
+            list.appendChild(div);
+          });
+          
+          if (orderData.bagNeeded && orderData.bagQuantity > 0) {
+            const bagDiv = document.createElement('div');
+            bagDiv.className = 'order-item';
+            bagDiv.innerHTML = `
+              <div class="order-item-header">
+                <div class="order-item-name">🛍️ レジ袋</div>
+                <div class="order-item-price">¥${orderData.bagPrice.toLocaleString()}</div>
+              </div>
+              <div class="order-item-details">数量: ${orderData.bagQuantity}枚</div>
+            `;
+            list.appendChild(bagDiv);
+          }
+          
+          currentOrderId = orderData.orderId;
+          
+          // 注文ステータスの監視を再開
+          if (currentOrderId) {
+            watchOrderStatus(currentOrderId);
+          }
+          
+          // 完了ページを表示
+          goToComplete();
+          
+          return true;
+        } catch (e) {
+          console.error('❌ 注文情報の復元エラー:', e);
+          localStorage.removeItem('currentOrder_' + tableNumber);
+        }
+      }
+      return false;
+    }
+
+    // 注文情報をLocalStorageに保存
+    function saveOrderToStorage(orderData) {
+      try {
+        localStorage.setItem('currentOrder_' + tableNumber, JSON.stringify(orderData));
+        console.log('💾 注文情報を保存しました:', orderData);
+      } catch (e) {
+        console.error('❌ 注文情報の保存エラー:', e);
+      }
+    }
+
+    // 注文完了時にLocalStorageをクリア
+    function clearOrderFromStorage() {
+      localStorage.removeItem('currentOrder_' + tableNumber);
+      console.log('🗑️ 注文情報をクリアしました');
+    }
+
     window.onload = async function() {
       console.log('ページ読み込み開始');
+      
+      // ページ読み込み時に注文情報を復元
+      const restored = restoreOrderFromStorage();
+      if (restored) {
+        console.log('✅ 保存された注文を復元しました');
+        return; // 復元した場合は以降の処理をスキップ
+      }
       
       // 営業時間チェック
       const now = new Date();
@@ -870,6 +956,8 @@
         if (waitingElement) {
           waitingElement.textContent = '1';
         }
+        // LocalStorageをクリア
+        clearOrderFromStorage();
       } else if (orderData.cancelledAt) {
         statusBox.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
         statusBox.style.borderColor = '#f44336';
@@ -879,6 +967,8 @@
         if (waitingElement) {
           waitingElement.textContent = '1';
         }
+        // LocalStorageをクリア
+        clearOrderFromStorage();
       } else if (orderData.paidAt) {
         statusBox.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
         statusBox.style.borderColor = '#2196F3';
@@ -1622,6 +1712,20 @@
           `;
           list.appendChild(bagDiv);
         }
+        
+        // 注文情報をLocalStorageに保存
+        const savedOrderData = {
+          orderId: docRef.id,
+          orderNumber: orderNumber,
+          myPosition: displayPosition,
+          totalAmount: totalAmount,
+          tableNumber: tableNumber,
+          items: cart,
+          bagNeeded: bagNeeded,
+          bagQuantity: bagQuantity,
+          bagPrice: bagTotal
+        };
+        saveOrderToStorage(savedOrderData);
         
         // 注文のステータスを監視開始
         watchOrderStatus(docRef.id);
