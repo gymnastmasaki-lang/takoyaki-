@@ -1666,14 +1666,30 @@
           nextOrderNumber: orderNumber
         });
         
+        // テイクアウトかどうか判定
+        const isTakeout = (tableNumber === 'テイクアウト');
+        
+        // 税率別の合計を計算
+        let tax8Total = 0;  // 8%対象商品の税込合計
+        let tax10Total = 0; // 10%対象商品の税込合計
         let totalAmount = 0;
+        
         cart.forEach(item => {
-          totalAmount += (item.price + item.toppingPrice) * item.quantity;
+          const subtotal = (item.price + item.toppingPrice) * item.quantity;
+          totalAmount += subtotal;
+          
+          // テイクアウトは8%、イートインは10%
+          if (isTakeout) {
+            tax8Total += subtotal;
+          } else {
+            tax10Total += subtotal;
+          }
         });
         
-        // レジ袋代を追加
+        // レジ袋は常に10%
         const bagTotal = bagNeeded ? bagQuantity * BAG_PRICE : 0;
         totalAmount += bagTotal;
+        tax10Total += bagTotal;
         
         const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
         
@@ -1686,6 +1702,8 @@
           bagNeeded: bagNeeded,
           bagQuantity: bagNeeded ? bagQuantity : 0,
           bagPrice: bagTotal,
+          tax8Total: tax8Total,
+          tax10Total: tax10Total,
           status: 'pending',
           deleteAt: Timestamp.fromDate(deleteAt),
           cancelledAt: null,
@@ -1764,7 +1782,9 @@
           items: cart,
           bagNeeded: bagNeeded,
           bagQuantity: bagQuantity,
-          bagPrice: bagTotal
+          bagPrice: bagTotal,
+          tax8Total: tax8Total,
+          tax10Total: tax10Total
         };
         saveOrderToStorage(savedOrderData);
         
@@ -1882,23 +1902,18 @@
       // LocalStorageから注文情報を取得
       const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
       let itemsHtml = '';
-      let tax8Total = 0;  // 8%対象商品の税込合計
-      let tax10Total = 0; // 10%対象商品の税込合計
-      
-      // テイクアウトかどうか判定
-      const isTakeout = (tableNumber === 'テイクアウト');
+      let tax8Total = 0;
+      let tax10Total = 0;
       
       if (savedOrder) {
         const orderData = JSON.parse(savedOrder);
+        
+        // LocalStorageに保存された税率情報を使用
+        tax8Total = orderData.tax8Total || 0;
+        tax10Total = orderData.tax10Total || 0;
+        
         orderData.items.forEach(item => {
           const subtotal = (item.price + item.toppingPrice) * item.quantity;
-          // テイクアウト（menu.htmlのみ）は8%、イートイン（?table=付き）は10%
-          if (isTakeout) {
-            tax8Total += subtotal;
-          } else {
-            tax10Total += subtotal;
-          }
-          
           itemsHtml += `
             <div style="display: flex; justify-content: space-between; margin: 8px 0; padding: 8px 0; border-bottom: 1px dashed #ddd;">
               <div style="flex: 1;">
@@ -1911,9 +1926,7 @@
           `;
         });
         
-        // レジ袋は常に10%
         if (orderData.bagNeeded && orderData.bagQuantity > 0) {
-          tax10Total += orderData.bagPrice;
           itemsHtml += `
             <div style="display: flex; justify-content: space-between; margin: 8px 0; padding: 8px 0; border-bottom: 1px dashed #ddd;">
               <div style="flex: 1;">
@@ -1927,11 +1940,11 @@
       }
       
       // 消費税計算（内税）
-      const tax8Excluded = Math.floor(tax8Total / 1.08);  // 8%商品合計（税抜）
-      const tax10Excluded = Math.floor(tax10Total / 1.10); // 10%商品合計（税抜）
-      const tax8Amount = tax8Total - tax8Excluded;  // 8%の消費税
-      const tax10Amount = tax10Total - tax10Excluded; // 10%の消費税
-      const totalTax = tax8Amount + tax10Amount;  // 消費税の合計
+      const tax8Excluded = Math.floor(tax8Total / 1.08);
+      const tax10Excluded = Math.floor(tax10Total / 1.10);
+      const tax8Amount = tax8Total - tax8Excluded;
+      const tax10Amount = tax10Total - tax10Excluded;
+      const totalTax = tax8Amount + tax10Amount;
       
       const receiptHtml = `
         <div style="font-family: 'Courier New', monospace; text-align: center;">
@@ -2047,29 +2060,13 @@
       const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
       let tax8Total = 0;
       let tax10Total = 0;
-      let totalAmount = 0;
-      
-      // テイクアウトかどうか判定
-      const isTakeout = (tableNumber === 'テイクアウト');
       
       if (savedOrder) {
         const orderData = JSON.parse(savedOrder);
-        totalAmount = orderData.totalAmount;
         
-        orderData.items.forEach(item => {
-          const subtotal = (item.price + item.toppingPrice) * item.quantity;
-          // テイクアウト（menu.htmlのみ）は8%、イートイン（?table=付き）は10%
-          if (isTakeout) {
-            tax8Total += subtotal;
-          } else {
-            tax10Total += subtotal;
-          }
-        });
-        
-        // レジ袋は常に10%
-        if (orderData.bagNeeded && orderData.bagQuantity > 0) {
-          tax10Total += orderData.bagPrice;
-        }
+        // LocalStorageに保存された税率情報を使用
+        tax8Total = orderData.tax8Total || 0;
+        tax10Total = orderData.tax10Total || 0;
       }
       
       // 消費税計算（内税）
