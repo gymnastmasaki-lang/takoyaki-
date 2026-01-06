@@ -580,6 +580,11 @@
         <div style="color: #000; font-size: 22px; margin: 15px 0;">注文番号</div>
         <div class="order-number-display" id="order-num">000</div>
         
+        <div style="margin: 20px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <button class="btn-primary" style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); box-shadow: 0 4px 15px rgba(33,150,243,0.3); padding: 15px; font-size: 16px;" onclick="showReceipt()">🧾 レシート発行</button>
+          <button class="btn-primary" style="background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); box-shadow: 0 4px 15px rgba(156,39,176,0.3); padding: 15px; font-size: 16px;" onclick="showInvoice()">📋 領収書発行</button>
+        </div>
+        
         <div style="margin: 20px 0;">
           <button class="btn-primary" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); box-shadow: 0 8px 20px rgba(0,0,0,0.3); padding: 15px; font-size: 18px; width: 100%;" onclick="callStaffFromComplete()">📞 呼出</button>
         </div>
@@ -608,6 +613,36 @@
         <div class="price-display">
           <div class="price-label">合計金額</div>
           <div class="price-amount" id="order-total">¥0</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- レシートモーダル -->
+  <div id="receipt-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; overflow-y: auto;">
+    <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;">
+      <div style="background: white; max-width: 400px; width: 100%; border-radius: 10px; overflow: hidden;">
+        <div id="receipt-content" style="padding: 30px; background: white;">
+          <!-- Receipt content will be inserted here -->
+        </div>
+        <div style="padding: 20px; background: #f5f5f5; display: flex; gap: 10px;">
+          <button onclick="downloadReceipt()" style="flex: 1; padding: 15px; background: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">💾 保存</button>
+          <button onclick="closeReceipt()" style="flex: 1; padding: 15px; background: #666; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">閉じる</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 領収書モーダル -->
+  <div id="invoice-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; overflow-y: auto;">
+    <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;">
+      <div style="background: white; max-width: 400px; width: 100%; border-radius: 10px; overflow: hidden;">
+        <div id="invoice-content" style="padding: 30px; background: white;">
+          <!-- Invoice content will be inserted here -->
+        </div>
+        <div style="padding: 20px; background: #f5f5f5; display: flex; gap: 10px;">
+          <button onclick="downloadInvoice()" style="flex: 1; padding: 15px; background: #4CAF50; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">💾 保存</button>
+          <button onclick="closeInvoice()" style="flex: 1; padding: 15px; background: #666; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">閉じる</button>
         </div>
       </div>
     </div>
@@ -1799,6 +1834,238 @@
       } catch (e) {
         console.error('お会計エラー:', e);
         showCustomAlert('お会計呼び出しに失敗しました');
+      }
+    };
+    
+    // レシート表示
+    window.showReceipt = function() {
+      const orderNum = document.getElementById('order-num').textContent;
+      const orderTotal = document.getElementById('order-total').textContent;
+      const eatStyle = document.getElementById('eat-style').textContent;
+      
+      const now = new Date();
+      const dateStr = now.getFullYear() + '/' + 
+                      String(now.getMonth() + 1).padStart(2, '0') + '/' + 
+                      String(now.getDate()).padStart(2, '0') + ' ' +
+                      String(now.getHours()).padStart(2, '0') + ':' + 
+                      String(now.getMinutes()).padStart(2, '0');
+      
+      // LocalStorageから注文情報を取得
+      const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
+      let itemsHtml = '';
+      
+      if (savedOrder) {
+        const orderData = JSON.parse(savedOrder);
+        orderData.items.forEach(item => {
+          const subtotal = (item.price + item.toppingPrice) * item.quantity;
+          itemsHtml += `
+            <div style="display: flex; justify-content: space-between; margin: 8px 0; padding: 8px 0; border-bottom: 1px dashed #ddd;">
+              <div style="flex: 1;">
+                <div style="font-weight: bold;">${item.name}</div>
+                <div style="font-size: 12px; color: #666;">トッピング: ${item.toppings}</div>
+                <div style="font-size: 12px; color: #666;">単価: ¥${(item.price + item.toppingPrice).toLocaleString()} × ${item.quantity}</div>
+              </div>
+              <div style="font-weight: bold; white-space: nowrap;">¥${subtotal.toLocaleString()}</div>
+            </div>
+          `;
+        });
+        
+        if (orderData.bagNeeded && orderData.bagQuantity > 0) {
+          itemsHtml += `
+            <div style="display: flex; justify-content: space-between; margin: 8px 0; padding: 8px 0; border-bottom: 1px dashed #ddd;">
+              <div style="flex: 1;">
+                <div style="font-weight: bold;">🛍️ レジ袋</div>
+                <div style="font-size: 12px; color: #666;">単価: ¥3 × ${orderData.bagQuantity}</div>
+              </div>
+              <div style="font-weight: bold; white-space: nowrap;">¥${orderData.bagPrice.toLocaleString()}</div>
+            </div>
+          `;
+        }
+      }
+      
+      const receiptHtml = `
+        <div style="font-family: 'Courier New', monospace; text-align: center;">
+          <div style="border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 15px;">
+            <h2 style="margin: 0; font-size: 24px;">粉もん屋 八</h2>
+            <div style="font-size: 14px; margin-top: 5px;">下赤塚店</div>
+          </div>
+          
+          <div style="text-align: left; margin: 20px 0;">
+            <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+              <span>日時:</span>
+              <span>${dateStr}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+              <span>注文番号:</span>
+              <span style="font-weight: bold; font-size: 18px;">#${orderNum}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+              <span>利用形態:</span>
+              <span>${eatStyle}</span>
+            </div>
+          </div>
+          
+          <div style="border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 15px 0; margin: 15px 0;">
+            <div style="text-align: left;">
+              ${itemsHtml}
+            </div>
+          </div>
+          
+          <div style="text-align: right; font-size: 24px; font-weight: bold; margin: 20px 0;">
+            合計: ${orderTotal}
+          </div>
+          
+          <div style="border-top: 2px solid #000; padding-top: 15px; margin-top: 20px; font-size: 12px;">
+            <div>ご来店ありがとうございました</div>
+            <div style="margin-top: 10px;">またのお越しをお待ちしております</div>
+          </div>
+        </div>
+      `;
+      
+      document.getElementById('receipt-content').innerHTML = receiptHtml;
+      document.getElementById('receipt-modal').style.display = 'block';
+    };
+    
+    window.closeReceipt = function() {
+      document.getElementById('receipt-modal').style.display = 'none';
+    };
+    
+    window.downloadReceipt = async function() {
+      const element = document.getElementById('receipt-content');
+      
+      try {
+        // html2canvasライブラリを動的に読み込み
+        if (!window.html2canvas) {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+          document.head.appendChild(script);
+          
+          await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = reject;
+          });
+        }
+        
+        const canvas = await html2canvas(element, {
+          backgroundColor: '#ffffff',
+          scale: 2
+        });
+        
+        const link = document.createElement('a');
+        const orderNum = document.getElementById('order-num').textContent;
+        link.download = `レシート_${orderNum}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
+        
+        showCustomAlert('レシートを保存しました！');
+      } catch (error) {
+        console.error('保存エラー:', error);
+        showCustomAlert('保存に失敗しました。\nスクリーンショットをご利用ください。');
+      }
+    };
+    
+    // 領収書表示
+    window.showInvoice = function() {
+      const orderNum = document.getElementById('order-num').textContent;
+      const orderTotal = document.getElementById('order-total').textContent;
+      const eatStyle = document.getElementById('eat-style').textContent;
+      
+      const now = new Date();
+      const dateStr = now.getFullYear() + '年' + 
+                      String(now.getMonth() + 1).padStart(2, '0') + '月' + 
+                      String(now.getDate()).padStart(2, '0') + '日';
+      
+      const invoiceHtml = `
+        <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 10px;">
+          <div style="text-align: center; border-bottom: 3px double #000; padding-bottom: 20px; margin-bottom: 20px;">
+            <h2 style="margin: 0; font-size: 28px; letter-spacing: 8px;">領収書</h2>
+          </div>
+          
+          <div style="margin: 30px 0;">
+            <div style="font-size: 14px; margin-bottom: 10px;">お客様</div>
+            <div style="border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 30px;">
+              <span style="font-size: 18px;">　　　　　　　　　　　</span>
+              <span style="font-size: 14px;">様</span>
+            </div>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <div style="font-size: 16px; margin-bottom: 10px;">下記の通り領収いたしました</div>
+            <div style="border: 2px solid #000; padding: 20px; margin: 20px 0;">
+              <div style="font-size: 14px; margin-bottom: 5px;">金額</div>
+              <div style="font-size: 36px; font-weight: bold;">${orderTotal}</div>
+              <div style="font-size: 14px; margin-top: 10px;">（内消費税 ¥0）</div>
+            </div>
+          </div>
+          
+          <div style="margin: 30px 0; font-size: 14px;">
+            <div style="margin: 10px 0;">
+              <span style="display: inline-block; width: 100px;">但し</span>
+              <span>飲食代として</span>
+            </div>
+            <div style="margin: 10px 0;">
+              <span style="display: inline-block; width: 100px;">利用形態</span>
+              <span>${eatStyle}</span>
+            </div>
+            <div style="margin: 10px 0;">
+              <span style="display: inline-block; width: 100px;">注文番号</span>
+              <span>#${orderNum}</span>
+            </div>
+          </div>
+          
+          <div style="text-align: right; margin: 40px 0 20px 0; font-size: 14px;">
+            <div style="margin: 5px 0;">${dateStr}</div>
+          </div>
+          
+          <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 40px;">
+            <div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 10px;">粉もん屋 八 下赤塚店</div>
+            <div style="text-align: center; font-size: 12px; color: #666;">
+              <div>東京都板橋区赤塚新町</div>
+              <div style="margin-top: 5px;">※この領収書は再発行できません</div>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      document.getElementById('invoice-content').innerHTML = invoiceHtml;
+      document.getElementById('invoice-modal').style.display = 'block';
+    };
+    
+    window.closeInvoice = function() {
+      document.getElementById('invoice-modal').style.display = 'none';
+    };
+    
+    window.downloadInvoice = async function() {
+      const element = document.getElementById('invoice-content');
+      
+      try {
+        // html2canvasライブラリを動的に読み込み
+        if (!window.html2canvas) {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+          document.head.appendChild(script);
+          
+          await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = reject;
+          });
+        }
+        
+        const canvas = await html2canvas(element, {
+          backgroundColor: '#ffffff',
+          scale: 2
+        });
+        
+        const link = document.createElement('a');
+        const orderNum = document.getElementById('order-num').textContent;
+        link.download = `領収書_${orderNum}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
+        
+        showCustomAlert('領収書を保存しました！');
+      } catch (error) {
+        console.error('保存エラー:', error);
+        showCustomAlert('保存に失敗しました。\nスクリーンショットをご利用ください。');
       }
     };
     
