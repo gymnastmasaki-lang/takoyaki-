@@ -1882,11 +1882,20 @@
       // LocalStorageから注文情報を取得
       const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
       let itemsHtml = '';
+      let tax8Total = 0;  // 8%対象商品の税込合計
+      let tax10Total = 0; // 10%対象商品の税込合計
       
       if (savedOrder) {
         const orderData = JSON.parse(savedOrder);
         orderData.items.forEach(item => {
           const subtotal = (item.price + item.toppingPrice) * item.quantity;
+          // レジ袋は8%、その他は10%（デフォルト）
+          if (item.name && item.name.includes('レジ袋')) {
+            tax8Total += subtotal;
+          } else {
+            tax10Total += subtotal;
+          }
+          
           itemsHtml += `
             <div style="display: flex; justify-content: space-between; margin: 8px 0; padding: 8px 0; border-bottom: 1px dashed #ddd;">
               <div style="flex: 1;">
@@ -1900,6 +1909,7 @@
         });
         
         if (orderData.bagNeeded && orderData.bagQuantity > 0) {
+          tax8Total += orderData.bagPrice;
           itemsHtml += `
             <div style="display: flex; justify-content: space-between; margin: 8px 0; padding: 8px 0; border-bottom: 1px dashed #ddd;">
               <div style="flex: 1;">
@@ -1911,6 +1921,13 @@
           `;
         }
       }
+      
+      // 消費税計算（内税）
+      const tax8Excluded = Math.floor(tax8Total / 1.08);  // 8%商品合計（税抜）
+      const tax10Excluded = Math.floor(tax10Total / 1.10); // 10%商品合計（税抜）
+      const tax8Amount = tax8Total - tax8Excluded;  // 8%の消費税
+      const tax10Amount = tax10Total - tax10Excluded; // 10%の消費税
+      const totalTax = tax8Amount + tax10Amount;  // 消費税の合計
       
       const receiptHtml = `
         <div style="font-family: 'Courier New', monospace; text-align: center;">
@@ -1937,6 +1954,21 @@
           <div style="border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 15px 0; margin: 15px 0;">
             <div style="text-align: left;">
               ${itemsHtml}
+            </div>
+          </div>
+          
+          <div style="text-align: left; font-size: 14px; margin: 15px 0; padding: 10px 0; border-bottom: 1px solid #ddd;">
+            ${tax8Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
+              <span>8%対象: ¥${tax8Excluded.toLocaleString()}</span>
+              <span>内税: ¥${tax8Amount.toLocaleString()}</span>
+            </div>` : ''}
+            ${tax10Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
+              <span>10%対象: ¥${tax10Excluded.toLocaleString()}</span>
+              <span>内税: ¥${tax10Amount.toLocaleString()}</span>
+            </div>` : ''}
+            <div style="display: flex; justify-content: space-between; margin: 5px 0; font-weight: bold;">
+              <span>消費税合計:</span>
+              <span>¥${totalTax.toLocaleString()}</span>
             </div>
           </div>
           
@@ -2007,6 +2039,38 @@
                       String(now.getMonth() + 1).padStart(2, '0') + '月' + 
                       String(now.getDate()).padStart(2, '0') + '日';
       
+      // LocalStorageから注文情報を取得して消費税を計算
+      const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
+      let tax8Total = 0;
+      let tax10Total = 0;
+      let totalAmount = 0;
+      
+      if (savedOrder) {
+        const orderData = JSON.parse(savedOrder);
+        totalAmount = orderData.totalAmount;
+        
+        orderData.items.forEach(item => {
+          const subtotal = (item.price + item.toppingPrice) * item.quantity;
+          // レジ袋は8%、その他は10%
+          if (item.name && item.name.includes('レジ袋')) {
+            tax8Total += subtotal;
+          } else {
+            tax10Total += subtotal;
+          }
+        });
+        
+        if (orderData.bagNeeded && orderData.bagQuantity > 0) {
+          tax8Total += orderData.bagPrice;
+        }
+      }
+      
+      // 消費税計算（内税）
+      const tax8Excluded = Math.floor(tax8Total / 1.08);
+      const tax10Excluded = Math.floor(tax10Total / 1.10);
+      const tax8Amount = tax8Total - tax8Excluded;
+      const tax10Amount = tax10Total - tax10Excluded;
+      const totalTax = tax8Amount + tax10Amount;
+      
       const invoiceHtml = `
         <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 10px;">
           <div style="text-align: center; border-bottom: 3px double #000; padding-bottom: 20px; margin-bottom: 20px;">
@@ -2026,7 +2090,7 @@
             <div style="border: 2px solid #000; padding: 20px; margin: 20px 0;">
               <div style="font-size: 14px; margin-bottom: 5px;">金額</div>
               <div style="font-size: 36px; font-weight: bold;">${orderTotal}</div>
-              <div style="font-size: 14px; margin-top: 10px;">（内消費税 ¥0）</div>
+              <div style="font-size: 14px; margin-top: 10px; color: #666;">（内消費税 ¥${totalTax.toLocaleString()}）</div>
             </div>
           </div>
           
