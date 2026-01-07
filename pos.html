@@ -15,9 +15,6 @@
   <!-- html2canvas for PNG export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   
-  <!-- SheetJS for Excel export -->
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
-  
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
@@ -1427,7 +1424,6 @@
       </div>
       
       <button class="btn" style="width: 100%; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; margin-bottom: 10px;" onclick="confirmSettlement()">精算を実行</button>
-      <button class="btn" style="width: 100%; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; margin-bottom: 10px;" onclick="generateDailyReport()">📊 日計表出力</button>
       <button class="btn btn-secondary" onclick="closeSettlementModal()">キャンセル</button>
     </div>
   </div>
@@ -2971,9 +2967,6 @@
         const taxExcludedTotal = tax8Excluded + tax10Excluded;  // 税抜合計
         const taxIncludedTotal = tax8TotalWithTax + tax10TotalWithTax;  // 税込合計（8%と10%の合計）
         
-        // 値引き後の合計売上
-        const finalTotalSales = taxIncludedTotal - discountTotal;
-        
         // ===== ドロアオープン数 =====
         const drawerOpenCount = settlementData.drawerOpenCount || 0;
         
@@ -2993,30 +2986,28 @@
         let laborCost = 0;
         try {
           const attendanceSnapshot = await window.getDocs(window.collection(window.db, 'kintai_attendance'));
-          attendanceSnapshot.forEach(doc => {
-            const data = doc.data();
+          attendanceSnapshot.forEach(docData => {
+            const data = docData.data();
             if (data.date === dateStr && data.clockIn && data.clockOut) {
-              // 勤務時間を計算（簡易版）
+              // 勤務時間を計算
               const clockIn = new Date(`${dateStr} ${data.clockIn}`);
               const clockOut = new Date(`${dateStr} ${data.clockOut}`);
-              const workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+              let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
               
               // 休憩時間を引く
-              let breakHours = 0;
               if (data.breakStart1 && data.breakEnd1) {
                 const breakStart1 = new Date(`${dateStr} ${data.breakStart1}`);
                 const breakEnd1 = new Date(`${dateStr} ${data.breakEnd1}`);
-                breakHours += (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+                workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
               }
               if (data.breakStart2 && data.breakEnd2) {
                 const breakStart2 = new Date(`${dateStr} ${data.breakStart2}`);
                 const breakEnd2 = new Date(`${dateStr} ${data.breakEnd2}`);
-                breakHours += (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+                workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
               }
               
-              const actualWorkHours = workHours - breakHours;
               const hourlyRate = data.hourlyRate || 1150;
-              laborCost += actualWorkHours * hourlyRate;
+              laborCost += workHours * hourlyRate;
             }
           });
           console.log('👷 人件費:', laborCost);
@@ -3226,202 +3217,6 @@ ${aiComment}
     window.closeSettlementModal = function() {
       document.getElementById('settlementModal').classList.add('hidden');
     };
-    
-    // 日計表生成関数
-    window.generateDailyReport = async function() {
-      try {
-        console.log('📊 日計表生成開始');
-        
-        // 当月の全ての日次売上データを取得
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
-        
-        // 月の最初の日と最後の日を計算
-        const firstDay = new Date(year, month - 1, 1);
-        const lastDay = new Date(year, month, 0);
-        const daysInMonth = lastDay.getDate();
-        
-        console.log(`${year}年${month}月のデータを取得中...`);
-        
-        // Firestoreから当月のデータを取得
-        const dailySalesSnapshot = await window.getDocs(window.collection(window.db, 'dailySales'));
-        
-        // 日付ごとにデータを整理
-        const salesByDate = {};
-        dailySalesSnapshot.forEach(doc => {
-          const data = doc.data();
-          const date = data.date;
-          
-          // 当月のデータのみ
-          if (date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
-            salesByDate[date] = data;
-          }
-        });
-        
-        console.log('取得したデータ:', salesByDate);
-        
-        // Excelデータを作成
-        const excelData = [];
-        
-        // ヘッダー行1（タイトル）
-        excelData.push(['', '売上日計表', '', '', '', '', '', '', '', '', '粉もん屋 八  下赤塚店', '', '', '']);
-        excelData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
-        excelData.push(['', `${year}-${String(month).padStart(2, '0')}-01`, '', '', '', '', '', '', '', '', '', '', '', '']);
-        excelData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
-        
-        // ヘッダー行2（列名）
-        excelData.push(['', '日', '曜日', '伝票数', '現金', 'カード', 'paypay', '売上合計', '人件費', '人件費%', '支払い', '純売上', 'TOTAL粗利', '天気']);
-        
-        // 曜日配列
-        const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
-        
-        // 累計粗利
-        let totalGrossProfit = 0;
-        
-        // 各日のデータ
-        for (let day = 1; day <= daysInMonth; day++) {
-          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          const date = new Date(year, month - 1, day);
-          const weekDay = weekDays[date.getDay()];
-          
-          const data = salesByDate[dateStr];
-          
-          if (data) {
-            // データがある場合
-            const customerCount = data.customerCount || 0;
-            const cashSales = data.cashSales || 0;
-            const creditSales = data.creditSales || 0;
-            const emoneSales = data.emoneSales || 0;
-            const totalSales = cashSales + creditSales + emoneSales;
-            
-            // 人件費をkintai_attendanceから取得
-            let laborCost = 0;
-            try {
-              const attendanceSnapshot = await window.getDocs(window.collection(window.db, 'kintai_attendance'));
-              attendanceSnapshot.forEach(doc => {
-                const attData = doc.data();
-                if (attData.date === dateStr && attData.clockIn && attData.clockOut) {
-                  const clockIn = new Date(`${dateStr} ${attData.clockIn}`);
-                  const clockOut = new Date(`${dateStr} ${attData.clockOut}`);
-                  const workHours = (clockOut - clockIn) / (1000 * 60 * 60);
-                  
-                  let breakHours = 0;
-                  if (attData.breakStart1 && attData.breakEnd1) {
-                    const breakStart1 = new Date(`${dateStr} ${attData.breakStart1}`);
-                    const breakEnd1 = new Date(`${dateStr} ${attData.breakEnd1}`);
-                    breakHours += (breakEnd1 - breakStart1) / (1000 * 60 * 60);
-                  }
-                  if (attData.breakStart2 && attData.breakEnd2) {
-                    const breakStart2 = new Date(`${dateStr} ${attData.breakStart2}`);
-                    const breakEnd2 = new Date(`${dateStr} ${attData.breakEnd2}`);
-                    breakHours += (breakEnd2 - breakStart2) / (1000 * 60 * 60);
-                  }
-                  
-                  const actualWorkHours = workHours - breakHours;
-                  const hourlyRate = attData.hourlyRate || 1150;
-                  laborCost += actualWorkHours * hourlyRate;
-                }
-              });
-            } catch (e) {
-              console.error('人件費取得エラー:', e);
-            }
-            
-            const laborCostPercent = totalSales > 0 ? (laborCost / totalSales * 100) : 0;
-            
-            // 支出をexpensesから取得
-            let payment = 0;
-            try {
-              const expenseDoc = await window.getDoc(window.doc(window.db, 'expenses', dateStr));
-              if (expenseDoc.exists()) {
-                payment = expenseDoc.data().total || 0;
-              }
-            } catch (e) {
-              console.error('支出取得エラー:', e);
-            }
-            
-            // 純売上
-            const netSales = totalSales - laborCost - payment;
-            
-            // 累計粗利
-            totalGrossProfit += netSales;
-            
-            excelData.push([
-              '',
-              date,
-              weekDay,
-              customerCount,
-              cashSales,
-              creditSales,
-              emoneSales,
-              totalSales,
-              laborCost,
-              laborCostPercent,
-              payment,
-              netSales,
-              totalGrossProfit,
-              '' // 天気は手動入力
-            ]);
-          } else {
-            // データがない場合（空行）
-            excelData.push([
-              '',
-              date,
-              weekDay,
-              '',
-              '',
-              '',
-              '',
-              '',
-              '',
-              '',
-              '',
-              '',
-              '',
-              ''
-            ]);
-          }
-        }
-        
-        console.log('Excelデータ作成完了:', excelData.length, '行');
-        
-        // SheetJSでExcelファイルを生成
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet(excelData);
-        
-        // 列幅を設定
-        ws['!cols'] = [
-          { wch: 3 },  // A列
-          { wch: 12 }, // B列（日付）
-          { wch: 5 },  // C列（曜日）
-          { wch: 8 },  // D列（伝票数）
-          { wch: 10 }, // E列（現金）
-          { wch: 10 }, // F列（カード）
-          { wch: 10 }, // G列（paypay）
-          { wch: 10 }, // H列（売上合計）
-          { wch: 10 }, // I列（人件費）
-          { wch: 10 }, // J列（人件費%）
-          { wch: 10 }, // K列（支払い）
-          { wch: 10 }, // L列（純売上）
-          { wch: 12 }, // M列（TOTAL粗利）
-          { wch: 10 }  // N列（天気）
-        ];
-        
-        XLSX.utils.book_append_sheet(wb, ws, '売上日計表');
-        
-        // ファイルをダウンロード
-        const fileName = `日計表${year}年${month}月.xlsx`;
-        XLSX.writeFile(wb, fileName);
-        
-        console.log('✅ 日計表出力完了:', fileName);
-        alert(`日計表を出力しました！\n${fileName}`);
-        
-      } catch (e) {
-        console.error('❌ 日計表生成エラー:', e);
-        alert('日計表の生成に失敗しました: ' + e.message);
-      }
-    };
-    
     
     // ===== 支出機能 =====
     let expenseRows = [];
