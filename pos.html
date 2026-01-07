@@ -15,6 +15,9 @@
   <!-- html2canvas for PNG export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
@@ -1068,6 +1071,7 @@
         <button id="time-override-btn" onclick="toggleTimeOverride()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">時外</button>
         <button onclick="openDrawer()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FFC107 0%, #FFA000 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px; box-shadow: 0 4px 15px rgba(255,193,7,0.3);">開く</button>
         <button onclick="showSalesModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">売上</button>
+        <button onclick="showExpenseModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FF5722 0%, #E64A19 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">支出</button>
         <button onclick="showHistoryModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">履歴</button>
         <button onclick="showMonthlyReportModal()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-right: 10px;">月次</button>
       </div>
@@ -1423,7 +1427,44 @@
       </div>
       
       <button class="btn" style="width: 100%; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; margin-bottom: 10px;" onclick="confirmSettlement()">精算を実行</button>
+      <button class="btn" style="width: 100%; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; margin-bottom: 10px;" onclick="generateDailyReport()">📊 日計表出力</button>
       <button class="btn btn-secondary" onclick="closeSettlementModal()">キャンセル</button>
+    </div>
+  </div>
+  
+  <!-- 支出モーダル -->
+  <div id="expenseModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+      <h3 style="color: #f093fb;">💰 支出入力</h3>
+      
+      <div style="margin: 20px 0;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr style="background: #f5f5f5;">
+              <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">店名</th>
+              <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">勘定科目</th>
+              <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">詳細</th>
+              <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">金額</th>
+              <th style="padding: 10px; border: 1px solid #ddd; width: 60px;"></th>
+            </tr>
+          </thead>
+          <tbody id="expenseTableBody">
+            <!-- 支出行がここに追加されます -->
+          </tbody>
+        </table>
+        
+        <button class="btn" style="margin-top: 10px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="addExpenseRow()">＋ 行を追加</button>
+        
+        <div style="margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; text-align: right;">
+          <span style="font-size: 18px; font-weight: bold;">合計: ¥</span>
+          <span id="expenseTotal" style="font-size: 24px; font-weight: bold; color: #f093fb;">0</span>
+        </div>
+      </div>
+      
+      <div style="display: flex; gap: 10px;">
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;" onclick="saveExpenses()">保存</button>
+        <button class="btn btn-secondary" style="flex: 1;" onclick="closeExpenseModal()">閉じる</button>
+      </div>
     </div>
   </div>
   
@@ -2936,6 +2977,56 @@
         // ===== ドロアオープン数 =====
         const drawerOpenCount = settlementData.drawerOpenCount || 0;
         
+        // ===== 支出を取得 =====
+        let expenseTotal = 0;
+        try {
+          const expenseDoc = await window.getDoc(doc(db, 'expenses', dateStr));
+          if (expenseDoc.exists()) {
+            expenseTotal = expenseDoc.data().total || 0;
+            console.log('💸 支出:', expenseTotal);
+          }
+        } catch (e) {
+          console.error('支出取得エラー:', e);
+        }
+        
+        // ===== 人件費を取得 =====
+        let laborCost = 0;
+        try {
+          const attendanceSnapshot = await window.getDocs(window.collection(window.db, 'kintai_attendance'));
+          attendanceSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.date === dateStr && data.clockIn && data.clockOut) {
+              // 勤務時間を計算（簡易版）
+              const clockIn = new Date(`${dateStr} ${data.clockIn}`);
+              const clockOut = new Date(`${dateStr} ${data.clockOut}`);
+              const workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+              
+              // 休憩時間を引く
+              let breakHours = 0;
+              if (data.breakStart1 && data.breakEnd1) {
+                const breakStart1 = new Date(`${dateStr} ${data.breakStart1}`);
+                const breakEnd1 = new Date(`${dateStr} ${data.breakEnd1}`);
+                breakHours += (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+              }
+              if (data.breakStart2 && data.breakEnd2) {
+                const breakStart2 = new Date(`${dateStr} ${data.breakStart2}`);
+                const breakEnd2 = new Date(`${dateStr} ${data.breakEnd2}`);
+                breakHours += (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+              }
+              
+              const actualWorkHours = workHours - breakHours;
+              const hourlyRate = data.hourlyRate || 1150;
+              laborCost += actualWorkHours * hourlyRate;
+            }
+          });
+          console.log('👷 人件費:', laborCost);
+        } catch (e) {
+          console.error('人件費取得エラー:', e);
+        }
+        
+        // 値引き・支出を引いた最終合計売上
+        const finalTotalSales = taxIncludedTotal - discountTotal - expenseTotal;
+        
         // ===== デバッグログ =====
         console.log('📅 日付:', dateStr);
         console.log('🕐 出力時刻:', outputTime);
@@ -3042,12 +3133,14 @@
 税抜合計: ¥${taxExcludedTotal.toLocaleString()}
 税込合計: ¥${taxIncludedTotal.toLocaleString()}
 値引き金額: ¥${discountTotal.toLocaleString()}
+支出: ¥${expenseTotal.toLocaleString()}
 合計売上: ¥${finalTotalSales.toLocaleString()}
 
 -------------------------------------
 その他
 -------------------------------------
 ドロアオープン数: ${drawerOpenCount}回
+人件費: ¥${Math.round(laborCost).toLocaleString()}
 担当者: ${staffName}
 
 =====================================
@@ -3132,6 +3225,339 @@ ${aiComment}
     // 精算モーダルを閉じる
     window.closeSettlementModal = function() {
       document.getElementById('settlementModal').classList.add('hidden');
+    };
+    
+    // 日計表生成関数
+    window.generateDailyReport = async function() {
+      try {
+        console.log('📊 日計表生成開始');
+        
+        // 当月の全ての日次売上データを取得
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        
+        // 月の最初の日と最後の日を計算
+        const firstDay = new Date(year, month - 1, 1);
+        const lastDay = new Date(year, month, 0);
+        const daysInMonth = lastDay.getDate();
+        
+        console.log(`${year}年${month}月のデータを取得中...`);
+        
+        // Firestoreから当月のデータを取得
+        const dailySalesSnapshot = await window.getDocs(window.collection(window.db, 'dailySales'));
+        
+        // 日付ごとにデータを整理
+        const salesByDate = {};
+        dailySalesSnapshot.forEach(doc => {
+          const data = doc.data();
+          const date = data.date;
+          
+          // 当月のデータのみ
+          if (date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
+            salesByDate[date] = data;
+          }
+        });
+        
+        console.log('取得したデータ:', salesByDate);
+        
+        // Excelデータを作成
+        const excelData = [];
+        
+        // ヘッダー行1（タイトル）
+        excelData.push(['', '売上日計表', '', '', '', '', '', '', '', '', '粉もん屋 八  下赤塚店', '', '', '']);
+        excelData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        excelData.push(['', `${year}-${String(month).padStart(2, '0')}-01`, '', '', '', '', '', '', '', '', '', '', '', '']);
+        excelData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        
+        // ヘッダー行2（列名）
+        excelData.push(['', '日', '曜日', '伝票数', '現金', 'カード', 'paypay', '売上合計', '人件費', '人件費%', '支払い', '純売上', 'TOTAL粗利', '天気']);
+        
+        // 曜日配列
+        const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
+        
+        // 累計粗利
+        let totalGrossProfit = 0;
+        
+        // 各日のデータ
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const date = new Date(year, month - 1, day);
+          const weekDay = weekDays[date.getDay()];
+          
+          const data = salesByDate[dateStr];
+          
+          if (data) {
+            // データがある場合
+            const customerCount = data.customerCount || 0;
+            const cashSales = data.cashSales || 0;
+            const creditSales = data.creditSales || 0;
+            const emoneSales = data.emoneSales || 0;
+            const totalSales = cashSales + creditSales + emoneSales;
+            
+            // 人件費をkintai_attendanceから取得
+            let laborCost = 0;
+            try {
+              const attendanceSnapshot = await window.getDocs(window.collection(window.db, 'kintai_attendance'));
+              attendanceSnapshot.forEach(doc => {
+                const attData = doc.data();
+                if (attData.date === dateStr && attData.clockIn && attData.clockOut) {
+                  const clockIn = new Date(`${dateStr} ${attData.clockIn}`);
+                  const clockOut = new Date(`${dateStr} ${attData.clockOut}`);
+                  const workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+                  
+                  let breakHours = 0;
+                  if (attData.breakStart1 && attData.breakEnd1) {
+                    const breakStart1 = new Date(`${dateStr} ${attData.breakStart1}`);
+                    const breakEnd1 = new Date(`${dateStr} ${attData.breakEnd1}`);
+                    breakHours += (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+                  }
+                  if (attData.breakStart2 && attData.breakEnd2) {
+                    const breakStart2 = new Date(`${dateStr} ${attData.breakStart2}`);
+                    const breakEnd2 = new Date(`${dateStr} ${attData.breakEnd2}`);
+                    breakHours += (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+                  }
+                  
+                  const actualWorkHours = workHours - breakHours;
+                  const hourlyRate = attData.hourlyRate || 1150;
+                  laborCost += actualWorkHours * hourlyRate;
+                }
+              });
+            } catch (e) {
+              console.error('人件費取得エラー:', e);
+            }
+            
+            const laborCostPercent = totalSales > 0 ? (laborCost / totalSales * 100) : 0;
+            
+            // 支出をexpensesから取得
+            let payment = 0;
+            try {
+              const expenseDoc = await window.getDoc(doc(window.db, 'expenses', dateStr));
+              if (expenseDoc.exists()) {
+                payment = expenseDoc.data().total || 0;
+              }
+            } catch (e) {
+              console.error('支出取得エラー:', e);
+            }
+            
+            // 純売上
+            const netSales = totalSales - laborCost - payment;
+            
+            // 累計粗利
+            totalGrossProfit += netSales;
+            
+            excelData.push([
+              '',
+              date,
+              weekDay,
+              customerCount,
+              cashSales,
+              creditSales,
+              emoneSales,
+              totalSales,
+              laborCost,
+              laborCostPercent,
+              payment,
+              netSales,
+              totalGrossProfit,
+              '' // 天気は手動入力
+            ]);
+          } else {
+            // データがない場合（空行）
+            excelData.push([
+              '',
+              date,
+              weekDay,
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              ''
+            ]);
+          }
+        }
+        
+        console.log('Excelデータ作成完了:', excelData.length, '行');
+        
+        // SheetJSでExcelファイルを生成
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+        
+        // 列幅を設定
+        ws['!cols'] = [
+          { wch: 3 },  // A列
+          { wch: 12 }, // B列（日付）
+          { wch: 5 },  // C列（曜日）
+          { wch: 8 },  // D列（伝票数）
+          { wch: 10 }, // E列（現金）
+          { wch: 10 }, // F列（カード）
+          { wch: 10 }, // G列（paypay）
+          { wch: 10 }, // H列（売上合計）
+          { wch: 10 }, // I列（人件費）
+          { wch: 10 }, // J列（人件費%）
+          { wch: 10 }, // K列（支払い）
+          { wch: 10 }, // L列（純売上）
+          { wch: 12 }, // M列（TOTAL粗利）
+          { wch: 10 }  // N列（天気）
+        ];
+        
+        XLSX.utils.book_append_sheet(wb, ws, '売上日計表');
+        
+        // ファイルをダウンロード
+        const fileName = `日計表${year}年${month}月.xlsx`;
+        XLSX.writeFile(wb, fileName);
+        
+        console.log('✅ 日計表出力完了:', fileName);
+        alert(`日計表を出力しました！\n${fileName}`);
+        
+      } catch (e) {
+        console.error('❌ 日計表生成エラー:', e);
+        alert('日計表の生成に失敗しました: ' + e.message);
+      }
+    };
+    
+    
+    // ===== 支出機能 =====
+    let expenseRows = [];
+    let currentExpenseDate = null;
+    
+    // 支出モーダルを開く
+    window.showExpenseModal = async function() {
+      const now = new Date();
+      const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+      
+      // 本日の日付を取得（午前3時基準）
+      const todayStart = new Date(jstNow);
+      todayStart.setHours(3, 0, 0, 0);
+      if (jstNow.getHours() < 3) {
+        todayStart.setDate(todayStart.getDate() - 1);
+      }
+      
+      const year = todayStart.getFullYear();
+      const month = String(todayStart.getMonth() + 1).padStart(2, '0');
+      const day = String(todayStart.getDate()).padStart(2, '0');
+      currentExpenseDate = `${year}-${month}-${day}`;
+      
+      console.log('支出モーダル表示:', currentExpenseDate);
+      
+      // Firebaseから本日の支出データを取得
+      try {
+        const expenseDoc = await window.getDoc(doc(db, 'expenses', currentExpenseDate));
+        
+        if (expenseDoc.exists()) {
+          expenseRows = expenseDoc.data().items || [];
+          console.log('既存の支出データを読み込み:', expenseRows);
+        } else {
+          // 新規の場合は初期行を追加
+          expenseRows = [];
+          for (let i = 0; i < 3; i++) {
+            addExpenseRow();
+          }
+        }
+      } catch (e) {
+        console.error('支出データ読み込みエラー:', e);
+        expenseRows = [];
+        for (let i = 0; i < 3; i++) {
+          addExpenseRow();
+        }
+      }
+      
+      renderExpenseTable();
+      document.getElementById('expenseModal').classList.remove('hidden');
+    };
+    
+    // 支出モーダルを閉じる
+    window.closeExpenseModal = function() {
+      document.getElementById('expenseModal').classList.add('hidden');
+    };
+    
+    // 支出行を追加
+    window.addExpenseRow = function() {
+      expenseRows.push({
+        storeName: '',
+        category: '',
+        detail: '',
+        amount: 0
+      });
+      renderExpenseTable();
+    };
+    
+    // 支出行を削除
+    window.deleteExpenseRow = function(index) {
+      expenseRows.splice(index, 1);
+      renderExpenseTable();
+    };
+    
+    // 支出テーブルを描画
+    function renderExpenseTable() {
+      const tbody = document.getElementById('expenseTableBody');
+      tbody.innerHTML = '';
+      
+      expenseRows.forEach((row, index) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="padding: 8px; border: 1px solid #ddd;">
+            <input type="text" value="${row.storeName}" onchange="updateExpenseRow(${index}, 'storeName', this.value)" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+          </td>
+          <td style="padding: 8px; border: 1px solid #ddd;">
+            <input type="text" value="${row.category}" onchange="updateExpenseRow(${index}, 'category', this.value)" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+          </td>
+          <td style="padding: 8px; border: 1px solid #ddd;">
+            <input type="text" value="${row.detail}" onchange="updateExpenseRow(${index}, 'detail', this.value)" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+          </td>
+          <td style="padding: 8px; border: 1px solid #ddd;">
+            <input type="number" value="${row.amount}" onchange="updateExpenseRow(${index}, 'amount', parseFloat(this.value) || 0)" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+          </td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">
+            <button onclick="deleteExpenseRow(${index})" style="padding: 5px 10px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">削除</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      
+      updateExpenseTotal();
+    }
+    
+    // 支出行を更新
+    window.updateExpenseRow = function(index, field, value) {
+      expenseRows[index][field] = value;
+      updateExpenseTotal();
+    };
+    
+    // 支出合計を更新
+    function updateExpenseTotal() {
+      const total = expenseRows.reduce((sum, row) => sum + (parseFloat(row.amount) || 0), 0);
+      document.getElementById('expenseTotal').textContent = total.toLocaleString();
+    }
+    
+    // 支出を保存
+    window.saveExpenses = async function() {
+      try {
+        console.log('支出を保存中:', currentExpenseDate, expenseRows);
+        
+        const total = expenseRows.reduce((sum, row) => sum + (parseFloat(row.amount) || 0), 0);
+        
+        await window.setDoc(doc(db, 'expenses', currentExpenseDate), {
+          date: currentExpenseDate,
+          items: expenseRows,
+          total: total,
+          updatedAt: window.Timestamp.now()
+        });
+        
+        console.log('✅ 支出保存完了');
+        alert('支出を保存しました');
+        closeExpenseModal();
+        
+      } catch (e) {
+        console.error('❌ 支出保存エラー:', e);
+        alert('支出の保存に失敗しました: ' + e.message);
+      }
     };
     
     // 手動カートの表示更新
