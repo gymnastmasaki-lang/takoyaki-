@@ -5165,8 +5165,30 @@ ${aiComment}
         console.log('  - tax10Total:', tax10Total);
         console.log('  - discountAmount:', discountAmount);
         
+        // 商品リストを作成（itemCounts保存用）
+        const allItems = [];
+        currentOrders.forEach(order => {
+          if (order.items && Array.isArray(order.items)) {
+            order.items.forEach(item => {
+              allItems.push({
+                name: item.name,
+                quantity: item.quantity || 1
+              });
+            });
+          }
+          // レジ袋も商品として追加
+          if (order.bagNeeded && order.bagQuantity > 0) {
+            allItems.push({
+              name: 'レジ袋',
+              quantity: order.bagQuantity
+            });
+          }
+        });
+        
+        console.log('🛒 商品リスト（itemCounts用）:', allItems);
+        
         // ★ 売上金額・客数・値引きを記録（商品点数は削除時にカウントするため0） ★
-        await updateDailySales(totalAmountToPay, selectedPaymentMethod, 0, tax8Total, tax10Total, discountAmount, 1);
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod, 0, tax8Total, tax10Total, discountAmount, 1, allItems);
         
         // 商品リストを税率情報付きで作成
         const itemsWithTaxRate = [];
@@ -5483,10 +5505,18 @@ ${aiComment}
     };
     
     // 日次売上更新関数
-    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0, customerCountIncrement = 0) {
+    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0, customerCountIncrement = 0, items = []) {
       try {
+        // 午前3時基準で日付を決定
         const now = new Date();
-        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        let targetDate = new Date(now);
+        
+        // 午前3時より前なら昨日扱い
+        if (now.getHours() < 3) {
+          targetDate.setDate(targetDate.getDate() - 1);
+        }
+        
+        const dateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
         
         console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount, customerCountIncrement });
         
@@ -5503,6 +5533,13 @@ ${aiComment}
           const data = salesDoc.data();
           console.log('既存データ:', data);
           
+          // 商品別カウントを計算
+          const currentItemCounts = data.itemCounts || {};
+          items.forEach(item => {
+            const itemName = item.name;
+            currentItemCounts[itemName] = (currentItemCounts[itemName] || 0) + item.quantity;
+          });
+          
           const updates = {
             totalSales: (data.totalSales || 0) + totalAmount,
             customerCount: (data.customerCount || 0) + customerCountIncrement,
@@ -5510,6 +5547,7 @@ ${aiComment}
             tax8Total: (data.tax8Total || 0) + tax8Total,
             tax10Total: (data.tax10Total || 0) + tax10Total,
             totalDiscount: (data.totalDiscount || 0) + discountAmount,
+            itemCounts: currentItemCounts,
             drawerOpenCount: data.drawerOpenCount || 0,  // 現在の値を保持
             cashSales: (data.cashSales || 0),  // 既存値を保持
             emoneSales: (data.emoneSales || 0),  // 既存値を保持
@@ -5535,6 +5573,13 @@ ${aiComment}
           console.log('✅ 既存売上データ更新:', updates);
           
         } else {
+          // 商品別カウントを計算
+          const newItemCounts = {};
+          items.forEach(item => {
+            const itemName = item.name;
+            newItemCounts[itemName] = (newItemCounts[itemName] || 0) + item.quantity;
+          });
+          
           const newData = {
             date: dateStr,
             totalSales: totalAmount,
@@ -5543,6 +5588,7 @@ ${aiComment}
             tax8Total: tax8Total,
             tax10Total: tax10Total,
             totalDiscount: discountAmount,
+            itemCounts: newItemCounts,
             cashSales: paymentMethod === 'cash' ? totalAmount : 0,
             emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
             creditSales: paymentMethod === 'credit' ? totalAmount : 0,

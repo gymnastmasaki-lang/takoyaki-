@@ -1238,7 +1238,7 @@
         
         // 日次売上を更新（コントローラーからは値引きなし）
         console.log('💾 日次売上更新中...');
-        await updateDailySales(order.totalAmount, selectedPaymentMethod, itemCount, tax8Total, tax10Total, 0);
+        await updateDailySales(order.totalAmount, selectedPaymentMethod, itemCount, tax8Total, tax10Total, 0, order.items);
         console.log('✅ 日次売上更新完了');
         
         closePaymentModal();
@@ -1251,10 +1251,18 @@
     }
     
     // 日次売上更新関数
-    async function updateDailySales(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0) {
+    async function updateDailySales(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0, items = []) {
       try {
+        // 午前3時基準で日付を決定（レジと同じロジック）
         const now = new Date();
-        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        let targetDate = new Date(now);
+        
+        // 午前3時より前なら昨日扱い
+        if (now.getHours() < 3) {
+          targetDate.setDate(targetDate.getDate() - 1);
+        }
+        
+        const dateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
         
         console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount });
         
@@ -1265,6 +1273,13 @@
           const data = salesDoc.data();
           console.log('既存データ:', data);
           
+          // 商品別カウントを計算
+          const currentItemCounts = data.itemCounts || {};
+          items.forEach(item => {
+            const itemName = item.name;
+            currentItemCounts[itemName] = (currentItemCounts[itemName] || 0) + item.quantity;
+          });
+          
           const updates = {
             totalSales: (data.totalSales || 0) + totalAmount,
             customerCount: (data.customerCount || 0) + 1,
@@ -1272,6 +1287,7 @@
             tax8Total: (data.tax8Total || 0) + tax8Total,
             tax10Total: (data.tax10Total || 0) + tax10Total,
             totalDiscount: (data.totalDiscount || 0) + discountAmount,
+            itemCounts: currentItemCounts,
             drawerOpenCount: data.drawerOpenCount || 0,
             cashSales: data.cashSales || 0,
             emoneSales: data.emoneSales || 0,
@@ -1292,6 +1308,13 @@
           console.log('✅ 既存売上データ更新:', updates);
           
         } else {
+          // 商品別カウントを計算
+          const newItemCounts = {};
+          items.forEach(item => {
+            const itemName = item.name;
+            newItemCounts[itemName] = (newItemCounts[itemName] || 0) + item.quantity;
+          });
+          
           const newData = {
             date: dateStr,
             totalSales: totalAmount,
@@ -1300,6 +1323,7 @@
             tax8Total: tax8Total,
             tax10Total: tax10Total,
             totalDiscount: discountAmount,
+            itemCounts: newItemCounts,
             cashSales: paymentMethod === 'cash' ? totalAmount : 0,
             emoneSales: paymentMethod === 'emoney' ? totalAmount : 0,
             creditSales: paymentMethod === 'credit' ? totalAmount : 0,
