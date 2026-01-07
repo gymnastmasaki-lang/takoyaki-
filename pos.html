@@ -1428,6 +1428,12 @@
         </ul>
       </div>
       
+      <div style="margin: 20px 0;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">精算日付を選択</label>
+        <input type="date" id="settlementDate" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
+        <p style="font-size: 12px; color: #666; margin-top: 5px;">※ 昨日の精算を上げ忘れた場合など、過去の日付を選択できます</p>
+      </div>
+      
       <div id="settlementSummary" style="margin: 20px 0;">
         <!-- 精算サマリー -->
       </div>
@@ -1480,27 +1486,18 @@
     <div class="modal" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
       <h3>📊 月次レポート</h3>
       
-      <div style="margin: 20px 0; display: flex; gap: 10px; align-items: center;">
-        <select id="reportYear" onchange="generateMonthlyReport()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
-          <!-- JavaScriptで生成 -->
-        </select>
+      <div style="margin: 20px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+          <label style="display: block; margin-bottom: 5px; font-weight: bold;">開始日</label>
+          <input type="date" id="reportStartDate" style="width: 100%; padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+        </div>
         
-        <select id="reportMonth" onchange="generateMonthlyReport()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
-          <option value="1">1月</option>
-          <option value="2">2月</option>
-          <option value="3">3月</option>
-          <option value="4">4月</option>
-          <option value="5">5月</option>
-          <option value="6">6月</option>
-          <option value="7">7月</option>
-          <option value="8">8月</option>
-          <option value="9">9月</option>
-          <option value="10">10月</option>
-          <option value="11">11月</option>
-          <option value="12">12月</option>
-        </select>
+        <div style="flex: 1; min-width: 200px;">
+          <label style="display: block; margin-bottom: 5px; font-weight: bold;">終了日</label>
+          <input type="date" id="reportEndDate" style="width: 100%; padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+        </div>
         
-        <button onclick="generateMonthlyReport()" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">📊 集計</button>
+        <button onclick="generatePeriodJournal()" style="padding: 12px 24px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">📊 ジャーナル生成</button>
       </div>
       
       <div id="monthlyReportContent">
@@ -2640,23 +2637,19 @@
     
     // 月次レポートモーダルを表示
     window.showMonthlyReportModal = function() {
-      // 年の選択肢を生成
-      const yearSelect = document.getElementById('reportYear');
-      const currentYear = new Date().getFullYear();
-      yearSelect.innerHTML = '';
-      for (let year = currentYear; year >= currentYear - 5; year--) {
-        const option = document.createElement('option');
-        option.value = year;
-        option.textContent = `${year}年`;
-        yearSelect.appendChild(option);
-      }
+      // 当月の開始日と終了日を初期値として設定
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
       
-      // 現在の月を選択
-      const currentMonth = new Date().getMonth() + 1;
-      document.getElementById('reportMonth').value = currentMonth;
+      const startDate = `${year}-${month}-01`;
+      const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
+      const endDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+      
+      document.getElementById('reportStartDate').value = startDate;
+      document.getElementById('reportEndDate').value = endDate;
       
       document.getElementById('monthlyReportModal').classList.remove('hidden');
-      generateMonthlyReport();
     };
     
     // 月次レポートを生成
@@ -2811,6 +2804,198 @@
     // 月次レポートモーダルを閉じる
     window.closeMonthlyReportModal = function() {
       document.getElementById('monthlyReportModal').classList.add('hidden');
+    };
+    
+    // ===== 期間ジャーナル生成 =====
+    window.generatePeriodJournal = async function() {
+      try {
+        const startDate = document.getElementById('reportStartDate').value;
+        const endDate = document.getElementById('reportEndDate').value;
+        
+        if (!startDate || !endDate) {
+          alert('開始日と終了日を選択してください');
+          return;
+        }
+        
+        if (startDate > endDate) {
+          alert('開始日は終了日より前の日付を選択してください');
+          return;
+        }
+        
+        console.log(`📊 期間ジャーナル生成: ${startDate} ～ ${endDate}`);
+        
+        const container = document.getElementById('monthlyReportContent');
+        container.innerHTML = '<div style="text-align: center; padding: 40px;">ジャーナル生成中...</div>';
+        
+        // 期間内の全日付を生成
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const dates = [];
+        
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          dates.push(dateStr);
+        }
+        
+        // 各日付の売上データを取得して合計
+        let totalCustomerCount = 0;
+        let totalItems = 0;
+        let totalCashSales = 0;
+        let totalEmoneSales = 0;
+        let totalCreditSales = 0;
+        let totalDiscount = 0;
+        let totalTax8 = 0;
+        let totalTax10 = 0;
+        let totalDrawerOpen = 0;
+        let totalExpense = 0;
+        let totalLaborCost = 0;
+        
+        for (const dateStr of dates) {
+          // 売上データ
+          const salesDoc = await window.getDoc(window.doc(window.db, 'dailySales', dateStr));
+          if (salesDoc.exists()) {
+            const data = salesDoc.data();
+            totalCustomerCount += data.customerCount || 0;
+            totalItems += data.totalItems || 0;
+            totalCashSales += data.cashSales || 0;
+            totalEmoneSales += data.emoneSales || 0;
+            totalCreditSales += data.creditSales || 0;
+            totalDiscount += data.totalDiscount || 0;
+            totalTax8 += data.tax8Total || 0;
+            totalTax10 += data.tax10Total || 0;
+            totalDrawerOpen += data.drawerOpenCount || 0;
+          }
+          
+          // 支出データ
+          const expenseDoc = await window.getDoc(window.doc(window.db, 'expenses', dateStr));
+          if (expenseDoc.exists()) {
+            totalExpense += expenseDoc.data().total || 0;
+          }
+          
+          // 人件費データ
+          const attendanceSnapshot = await window.getDocs(window.collection(window.db, 'kintai_attendance'));
+          attendanceSnapshot.forEach(doc => {
+            const attData = doc.data();
+            if (attData.date === dateStr && attData.clockIn && attData.clockOut) {
+              const clockIn = new Date(`${dateStr} ${attData.clockIn}`);
+              const clockOut = new Date(`${dateStr} ${attData.clockOut}`);
+              let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+              
+              if (attData.breakStart1 && attData.breakEnd1) {
+                const breakStart1 = new Date(`${dateStr} ${attData.breakStart1}`);
+                const breakEnd1 = new Date(`${dateStr} ${attData.breakEnd1}`);
+                workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+              }
+              if (attData.breakStart2 && attData.breakEnd2) {
+                const breakStart2 = new Date(`${dateStr} ${attData.breakStart2}`);
+                const breakEnd2 = new Date(`${dateStr} ${attData.breakEnd2}`);
+                workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+              }
+              
+              const hourlyRate = attData.hourlyRate || 1150;
+              totalLaborCost += workHours * hourlyRate;
+            }
+          });
+        }
+        
+        // 計算
+        const totalSales = totalCashSales + totalEmoneSales + totalCreditSales;
+        const averageSpend = totalCustomerCount > 0 ? Math.round(totalSales / totalCustomerCount) : 0;
+        
+        const tax8Excluded = Math.floor(totalTax8 / 1.08);
+        const tax10Excluded = Math.floor(totalTax10 / 1.10);
+        const tax8Amount = totalTax8 - tax8Excluded;
+        const tax10Amount = totalTax10 - tax10Excluded;
+        const totalTax = tax8Amount + tax10Amount;
+        const taxExcludedTotal = tax8Excluded + tax10Excluded;
+        const taxIncludedTotal = totalTax8 + totalTax10;
+        const finalTotalSales = taxIncludedTotal - totalDiscount - totalExpense;
+        
+        const now = new Date();
+        const outputTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+        
+        // ジャーナルテキストを生成
+        const journalText = `
+=====================================
+      期間ジャーナル
+=====================================
+期間: ${startDate} ～ ${endDate}
+出力時刻: ${outputTime}
+客数: ${totalCustomerCount}組
+総売上点数: ${totalItems}点
+平均客単価: ¥${averageSpend.toLocaleString()}
+合計売上: ¥${totalSales.toLocaleString()}
+
+-------------------------------------
+売上内訳
+-------------------------------------
+現金: ¥${totalCashSales.toLocaleString()}
+電子マネー: ¥${totalEmoneSales.toLocaleString()}
+クレジットカード: ¥${totalCreditSales.toLocaleString()}
+値引き: ¥${totalDiscount.toLocaleString()}
+
+-------------------------------------
+税金内訳（内税）
+-------------------------------------
+8%の商品合計（税抜）: ¥${tax8Excluded.toLocaleString()}
+8%の商品合計（税込）: ¥${totalTax8.toLocaleString()}
+8%の消費税: ¥${tax8Amount.toLocaleString()}
+
+10%の商品合計（税抜）: ¥${tax10Excluded.toLocaleString()}
+10%の商品合計（税込）: ¥${totalTax10.toLocaleString()}
+10%の消費税: ¥${tax10Amount.toLocaleString()}
+
+消費税の合計: ¥${totalTax.toLocaleString()}
+税抜合計: ¥${taxExcludedTotal.toLocaleString()}
+税込合計: ¥${taxIncludedTotal.toLocaleString()}
+値引き金額: ¥${totalDiscount.toLocaleString()}
+支出: ¥${totalExpense.toLocaleString()}
+合計売上: ¥${finalTotalSales.toLocaleString()}
+
+-------------------------------------
+その他
+-------------------------------------
+ドロアオープン数: ${totalDrawerOpen}回
+人件費: ¥${Math.round(totalLaborCost).toLocaleString()}
+
+=====================================
+`;
+        
+        // PNG画像として保存
+        const journalDiv = document.createElement('div');
+        journalDiv.style.cssText = `
+          font-family: 'Courier New', monospace;
+          font-size: 14px;
+          line-height: 1.6;
+          padding: 30px;
+          background: white;
+          color: black;
+          white-space: pre-wrap;
+          position: absolute;
+          left: -9999px;
+        `;
+        journalDiv.textContent = journalText;
+        document.body.appendChild(journalDiv);
+        
+        const canvas = await html2canvas(journalDiv, {
+          backgroundColor: '#ffffff',
+          scale: 2
+        });
+        
+        document.body.removeChild(journalDiv);
+        
+        const link = document.createElement('a');
+        link.download = `期間ジャーナル_${startDate}_${endDate}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
+        
+        console.log('✅ 期間ジャーナル生成完了');
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: #4CAF50; font-size: 18px;">✅ ジャーナルをダウンロードしました</div>';
+        
+      } catch (e) {
+        console.error('❌ 期間ジャーナル生成エラー:', e);
+        alert('期間ジャーナルの生成に失敗しました: ' + e.message);
+      }
     };
     
     // ========== 客数機能 ==========
@@ -3106,14 +3291,40 @@
         });
       }
       
+      // 今日の日付を初期値として設定（午前3時基準）
+      const now = new Date();
+      const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+      const todayStart = new Date(jstNow);
+      todayStart.setHours(3, 0, 0, 0);
+      if (jstNow.getHours() < 3) {
+        todayStart.setDate(todayStart.getDate() - 1);
+      }
+      
+      const year = todayStart.getFullYear();
+      const month = String(todayStart.getMonth() + 1).padStart(2, '0');
+      const day = String(todayStart.getDate()).padStart(2, '0');
+      const todayDateStr = `${year}-${month}-${day}`;
+      
+      document.getElementById('settlementDate').value = todayDateStr;
+      
       const container = document.getElementById('settlementSummary');
       container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
       
       document.getElementById('settlementModal').classList.remove('hidden');
       
+      // 日付変更時にサマリーを更新
+      document.getElementById('settlementDate').onchange = updateSettlementSummary;
+      
+      await updateSettlementSummary();
+    };
+    
+    // 精算サマリーを更新
+    async function updateSettlementSummary() {
+      const container = document.getElementById('settlementSummary');
+      container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
+      
       try {
-        const now = new Date();
-        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const dateStr = document.getElementById('settlementDate').value;
         
         // 日次売上データから取得
         const salesRef = window.doc(window.db, 'dailySales', dateStr);
@@ -3180,7 +3391,7 @@
         console.error('精算サマリーエラー:', e);
         container.innerHTML = '<div style="text-align: center; color: red;">エラーが発生しました</div>';
       }
-    };
+    }
     
     // 精算を実行（CSVダウンロード）
     window.confirmSettlement = async function() {
@@ -3351,17 +3562,22 @@
 
           if (response.ok) {
             const data = await response.json();
+            console.log('API Response:', data);
             if (data.content && data.content[0] && data.content[0].text) {
               aiComment = data.content[0].text;
               console.log('✅ AIコメント生成成功');
+            } else {
+              console.log('⚠️ レスポンス形式が不正:', data);
+              aiComment = '※ AIコメントの生成に失敗しました（レスポンス形式エラー）';
             }
           } else {
-            console.log('⚠️ AIコメント生成失敗（APIエラー）');
-            aiComment = '※ AIコメントの生成に失敗しました';
+            const errorData = await response.json().catch(() => ({}));
+            console.log('⚠️ AIコメント生成失敗（APIエラー）:', response.status, errorData);
+            aiComment = `※ AIコメントの生成に失敗しました（ステータス: ${response.status}）`;
           }
         } catch (error) {
           console.error('❌ AIコメント生成エラー:', error);
-          aiComment = '※ AIコメントの生成中にエラーが発生しました';
+          aiComment = '※ AIコメントの生成中にエラーが発生しました: ' + error.message;
         }
         
         // ===== ジャーナルテキストを生成 =====
