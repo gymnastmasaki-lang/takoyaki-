@@ -1520,10 +1520,8 @@
         <!-- 編集内容 -->
       </div>
       
-      <div style="display: flex; gap: 10px; margin-top: 20px;">
-        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
-        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrderFromEdit()">注文削除</button>
-        <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+      <div id="editOrderButtons" style="display: flex; gap: 10px; margin-top: 20px;">
+        <!-- ボタンは動的に生成 -->
       </div>
     </div>
   </div>
@@ -2238,38 +2236,22 @@
           </div>`;
         });
         
-        // アクションボタン
-        let actionsHtml = '';
-        if (!order.deleted) {
-          // 削除されていない注文は編集可能
-          actionsHtml = `
-            <div style="display: flex; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 2px solid #eee;">
-              <button onclick="editOrder('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                ✏️ 編集
-              </button>
-              ${order.paidAt ? `
-                <button onclick="reprintReceipt('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                  レシート再印刷
-                </button>
-                <button onclick="reprintInvoice('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                  領収書再印刷
-                </button>
-              ` : ''}
-            </div>
-          `;
-        } else if (order.paidAt) {
-          // 削除済みでも会計済みなら再印刷可能
-          actionsHtml = `
-            <div style="display: flex; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 2px solid #eee;">
+        // アクションボタン（すべての注文が編集可能）
+        let actionsHtml = `
+          <div style="display: flex; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 2px solid #eee;">
+            <button onclick="editOrder('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+              ✏️ 編集
+            </button>
+            ${order.paidAt ? `
               <button onclick="reprintReceipt('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                 レシート再印刷
               </button>
               <button onclick="reprintInvoice('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                 領収書再印刷
               </button>
-            </div>
-          `;
-        }
+            ` : ''}
+          </div>
+        `;
         
         card.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -2505,6 +2487,24 @@
           </div>
         `;
         
+        // ボタンを動的に生成（削除済みかどうかで変わる）
+        const buttonsContainer = document.getElementById('editOrderButtons');
+        if (orderData.deleted) {
+          // 削除済み注文：保存と復元ボタン
+          buttonsContainer.innerHTML = `
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;" onclick="restoreOrder()">注文を復元</button>
+            <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+          `;
+        } else {
+          // 通常の注文：保存と削除ボタン
+          buttonsContainer.innerHTML = `
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrderFromEdit()">注文削除</button>
+            <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+          `;
+        }
+        
         document.getElementById('editOrderModal').classList.remove('hidden');
         
       } catch (e) {
@@ -2607,6 +2607,32 @@
       } catch (e) {
         console.error('注文削除エラー:', e);
         alert('注文の削除に失敗しました: ' + e.message);
+      }
+    };
+    
+    // 注文を復元
+    window.restoreOrder = async function() {
+      if (!currentEditingOrder) return;
+      
+      if (!confirm(`注文 #${currentEditingOrder.orderNumber} を復元しますか？`)) {
+        return;
+      }
+      
+      try {
+        await window.updateDoc(window.doc(window.db, 'orders', currentEditingOrder.id), {
+          deleted: false,
+          deletedAt: null
+        });
+        
+        alert('注文を復元しました');
+        closeEditOrderModal();
+        
+        // 履歴を再読み込み
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('注文復元エラー:', e);
+        alert('注文の復元に失敗しました: ' + e.message);
       }
     };
     
@@ -3310,6 +3336,7 @@
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              'x-api-key': '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',
               'anthropic-version': '2023-06-01'
             },
             body: JSON.stringify({
