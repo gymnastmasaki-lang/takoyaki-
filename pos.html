@@ -2704,6 +2704,28 @@
         let totalLaborCost = 0;
         const itemCounts = {}; // 商品別カウント
         
+        // ordersコレクションから直接商品データを集計
+        const ordersQuery = window.query(
+          window.collection(window.db, 'orders'),
+          window.where('paidAt', '!=', null)
+        );
+        const ordersSnapshot = await window.getDocs(ordersQuery);
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          const orderDate = data.timestamp.toDate();
+          const orderDateStr = `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, '0')}-${String(orderDate.getDate()).padStart(2, '0')}`;
+          
+          // 期間内の注文のみ
+          if (dates.includes(orderDateStr) && data.items && data.paidAt) {
+            data.items.forEach(item => {
+              itemCounts[item.name] = (itemCounts[item.name] || 0) + (item.quantity || 1);
+            });
+          }
+        });
+        
+        console.log('📦 ordersから集計した商品データ:', itemCounts);
+        
         for (const dateStr of dates) {
           // 売上データ
           const salesDoc = await window.getDoc(window.doc(window.db, 'dailySales', dateStr));
@@ -2718,16 +2740,6 @@
             totalTax8 += data.tax8Total || 0;
             totalTax10 += data.tax10Total || 0;
             totalDrawerOpen += data.drawerOpenCount || 0;
-            
-            // 商品カウント
-            if (data.itemCounts) {
-              console.log(`📦 ${dateStr}の商品データ:`, data.itemCounts);
-              Object.keys(data.itemCounts).forEach(itemName => {
-                itemCounts[itemName] = (itemCounts[itemName] || 0) + data.itemCounts[itemName];
-              });
-            } else {
-              console.warn(`⚠️ ${dateStr}には商品データがありません`);
-            }
           }
           
           // 支出データ
@@ -3058,35 +3070,6 @@
         
         console.log('最終売上:', totalSales, '注文数:', orderCount);
         
-        // 商品別販売数を集計
-        let itemCountsHtml = '';
-        if (salesDoc.exists()) {
-          const data = salesDoc.data();
-          const itemCounts = data.itemCounts || {};
-          
-          console.log('📦 商品別販売データ:', itemCounts);
-          
-          if (Object.keys(itemCounts).length > 0) {
-            // 販売数の多い順にソート
-            const sortedItems = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]);
-            
-            sortedItems.forEach(([itemName, count]) => {
-              itemCountsHtml += `
-                <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
-                  <span>${itemName}</span>
-                  <strong>${count}個</strong>
-                </div>
-              `;
-            });
-          } else {
-            itemCountsHtml = '<div style="text-align: center; padding: 20px; color: #999;">データがありません</div>';
-          }
-        } else {
-          itemCountsHtml = '<div style="text-align: center; padding: 20px; color: #999;">データがありません</div>';
-        }
-        
-        console.log('📊 商品別販売HTMLを生成:', itemCountsHtml.length, '文字');
-        
         // 売上目標達成率を計算
         const dayOfWeek = now.getDay(); // 0=日曜, 6=土曜
         const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
@@ -3143,13 +3126,6 @@
               <div style="display: flex; justify-content: space-between; padding: 10px 0;">
                 <span>電子マネー</span>
                 <strong>¥${emoneSales.toLocaleString()}</strong>
-              </div>
-            </div>
-            
-            <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
-              <h4 style="margin: 0 0 15px 0;">🍽️ 商品別販売数</h4>
-              <div style="max-height: 300px; overflow-y: auto;">
-                ${itemCountsHtml}
               </div>
             </div>
           </div>
@@ -3462,67 +3438,6 @@
         console.log('🔓 ドロアオープン数:', drawerOpenCount);
         console.log('👤 担当者:', staffName);
         
-        // ===== AIコメントを生成 =====
-        let aiComment = '';
-        try {
-          console.log('🤖 AIコメント生成開始...');
-          const prompt = `あなたは飲食店の経営コンサルタントです。以下の本日の売上データを分析し、簡潔な感想とアドバイス、今後の売上向上のための具体的な提案を日本語で提供してください。
-
-【本日の売上データ】
-- 客数: ${customerCount}組
-- 総売上点数: ${totalItems}点
-- 平均客単価: ${averageSpend}円
-- 合計売上: ${totalSales}円
-- 現金: ${cashSales}円
-- 電子マネー: ${emoneSales}円
-- クレジットカード: ${creditSales}円
-- 値引き: ${discountTotal}円
-
-【出力形式】
-以下の3つのセクションで回答してください：
-1. 本日の売上の感想（2-3文）
-2. 気づいた点とアドバイス（2-3文）
-3. 売上向上のための具体的な提案（箇条書きで3-4点）
-
-簡潔で実践的なアドバイスをお願いします。`;
-
-          const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': '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',
-              'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-              model: 'claude-sonnet-4-20250514',
-              max_tokens: 1024,
-              messages: [{
-                role: 'user',
-                content: prompt
-              }]
-            })
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            console.log('API Response:', data);
-            if (data.content && data.content[0] && data.content[0].text) {
-              aiComment = data.content[0].text;
-              console.log('✅ AIコメント生成成功');
-            } else {
-              console.log('⚠️ レスポンス形式が不正:', data);
-              aiComment = '※ AIコメントの生成に失敗しました（レスポンス形式エラー）';
-            }
-          } else {
-            const errorData = await response.json().catch(() => ({}));
-            console.log('⚠️ AIコメント生成失敗（APIエラー）:', response.status, errorData);
-            aiComment = `※ AIコメントの生成に失敗しました（ステータス: ${response.status}）`;
-          }
-        } catch (error) {
-          console.error('❌ AIコメント生成エラー:', error);
-          aiComment = '※ AIコメントの生成中にエラーが発生しました: ' + error.message;
-        }
-        
         // ===== ジャーナルテキストを生成 =====
         const journalText = `
 =====================================
@@ -3566,11 +3481,6 @@
 ドロアオープン数: ${drawerOpenCount}回
 人件費: ¥${Math.round(laborCost).toLocaleString()}
 担当者: ${staffName}
-
-=====================================
-      Claudeからのコメント
-=====================================
-${aiComment}
 
 =====================================
 `;
