@@ -2085,7 +2085,12 @@
     // 履歴を読み込み
     async function loadHistory() {
       try {
-        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
+        // timestampで昇順（古い順）にクエリ
+        const q = window.query(
+          window.collection(window.db, 'orders'),
+          window.orderBy('timestamp', 'asc')
+        );
+        const ordersSnapshot = await window.getDocs(q);
         historyOrders = [];
         
         ordersSnapshot.forEach(doc => {
@@ -2106,12 +2111,12 @@
           });
         });
         
-        // 注文番号で昇順ソート（古い順→新しい順、一番上が古く一番下が新しい）
-        historyOrders.sort((a, b) => a.orderNumber - b.orderNumber);
+        // Firebaseのクエリで既に時系列順（古い順）にソートされている
+        console.log('✅ 履歴読み込み完了:', historyOrders.length, '件');
         
         filterHistory();
       } catch (e) {
-        console.error('履歴読み込みエラー:', e);
+        console.error('❌ 履歴読み込みエラー:', e);
         alert('履歴の読み込みに失敗しました');
       }
     }
@@ -3053,6 +3058,35 @@
         
         console.log('最終売上:', totalSales, '注文数:', orderCount);
         
+        // 商品別販売数を集計
+        let itemCountsHtml = '';
+        if (salesDoc.exists()) {
+          const data = salesDoc.data();
+          const itemCounts = data.itemCounts || {};
+          
+          console.log('📦 商品別販売データ:', itemCounts);
+          
+          if (Object.keys(itemCounts).length > 0) {
+            // 販売数の多い順にソート
+            const sortedItems = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]);
+            
+            sortedItems.forEach(([itemName, count]) => {
+              itemCountsHtml += `
+                <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
+                  <span>${itemName}</span>
+                  <strong>${count}個</strong>
+                </div>
+              `;
+            });
+          } else {
+            itemCountsHtml = '<div style="text-align: center; padding: 20px; color: #999;">データがありません</div>';
+          }
+        } else {
+          itemCountsHtml = '<div style="text-align: center; padding: 20px; color: #999;">データがありません</div>';
+        }
+        
+        console.log('📊 商品別販売HTMLを生成:', itemCountsHtml.length, '文字');
+        
         // 売上目標達成率を計算
         const dayOfWeek = now.getDay(); // 0=日曜, 6=土曜
         const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
@@ -3109,6 +3143,13 @@
               <div style="display: flex; justify-content: space-between; padding: 10px 0;">
                 <span>電子マネー</span>
                 <strong>¥${emoneSales.toLocaleString()}</strong>
+              </div>
+            </div>
+            
+            <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
+              <h4 style="margin: 0 0 15px 0;">🍽️ 商品別販売数</h4>
+              <div style="max-height: 300px; overflow-y: auto;">
+                ${itemCountsHtml}
               </div>
             </div>
           </div>
