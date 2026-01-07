@@ -1396,14 +1396,8 @@
     <div class="modal" style="max-width: 700px;">
       <h3>本日の売上</h3>
       
-      <div style="margin: 20px 0; display: flex; gap: 10px;">
-        <select id="salesDateFilter" onchange="calculateSales()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px; flex: 1;">
-          <option value="today">今日</option>
-          <option value="yesterday">昨日</option>
-          <option value="week">今週</option>
-          <option value="month">今月</option>
-        </select>
-        <button onclick="showSettlementModal()" style="padding: 8px 16px; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">🔄 精算</button>
+      <div style="margin: 20px 0; display: flex; justify-content: flex-end;">
+        <button onclick="showSettlementModal()" style="padding: 10px 20px; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 16px;">🔄 精算</button>
       </div>
       
       <div id="salesContent">
@@ -2198,7 +2192,10 @@
       
       container.innerHTML = '';
       
-      orders.forEach(order => {
+      // 新しい順に表示（配列を逆順にする）
+      const reversedOrders = [...orders].reverse();
+      
+      reversedOrders.forEach(order => {
         const card = document.createElement('div');
         card.style.cssText = `
           background: white;
@@ -2652,154 +2649,6 @@
       document.getElementById('monthlyReportModal').classList.remove('hidden');
     };
     
-    // 月次レポートを生成
-    window.generateMonthlyReport = async function() {
-      const year = parseInt(document.getElementById('reportYear').value);
-      const month = parseInt(document.getElementById('reportMonth').value);
-      
-      const container = document.getElementById('monthlyReportContent');
-      container.innerHTML = '<div style="text-align: center; padding: 40px;">集計中...</div>';
-      
-      try {
-        const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
-        
-        let totalSales = 0;
-        let totalOrders = 0;
-        let paidOrders = 0;
-        let cancelledOrders = 0;
-        let deletedOrders = 0;
-        let itemCounts = {};
-        let categoryCounts = {};
-        let dailySales = {};
-        
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          const orderDate = data.timestamp.toDate();
-          
-          if (orderDate.getFullYear() === year && orderDate.getMonth() + 1 === month) {
-            totalOrders++;
-            
-            if (data.deleted) {
-              deletedOrders++;
-            }
-            if (data.paidAt) {
-              paidOrders++;
-              totalSales += data.totalAmount || 0;
-              
-              // 日別売上
-              const day = orderDate.getDate();
-              dailySales[day] = (dailySales[day] || 0) + (data.totalAmount || 0);
-            }
-            if (data.cancelledAt) {
-              cancelledOrders++;
-            }
-            
-            // 商品集計
-            if (data.items && data.paidAt) {
-              data.items.forEach(item => {
-                itemCounts[item.name] = (itemCounts[item.name] || 0) + item.quantity;
-                
-                // カテゴリ集計
-                const category = item.category || 'その他';
-                categoryCounts[category] = (categoryCounts[category] || 0) + item.quantity;
-              });
-            }
-          }
-        });
-        
-        // 人気商品トップ10
-        const topItems = Object.entries(itemCounts)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 10);
-        
-        // カテゴリ別売上
-        const categoryList = Object.entries(categoryCounts)
-          .sort((a, b) => b[1] - a[1]);
-        
-        // 日別売上グラフ用データ
-        const daysInMonth = new Date(year, month, 0).getDate();
-        let dailyChart = '';
-        for (let day = 1; day <= daysInMonth; day++) {
-          const sales = dailySales[day] || 0;
-          const barHeight = sales > 0 ? Math.max(20, (sales / Math.max(...Object.values(dailySales))) * 100) : 0;
-          dailyChart += `
-            <div style="display: flex; align-items: flex-end; margin-right: 2px;">
-              <div style="width: 20px; height: ${barHeight}px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 3px 3px 0 0;" title="${day}日: ¥${sales.toLocaleString()}"></div>
-            </div>
-          `;
-        }
-        
-        container.innerHTML = `
-          <div style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-            <h4 style="margin-bottom: 15px; color: #667eea;">📈 売上サマリー</h4>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-              <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 10px;">
-                <div style="font-size: 14px; opacity: 0.9;">総売上</div>
-                <div style="font-size: 28px; font-weight: bold;">¥${totalSales.toLocaleString()}</div>
-              </div>
-              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 15px; border-radius: 10px;">
-                <div style="font-size: 14px; opacity: 0.9;">会計済み注文</div>
-                <div style="font-size: 28px; font-weight: bold;">${paidOrders}件</div>
-              </div>
-              <div style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; padding: 15px; border-radius: 10px;">
-                <div style="font-size: 14px; opacity: 0.9;">客数</div>
-                <div style="font-size: 28px; font-weight: bold;">${totalOrders}件</div>
-              </div>
-              <div style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; padding: 15px; border-radius: 10px;">
-                <div style="font-size: 14px; opacity: 0.9;">平均単価</div>
-                <div style="font-size: 28px; font-weight: bold;">¥${paidOrders > 0 ? Math.round(totalSales / paidOrders).toLocaleString() : 0}</div>
-              </div>
-            </div>
-          </div>
-          
-          <div style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-            <h4 style="margin-bottom: 15px; color: #667eea;">📊 日別売上推移</h4>
-            <div style="display: flex; height: 150px; align-items: flex-end; justify-content: space-between; padding: 10px; background: #f8f9fa; border-radius: 8px;">
-              ${dailyChart}
-            </div>
-          </div>
-          
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
-            <div style="background: white; border-radius: 12px; padding: 20px;">
-              <h4 style="margin-bottom: 15px; color: #667eea;">🏆 人気商品トップ10</h4>
-              ${topItems.map((item, idx) => `
-                <div style="display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee;">
-                  <span>${idx + 1}. ${item[0]}</span>
-                  <strong>${item[1]}個</strong>
-                </div>
-              `).join('')}
-            </div>
-            
-            <div style="background: white; border-radius: 12px; padding: 20px;">
-              <h4 style="margin-bottom: 15px; color: #667eea;">📦 カテゴリ別販売数</h4>
-              ${categoryList.map(cat => `
-                <div style="display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee;">
-                  <span>${cat[0]}</span>
-                  <strong>${cat[1]}個</strong>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-          
-          <div style="background: white; border-radius: 12px; padding: 20px; margin-top: 20px;">
-            <h4 style="margin-bottom: 15px; color: #667eea;">📋 その他の統計</h4>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
-              <div style="padding: 10px; background: #f8f9fa; border-radius: 8px;">
-                <div style="font-size: 12px; color: #666;">キャンセル数</div>
-                <div style="font-size: 20px; font-weight: bold;">${cancelledOrders}件</div>
-              </div>
-              <div style="padding: 10px; background: #f8f9fa; border-radius: 8px;">
-                <div style="font-size: 12px; color: #666;">削除数</div>
-                <div style="font-size: 20px; font-weight: bold;">${deletedOrders}件</div>
-              </div>
-            </div>
-          </div>
-        `;
-      } catch (e) {
-        console.error('レポート生成エラー:', e);
-        container.innerHTML = '<div style="text-align: center; padding: 40px; color: red;">レポートの生成に失敗しました</div>';
-      }
-    };
     
     // 月次レポートモーダルを閉じる
     window.closeMonthlyReportModal = function() {
@@ -2849,6 +2698,7 @@
         let totalDrawerOpen = 0;
         let totalExpense = 0;
         let totalLaborCost = 0;
+        const itemCounts = {}; // 商品別カウント
         
         for (const dateStr of dates) {
           // 売上データ
@@ -2864,6 +2714,13 @@
             totalTax8 += data.tax8Total || 0;
             totalTax10 += data.tax10Total || 0;
             totalDrawerOpen += data.drawerOpenCount || 0;
+            
+            // 商品カウント
+            if (data.itemCounts) {
+              Object.keys(data.itemCounts).forEach(itemName => {
+                itemCounts[itemName] = (itemCounts[itemName] || 0) + data.itemCounts[itemName];
+              });
+            }
           }
           
           // 支出データ
@@ -2990,7 +2847,75 @@
         link.click();
         
         console.log('✅ 期間ジャーナル生成完了');
-        container.innerHTML = '<div style="text-align: center; padding: 40px; color: #4CAF50; font-size: 18px;">✅ ジャーナルをダウンロードしました</div>';
+        
+        // 商品カウントをソート（販売数が多い順）
+        const sortedItems = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]);
+        
+        // 商品カウントのHTML生成
+        let itemCountsHtml = '';
+        sortedItems.forEach(([itemName, count]) => {
+          itemCountsHtml += `
+            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
+              <span>${itemName}</span>
+              <strong>${count}個</strong>
+            </div>
+          `;
+        });
+        
+        // サマリー表示
+        container.innerHTML = `
+          <div style="padding: 20px;">
+            <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border-radius: 12px; margin-bottom: 20px;">
+              <div style="font-size: 18px; margin-bottom: 10px;">✅ ジャーナルをダウンロードしました</div>
+              <div style="font-size: 14px; opacity: 0.9;">期間: ${startDate} ～ ${endDate}</div>
+            </div>
+            
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
+              <h4 style="margin: 0 0 15px 0; color: #333;">📊 期間サマリー</h4>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <div style="font-size: 12px; color: #666; margin-bottom: 5px;">総売上</div>
+                  <div style="font-size: 24px; font-weight: bold; color: #4CAF50;">¥${(totalCashSales + totalEmoneSales + totalCreditSales).toLocaleString()}</div>
+                </div>
+                <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <div style="font-size: 12px; color: #666; margin-bottom: 5px;">客数</div>
+                  <div style="font-size: 24px; font-weight: bold; color: #2196F3;">${totalCustomerCount}組</div>
+                </div>
+                <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <div style="font-size: 12px; color: #666; margin-bottom: 5px;">販売点数</div>
+                  <div style="font-size: 24px; font-weight: bold; color: #FF9800;">${totalItems}点</div>
+                </div>
+                <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <div style="font-size: 12px; color: #666; margin-bottom: 5px;">平均客単価</div>
+                  <div style="font-size: 24px; font-weight: bold; color: #9C27B0;">¥${totalCustomerCount > 0 ? Math.round((totalCashSales + totalEmoneSales + totalCreditSales) / totalCustomerCount).toLocaleString() : 0}</div>
+                </div>
+              </div>
+            </div>
+            
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
+              <h4 style="margin: 0 0 15px 0; color: #333;">💳 支払方法別</h4>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+                <span>現金</span>
+                <strong>¥${totalCashSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+                <span>電子マネー</span>
+                <strong>¥${totalEmoneSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0;">
+                <span>クレジットカード</span>
+                <strong>¥${totalCreditSales.toLocaleString()}</strong>
+              </div>
+            </div>
+            
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 12px;">
+              <h4 style="margin: 0 0 15px 0; color: #333;">🍽️ 商品別販売数</h4>
+              <div style="max-height: 300px; overflow-y: auto;">
+                ${itemCountsHtml || '<div style="text-align: center; color: #999;">データがありません</div>'}
+              </div>
+            </div>
+          </div>
+        `;
         
       } catch (e) {
         console.error('❌ 期間ジャーナル生成エラー:', e);
@@ -3073,7 +2998,6 @@
     // 売上を計算
     window.calculateSales = async function() {
       const container = document.getElementById('salesContent');
-      const filter = document.getElementById('salesDateFilter').value;
       container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
       
       try {
@@ -3084,83 +3008,49 @@
           });
         }
         
+        // 今日の日次売上データから取得（午前3時基準）
+        const now = new Date();
+        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        const todayStart = new Date(jstNow);
+        todayStart.setHours(3, 0, 0, 0);
+        if (jstNow.getHours() < 3) {
+          todayStart.setDate(todayStart.getDate() - 1);
+        }
+        
+        const year = todayStart.getFullYear();
+        const month = String(todayStart.getMonth() + 1).padStart(2, '0');
+        const day = String(todayStart.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        
+        const salesRef = window.doc(window.db, 'dailySales', dateStr);
+        const salesDoc = await window.getDoc(salesRef);
+        
         let totalSales = 0;
         let cashSales = 0;
         let emoneSales = 0;
         let creditSales = 0;
         let orderCount = 0;
         
-        // 今日の場合は日次売上データから取得
-        if (filter === 'today') {
-          const now = new Date();
-          const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-          
-          const salesRef = window.doc(window.db, 'dailySales', dateStr);
-          const salesDoc = await window.getDoc(salesRef);
-          
-          if (salesDoc.exists()) {
-            const data = salesDoc.data();
-            totalSales = data.totalSales || 0;
-            cashSales = data.cashSales || 0;
-            emoneSales = data.emoneSales || 0;
-            creditSales = data.creditSales || 0;
-            orderCount = data.customerCount || 0; // 注文数 = 客数
-          }
-        } else {
-          // 他の期間は従来通り全注文をループ
-          const now = new Date();
-          const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-          
-          let startDate = new Date(jstNow);
-          startDate.setHours(3, 0, 0, 0);
-          
-          if (filter === 'yesterday') {
-            startDate.setDate(startDate.getDate() - 1);
-            if (jstNow.getHours() < 3) {
-              startDate.setDate(startDate.getDate() - 1);
-            }
-          } else if (filter === 'week') {
-            startDate.setDate(startDate.getDate() - 7);
-          } else if (filter === 'month') {
-            startDate.setDate(1);
-          }
-          
-          const ordersSnapshot = await window.getDocs(window.collection(window.db, 'orders'));
-          
-          ordersSnapshot.forEach(docSnap => {
-            const data = docSnap.data();
-            if (!data.timestamp) return;
-            
-            const orderDate = data.timestamp.toDate();
-            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-            
-            // 指定期間の注文で、会計済み（削除されていない）もの
-            if (jstOrderDate >= startDate && data.paidAt && !data.deleted) {
-              totalSales += data.totalAmount || 0;
-              orderCount++;
-              
-              // 支払い方法別
-              if (data.paymentMethod === 'cash') cashSales += data.totalAmount || 0;
-              else if (data.paymentMethod === 'emoney') emoneSales += data.totalAmount || 0;
-              else if (data.paymentMethod === 'credit') creditSales += data.totalAmount || 0;
-            }
-          });
+        if (salesDoc.exists()) {
+          const data = salesDoc.data();
+          totalSales = data.totalSales || 0;
+          cashSales = data.cashSales || 0;
+          emoneSales = data.emoneSales || 0;
+          creditSales = data.creditSales || 0;
+          orderCount = data.customerCount || 0;
         }
         
         console.log('最終売上:', totalSales, '注文数:', orderCount);
         
-        // 売上目標達成率を計算（今日の場合のみ）
-        let targetSection = '';
-        if (filter === 'today') {
-          const now = new Date();
-          const dayOfWeek = now.getDay(); // 0=日曜, 6=土曜
-          const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-          const targetSales = isWeekend ? 70000 : 50000;
-          const achievementRate = Math.round((totalSales / targetSales) * 100);
-          
-          const rateColor = achievementRate >= 100 ? '#4CAF50' : achievementRate >= 80 ? '#FF9800' : '#f44336';
-          
-          targetSection = `
+        // 売上目標達成率を計算
+        const dayOfWeek = now.getDay(); // 0=日曜, 6=土曜
+        const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+        const targetSales = isWeekend ? 70000 : 50000;
+        const achievementRate = Math.round((totalSales / targetSales) * 100);
+        
+        const rateColor = achievementRate >= 100 ? '#4CAF50' : achievementRate >= 80 ? '#FF9800' : '#f44336';
+        
+        const targetSection = `
             <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white;">
               <h4 style="margin: 0 0 10px 0;">📊 売上目標</h4>
               <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
@@ -3179,7 +3069,6 @@
               </div>
             </div>
           `;
-        }
         
         container.innerHTML = `
           <div style="background: white; border-radius: 12px; padding: 20px;">
@@ -3552,7 +3441,7 @@
             },
             body: JSON.stringify({
               model: 'claude-sonnet-4-20250514',
-              max_tokens: 1000,
+              max_tokens: 1024,
               messages: [{
                 role: 'user',
                 content: prompt
