@@ -3297,18 +3297,33 @@ ${aiComment}
     };
     
     // 支出テーブルを描画
+    // 勘定科目と税率のマッピング
+    const categoryTaxRates = {
+      '材料費': 8,
+      '日用品': 10,
+      '雑費・雑品': 10,
+      'その他': 10
+    };
+    
     function renderExpenseTable() {
       const tbody = document.getElementById('expenseTableBody');
       tbody.innerHTML = '';
       
       expenseRows.forEach((row, index) => {
+        const taxRate = categoryTaxRates[row.category] || 10;
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td style="padding: 8px; border: 1px solid #ddd;">
             <input type="text" value="${row.storeName}" onchange="updateExpenseRow(${index}, 'storeName', this.value)" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
           </td>
           <td style="padding: 8px; border: 1px solid #ddd;">
-            <input type="text" value="${row.category}" onchange="updateExpenseRow(${index}, 'category', this.value)" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+            <select onchange="updateExpenseRow(${index}, 'category', this.value)" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+              <option value="">選択してください</option>
+              <option value="材料費" ${row.category === '材料費' ? 'selected' : ''}>材料費 (8%)</option>
+              <option value="日用品" ${row.category === '日用品' ? 'selected' : ''}>日用品 (10%)</option>
+              <option value="雑費・雑品" ${row.category === '雑費・雑品' ? 'selected' : ''}>雑費・雑品 (10%)</option>
+              <option value="その他" ${row.category === 'その他' ? 'selected' : ''}>その他 (10%)</option>
+            </select>
           </td>
           <td style="padding: 8px; border: 1px solid #ddd;">
             <input type="text" value="${row.detail}" onchange="updateExpenseRow(${index}, 'detail', this.value)" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
@@ -3367,6 +3382,14 @@ ${aiComment}
       try {
         console.log('📄 支出CSV出力開始');
         
+        // 勘定科目と税率のマッピング
+        const categoryTaxRates = {
+          '材料費': 8,
+          '日用品': 10,
+          '雑費・雑品': 10,
+          'その他': 10
+        };
+        
         // CSVヘッダー
         let csvContent = '\uFEFF'; // BOM（UTF-8）
         csvContent += '店名,勘定科目,詳細,金額\n';
@@ -3382,9 +3405,58 @@ ${aiComment}
           csvContent += `${storeName},${category},${detail},${amount}\n`;
         });
         
-        // 合計行を追加
-        const total = expenseRows.reduce((sum, row) => sum + (parseFloat(row.amount) || 0), 0);
-        csvContent += `"","","合計",${total}\n`;
+        csvContent += '\n';
+        
+        // 勘定科目ごとの合計を計算
+        const categoryTotals = {};
+        expenseRows.forEach(row => {
+          const category = row.category || 'その他';
+          if (!categoryTotals[category]) {
+            categoryTotals[category] = 0;
+          }
+          categoryTotals[category] += parseFloat(row.amount) || 0;
+        });
+        
+        // 勘定科目ごとの合計を出力
+        csvContent += '【勘定科目別合計】\n';
+        csvContent += '勘定科目,金額,税率\n';
+        
+        Object.keys(categoryTotals).forEach(category => {
+          const total = categoryTotals[category];
+          const taxRate = categoryTaxRates[category] || 10;
+          csvContent += `"${category}",${total},${taxRate}%\n`;
+        });
+        
+        csvContent += '\n';
+        
+        // 税率別の合計を計算
+        let tax8Total = 0;
+        let tax10Total = 0;
+        
+        expenseRows.forEach(row => {
+          const category = row.category || 'その他';
+          const amount = parseFloat(row.amount) || 0;
+          const taxRate = categoryTaxRates[category] || 10;
+          
+          if (taxRate === 8) {
+            tax8Total += amount;
+          } else {
+            tax10Total += amount;
+          }
+        });
+        
+        // 税率別の合計を出力
+        csvContent += '【税率別合計】\n';
+        csvContent += '税率,合計金額\n';
+        csvContent += `"8%",${tax8Total}\n`;
+        csvContent += `"10%",${tax10Total}\n`;
+        csvContent += '\n';
+        
+        // 総合計を出力
+        const total = tax8Total + tax10Total;
+        csvContent += '【総合計】\n';
+        csvContent += '合計金額\n';
+        csvContent += `${total}\n`;
         
         // Blobを作成してダウンロード
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
