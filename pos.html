@@ -4901,9 +4901,30 @@
         <span style="color: #667eea;" id="itemPrice${index}">¥${itemTotal.toLocaleString()}</span>
       `;
       
-      // クリックで金額編集
+      // 商品行をクリックで金額編集
       headerDiv.onclick = function() {
-        editItemPrice(index, itemTotal, itemName, quantity);
+        const newPrice = prompt(`${itemName} ×${quantity} の金額を入力してください\n（現在: ¥${itemTotal.toLocaleString()}）`, itemTotal);
+        
+        if (newPrice === null) return; // キャンセル
+        
+        const numPrice = parseInt(newPrice);
+        if (isNaN(numPrice) || numPrice < 0) {
+          alert('正しい金額を入力してください');
+          return;
+        }
+        
+        // 金額表示を更新
+        document.getElementById(`itemPrice${index}`).textContent = `¥${numPrice.toLocaleString()}`;
+        
+        // ラジオボタンのdata-amountを更新
+        document.querySelectorAll(`input[name="taxRate${index}"]`).forEach(radio => {
+          radio.dataset.amount = numPrice;
+        });
+        
+        // 税率別集計と請求額を再計算
+        calculateTaxSummary();
+        
+        console.log(`✅ 商品${index}の金額を${itemTotal}円から${numPrice}円に変更`);
       };
       
       itemDiv.appendChild(headerDiv);
@@ -4949,39 +4970,6 @@
       
       container.appendChild(itemDiv);
     }
-    
-    // 商品の金額を編集
-    window.editItemPrice = function(index, currentPrice, itemName, quantity) {
-      const newPrice = prompt(`${itemName} ×${quantity} の金額を入力してください\n（現在: ¥${currentPrice.toLocaleString()}）`, currentPrice);
-      
-      if (newPrice === null) {
-        // キャンセルされた
-        return;
-      }
-      
-      const numPrice = parseInt(newPrice);
-      if (isNaN(numPrice) || numPrice < 0) {
-        alert('正しい金額を入力してください');
-        return;
-      }
-      
-      // 金額表示を更新
-      const priceElement = document.getElementById(`itemPrice${index}`);
-      if (priceElement) {
-        priceElement.textContent = `¥${numPrice.toLocaleString()}`;
-      }
-      
-      // ラジオボタンのdata-amountを更新
-      const radios = document.querySelectorAll(`input[name="taxRate${index}"]`);
-      radios.forEach(radio => {
-        radio.dataset.amount = numPrice;
-      });
-      
-      // 税率別集計を再計算
-      calculateTaxSummary();
-      
-      console.log(`✅ 商品${index}の金額を${currentPrice}円から${numPrice}円に変更`);
-    };
     
     // 税率別集計を計算
     function calculateTaxSummary() {
@@ -5143,16 +5131,15 @@
           console.log('✅ 商品点数カウント成功:', itemCount + '点');
         }
         
-        // 元の合計金額を計算（編集された金額を使用）
+        // 元の合計金額を計算（値引き前）
         let originalTotal = 0;
-        const radios = document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked');
-        radios.forEach(radio => {
-          originalTotal += parseFloat(radio.dataset.amount) || 0;
+        currentOrders.forEach(order => {
+          originalTotal += order.totalAmount || 0;
         });
         
         // 値引き金額を取得
         const discountAmount = parseInt(document.getElementById('discountAmount').value) || 0;
-        console.log('💸 元の金額（編集後）:', originalTotal);
+        console.log('💸 元の金額:', originalTotal);
         console.log('💸 値引き金額:', discountAmount);
         console.log('💸 値引き後金額:', totalAmountToPay);
         
@@ -5228,11 +5215,11 @@
             if (order.bagNeeded && order.bagQuantity > 0) {
               const radio = document.querySelector(`input[name="taxRate${itemIndex}"]:checked`);
               const taxRate = radio ? parseInt(radio.value) : 10;
-              const bagTotal = order.bagPrice || (order.bagQuantity * 3);
+              const editedPrice = radio ? parseFloat(radio.dataset.amount) : (order.bagQuantity * 3);
               itemsWithTaxRate.push({
                 name: '🛍️ レジ袋',
                 quantity: order.bagQuantity,
-                price: 3,
+                price: editedPrice / order.bagQuantity, // 単価に戻す
                 toppings: 'なし',
                 taxRate: taxRate
               });
