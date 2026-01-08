@@ -6482,14 +6482,50 @@
       }
       
       try {
+        // トッピングをtoppingsコレクションに登録してIDを取得
+        const toppingIds = [];
+        
+        if (toppingSets.length > 0) {
+          // 最新のトッピングIDを取得
+          const toppingsSnapshot = await window.getDocs(window.collection(window.db, 'toppings'));
+          let maxNum = 15; // T0016から開始
+          
+          toppingsSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.id && data.id.startsWith('T')) {
+              const num = parseInt(data.id.substring(1));
+              if (num > maxNum) maxNum = num;
+            }
+          });
+          
+          // 各トッピングセットのオプションをtoppingsに登録
+          for (const set of toppingSets) {
+            for (const option of set.options) {
+              maxNum++;
+              const toppingId = 'T' + String(maxNum).padStart(4, '0');
+              
+              await window.addDoc(window.collection(window.db, 'toppings'), {
+                id: toppingId,
+                name: option.name,
+                price: option.price,
+                order: maxNum
+              });
+              
+              toppingIds.push(toppingId);
+            }
+          }
+        }
+        
         // Firebaseに商品を追加
         const productData = {
           name: name,
           price: price,
           category: finalCategory,
           toppingSets: toppingSets,
+          toppingsId: toppingIds.join(','), // カンマ区切りで保存
           note: note,
           image: image || '',
+          taxRate: 10,
           createdAt: window.Timestamp.now()
         };
         
@@ -6738,14 +6774,51 @@
         // 既存商品を取得してdocIdを確認
         const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
         let docId = null;
+        let existingToppingsId = '';
+        
         menuSnapshot.forEach(doc => {
           if (doc.data().id === productId || doc.id === productId) {
             docId = doc.id;
+            existingToppingsId = doc.data().toppingsId || '';
           }
         });
         
         if (!docId) {
           throw new Error('商品が見つかりません');
+        }
+        
+        // トッピングをtoppingsコレクションに登録してIDを取得
+        const toppingIds = [];
+        
+        if (toppingSets.length > 0) {
+          // 最新のトッピングIDを取得
+          const toppingsSnapshot = await window.getDocs(window.collection(window.db, 'toppings'));
+          let maxNum = 15; // T0016から開始
+          
+          toppingsSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.id && data.id.startsWith('T')) {
+              const num = parseInt(data.id.substring(1));
+              if (num > maxNum) maxNum = num;
+            }
+          });
+          
+          // 各トッピングセットのオプションをtoppingsに登録
+          for (const set of toppingSets) {
+            for (const option of set.options) {
+              maxNum++;
+              const toppingId = 'T' + String(maxNum).padStart(4, '0');
+              
+              await window.addDoc(window.collection(window.db, 'toppings'), {
+                id: toppingId,
+                name: option.name,
+                price: option.price,
+                order: maxNum
+              });
+              
+              toppingIds.push(toppingId);
+            }
+          }
         }
         
         const productData = {
@@ -6754,6 +6827,7 @@
           price: price,
           category: category,
           toppingSets: toppingSets,
+          toppingsId: toppingIds.length > 0 ? toppingIds.join(',') : existingToppingsId,
           note: note,
           image: image || '',
           taxRate: 10
