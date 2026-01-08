@@ -1525,7 +1525,9 @@
             category: data.category || 'その他',
             taxRate: data.taxRate || 10,
             toppingsId: data.toppingsId || '', // カンマ区切りのトッピングID文字列
-            toppings: data.toppings || [] // 配列形式（互換性のため）
+            toppings: data.toppings || [], // 配列形式（互換性のため）
+            toppingSets: data.toppingSets || [], // 新しいトッピングセット形式
+            note: data.note || '' // 表示制限用のnote
           });
         });
         
@@ -4491,16 +4493,21 @@
         console.error('Timestamp変換エラー:', e);
       }
       
-      let statusHtml = '';
-      if (order.cancelledAt) {
-        statusHtml = '<span class="order-status cancelled">キャンセル</span>';
-      } else if (order.paidAt) {
-        statusHtml = '<span class="order-status" style="background: #2196F3; color: white;">会計済</span>';
-      } else if (order.completedAt) {
-        statusHtml = '<span class="order-status completed">提供済み</span>';
-      } else {
-        statusHtml = '<span class="order-status pending">調理中</span>';
+      // 複数のステータスバッジを表示
+      let statusBadges = [];
+      if (order.paidAt) {
+        statusBadges.push('<span class="order-status" style="background: #2196F3; color: white;">会計済</span>');
       }
+      if (order.completedAt) {
+        statusBadges.push('<span class="order-status completed">提供済み</span>');
+      }
+      if (order.cancelledAt) {
+        statusBadges.push('<span class="order-status cancelled">キャンセル</span>');
+      }
+      if (statusBadges.length === 0) {
+        statusBadges.push('<span class="order-status pending">調理中</span>');
+      }
+      const statusHtml = statusBadges.join(' ');
       
       let itemsHtml = '';
       if (order.items && Array.isArray(order.items) && order.items.length > 0) {
@@ -6093,7 +6100,7 @@
     </div>
   </div>
   <div id="productRegistrationModal" class="modal-overlay hidden">
-    <div class="modal" style="max-width: 600px;">
+    <div class="modal" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
       <h3>商品登録</h3>
       
       <div style="margin: 20px 0;">
@@ -6125,13 +6132,17 @@
       </div>
       
       <div style="margin: 20px 0;">
-        <label style="display: block; margin-bottom: 5px; font-weight: bold;">トッピング（カンマ区切りで複数入力可能）</label>
-        <input type="text" id="productToppings" placeholder="例: マヨネーズ,ソース,ねぎ" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Note（表示制限）</label>
+        <input type="text" id="productNote" placeholder="例: 店内のみ, テイクアウトのみ" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
+        <small style="color: #666;">「店内のみ」と入力するとテイクアウトでは非表示、「テイクアウトのみ」と入力すると店内では非表示になります</small>
       </div>
       
-      <div style="margin: 20px 0;">
-        <label style="display: block; margin-bottom: 5px; font-weight: bold;">トッピング価格（カンマ区切りで複数入力可能）</label>
-        <input type="text" id="productToppingPrices" placeholder="例: 50,50,50" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
+      <div style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        <h4 style="margin-bottom: 15px;">トッピングセット</h4>
+        <div id="toppingSetsList">
+          <!-- トッピングセットがここに追加されます -->
+        </div>
+        <button onclick="addToppingSetToProduct()" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px;">+ トッピングセットを追加</button>
       </div>
       
       <div style="display: flex; gap: 10px;">
@@ -6179,6 +6190,9 @@
   <script>
     // ========== 商品登録・削除機能 ==========
     
+    // トッピングセットの管理用配列
+    let productToppingSets = [];
+    
     // 商品登録モーダルを表示
     window.showProductRegistrationModal = function() {
       document.getElementById('productRegistrationModal').classList.remove('hidden');
@@ -6187,8 +6201,9 @@
       document.getElementById('productPrice').value = '';
       document.getElementById('productCategory').value = '';
       document.getElementById('productCustomCategory').value = '';
-      document.getElementById('productToppings').value = '';
-      document.getElementById('productToppingPrices').value = '';
+      document.getElementById('productNote').value = '';
+      productToppingSets = [];
+      document.getElementById('toppingSetsList').innerHTML = '';
     };
     
     // 商品登録モーダルを閉じる
@@ -6196,14 +6211,82 @@
       document.getElementById('productRegistrationModal').classList.add('hidden');
     };
     
+    // トッピングセットを追加
+    window.addToppingSetToProduct = function() {
+      const setDiv = document.createElement('div');
+      setDiv.style.cssText = 'margin-bottom: 15px; padding: 15px; background: white; border-radius: 8px; border: 2px solid #ddd;';
+      const setIndex = productToppingSets.length;
+      
+      setDiv.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <h5 style="margin: 0;">トッピングセット ${setIndex + 1}</h5>
+          <button onclick="removeToppingSet(${setIndex})" style="padding: 5px 10px; background: #F44336; color: white; border: none; border-radius: 4px; cursor: pointer;">削除</button>
+        </div>
+        
+        <div style="margin-bottom: 10px;">
+          <label style="display: block; margin-bottom: 5px; font-weight: bold;">セット名</label>
+          <input type="text" class="topping-set-name" placeholder="例: たこ焼きの味" style="width: 100%; padding: 8px; border: 2px solid #ddd; border-radius: 6px;">
+        </div>
+        
+        <div style="margin-bottom: 10px;">
+          <label style="display: block; margin-bottom: 5px; font-weight: bold;">選択タイプ</label>
+          <select class="topping-set-type" style="width: 100%; padding: 8px; border: 2px solid #ddd; border-radius: 6px;">
+            <option value="single">単一選択（プルダウン）</option>
+            <option value="multiple">複数選択（チェックボックス）</option>
+          </select>
+        </div>
+        
+        <div style="margin-bottom: 10px;">
+          <label style="display: block; margin-bottom: 5px; font-weight: bold;">トッピング項目</label>
+          <div class="topping-options-list" style="margin-bottom: 10px;">
+            <!-- トッピング項目がここに追加されます -->
+          </div>
+          <button onclick="addToppingOption(${setIndex})" style="padding: 6px 12px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">+ 項目を追加</button>
+        </div>
+      `;
+      
+      document.getElementById('toppingSetsList').appendChild(setDiv);
+      productToppingSets.push({ options: [] });
+      
+      // 初期項目を1つ追加
+      addToppingOption(setIndex);
+    };
+    
+    // トッピングセットを削除
+    window.removeToppingSet = function(index) {
+      productToppingSets.splice(index, 1);
+      renderToppingSets();
+    };
+    
+    // トッピング項目を追加
+    window.addToppingOption = function(setIndex) {
+      const optionsList = document.getElementById('toppingSetsList').children[setIndex].querySelector('.topping-options-list');
+      const optionDiv = document.createElement('div');
+      optionDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 8px; align-items: center;';
+      optionDiv.innerHTML = `
+        <input type="text" class="topping-option-name" placeholder="例: ソース" style="flex: 2; padding: 6px; border: 2px solid #ddd; border-radius: 4px;">
+        <input type="number" class="topping-option-price" placeholder="価格" value="0" style="flex: 1; padding: 6px; border: 2px solid #ddd; border-radius: 4px;">
+        <button onclick="this.parentElement.remove()" style="padding: 6px 10px; background: #F44336; color: white; border: none; border-radius: 4px; cursor: pointer;">×</button>
+      `;
+      optionsList.appendChild(optionDiv);
+    };
+    
+    // トッピングセットを再描画
+    function renderToppingSets() {
+      const container = document.getElementById('toppingSetsList');
+      container.innerHTML = '';
+      productToppingSets.forEach((set, index) => {
+        addToppingSetToProduct();
+      });
+    }
+    
     // 商品を登録
     window.registerProduct = async function() {
       const name = document.getElementById('productName').value.trim();
       const price = parseInt(document.getElementById('productPrice').value);
       const category = document.getElementById('productCategory').value;
       const customCategory = document.getElementById('productCustomCategory').value.trim();
-      const toppingsInput = document.getElementById('productToppings').value.trim();
-      const toppingPricesInput = document.getElementById('productToppingPrices').value.trim();
+      const note = document.getElementById('productNote').value.trim();
       
       // バリデーション
       if (!name) {
@@ -6222,14 +6305,35 @@
         return;
       }
       
-      // トッピングを配列に変換
-      const toppings = toppingsInput ? toppingsInput.split(',').map(t => t.trim()).filter(t => t) : [];
-      const toppingPrices = toppingPricesInput ? toppingPricesInput.split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p)) : [];
+      // トッピングセットを収集
+      const toppingSets = [];
+      const setDivs = document.getElementById('toppingSetsList').children;
       
-      // トッピング数と価格数が一致しない場合は警告
-      if (toppings.length !== toppingPrices.length && toppings.length > 0) {
-        if (!confirm('トッピングの数と価格の数が一致しません。続けますか？')) {
-          return;
+      for (let i = 0; i < setDivs.length; i++) {
+        const setDiv = setDivs[i];
+        const setName = setDiv.querySelector('.topping-set-name').value.trim();
+        const setType = setDiv.querySelector('.topping-set-type').value;
+        
+        if (!setName) continue; // 名前がない場合はスキップ
+        
+        const options = [];
+        const optionDivs = setDiv.querySelectorAll('.topping-options-list > div');
+        
+        optionDivs.forEach(optionDiv => {
+          const optionName = optionDiv.querySelector('.topping-option-name').value.trim();
+          const optionPrice = parseInt(optionDiv.querySelector('.topping-option-price').value) || 0;
+          
+          if (optionName) {
+            options.push({ name: optionName, price: optionPrice });
+          }
+        });
+        
+        if (options.length > 0) {
+          toppingSets.push({
+            name: setName,
+            type: setType,
+            options: options
+          });
         }
       }
       
@@ -6239,8 +6343,8 @@
           name: name,
           price: price,
           category: finalCategory,
-          toppings: toppings,
-          toppingPrices: toppingPrices,
+          toppingSets: toppingSets,
+          note: note,
           createdAt: window.Timestamp.now()
         };
         
