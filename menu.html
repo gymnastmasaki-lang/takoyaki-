@@ -1204,6 +1204,7 @@
             name: data.name,
             price: data.price,
             toppingsId: data.toppingsId,
+            toppingSets: data.toppingSets || [], // 追加
             image: data.image || '',
             note: note
           });
@@ -1355,7 +1356,77 @@
         return;
       }
       
-      if (item.toppingsId) {
+      // toppingSetsを優先的に使用
+      if (item.toppingSets && item.toppingSets.length > 0) {
+        console.log('✅ toppingSetsを使用:', item.toppingSets);
+        
+        const list = document.getElementById('topping-list');
+        list.innerHTML = '';
+        
+        // 各トッピングセットを表示
+        item.toppingSets.forEach((set, setIndex) => {
+          // セットのヘッダー
+          const setHeader = document.createElement('div');
+          setHeader.style.cssText = 'font-weight: bold; font-size: 16px; margin: 15px 0 10px 0; padding: 10px; background: #f5f5f5; border-radius: 8px; color: #333;';
+          setHeader.textContent = set.name + (set.type === 'single' ? ' （1つ選択）' : ' （複数選択可）');
+          list.appendChild(setHeader);
+          
+          // セットのオプション
+          set.options.forEach((option, optionIndex) => {
+            const div = document.createElement('div');
+            div.className = 'topping-item';
+            div.setAttribute('data-set-index', setIndex);
+            div.setAttribute('data-option-index', optionIndex);
+            div.setAttribute('data-set-type', set.type);
+            div.innerHTML = `
+              <span>${option.name}</span>
+              <span style="color: #4CAF50; font-weight: bold;">${option.price > 0 ? '+¥' + option.price.toLocaleString() : '無料'}</span>
+            `;
+            
+            div.onclick = () => {
+              if (set.type === 'single') {
+                // 単一選択：同じセット内の他の選択を解除
+                document.querySelectorAll(`.topping-item[data-set-index="${setIndex}"]`).forEach(item => {
+                  item.classList.remove('selected');
+                });
+                div.classList.add('selected');
+                
+                // 同じセットの他の選択を削除
+                selectedToppings = selectedToppings.filter(t => t.setIndex !== setIndex);
+                selectedToppings.push({
+                  setIndex: setIndex,
+                  setName: set.name,
+                  optionIndex: optionIndex,
+                  name: option.name,
+                  price: option.price,
+                  id: `${setIndex}-${optionIndex}`
+                });
+              } else {
+                // 複数選択：トグル
+                div.classList.toggle('selected');
+                const idx = selectedToppings.findIndex(t => t.setIndex === setIndex && t.optionIndex === optionIndex);
+                if (idx > -1) {
+                  selectedToppings.splice(idx, 1);
+                } else {
+                  selectedToppings.push({
+                    setIndex: setIndex,
+                    setName: set.name,
+                    optionIndex: optionIndex,
+                    name: option.name,
+                    price: option.price,
+                    id: `${setIndex}-${optionIndex}`
+                  });
+                }
+              }
+              updateSubtotal();
+            };
+            list.appendChild(div);
+          });
+        });
+      } else if (item.toppingsId) {
+        // 後方互換性: 古いtoppingsId形式
+        console.log('⚠️ 古いtoppingsId形式を使用');
+        
         const toppingIds = item.toppingsId.split(',').map(id => id.trim());
         const toppingsSnapshot = await getDocs(collection(db, 'toppings'));
         const toppings = [];
@@ -1377,9 +1448,9 @@
         const list = document.getElementById('topping-list');
         list.innerHTML = '';
         
-        // 🆕 標準トッピングを一番上に追加（デフォルトで選択状態）
+        // 標準トッピングを一番上に追加（デフォルトで選択状態）
         const standardDiv = document.createElement('div');
-        standardDiv.className = 'topping-item selected';  // 🆕 最初から選択状態
+        standardDiv.className = 'topping-item selected';
         standardDiv.id = 'standard-topping';
         standardDiv.innerHTML = `
           <span>標準トッピング</span>
