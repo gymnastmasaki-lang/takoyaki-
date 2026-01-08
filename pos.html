@@ -1079,6 +1079,8 @@
           
           <button onclick="showProductRegistrationModal()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; flex: 1;">商品登録</button>
           
+          <button onclick="showProductEditModal()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; flex: 1;">商品変更</button>
+          
           <button onclick="showProductDeleteModal()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; flex: 1;">商品削除</button>
         </div>
       </div>
@@ -6350,6 +6352,27 @@
         
         await window.addDoc(window.collection(window.db, 'menu'), productData);
         
+        // カテゴリをcategoriesコレクションに追加（存在しない場合）
+        try {
+          const categoryDoc = window.doc(window.db, 'categories', finalCategory);
+          const categorySnap = await window.getDoc(categoryDoc);
+          
+          if (!categorySnap.exists()) {
+            await window.setDoc(categoryDoc, {
+              name: finalCategory,
+              displayName: finalCategory,
+              order: 999,
+              isActive: true,
+              createdAt: window.Timestamp.now()
+            });
+            console.log('✅ 新規カテゴリを登録:', finalCategory);
+          } else {
+            console.log('カテゴリは既に存在します:', finalCategory);
+          }
+        } catch (e) {
+          console.error('カテゴリ登録エラー:', e);
+        }
+        
         alert('商品を登録しました');
         closeProductRegistrationModal();
         
@@ -6481,6 +6504,298 @@
       }
     }
     
+
+    // 商品変更用の変数
+    let editProductToppingSets = [];
+    let allProductsForEdit = [];
+    
+    // 商品変更モーダルを表示
+    window.showProductEditModal = async function() {
+      document.getElementById('productEditModal').classList.remove('hidden');
+      await loadProductEditList();
+    };
+    
+    // 商品変更モーダルを閉じる
+    window.closeProductEditModal = function() {
+      document.getElementById('productEditModal').classList.add('hidden');
+    };
+    
+    // 商品変更詳細モーダルを閉じる
+    window.closeProductEditDetailModal = function() {
+      document.getElementById('productEditDetailModal').classList.add('hidden');
+    };
+    
+    // 変更用の商品リストを読み込み
+    async function loadProductEditList() {
+      try {
+        const container = document.getElementById('productEditList');
+        container.innerHTML = '<div style="text-align: center; padding: 20px;">読み込み中...</div>';
+        
+        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
+        allProductsForEdit = [];
+        
+        menuSnapshot.forEach(doc => {
+          allProductsForEdit.push({
+            id: doc.id,
+            ...doc.data()
+          });
+        });
+        
+        // カテゴリ別にソート
+        allProductsForEdit.sort((a, b) => {
+          if (a.category !== b.category) {
+            return a.category.localeCompare(b.category);
+          }
+          return a.name.localeCompare(b.name);
+        });
+        
+        displayProductEditList(allProductsForEdit);
+        
+      } catch (error) {
+        console.error('商品リスト読み込みエラー:', error);
+        document.getElementById('productEditList').innerHTML = '<div style="text-align: center; padding: 20px; color: red;">読み込みに失敗しました</div>';
+      }
+    }
+    
+    // 商品変更リストを表示
+    function displayProductEditList(products) {
+      const container = document.getElementById('productEditList');
+      
+      if (products.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">商品がありません</div>';
+        return;
+      }
+      
+      container.innerHTML = '';
+      
+      products.forEach(product => {
+        const productDiv = document.createElement('div');
+        productDiv.style.cssText = 'padding: 15px; margin-bottom: 10px; background: white; border-radius: 8px; border: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center;';
+        
+        const infoDiv = document.createElement('div');
+        infoDiv.innerHTML = `
+          <div style="font-weight: bold; font-size: 16px; margin-bottom: 5px;">${product.name}</div>
+          <div style="color: #666; font-size: 14px;">
+            <span style="background: #E3F2FD; padding: 2px 8px; border-radius: 4px; margin-right: 10px;">${product.category}</span>
+            <span style="color: #4CAF50; font-weight: bold;">¥${product.price.toLocaleString()}</span>
+          </div>
+        `;
+        
+        const editBtn = document.createElement('button');
+        editBtn.textContent = '編集';
+        editBtn.style.cssText = 'padding: 8px 20px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;';
+        editBtn.onclick = () => openEditProductDetail(product);
+        
+        productDiv.appendChild(infoDiv);
+        productDiv.appendChild(editBtn);
+        container.appendChild(productDiv);
+      });
+    }
+    
+    // 商品検索フィルター（変更用）
+    window.filterProductEditList = function() {
+      const searchText = document.getElementById('productEditSearchInput').value.toLowerCase();
+      
+      if (!searchText) {
+        displayProductEditList(allProductsForEdit);
+        return;
+      }
+      
+      const filtered = allProductsForEdit.filter(product => 
+        product.name.toLowerCase().includes(searchText) ||
+        product.category.toLowerCase().includes(searchText)
+      );
+      
+      displayProductEditList(filtered);
+    };
+    
+    // 商品編集詳細を開く
+    function openEditProductDetail(product) {
+      document.getElementById('productEditModal').classList.add('hidden');
+      document.getElementById('productEditDetailModal').classList.remove('hidden');
+      
+      // フォームに既存データを設定
+      document.getElementById('editProductId').value = product.id;
+      document.getElementById('editProductName').value = product.name;
+      document.getElementById('editProductPrice').value = product.price;
+      document.getElementById('editProductCategory').value = product.category;
+      document.getElementById('editProductCustomCategory').value = '';
+      document.getElementById('editProductNote').value = product.note || '';
+      
+      // トッピングセットを設定
+      editProductToppingSets = product.toppingSets || [];
+      renderEditToppingSets();
+    }
+    
+    // トッピングセットを編集画面に再描画
+    function renderEditToppingSets() {
+      const container = document.getElementById('editToppingSetsList');
+      container.innerHTML = '';
+      
+      editProductToppingSets.forEach((set, index) => {
+        addToppingSetToEditProduct(set);
+      });
+    }
+    
+    // 編集画面にトッピングセットを追加
+    window.addToppingSetToEditProduct = function(existingSet = null) {
+      const container = document.getElementById('editToppingSetsList');
+      
+      const setDiv = document.createElement('div');
+      setDiv.style.cssText = 'border: 2px solid #ddd; padding: 15px; border-radius: 8px; margin-bottom: 15px; background: #f9f9f9;';
+      
+      const setName = existingSet ? existingSet.name : '';
+      const setType = existingSet ? existingSet.type : 'single';
+      
+      setDiv.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <input type="text" class="edit-topping-set-name" value="${setName}" placeholder="セット名（例: ソース種類）" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-right: 10px;">
+          <select class="edit-topping-set-type" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-right: 10px;">
+            <option value="single" ${setType === 'single' ? 'selected' : ''}>単一選択</option>
+            <option value="multiple" ${setType === 'multiple' ? 'selected' : ''}>複数選択</option>
+          </select>
+          <button onclick="this.parentElement.parentElement.remove()" style="padding: 6px 12px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">削除</button>
+        </div>
+        <div class="edit-topping-options-list">
+          <!-- オプションがここに追加される -->
+        </div>
+        <button onclick="addToppingOptionToEditSet(this.parentElement)" style="padding: 6px 12px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 5px;">+ オプション追加</button>
+      `;
+      
+      container.appendChild(setDiv);
+      
+      // 既存のオプションを追加
+      if (existingSet && existingSet.options) {
+        const optionsList = setDiv.querySelector('.edit-topping-options-list');
+        existingSet.options.forEach(option => {
+          addToppingOptionToEditSetWithData(optionsList, option.name, option.price);
+        });
+      }
+    };
+    
+    // 編集画面のトッピングセットにオプションを追加
+    window.addToppingOptionToEditSet = function(setElement) {
+      addToppingOptionToEditSetWithData(setElement.querySelector('.edit-topping-options-list'), '', 0);
+    };
+    
+    // 編集画面のトッピングオプションを追加（データ付き）
+    function addToppingOptionToEditSetWithData(optionsList, optionName = '', optionPrice = 0) {
+      const optionDiv = document.createElement('div');
+      optionDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 8px; align-items: center;';
+      optionDiv.innerHTML = `
+        <input type="text" class="edit-topping-option-name" value="${optionName}" placeholder="オプション名" style="flex: 2; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+        <input type="number" class="edit-topping-option-price" value="${optionPrice}" placeholder="追加料金" min="0" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+        <button onclick="this.parentElement.remove()" style="padding: 4px 8px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">×</button>
+      `;
+      optionsList.appendChild(optionDiv);
+    }
+    
+    // 商品を更新
+    window.updateProduct = async function() {
+      const productId = document.getElementById('editProductId').value;
+      const name = document.getElementById('editProductName').value.trim();
+      const price = parseInt(document.getElementById('editProductPrice').value);
+      const category = document.getElementById('editProductCategory').value;
+      const customCategory = document.getElementById('editProductCustomCategory').value.trim();
+      const note = document.getElementById('editProductNote').value.trim();
+      
+      // バリデーション
+      if (!name) {
+        alert('商品名を入力してください');
+        return;
+      }
+      
+      if (!price || price < 0) {
+        alert('正しい価格を入力してください');
+        return;
+      }
+      
+      const finalCategory = customCategory || category;
+      if (!finalCategory) {
+        alert('カテゴリを選択するか、カスタムカテゴリを入力してください');
+        return;
+      }
+      
+      // トッピングセットを収集
+      const toppingSets = [];
+      const setDivs = document.getElementById('editToppingSetsList').children;
+      
+      for (let i = 0; i < setDivs.length; i++) {
+        const setDiv = setDivs[i];
+        const setName = setDiv.querySelector('.edit-topping-set-name').value.trim();
+        const setType = setDiv.querySelector('.edit-topping-set-type').value;
+        
+        if (!setName) continue;
+        
+        const options = [];
+        const optionDivs = setDiv.querySelectorAll('.edit-topping-options-list > div');
+        
+        optionDivs.forEach(optionDiv => {
+          const optionName = optionDiv.querySelector('.edit-topping-option-name').value.trim();
+          const optionPrice = parseInt(optionDiv.querySelector('.edit-topping-option-price').value) || 0;
+          
+          if (optionName) {
+            options.push({ name: optionName, price: optionPrice });
+          }
+        });
+        
+        if (options.length > 0) {
+          toppingSets.push({
+            name: setName,
+            type: setType,
+            options: options
+          });
+        }
+      }
+      
+      try {
+        // Firebaseの商品を更新
+        const productData = {
+          name: name,
+          price: price,
+          category: finalCategory,
+          toppingSets: toppingSets,
+          note: note,
+          updatedAt: window.Timestamp.now()
+        };
+        
+        await window.updateDoc(window.doc(window.db, 'menu', productId), productData);
+        
+        // カテゴリをcategoriesコレクションに追加（存在しない場合）
+        try {
+          const categoryDoc = window.doc(window.db, 'categories', finalCategory);
+          const categorySnap = await window.getDoc(categoryDoc);
+          
+          if (!categorySnap.exists()) {
+            await window.setDoc(categoryDoc, {
+              name: finalCategory,
+              displayName: finalCategory,
+              order: 999,
+              isActive: true,
+              createdAt: window.Timestamp.now()
+            });
+            console.log('✅ 新規カテゴリを登録:', finalCategory);
+          } else {
+            console.log('カテゴリは既に存在します:', finalCategory);
+          }
+        } catch (e) {
+          console.error('カテゴリ登録エラー:', e);
+        }
+        
+        alert('商品を更新しました');
+        closeProductEditDetailModal();
+        closeProductEditModal();
+        
+        // メニューを再読み込み
+        
+        
+      } catch (error) {
+        console.error('商品更新エラー:', error);
+        alert('商品の更新に失敗しました: ' + error.message);
+      }
+    };
+    
+
     // パスワード認証処理
     function handlePOSLogin(event) {
       event.preventDefault();
