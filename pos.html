@@ -1752,68 +1752,144 @@
     
     // トッピング選択モーダルを表示
     function showToppingModal(item) {
+      currentSelectingItem = item;
+      selectedToppings = [];
+      
       document.getElementById('toppingModalItemName').textContent = item.name;
       const list = document.getElementById('toppingsList');
       list.innerHTML = '';
       
-      // 「なし」オプション
-      const noneDiv = document.createElement('div');
-      noneDiv.className = 'topping-item';
-      noneDiv.style.cursor = 'pointer';
-      noneDiv.innerHTML = `
-        <input type="checkbox" id="topping-none" style="pointer-events: none;">
-        <div class="topping-item-info">
-          <span class="topping-item-name">標準トッピング</span>
-          <span class="topping-item-price">¥0</span>
-        </div>
-      `;
-      
-      // div全体をクリック可能に
-      noneDiv.onclick = () => {
-        const checkbox = document.getElementById('topping-none');
-        checkbox.checked = !checkbox.checked;
-        selectNoneTopping(checkbox);
-      };
-      
-      list.appendChild(noneDiv);
-      
-      // toppingsIdからトッピングIDのリストを取得
-      let allowedToppingIds = [];
-      if (item.toppingsId && typeof item.toppingsId === 'string') {
-        // カンマ区切り文字列から配列に変換
-        allowedToppingIds = item.toppingsId.split(',').map(id => id.trim());
-      } else if (item.toppings && Array.isArray(item.toppings)) {
-        // 配列形式の場合
-        allowedToppingIds = item.toppings;
-      }
-      
-      toppingsData.forEach(topping => {
-        // toppingsIdに含まれている場合のみ表示（空の場合は表示しない）
-        if (allowedToppingIds.length > 0 && allowedToppingIds.includes(topping.id)) {
-          const div = document.createElement('div');
-          div.className = 'topping-item';
-          div.style.cursor = 'pointer';
-          div.innerHTML = `
-            <input type="checkbox" id="topping-${topping.id}" value="${topping.id}" style="pointer-events: none;">
-            <div class="topping-item-info">
-              <span class="topping-item-name">${topping.name}</span>
-              <span class="topping-item-price">+¥${topping.price.toLocaleString()}</span>
-            </div>
-          `;
+      // toppingSetsが存在する場合は新しい形式を使用
+      if (item.toppingSets && item.toppingSets.length > 0) {
+        item.toppingSets.forEach((set, setIndex) => {
+          const setDiv = document.createElement('div');
+          setDiv.style.cssText = 'margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px;';
           
-          // div全体をクリック可能に
-          div.onclick = () => {
-            const checkbox = document.getElementById(`topping-${topping.id}`);
-            checkbox.checked = !checkbox.checked;
-            selectTopping(checkbox);
-          };
+          const setTitle = document.createElement('div');
+          setTitle.style.cssText = 'font-weight: bold; font-size: 16px; margin-bottom: 10px; color: #333;';
+          setTitle.textContent = set.name + (set.type === 'single' ? ' （1つ選択）' : ' （複数選択可）');
+          setDiv.appendChild(setTitle);
           
-          list.appendChild(div);
+          set.options.forEach((option, optionIndex) => {
+            const optionDiv = document.createElement('div');
+            optionDiv.className = 'topping-item';
+            optionDiv.style.cursor = 'pointer';
+            
+            const inputType = set.type === 'single' ? 'radio' : 'checkbox';
+            const inputName = set.type === 'single' ? `topping-set-${setIndex}` : '';
+            
+            optionDiv.innerHTML = `
+              <input type="${inputType}" id="topping-${setIndex}-${optionIndex}" name="${inputName}" style="pointer-events: none;">
+              <div class="topping-item-info">
+                <span class="topping-item-name">${option.name}</span>
+                <span class="topping-item-price">+¥${option.price.toLocaleString()}</span>
+              </div>
+            `;
+            
+            optionDiv.onclick = () => {
+              const input = document.getElementById(`topping-${setIndex}-${optionIndex}`);
+              
+              if (set.type === 'single') {
+                // ラジオボタンの場合、他の選択を解除
+                set.options.forEach((_, idx) => {
+                  const otherInput = document.getElementById(`topping-${setIndex}-${idx}`);
+                  if (otherInput) otherInput.checked = false;
+                });
+                input.checked = true;
+                
+                // 選択状態を保存
+                selectedToppings = selectedToppings.filter(t => t.setIndex !== setIndex);
+                selectedToppings.push({
+                  setIndex: setIndex,
+                  setName: set.name,
+                  optionIndex: optionIndex,
+                  optionName: option.name,
+                  price: option.price
+                });
+              } else {
+                // チェックボックスの場合
+                input.checked = !input.checked;
+                
+                if (input.checked) {
+                  selectedToppings.push({
+                    setIndex: setIndex,
+                    setName: set.name,
+                    optionIndex: optionIndex,
+                    optionName: option.name,
+                    price: option.price
+                  });
+                } else {
+                  selectedToppings = selectedToppings.filter(
+                    t => !(t.setIndex === setIndex && t.optionIndex === optionIndex)
+                  );
+                }
+              }
+              
+              console.log('選択されたトッピング:', selectedToppings);
+            };
+            
+            setDiv.appendChild(optionDiv);
+          });
+          
+          list.appendChild(setDiv);
+        });
+      } else {
+        // 古い形式（toppingsId）の場合
+        // 「なし」オプション
+        const noneDiv = document.createElement('div');
+        noneDiv.className = 'topping-item';
+        noneDiv.style.cursor = 'pointer';
+        noneDiv.innerHTML = `
+          <input type="checkbox" id="topping-none" style="pointer-events: none;">
+          <div class="topping-item-info">
+            <span class="topping-item-name">標準トッピング</span>
+            <span class="topping-item-price">¥0</span>
+          </div>
+        `;
+        
+        noneDiv.onclick = () => {
+          const checkbox = document.getElementById('topping-none');
+          checkbox.checked = !checkbox.checked;
+          selectNoneTopping(checkbox);
+        };
+        
+        list.appendChild(noneDiv);
+        
+        // toppingsIdからトッピングIDのリストを取得
+        let allowedToppingIds = [];
+        if (item.toppingsId && typeof item.toppingsId === 'string') {
+          allowedToppingIds = item.toppingsId.split(',').map(id => id.trim());
+        } else if (item.toppings && Array.isArray(item.toppings)) {
+          allowedToppingIds = item.toppings;
         }
-      });
-      
-      // デフォルトで「なし」を選択
-      document.getElementById('topping-none').checked = true;
+        
+        toppingsData.forEach(topping => {
+          if (allowedToppingIds.length > 0 && allowedToppingIds.includes(topping.id)) {
+            const div = document.createElement('div');
+            div.className = 'topping-item';
+            div.style.cursor = 'pointer';
+            div.innerHTML = `
+              <input type="checkbox" id="topping-${topping.id}" value="${topping.id}" style="pointer-events: none;">
+              <div class="topping-item-info">
+                <span class="topping-item-name">${topping.name}</span>
+                <span class="topping-item-price">+¥${topping.price.toLocaleString()}</span>
+              </div>
+            `;
+            
+            div.onclick = () => {
+              const checkbox = document.getElementById(`topping-${topping.id}`);
+              checkbox.checked = !checkbox.checked;
+              selectTopping(checkbox);
+            };
+            
+            list.appendChild(div);
+          }
+        });
+        
+        // デフォルトで「なし」を選択
+        const noneCheckbox = document.getElementById('topping-none');
+        if (noneCheckbox) noneCheckbox.checked = true;
+      }
       
       document.getElementById('toppingModal').classList.remove('hidden');
     }
@@ -1861,10 +1937,25 @@
       
       let toppingNames = 'なし';
       let toppingPrice = 0;
+      let toppingDetails = [];
       
-      if (selectedToppings.length > 0) {
-        toppingNames = selectedToppings.map(t => t.name).join(', ');
-        toppingPrice = selectedToppings.reduce((sum, t) => sum + t.price, 0);
+      // 新しい形式（toppingSets）の場合
+      if (currentSelectingItem.toppingSets && currentSelectingItem.toppingSets.length > 0) {
+        if (selectedToppings.length > 0) {
+          toppingNames = selectedToppings.map(t => t.optionName).join(', ');
+          toppingPrice = selectedToppings.reduce((sum, t) => sum + t.price, 0);
+          toppingDetails = selectedToppings.map(t => ({
+            setName: t.setName,
+            optionName: t.optionName,
+            price: t.price
+          }));
+        }
+      } else {
+        // 古い形式（toppingsId）の場合
+        if (selectedToppings.length > 0) {
+          toppingNames = selectedToppings.map(t => t.name).join(', ');
+          toppingPrice = selectedToppings.reduce((sum, t) => sum + t.price, 0);
+        }
       }
       
       // 編集モードかどうかを確認
@@ -1872,13 +1963,15 @@
         // 既存アイテムを更新
         manualCart[currentSelectingItem.editIndex].toppings = toppingNames;
         manualCart[currentSelectingItem.editIndex].toppingPrice = toppingPrice;
+        manualCart[currentSelectingItem.editIndex].toppingDetails = toppingDetails;
       } else {
         // 新規アイテムを追加
         manualCart.push({
           ...currentSelectingItem,
           quantity: 1,
           toppings: toppingNames,
-          toppingPrice: toppingPrice
+          toppingPrice: toppingPrice,
+          toppingDetails: toppingDetails
         });
       }
       
@@ -6172,6 +6265,47 @@
       <button class="btn btn-secondary" style="width: 100%; margin-top: 20px;" onclick="closeProductDeleteModal()">閉じる</button>
     </div>
   </div>
+  
+  <!-- 商品編集モーダル -->
+  <div id="productEditModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
+      <h3>商品編集</h3>
+      
+      <input type="hidden" id="editProductId">
+      
+      <div style="margin-bottom: 15px;">
+        <label style="display: block; font-weight: bold; margin-bottom: 5px;">商品名 *</label>
+        <input type="text" id="editProductName" placeholder="商品名を入力" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
+      </div>
+      
+      <div style="margin-bottom: 15px;">
+        <label style="display: block; font-weight: bold; margin-bottom: 5px;">価格 *</label>
+        <input type="number" id="editProductPrice" placeholder="価格を入力" min="0" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
+      </div>
+      
+      <div style="margin-bottom: 15px;">
+        <label style="display: block; font-weight: bold; margin-bottom: 5px;">カテゴリ *</label>
+        <input type="text" id="editProductCategory" placeholder="カテゴリを入力" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
+      </div>
+      
+      <div style="margin-bottom: 15px;">
+        <label style="display: block; font-weight: bold; margin-bottom: 5px;">トッピングセット</label>
+        <div id="editToppingSetsContainer"></div>
+        <button type="button" onclick="addEditToppingSet()" style="padding: 8px 15px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px;">+ トッピングセット追加</button>
+      </div>
+      
+      <div style="margin-bottom: 15px;">
+        <label style="display: block; font-weight: bold; margin-bottom: 5px;">備考</label>
+        <textarea id="editProductNote" placeholder="備考を入力" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; min-height: 80px;"></textarea>
+      </div>
+      
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;" onclick="saveEditedProduct()">✏️ 更新</button>
+        <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditProductModal()">キャンセル</button>
+      </div>
+    </div>
+  </div>
+  
   <div id="page-soldout" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); z-index: 10000; padding: 20px; overflow-y: auto;">
     <div style="max-width: 1200px; margin: 0 auto;">
       <button onclick="backFromSoldOut()" style="padding: 15px 30px; font-size: 18px; background: #FFFF00; color: #333; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">← 戻る</button>
@@ -6437,15 +6571,189 @@
         `;
         
         const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = '削除';
-        deleteBtn.style.cssText = 'padding: 8px 20px; background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;';
+        deleteBtn.textContent = '🗑️ 削除';
+        deleteBtn.style.cssText = 'padding: 8px 20px; background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-left: 10px;';
         deleteBtn.onclick = () => deleteProduct(product.id, product.name);
         
+        const editBtn = document.createElement('button');
+        editBtn.textContent = '✏️ 編集';
+        editBtn.style.cssText = 'padding: 8px 20px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;';
+        editBtn.onclick = () => openEditProductModal(product);
+        
+        const btnContainer = document.createElement('div');
+        btnContainer.style.cssText = 'display: flex; gap: 10px;';
+        btnContainer.appendChild(editBtn);
+        btnContainer.appendChild(deleteBtn);
+        
         productDiv.appendChild(infoDiv);
-        productDiv.appendChild(deleteBtn);
+        productDiv.appendChild(btnContainer);
         container.appendChild(productDiv);
       });
     }
+    
+    // ========== 商品編集機能 ==========
+    let editToppingSets = [];
+    
+    // 商品編集モーダルを開く
+    window.openEditProductModal = function(product) {
+      document.getElementById('productEditModal').classList.remove('hidden');
+      document.getElementById('editProductId').value = product.id;
+      document.getElementById('editProductName').value = product.name;
+      document.getElementById('editProductPrice').value = product.price;
+      document.getElementById('editProductCategory').value = product.category;
+      document.getElementById('editProductNote').value = product.note || '';
+      
+      // トッピングセットを読み込み
+      editToppingSets = product.toppingSets ? JSON.parse(JSON.stringify(product.toppingSets)) : [];
+      renderEditToppingSets();
+    };
+    
+    // 商品編集モーダルを閉じる
+    window.closeEditProductModal = function() {
+      document.getElementById('productEditModal').classList.add('hidden');
+      editToppingSets = [];
+    };
+    
+    // トッピングセットを描画
+    function renderEditToppingSets() {
+      const container = document.getElementById('editToppingSetsContainer');
+      container.innerHTML = '';
+      
+      editToppingSets.forEach((set, setIndex) => {
+        const setDiv = document.createElement('div');
+        setDiv.style.cssText = 'border: 2px solid #ddd; padding: 15px; border-radius: 8px; margin-bottom: 15px; background: #f9f9f9;';
+        
+        setDiv.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <input type="text" class="edit-topping-set-name" value="${set.name}" placeholder="セット名（例: ソース種類）" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-right: 10px;">
+            <select class="edit-topping-set-type" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-right: 10px;">
+              <option value="single" ${set.type === 'single' ? 'selected' : ''}>単一選択</option>
+              <option value="multiple" ${set.type === 'multiple' ? 'selected' : ''}>複数選択</option>
+            </select>
+            <button onclick="removeEditToppingSet(${setIndex})" style="padding: 6px 12px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">削除</button>
+          </div>
+          <div class="edit-topping-options-list"></div>
+          <button onclick="addEditToppingOption(${setIndex})" style="padding: 6px 12px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 5px;">+ オプション追加</button>
+        `;
+        
+        const optionsList = setDiv.querySelector('.edit-topping-options-list');
+        set.options.forEach((option, optionIndex) => {
+          const optionDiv = document.createElement('div');
+          optionDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 8px; align-items: center;';
+          optionDiv.innerHTML = `
+            <input type="text" class="edit-option-name" value="${option.name}" placeholder="オプション名" style="flex: 2; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+            <input type="number" class="edit-option-price" value="${option.price}" placeholder="追加料金" min="0" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+            <button onclick="removeEditToppingOption(${setIndex}, ${optionIndex})" style="padding: 4px 8px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">×</button>
+          `;
+          optionsList.appendChild(optionDiv);
+        });
+        
+        container.appendChild(setDiv);
+      });
+    }
+    
+    // トッピングセットを追加
+    window.addEditToppingSet = function() {
+      editToppingSets.push({
+        name: '',
+        type: 'single',
+        options: []
+      });
+      renderEditToppingSets();
+    };
+    
+    // トッピングセットを削除
+    window.removeEditToppingSet = function(setIndex) {
+      editToppingSets.splice(setIndex, 1);
+      renderEditToppingSets();
+    };
+    
+    // トッピングオプションを追加
+    window.addEditToppingOption = function(setIndex) {
+      editToppingSets[setIndex].options.push({
+        name: '',
+        price: 0
+      });
+      renderEditToppingSets();
+    };
+    
+    // トッピングオプションを削除
+    window.removeEditToppingOption = function(setIndex, optionIndex) {
+      editToppingSets[setIndex].options.splice(optionIndex, 1);
+      renderEditToppingSets();
+    };
+    
+    // 商品を更新
+    window.saveEditedProduct = async function() {
+      const productId = document.getElementById('editProductId').value;
+      const name = document.getElementById('editProductName').value.trim();
+      const price = parseInt(document.getElementById('editProductPrice').value);
+      const category = document.getElementById('editProductCategory').value.trim();
+      const note = document.getElementById('editProductNote').value.trim();
+      
+      if (!name || !price || !category) {
+        alert('商品名、価格、カテゴリは必須です');
+        return;
+      }
+      
+      // トッピングセットの情報を収集
+      const setDivs = document.querySelectorAll('#editToppingSetsContainer > div');
+      const toppingSets = [];
+      
+      setDivs.forEach((setDiv, setIndex) => {
+        const setName = setDiv.querySelector('.edit-topping-set-name').value.trim();
+        const setType = setDiv.querySelector('.edit-topping-set-type').value;
+        
+        if (!setName) return;
+        
+        const options = [];
+        const optionDivs = setDiv.querySelectorAll('.edit-topping-options-list > div');
+        
+        optionDivs.forEach(optionDiv => {
+          const optionName = optionDiv.querySelector('.edit-option-name').value.trim();
+          const optionPrice = parseInt(optionDiv.querySelector('.edit-option-price').value) || 0;
+          
+          if (optionName) {
+            options.push({ name: optionName, price: optionPrice });
+          }
+        });
+        
+        if (options.length > 0) {
+          toppingSets.push({
+            name: setName,
+            type: setType,
+            options: options
+          });
+        }
+      });
+      
+      try {
+        const productData = {
+          id: productId,
+          name: name,
+          price: price,
+          category: category,
+          toppingSets: toppingSets,
+          note: note,
+          taxRate: 10
+        };
+        
+        await window.setDoc(window.doc(window.db, 'menu', productId), productData);
+        
+        alert('商品を更新しました');
+        closeEditProductModal();
+        
+        // リストを再読み込み
+        await loadProductDeleteList();
+        
+        // メニューを再読み込み
+        await initializeSystem();
+        
+      } catch (error) {
+        console.error('商品更新エラー:', error);
+        alert('商品の更新に失敗しました: ' + error.message);
+      }
+    };
     
     // 商品を検索してフィルター
     window.filterProductList = function() {
