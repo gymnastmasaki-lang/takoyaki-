@@ -1514,11 +1514,16 @@
       // Firebaseからメニューを取得
       try {
         const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
+        const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
+        const soldOutIds = new Set();
+        soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
+        
         menuData = [];
         menuSnapshot.forEach(doc => {
           const data = doc.data();
+          const menuId = data.id || doc.id;
           menuData.push({
-            id: data.id || doc.id, // data.idを優先、なければdoc.id
+            id: menuId,
             docId: doc.id, // ドキュメントIDも保持
             name: data.name || '',
             price: data.price || 0,
@@ -1527,7 +1532,8 @@
             toppingsId: data.toppingsId || '', // カンマ区切りのトッピングID文字列
             toppings: data.toppings || [], // 配列形式（互換性のため）
             toppingSets: data.toppingSets || [], // 新しいトッピングセット形式
-            note: data.note || '' // 表示制限用のnote
+            note: data.note || '', // 表示制限用のnote
+            outOfStock: soldOutIds.has(menuId) // 品切れ判定
           });
         });
         
@@ -1539,7 +1545,7 @@
           return 0;
         });
         
-        console.log('✅ メニューを読み込みました:', menuData.length, '件');
+        console.log('✅ メニューを読み込みました:', menuData.length, '件 (品切れ:', soldOutIds.size, '件)');
         console.log('ソート後のメニューID:', menuData.map(m => m.id).join(', '));
       } catch (e) {
         console.error('❌ メニューの読み込みに失敗:', e);
@@ -3497,7 +3503,7 @@
           taxIncludedTotal: taxIncludedTotal,
           drawerOpenCount: drawerOpenCount,
           staffName: staffName,
-          aiComment: (aiComment || "")
+          aiComment: ""
         });
         
         console.log('✅ 精算ジャーナル生成完了');
@@ -5009,7 +5015,7 @@
       console.log('🟢 completePayment開始');
       
       if (!selectedPaymentMethod) {
-        showToast('⚠️ 支払い方法を選択してください');
+        alert('支払い方法を選択してください');
         return;
       }
       
@@ -5695,8 +5701,8 @@
       soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
       
       items.sort((a, b) => {
-        const numA = parseInt(a.id.replace(/\D/g, ''));
-        const numB = parseInt(b.id.replace(/\D/g, ''));
+        const numA = a.id ? parseInt(a.id.replace(/\D/g, '') || '0') : 0;
+        const numB = b.id ? parseInt(b.id.replace(/\D/g, '') || '0') : 0;
         return numA - numB;
       });
       
@@ -5896,7 +5902,7 @@
       };
       
       overlay.appendChild(popup);
-      // document.body.appendChild(overlay); audioEnabled = true;
+      document.body.appendChild(overlay);
     }
     
     function playOrderSound() {
@@ -6066,7 +6072,7 @@
       `;
       
       overlay.appendChild(popup);
-      // document.body.appendChild(overlay); audioEnabled = true;
+      document.body.appendChild(overlay);
     }
     
     window.dismissStaffCallPopup = async function(callId) {
