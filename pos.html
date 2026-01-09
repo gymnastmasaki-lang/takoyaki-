@@ -977,6 +977,29 @@
     .soldout-toggle-btn.set-available {
       background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
     }
+    
+    /* トーストアニメーション */
+    @keyframes slideIn {
+      from {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+    
+    @keyframes slideOut {
+      from {
+        transform: translateX(0);
+        opacity: 1;
+      }
+      to {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+    }
   </style>
   
   <script>
@@ -6440,6 +6463,32 @@
     </div>
   </div>
   
+  <!-- 削除確認モーダル -->
+  <div id="deleteConfirmModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 500px;">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <div style="font-size: 60px; margin-bottom: 10px;">⚠️</div>
+        <h3 style="margin: 0; font-size: 24px; color: #f44336;">テーブルを削除しますか？</h3>
+      </div>
+      
+      <div style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 10px; padding: 20px; margin: 20px 0;">
+        <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px; color: #333;">
+          <span id="deleteTableName"></span>
+        </div>
+        <div style="color: #666; line-height: 1.8;">
+          ⚠️ このテーブルのQRコードは使用できなくなります<br>
+          ⚠️ この操作は取り消せません
+        </div>
+      </div>
+      
+      <input type="hidden" id="deleteTableId">
+      
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button class="btn btn-secondary" style="flex: 1;" onclick="closeDeleteConfirmModal()">キャンセル</button>
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="confirmDeleteTable()">🗑️ 削除する</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 商品編集モーダル -->
   <div id="productEditModal" class="modal-overlay hidden">
@@ -7245,20 +7294,89 @@
     
     // テーブルを削除
     async function deleteTable(id, name) {
-      if (!confirm(`テーブル「${name}」を削除しますか？\n\nこのテーブルのQRコードは使用できなくなります。\nこの操作は取り消せません。`)) {
-        return;
-      }
+      // カスタム削除確認モーダルを表示
+      document.getElementById('deleteTableId').value = id;
+      document.getElementById('deleteTableName').textContent = `テーブル「${name}」`;
+      document.getElementById('deleteConfirmModal').classList.remove('hidden');
+    }
+    
+    // 削除確認モーダルを閉じる
+    window.closeDeleteConfirmModal = function() {
+      document.getElementById('deleteConfirmModal').classList.add('hidden');
+    };
+    
+    // 削除を確定
+    window.confirmDeleteTable = async function() {
+      const id = document.getElementById('deleteTableId').value;
+      const name = document.getElementById('deleteTableName').textContent.replace('テーブル「', '').replace('」', '');
+      
+      closeDeleteConfirmModal();
       
       try {
         await window.deleteDoc(window.doc(window.db, 'tables', id));
-        alert(`テーブル「${name}」を削除しました`);
+        
+        // 成功メッセージをオシャレに表示
+        showSuccessMessage(`テーブル「${name}」を削除しました`);
+        
         await loadTablesList();
         await loadTableButtons(); // テーブルボタンを再読み込み
         
       } catch (error) {
         console.error('テーブル削除エラー:', error);
-        alert('テーブルの削除に失敗しました: ' + error.message);
+        showErrorMessage('テーブルの削除に失敗しました: ' + error.message);
       }
+    };
+    
+    // 成功メッセージを表示
+    function showSuccessMessage(message) {
+      const toast = document.createElement('div');
+      toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        color: white;
+        padding: 20px 30px;
+        border-radius: 12px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        z-index: 10000;
+        font-size: 16px;
+        font-weight: bold;
+        animation: slideIn 0.3s ease-out;
+      `;
+      toast.innerHTML = `✅ ${message}`;
+      document.body.appendChild(toast);
+      
+      setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease-in';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+    
+    // エラーメッセージを表示
+    function showErrorMessage(message) {
+      const toast = document.createElement('div');
+      toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+        color: white;
+        padding: 20px 30px;
+        border-radius: 12px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        z-index: 10000;
+        font-size: 16px;
+        font-weight: bold;
+        animation: slideIn 0.3s ease-out;
+      `;
+      toast.innerHTML = `❌ ${message}`;
+      document.body.appendChild(toast);
+      
+      setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease-in';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
     }
     
     // QRコードを表示
@@ -7383,11 +7501,25 @@
           });
         });
         
-        // 名前でソート
-        tables.sort((a, b) => a.name.localeCompare(b.name));
+        // 即会計、テイクアウトを最初に、残りはアルファベット順
+        const fixedTables = ['即会計', 'テイクアウト'];
+        const sortedTables = [];
+        
+        // 固定テーブルを最初に追加
+        fixedTables.forEach(fixedName => {
+          const found = tables.find(t => t.name === fixedName);
+          if (found) {
+            sortedTables.push(found);
+          }
+        });
+        
+        // 残りのテーブルをアルファベット順に追加
+        const otherTables = tables.filter(t => !fixedTables.includes(t.name));
+        otherTables.sort((a, b) => a.name.localeCompare(b.name));
+        sortedTables.push(...otherTables);
         
         // テーブルボタンを生成
-        tables.forEach(table => {
+        sortedTables.forEach(table => {
           const btn = document.createElement('button');
           btn.className = 'table-btn dynamic-table-btn';
           btn.id = `table-${table.name}`;
@@ -7419,14 +7551,14 @@
           grid.appendChild(btn);
         });
         
-        // TABLESグローバル変数も更新（手動入力用）
-        window.TABLES = ['即会計', 'テイクアウト', ...tables.map(t => t.name)];
+        // TABLESグローバル変数も更新（手動入力用、同じ順序）
+        window.TABLES = sortedTables.map(t => t.name);
         
         // 手動入力のセレクトボックスも更新
         updateManualTableSelect();
         
         // 新しいテーブルのリアルタイム監視を開始
-        tables.forEach(table => {
+        sortedTables.forEach(table => {
           monitorTable(table.name);
         });
         
