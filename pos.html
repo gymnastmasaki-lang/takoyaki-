@@ -1098,7 +1098,7 @@
       
       <div class="section">
         <!-- テーブル選択 -->
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
+        <div id="tableButtonsGrid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
           
           <div style="background: linear-gradient(135deg, #81C784 0%, #66BB6A 100%); padding: 8px 10px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 50px;">
             <label style="margin: 0; white-space: nowrap; font-size: 12px; font-weight: bold; color: white;">レシート自動発行</label>
@@ -1117,6 +1117,7 @@
           </div>
           <button class="table-btn" onclick="selectTable('即会計')" id="table-即会計" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-size: 16px; font-weight: bold;">即会計</button>
           <button class="table-btn" onclick="selectTable('テイクアウト')" id="table-テイクアウト">テイクアウト</button>
+          <!-- 動的テーブルボタンがここに追加されます -->
         </div>
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
           <button class="table-btn" onclick="selectTable('c1')" id="table-c1">c1</button>
@@ -1601,28 +1602,7 @@
       }
       
       // テーブルボタンを生成
-      const tableGrid = document.getElementById('tableGrid');
-      // テーブルボタンは既にHTMLで配置済みのため、自動生成はスキップ
-      // tableGrid.innerHTML = '';
-      // ただし、予約テーブルのメモ状態は更新する
-      TABLES.forEach(table => {
-        const btn = document.getElementById(`table-${table}`);
-        if (btn && table.startsWith('予約')) {
-          if (reservationMemos[table]) {
-            btn.style.background = 'linear-gradient(135deg, #FF9800 0%, #FF5722 100%)';
-            btn.style.color = 'white';
-          }
-        }
-      });
-      
-      // 手動入力用のテーブル選択肢を生成
-      const manualTable = document.getElementById('manualTable');
-      TABLES.forEach(table => {
-        const option = document.createElement('option');
-        option.value = table;
-        option.textContent = `テーブル ${table}`;
-        manualTable.appendChild(option);
-      });
+      await loadTableButtons();
       
       // カテゴリを初期化
       initializeCategories();
@@ -7240,6 +7220,7 @@
         alert(`テーブル「${name}」を追加しました`);
         closeAddTableModal();
         await loadTablesList();
+        await loadTableButtons(); // テーブルボタンを再読み込み
         
       } catch (error) {
         console.error('テーブル追加エラー:', error);
@@ -7310,6 +7291,7 @@
         alert(`テーブル「${name}」を更新しました`);
         closeEditTableModal();
         await loadTablesList();
+        await loadTableButtons(); // テーブルボタンを再読み込み
         
       } catch (error) {
         console.error('テーブル更新エラー:', error);
@@ -7327,6 +7309,7 @@
         await window.deleteDoc(window.doc(window.db, 'tables', id));
         alert(`テーブル「${name}」を削除しました`);
         await loadTablesList();
+        await loadTableButtons(); // テーブルボタンを再読み込み
         
       } catch (error) {
         console.error('テーブル削除エラー:', error);
@@ -7365,6 +7348,74 @@
     window.closeQrCodeModal = function() {
       document.getElementById('qrCodeModal').classList.add('hidden');
     };
+    
+    // ========== テーブルボタン動的生成 ==========
+    
+    // テーブルボタンを読み込んで表示
+    async function loadTableButtons() {
+      try {
+        const grid = document.getElementById('tableButtonsGrid');
+        
+        // 固定ボタン（レシート自動発行、手動待ち人数、即会計、テイクアウト）を除いて
+        // 既存の動的テーブルボタンを削除
+        const existingButtons = grid.querySelectorAll('.dynamic-table-btn');
+        existingButtons.forEach(btn => btn.remove());
+        
+        // Firebaseからテーブル一覧を取得
+        const tablesSnapshot = await window.getDocs(window.collection(window.db, 'tables'));
+        const tables = [];
+        
+        tablesSnapshot.forEach(doc => {
+          tables.push({
+            id: doc.id,
+            ...doc.data()
+          });
+        });
+        
+        // 名前でソート
+        tables.sort((a, b) => a.name.localeCompare(b.name));
+        
+        // テーブルボタンを生成
+        tables.forEach(table => {
+          const btn = document.createElement('button');
+          btn.className = 'table-btn dynamic-table-btn';
+          btn.id = `table-${table.name}`;
+          btn.textContent = table.name;
+          btn.onclick = () => selectTable(table.name);
+          btn.style.cssText = 'background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%); color: white; font-size: 16px; font-weight: bold; padding: 15px; border-radius: 12px; border: none; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2);';
+          
+          grid.appendChild(btn);
+        });
+        
+        // TABLESグローバル変数も更新（手動入力用）
+        window.TABLES = ['即会計', 'テイクアウト', ...tables.map(t => t.name)];
+        
+        // 手動入力のセレクトボックスも更新
+        updateManualTableSelect();
+        
+      } catch (error) {
+        console.error('テーブルボタン読み込みエラー:', error);
+      }
+    }
+    
+    // 手動入力用のテーブル選択肢を更新
+    function updateManualTableSelect() {
+      const manualTable = document.getElementById('manualTable');
+      if (!manualTable) return;
+      
+      // 既存のオプションをクリア（最初のオプションを除く）
+      while (manualTable.options.length > 1) {
+        manualTable.remove(1);
+      }
+      
+      // TABLESから選択肢を生成
+      window.TABLES.forEach(table => {
+        const option = document.createElement('option');
+        option.value = table;
+        option.textContent = `テーブル ${table}`;
+        manualTable.appendChild(option);
+      });
+    }
     
     // カテゴリ一覧を読み込み
     async function loadSortCategories() {
