@@ -15,6 +15,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
     import { getFirestore, collection, query, where, getDocs, updateDoc, doc, Timestamp, onSnapshot, addDoc, orderBy, getDoc, setDoc, limit, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
     import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+    import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
     
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -28,10 +29,12 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const storage = getStorage(app);
+    const auth = getAuth(app);
     
     // グローバルに公開
     window.db = db;
     window.storage = storage;
+    window.auth = auth;
     window.storageRef = ref;
     window.uploadBytes = uploadBytes;
     window.getDownloadURL = getDownloadURL;
@@ -1090,7 +1093,7 @@
         <div style="display: flex; flex-direction: column; gap: 10px;">
           
           <div style="display: flex; gap: 10px;">
-            <button onclick="increaseWaiting()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">待1</button>
+            <button onclick="increaseWaiting()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">待増</button>
             <button onclick="showSoldOutPage()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">品切</button>
             <button id="bulk-soldout-btn" onclick="toggleBulkSoldOut()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">一括</button>
             <button id="time-override-btn" onclick="toggleTimeOverride()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">時外</button>
@@ -1112,7 +1115,8 @@
           <button onclick="showProductDeleteModal()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; flex: 1;">商品削除</button>
         </div>
         <div style="display: flex; flex-direction: column; gap: 10px;">
-          <button onclick="showTableManagementModal()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; height: 100%;">テーブル</button>
+          <button onclick="showTableManagementModal()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">テーブル</button>
+          <button onclick="logout()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">ログアウト</button>
         </div>
       </div>
     </div>
@@ -1521,23 +1525,9 @@
           });
         });
         
-        // orderフィールドでソート（order → カテゴリ → ID）
+        // menu.htmlと同じソート方法：IDでソート
         console.log('ソート前のメニューID:', menuData.map(m => m.id).join(', '));
         menuData.sort((a, b) => {
-          // カテゴリ別にソート
-          if (a.category !== b.category) {
-            return a.category.localeCompare(b.category, 'ja');
-          }
-          
-          // 同じカテゴリ内ではorder順
-          const orderA = a.order !== undefined ? a.order : 999;
-          const orderB = b.order !== undefined ? b.order : 999;
-          
-          if (orderA !== orderB) {
-            return orderA - orderB;
-          }
-          
-          // orderが同じ場合はID順
           if (a.id < b.id) return -1;
           if (a.id > b.id) return 1;
           return 0;
@@ -7077,6 +7067,22 @@
       document.getElementById('tableManagementModal').classList.add('hidden');
     };
     
+    // ログアウト関数
+    window.logout = async function() {
+      if (!confirm('ログアウトしますか？')) {
+        return;
+      }
+      
+      try {
+        await signOut(window.auth);
+        // ログインページにリダイレクト
+        window.location.href = 'index.html';
+      } catch (error) {
+        console.error('ログアウトエラー:', error);
+        alert('ログアウトに失敗しました: ' + error.message);
+      }
+    };
+    
     // テーブル一覧を読み込み
     async function loadTablesList() {
       try {
@@ -7590,20 +7596,32 @@
     async function loadSortCategories() {
       try {
         const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
-        const categories = new Set();
+        const categoryInfo = new Map();
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
-          if (data.category) {
-            categories.add(data.category);
+          if (data.category && data.id) {
+            const cat = data.category;
+            const itemId = data.id;
+            
+            if (!categoryInfo.has(cat)) {
+              categoryInfo.set(cat, { minId: itemId });
+            } else {
+              const info = categoryInfo.get(cat);
+              if (itemId < info.minId) {
+                info.minId = itemId;
+              }
+            }
           }
         });
         
         const select = document.getElementById('sortCategorySelect');
         select.innerHTML = '<option value="">カテゴリを選択...</option>';
         
-        // カテゴリをソート
-        const sortedCategories = Array.from(categories).sort((a, b) => a.localeCompare(b, 'ja'));
+        // menu.htmlと同じソート方法：各カテゴリの最小IDでソート
+        const sortedCategories = Array.from(categoryInfo.entries())
+          .sort((a, b) => a[1].minId.localeCompare(b[1].minId))
+          .map(entry => entry[0]);
         
         sortedCategories.forEach(category => {
           const option = document.createElement('option');
