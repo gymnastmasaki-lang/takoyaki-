@@ -1086,6 +1086,8 @@
           <button onclick="showProductRegistrationModal()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; flex: 1;">商品登録</button>
           
           <button onclick="showProductDeleteModal()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; flex: 1;">商品削除</button>
+          
+          <button onclick="showSortOrderModal()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; flex: 1;">並び順</button>
         </div>
       </div>
     </div>
@@ -1543,9 +1545,23 @@
           });
         });
         
-        // menu.htmlと同じソート方法：文字列比較
+        // orderフィールドでソート（order → カテゴリ → ID）
         console.log('ソート前のメニューID:', menuData.map(m => m.id).join(', '));
         menuData.sort((a, b) => {
+          // カテゴリ別にソート
+          if (a.category !== b.category) {
+            return a.category.localeCompare(b.category, 'ja');
+          }
+          
+          // 同じカテゴリ内ではorder順
+          const orderA = a.order !== undefined ? a.order : 999;
+          const orderB = b.order !== undefined ? b.order : 999;
+          
+          if (orderA !== orderB) {
+            return orderA - orderB;
+          }
+          
+          // orderが同じ場合はID順
           if (a.id < b.id) return -1;
           if (a.id > b.id) return 1;
           return 0;
@@ -6359,6 +6375,37 @@
     </div>
   </div>
   
+  <!-- 並び順変更モーダル -->
+  <div id="sortOrderModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <h3>並び順変更</h3>
+      
+      <div style="margin: 20px 0;">
+        <label style="display: block; font-weight: bold; margin-bottom: 10px;">カテゴリを選択</label>
+        <select id="sortCategorySelect" onchange="loadSortProducts()" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
+          <option value="">カテゴリを選択...</option>
+        </select>
+      </div>
+      
+      <div style="margin: 20px 0; padding: 15px; background: #e3f2fd; border-radius: 8px; border-left: 4px solid #2196F3;">
+        <div style="font-weight: bold; margin-bottom: 5px;">📌 使い方</div>
+        <div style="font-size: 14px; color: #666;">
+          • 商品をドラッグ&ドロップで並び替え<br>
+          • 「保存」ボタンで確定
+        </div>
+      </div>
+      
+      <div id="sortProductsList" style="min-height: 200px; margin: 20px 0;">
+        <div style="text-align: center; color: #999; padding: 40px;">カテゴリを選択してください</div>
+      </div>
+      
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveSortOrder()">💾 保存</button>
+        <button class="btn btn-secondary" style="flex: 1;" onclick="closeSortOrderModal()">キャンセル</button>
+      </div>
+    </div>
+  </div>
+  
   <!-- 商品編集モーダル -->
   <div id="productEditModal" class="modal-overlay hidden">
     <div class="modal" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
@@ -6914,6 +6961,246 @@
         container.appendChild(productDiv);
       });
     }
+    
+    // ========== 並び順変更機能 ==========
+    
+    let sortProducts = [];
+    let draggedElement = null;
+    
+    // 並び順変更モーダルを表示
+    window.showSortOrderModal = async function() {
+      document.getElementById('sortOrderModal').classList.remove('hidden');
+      await loadSortCategories();
+    };
+    
+    // 並び順変更モーダルを閉じる
+    window.closeSortOrderModal = function() {
+      document.getElementById('sortOrderModal').classList.add('hidden');
+      sortProducts = [];
+      document.getElementById('sortProductsList').innerHTML = '<div style="text-align: center; color: #999; padding: 40px;">カテゴリを選択してください</div>';
+    };
+    
+    // カテゴリ一覧を読み込み
+    async function loadSortCategories() {
+      try {
+        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
+        const categories = new Set();
+        
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.category) {
+            categories.add(data.category);
+          }
+        });
+        
+        const select = document.getElementById('sortCategorySelect');
+        select.innerHTML = '<option value="">カテゴリを選択...</option>';
+        
+        // カテゴリをソート
+        const sortedCategories = Array.from(categories).sort((a, b) => a.localeCompare(b, 'ja'));
+        
+        sortedCategories.forEach(category => {
+          const option = document.createElement('option');
+          option.value = category;
+          option.textContent = category;
+          select.appendChild(option);
+        });
+        
+      } catch (error) {
+        console.error('カテゴリ読み込みエラー:', error);
+      }
+    }
+    
+    // 選択したカテゴリの商品を読み込み
+    window.loadSortProducts = async function() {
+      const category = document.getElementById('sortCategorySelect').value;
+      
+      if (!category) {
+        document.getElementById('sortProductsList').innerHTML = '<div style="text-align: center; color: #999; padding: 40px;">カテゴリを選択してください</div>';
+        return;
+      }
+      
+      try {
+        const container = document.getElementById('sortProductsList');
+        container.innerHTML = '<div style="text-align: center; padding: 20px;">読み込み中...</div>';
+        
+        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
+        sortProducts = [];
+        
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.category === category) {
+            sortProducts.push({
+              id: doc.id,
+              docId: doc.id,
+              name: data.name || data.id,
+              price: data.price,
+              order: data.order || 999
+            });
+          }
+        });
+        
+        // 現在の並び順でソート
+        sortProducts.sort((a, b) => {
+          if (a.order !== b.order) {
+            return a.order - b.order;
+          }
+          return a.name.localeCompare(b.name, 'ja');
+        });
+        
+        displaySortProducts();
+        
+      } catch (error) {
+        console.error('商品読み込みエラー:', error);
+        document.getElementById('sortProductsList').innerHTML = '<div style="text-align: center; padding: 20px; color: red;">読み込みに失敗しました</div>';
+      }
+    };
+    
+    // ドラッグ可能な商品リストを表示
+    function displaySortProducts() {
+      const container = document.getElementById('sortProductsList');
+      
+      if (sortProducts.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">このカテゴリには商品がありません</div>';
+        return;
+      }
+      
+      container.innerHTML = '';
+      
+      sortProducts.forEach((product, index) => {
+        const productDiv = document.createElement('div');
+        productDiv.draggable = true;
+        productDiv.dataset.index = index;
+        productDiv.style.cssText = `
+          padding: 15px;
+          margin-bottom: 10px;
+          background: white;
+          border-radius: 8px;
+          border: 2px solid #ddd;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          cursor: move;
+          transition: all 0.2s;
+        `;
+        
+        productDiv.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 15px;">
+            <div style="font-size: 20px; color: #999;">☰</div>
+            <div style="font-weight: bold; font-size: 18px; color: #333; min-width: 30px;">${index + 1}</div>
+            <div>
+              <div style="font-weight: bold; font-size: 16px; margin-bottom: 5px;">${product.name}</div>
+              <div style="color: #4CAF50; font-weight: bold;">¥${product.price.toLocaleString()}</div>
+            </div>
+          </div>
+        `;
+        
+        // ドラッグイベント
+        productDiv.addEventListener('dragstart', handleDragStart);
+        productDiv.addEventListener('dragover', handleDragOver);
+        productDiv.addEventListener('drop', handleDrop);
+        productDiv.addEventListener('dragend', handleDragEnd);
+        
+        container.appendChild(productDiv);
+      });
+    }
+    
+    // ドラッグ開始
+    function handleDragStart(e) {
+      draggedElement = this;
+      this.style.opacity = '0.5';
+      e.dataTransfer.effectAllowed = 'move';
+    }
+    
+    // ドラッグオーバー
+    function handleDragOver(e) {
+      if (e.preventDefault) {
+        e.preventDefault();
+      }
+      e.dataTransfer.dropEffect = 'move';
+      
+      const target = e.currentTarget;
+      if (target !== draggedElement) {
+        target.style.borderColor = '#2196F3';
+        target.style.background = '#E3F2FD';
+      }
+      
+      return false;
+    }
+    
+    // ドロップ
+    function handleDrop(e) {
+      if (e.stopPropagation) {
+        e.stopPropagation();
+      }
+      
+      const target = e.currentTarget;
+      target.style.borderColor = '#ddd';
+      target.style.background = 'white';
+      
+      if (draggedElement !== target) {
+        const draggedIndex = parseInt(draggedElement.dataset.index);
+        const targetIndex = parseInt(target.dataset.index);
+        
+        // 配列を並び替え
+        const [draggedItem] = sortProducts.splice(draggedIndex, 1);
+        sortProducts.splice(targetIndex, 0, draggedItem);
+        
+        // 再描画
+        displaySortProducts();
+      }
+      
+      return false;
+    }
+    
+    // ドラッグ終了
+    function handleDragEnd(e) {
+      this.style.opacity = '1';
+      
+      // すべての要素のスタイルをリセット
+      const items = document.querySelectorAll('#sortProductsList > div');
+      items.forEach(item => {
+        item.style.borderColor = '#ddd';
+        item.style.background = 'white';
+      });
+    }
+    
+    // 並び順を保存
+    window.saveSortOrder = async function() {
+      const category = document.getElementById('sortCategorySelect').value;
+      
+      if (!category || sortProducts.length === 0) {
+        alert('保存する商品がありません');
+        return;
+      }
+      
+      if (!confirm('並び順を保存しますか？')) {
+        return;
+      }
+      
+      try {
+        // 各商品にorder値を設定して保存
+        const promises = sortProducts.map((product, index) => {
+          return window.updateDoc(window.doc(window.db, 'menu', product.docId), {
+            order: index
+          });
+        });
+        
+        await Promise.all(promises);
+        
+        alert('並び順を保存しました');
+        closeSortOrderModal();
+        
+        // メニューを再読み込み
+        if (typeof loadMenu === 'function') {
+          loadMenu();
+        }
+        
+      } catch (error) {
+        console.error('保存エラー:', error);
+        alert('保存に失敗しました: ' + error.message);
+      }
+    };
     
     // ========== 商品編集機能 ==========
     let editToppingSets = [];
