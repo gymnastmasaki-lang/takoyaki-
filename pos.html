@@ -5839,22 +5839,47 @@
     // 個別品切れ切り替え
     window.toggleSoldOut = async function(menuId, setSoldOut) {
       try {
+        console.log('📍 toggleSoldOut:', menuId, setSoldOut);
+        
         if (setSoldOut) {
+          // 品切れに設定
           await window.setDoc(window.doc(window.db, 'sold_out', menuId), {
             menuId: menuId,
             timestamp: window.Timestamp.now()
           });
           showToast('品切れに設定');
         } else {
-          await window.deleteDoc(window.doc(window.db, 'sold_out', menuId));
-          showToast('販売再開');
+          // 再販：menuIdに一致するドキュメントを検索して削除
+          const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
+          const deletePromises = [];
+          let foundCount = 0;
+          
+          soldOutSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            console.log('  sold_out doc:', docSnap.id, data);
+            
+            // menuIdが一致するドキュメントを削除（.refを使用）
+            if (data.menuId === menuId || docSnap.id === menuId) {
+              console.log('    → 削除:', docSnap.id);
+              deletePromises.push(window.deleteDoc(docSnap.ref));
+              foundCount++;
+            }
+          });
+          
+          if (deletePromises.length > 0) {
+            await Promise.all(deletePromises);
+            showToast(`販売再開 (${foundCount}件)`);
+          } else {
+            console.warn('削除するドキュメントが見つかりません。menuId:', menuId);
+            showToast('⚠️ 削除対象なし');
+          }
         }
         
         const sel = document.getElementById('soldout-category-select');
         const filtered = sel.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === sel.value);
         await displaySoldOutItems(filtered);
       } catch (e) {
-        console.error(e);
+        console.error('toggleSoldOut error:', e);
         alert('エラー: ' + e.message);
       }
     };
@@ -6782,8 +6807,34 @@
       });
     }
     
+
+    // トッピングオプションを追加
+    window.addEditToppingOption = function(setIndex) {
+      // 現在の入力内容を保存
+      saveCurrentEditToppingData();
+      
+      // 新しいオプションを追加
+      editToppingSets[setIndex].options.push({
+        name: '',
+        price: 0
+      });
+      renderEditToppingSets();
+    };
+    
+    // トッピングオプションを削除
+    window.removeEditToppingOption = function(setIndex, optionIndex) {
+      // 現在の入力内容を保存
+      saveCurrentEditToppingData();
+      
+      editToppingSets[setIndex].options.splice(optionIndex, 1);
+      renderEditToppingSets();
+    };
+    
     // トッピングセットを追加
     window.addEditToppingSet = function() {
+      // 現在の入力内容を保存
+      saveCurrentEditToppingData();
+      
       editToppingSets.push({
         name: '',
         type: 'single',
@@ -6794,24 +6845,41 @@
     
     // トッピングセットを削除
     window.removeEditToppingSet = function(setIndex) {
+      // 現在の入力内容を保存
+      saveCurrentEditToppingData();
+      
       editToppingSets.splice(setIndex, 1);
       renderEditToppingSets();
     };
     
-    // トッピングオプションを追加
-    window.addEditToppingOption = function(setIndex) {
-      editToppingSets[setIndex].options.push({
-        name: '',
-        price: 0
-      });
-      renderEditToppingSets();
-    };
-    
-    // トッピングオプションを削除
-    window.removeEditToppingOption = function(setIndex, optionIndex) {
-      editToppingSets[setIndex].options.splice(optionIndex, 1);
-      renderEditToppingSets();
-    };
+    // 現在の入力内容をeditToppingSetsに保存
+    function saveCurrentEditToppingData() {
+      const container = document.getElementById('editToppingSetsContainer');
+      const setDivs = container.children;
+      
+      for (let i = 0; i < setDivs.length && i < editToppingSets.length; i++) {
+        const setDiv = setDivs[i];
+        
+        // セット名とタイプを保存
+        const nameInput = setDiv.querySelector('.edit-topping-set-name');
+        const typeSelect = setDiv.querySelector('.edit-topping-set-type');
+        
+        if (nameInput) editToppingSets[i].name = nameInput.value;
+        if (typeSelect) editToppingSets[i].type = typeSelect.value;
+        
+        // オプションを保存
+        const optionDivs = setDiv.querySelectorAll('.edit-topping-options-list > div');
+        optionDivs.forEach((optionDiv, optIdx) => {
+          if (editToppingSets[i].options[optIdx]) {
+            const nameInput = optionDiv.querySelector('.edit-option-name');
+            const priceInput = optionDiv.querySelector('.edit-option-price');
+            
+            if (nameInput) editToppingSets[i].options[optIdx].name = nameInput.value;
+            if (priceInput) editToppingSets[i].options[optIdx].price = parseInt(priceInput.value) || 0;
+          }
+        });
+      }
+    }
     
     // 商品を更新
     window.saveEditedProduct = async function() {
