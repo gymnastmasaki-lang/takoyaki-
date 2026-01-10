@@ -1087,7 +1087,7 @@
         <p style="color: #666; margin-top: 10px;">店舗情報を入力してください</p>
       </div>
       
-      <form onsubmit="handlePOSLogin(event)" style="margin: 0;">
+      <form id="posLoginForm" style="margin: 0;">
         <div style="margin-bottom: 20px;">
           <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px; font-size: 14px;">店舗名</label>
           <input
@@ -8296,9 +8296,14 @@
     async function handlePOSLogin(event) {
       event.preventDefault();
       
+      console.log('=== POSログイン試行開始 ===');
+      
       const storeNameInput = document.getElementById('posStoreNameInput').value.trim();
       const passwordInput = document.getElementById('posPasswordInput').value;
       const loginError = document.getElementById('loginError');
+      
+      console.log('入力された店舗名:', storeNameInput);
+      console.log('パスワード長:', passwordInput.length);
       
       if (!storeNameInput || !passwordInput) {
         loginError.textContent = '店舗名とパスワードを入力してください';
@@ -8308,16 +8313,20 @@
 
       try {
         // Firebaseの初期化を待つ
+        console.log('Firebase初期化状態:', window.firebaseReady);
         if (!window.firebaseReady) {
           loginError.textContent = 'システムの初期化中です。少々お待ちください。';
           loginError.style.display = 'block';
           return;
         }
 
+        console.log('店舗データベース検索中...');
         // まず新しい店舗別認証を試みる
         const storesRef = window.collection(window.db, 'stores');
         const q = window.query(storesRef, window.where('storeName', '==', storeNameInput));
         const querySnapshot = await window.getDocs(q);
+        
+        console.log('検索結果:', querySnapshot.empty ? '店舗なし' : '店舗あり');
 
         // 新しい店舗別認証
         if (!querySnapshot.empty) {
@@ -8374,7 +8383,9 @@
         }
         
         // 店舗が見つからない場合、旧パスワード認証を試す（下赤塚店用フォールバック）
+        console.log('旧システム認証チェック:', storeNameInput, '===', '下赤塚', '?');
         if (storeNameInput === '下赤塚' && passwordInput === 'K12290619T') {
+          console.log('✅ 旧システム認証条件に一致');
           // 旧システム用の認証
           currentStoreId = null; // 旧データパスを使用
           currentStoreName = '下赤塚';
@@ -8385,6 +8396,8 @@
           sessionStorage.setItem('posStoreId', '');
           sessionStorage.setItem('posStoreName', currentStoreName);
           sessionStorage.setItem('posAuthenticated', 'true');
+          
+          console.log('セッションストレージ保存完了');
           
           document.getElementById('loginScreen').style.display = 'none';
           document.getElementById('mainContent').style.display = 'block';
@@ -8402,6 +8415,8 @@
             window.addEventListener('firebaseReady', initializeApp);
           }
           return;
+        } else {
+          console.log('❌ 旧システム認証条件に不一致');
         }
 
         // ログイン失敗
@@ -8412,11 +8427,22 @@
         setTimeout(() => {
           loginError.style.display = 'none';
         }, 3000);
+      } catch (error) {
+        console.error('❌ ログインエラー:', error);
+        loginError.textContent = 'ログインエラー: ' + error.message;
+        loginError.style.display = 'block';
       }
     }
     
     // ページ読み込み時にセッションをチェック
     window.addEventListener('DOMContentLoaded', () => {
+      // ログインフォームのイベントリスナーを設定
+      const loginForm = document.getElementById('posLoginForm');
+      if (loginForm) {
+        loginForm.addEventListener('submit', handlePOSLogin);
+        console.log('✅ ログインフォームのイベントリスナー登録完了');
+      }
+      
       const isAuthenticated = sessionStorage.getItem('posAuthenticated');
       const savedStoreId = sessionStorage.getItem('posStoreId');
       const savedStoreName = sessionStorage.getItem('posStoreName');
