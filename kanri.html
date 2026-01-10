@@ -93,6 +93,7 @@
             const [showAddEmployee, setShowAddEmployee] = useState(false);
             const [selectedPayslipEmployee, setSelectedPayslipEmployee] = useState(null);
             const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+            const [storeNameInput, setStoreNameInput] = useState('');
             const [passwordInput, setPasswordInput] = useState('');
             const [editingTime, setEditingTime] = useState(null);
             const [editingValue, setEditingValue] = useState('');
@@ -143,16 +144,24 @@
 
                     const { collection, getDocs } = window.firebaseModules;
                     
-                    // 従業員データを取得
-                    const empSnapshot = await getDocs(collection(window.db, 'kintai_employees'));
+                    // 店舗IDがない場合はエラー
+                    if (!window.currentStoreId) {
+                        setError('店舗情報が見つかりません。再度ログインしてください。');
+                        return;
+                    }
+                    
+                    // 店舗別の従業員データを取得
+                    const empRef = collection(window.db, 'stores', window.currentStoreId, 'employees');
+                    const empSnapshot = await getDocs(empRef);
                     const empList = [];
                     empSnapshot.forEach(doc => {
                         empList.push({ id: doc.id, ...doc.data() });
                     });
                     setEmployees(empList);
                     
-                    // 勤怠データを取得（現在の月のみ）
-                    const attSnapshot = await getDocs(collection(window.db, 'kintai_attendance'));
+                    // 店舗別の勤怠データを取得（現在の月のみ）
+                    const attRef = collection(window.db, 'stores', window.currentStoreId, 'attendance');
+                    const attSnapshot = await getDocs(attRef);
                     const attData = {};
                     attSnapshot.forEach(doc => {
                         const data = doc.data();
@@ -188,17 +197,42 @@
                         await new Promise(resolve => setTimeout(resolve, 100));
                     }
 
-                    const { doc, getDoc } = window.firebaseModules;
+                    const { doc, getDoc, collection, query, where, getDocs } = window.firebaseModules;
                     
-                    const settingsRef = doc(window.db, 'kintai_settings', 'admin');
-                    const settingsSnap = await getDoc(settingsRef);
-                    
-                    let correctPassword = 'K12290619T';
-                    if (settingsSnap.exists()) {
-                        correctPassword = settingsSnap.data().password || 'K12290619T';
+                    // 店舗名で検索
+                    const storesRef = collection(window.db, 'stores');
+                    const q = query(storesRef, where('storeName', '==', storeNameInput));
+                    const querySnapshot = await getDocs(q);
+
+                    if (querySnapshot.empty) {
+                        alert('店舗が見つかりません');
+                        return;
                     }
-                    
-                    if (passwordInput === correctPassword) {
+
+                    let authenticated = false;
+                    let storeData = null;
+                    let storeDocId = null;
+
+                    querySnapshot.forEach((doc) => {
+                        const data = doc.data();
+                        if (data.storePassword === passwordInput) {
+                            if (!data.isActive) {
+                                alert('この店舗は無効化されています');
+                                return;
+                            }
+                            authenticated = true;
+                            storeData = data;
+                            storeDocId = doc.id;
+                        }
+                    });
+
+                    if (authenticated && storeData) {
+                        window.currentStoreId = storeDocId;
+                        window.currentStoreName = storeData.storeName;
+                        
+                        sessionStorage.setItem('kanriStoreId', storeDocId);
+                        sessionStorage.setItem('kanriStoreName', storeData.storeName);
+                        
                         setIsAdminAuthenticated(true);
                         setPasswordInput('');
                     } else {
@@ -318,7 +352,12 @@
                 try {
                     const { collection, addDoc, Timestamp } = window.firebaseModules;
                     
-                    await addDoc(collection(window.db, 'kintai_employees'), {
+                    if (!window.currentStoreId) {
+                        throw new Error('店舗情報が見つかりません');
+                    }
+                    
+                    const empRef = collection(window.db, 'stores', window.currentStoreId, 'employees');
+                    await addDoc(empRef, {
                         name,
                         hourlyRate: parseFloat(hourlyRate) || 0,
                         transportAllowance: parseFloat(transportAllowance) || 0,
@@ -525,13 +564,24 @@
                                 
                                 <form onSubmit={handleLogin}>
                                     <input
+                                        type="text"
+                                        placeholder="店舗名"
+                                        value={storeNameInput}
+                                        onChange={(e) => setStoreNameInput(e.target.value)}
+                                        className="w-full p-3 border rounded-lg mb-4"
+                                        autoFocus
+                                        disabled={isLoading}
+                                        required
+                                    />
+                                    
+                                    <input
                                         type="password"
                                         placeholder="パスワード"
                                         value={passwordInput}
                                         onChange={(e) => setPasswordInput(e.target.value)}
                                         className="w-full p-3 border rounded-lg mb-4"
-                                        autoFocus
                                         disabled={isLoading}
+                                        required
                                     />
                                     
                                     <button

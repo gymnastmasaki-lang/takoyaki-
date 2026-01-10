@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>既存データ移行ツール</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, getDocs, doc, setDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+            authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+            projectId: "takoyaki-order-system-bacd7",
+            storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+            messagingSenderId: "104494752890",
+            appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        async function migrateExistingData() {
+            const log = document.getElementById('log');
+            const addLog = (message, type = 'info') => {
+                const p = document.createElement('p');
+                p.className = type === 'error' ? 'text-red-600' : type === 'success' ? 'text-green-600' : 'text-gray-700';
+                p.textContent = message;
+                log.appendChild(p);
+            };
+
+            try {
+                addLog('=== 既存データ移行開始 ===');
+                
+                // 1. 下赤塚店の店舗情報を作成
+                addLog('1. 店舗情報を作成中...');
+                const storeId = 'shimoarekasuka'; // 下赤塚店のID
+                await setDoc(doc(db, 'stores', storeId), {
+                    storeName: '下赤塚',
+                    storePassword: 'K12290619T',
+                    isActive: true,
+                    createdAt: Timestamp.now(),
+                    updatedAt: Timestamp.now()
+                });
+                addLog('✓ 店舗情報作成完了', 'success');
+
+                // 2. メニューデータの移行
+                addLog('2. メニューデータを移行中...');
+                const menuSnapshot = await getDocs(collection(db, 'menu'));
+                let menuCount = 0;
+                for (const menuDoc of menuSnapshot.docs) {
+                    await setDoc(
+                        doc(db, 'stores', storeId, 'menus', menuDoc.id),
+                        menuDoc.data()
+                    );
+                    menuCount++;
+                }
+                addLog(`✓ メニュー ${menuCount}件 移行完了`, 'success');
+
+                // 3. テーブルデータの移行
+                addLog('3. テーブルデータを移行中...');
+                const tablesSnapshot = await getDocs(collection(db, 'tables'));
+                let tableCount = 0;
+                for (const tableDoc of tablesSnapshot.docs) {
+                    await setDoc(
+                        doc(db, 'stores', storeId, 'tables', tableDoc.id),
+                        tableDoc.data()
+                    );
+                    tableCount++;
+                }
+                addLog(`✓ テーブル ${tableCount}件 移行完了`, 'success');
+
+                // 4. 注文データの移行（削除済みでないもののみ）
+                addLog('4. 注文データを移行中...');
+                const ordersSnapshot = await getDocs(collection(db, 'orders'));
+                let orderCount = 0;
+                for (const orderDoc of ordersSnapshot.docs) {
+                    const data = orderDoc.data();
+                    if (!data.deleted) {
+                        await setDoc(
+                            doc(db, 'stores', storeId, 'orders', orderDoc.id),
+                            data
+                        );
+                        orderCount++;
+                    }
+                }
+                addLog(`✓ 注文 ${orderCount}件 移行完了`, 'success');
+
+                // 5. 従業員データの移行
+                addLog('5. 従業員データを移行中...');
+                const employeesSnapshot = await getDocs(collection(db, 'kintai_employees'));
+                let employeeCount = 0;
+                for (const empDoc of employeesSnapshot.docs) {
+                    await setDoc(
+                        doc(db, 'stores', storeId, 'employees', empDoc.id),
+                        empDoc.data()
+                    );
+                    employeeCount++;
+                }
+                addLog(`✓ 従業員 ${employeeCount}件 移行完了`, 'success');
+
+                // 6. 勤怠データの移行
+                addLog('6. 勤怠データを移行中...');
+                const attendanceSnapshot = await getDocs(collection(db, 'kintai_attendance'));
+                let attendanceCount = 0;
+                for (const attDoc of attendanceSnapshot.docs) {
+                    await setDoc(
+                        doc(db, 'stores', storeId, 'attendance', attDoc.id),
+                        attDoc.data()
+                    );
+                    attendanceCount++;
+                }
+                addLog(`✓ 勤怠 ${attendanceCount}件 移行完了`, 'success');
+
+                // 7. スタッフ呼び出しデータの移行
+                addLog('7. スタッフ呼び出しデータを移行中...');
+                const callsSnapshot = await getDocs(collection(db, 'staff_calls'));
+                let callsCount = 0;
+                for (const callDoc of callsSnapshot.docs) {
+                    await setDoc(
+                        doc(db, 'stores', storeId, 'staff_calls', callDoc.id),
+                        callDoc.data()
+                    );
+                    callsCount++;
+                }
+                addLog(`✓ スタッフ呼び出し ${callsCount}件 移行完了`, 'success');
+
+                addLog('');
+                addLog('=== 移行完了 ===', 'success');
+                addLog('');
+                addLog('移行されたデータ:');
+                addLog(`- メニュー: ${menuCount}件`);
+                addLog(`- テーブル: ${tableCount}件`);
+                addLog(`- 注文: ${orderCount}件`);
+                addLog(`- 従業員: ${employeeCount}件`);
+                addLog(`- 勤怠: ${attendanceCount}件`);
+                addLog(`- スタッフ呼び出し: ${callsCount}件`);
+                addLog('');
+                addLog('店舗ID: shimoarekasuka');
+                addLog('店舗名: 下赤塚');
+                addLog('パスワード: K12290619T');
+                
+                document.getElementById('successMessage').classList.remove('hidden');
+
+            } catch (error) {
+                addLog('❌ エラー: ' + error.message, 'error');
+                console.error('Migration error:', error);
+            }
+        }
+
+        // ページ読み込み時に表示
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('root').innerHTML = `
+                <div class="min-h-screen bg-gray-100 p-8">
+                    <div class="max-w-4xl mx-auto">
+                        <div class="bg-white rounded-xl shadow-lg p-8 mb-6">
+                            <h1 class="text-3xl font-bold text-gray-800 mb-4">既存データ移行ツール</h1>
+                            <p class="text-gray-600 mb-6">
+                                このツールは、既存の「下赤塚店」のデータを新しい多店舗対応システムに移行します。
+                            </p>
+                            
+                            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+                                <div class="flex">
+                                    <div class="flex-shrink-0">
+                                        <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                                        </svg>
+                                    </div>
+                                    <div class="ml-3">
+                                        <h3 class="text-sm font-medium text-yellow-800">注意事項</h3>
+                                        <div class="mt-2 text-sm text-yellow-700">
+                                            <ul class="list-disc list-inside space-y-1">
+                                                <li>このツールは一度だけ実行してください</li>
+                                                <li>既存データは削除されません（コピーされます）</li>
+                                                <li>移行後は新しいシステムでログインしてください</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button 
+                                onclick="migrateData()" 
+                                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg transition-all"
+                            >
+                                移行を開始
+                            </button>
+                        </div>
+
+                        <div id="successMessage" class="hidden bg-green-50 border-l-4 border-green-400 p-4 mb-6">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <svg class="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                                    </svg>
+                                </div>
+                                <div class="ml-3">
+                                    <h3 class="text-sm font-medium text-green-800">移行が完了しました！</h3>
+                                    <div class="mt-2 text-sm text-green-700">
+                                        <p>今後は以下の情報でログインしてください：</p>
+                                        <ul class="list-disc list-inside mt-2">
+                                            <li>店舗名: <strong>下赤塚</strong></li>
+                                            <li>パスワード: <strong>K12290619T</strong></li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-xl shadow-lg p-8">
+                            <h2 class="text-xl font-bold text-gray-800 mb-4">移行ログ</h2>
+                            <div id="log" class="bg-gray-50 p-4 rounded-lg font-mono text-sm max-h-96 overflow-y-auto"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        // グローバル関数として公開
+        window.migrateData = migrateExistingData;
+    </script>
+</body>
+</html>

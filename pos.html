@@ -54,6 +54,38 @@
     window.limit = limit;
     window.deleteDoc = deleteDoc;
     
+    // 店舗別コレクション参照を取得するヘルパー関数
+    window.getStoreCollection = function(collectionName) {
+      if (!window.currentStoreId) {
+        console.warn('店舗IDが未設定のため、旧データパスを使用します');
+        // 旧データパスのマッピング
+        const oldPathMap = {
+          'menus': 'menu',
+          'employees': 'kintai_employees',
+          'attendance': 'kintai_attendance'
+        };
+        return collection(db, oldPathMap[collectionName] || collectionName);
+      }
+      
+      return collection(db, 'stores', window.currentStoreId, collectionName);
+    };
+    
+    // 店舗別ドキュメント参照を取得するヘルパー関数
+    window.getStoreDoc = function(collectionName, docId) {
+      if (!window.currentStoreId) {
+        console.warn('店舗IDが未設定のため、旧データパスを使用します');
+        // 旧データパスのマッピング
+        const oldPathMap = {
+          'menus': 'menu',
+          'employees': 'kintai_employees',
+          'attendance': 'kintai_attendance'
+        };
+        return doc(db, oldPathMap[collectionName] || collectionName, docId);
+      }
+      
+      return doc(db, 'stores', window.currentStoreId, collectionName, docId);
+    };
+    
     // 初期化完了フラグ
     window.firebaseReady = true;
     console.log('✅ Firebase初期化完了 (Firestore + Storage)');
@@ -70,7 +102,11 @@
     async function loadStaffList() {
       try {
         const staffSelect = document.getElementById('staffSelect');
-        const staffSnapshot = await getDocs(collection(db, 'kintai_employees'));
+        if (!staffSelect) return;
+        
+        // 店舗別の従業員データを読み込む
+        const employeesRef = window.getStoreCollection('employees');
+        const staffSnapshot = await getDocs(employeesRef);
         
         // リセット
         staffSelect.innerHTML = '<option value="">選択してください</option>';
@@ -83,7 +119,7 @@
           staffSelect.appendChild(option);
         });
         
-        console.log('✅ 担当者リスト読み込み完了');
+        console.log('✅ 担当者リスト読み込み完了 - 店舗:', window.currentStoreName);
       } catch (e) {
         console.error('❌ 担当者リスト読み込みエラー:', e);
       }
@@ -1048,17 +1084,32 @@
       <div style="text-align: center; margin-bottom: 30px;">
         <div style="font-size: 60px; margin-bottom: 10px;">🔐</div>
         <h2 style="font-size: 24px; font-weight: bold; color: #333; margin: 0;">POSシステム</h2>
-        <p style="color: #666; margin-top: 10px;">パスワードを入力してください</p>
+        <p style="color: #666; margin-top: 10px;">店舗情報を入力してください</p>
       </div>
       
       <form onsubmit="handlePOSLogin(event)" style="margin: 0;">
-        <input
-          type="password"
-          id="posPasswordInput"
-          placeholder="パスワード"
-          style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box; margin-bottom: 20px;"
-          autofocus
-        />
+        <div style="margin-bottom: 20px;">
+          <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px; font-size: 14px;">店舗名</label>
+          <input
+            type="text"
+            id="posStoreNameInput"
+            placeholder="店舗名を入力"
+            style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box;"
+            required
+            autofocus
+          />
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+          <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px; font-size: 14px;">パスワード</label>
+          <input
+            type="password"
+            id="posPasswordInput"
+            placeholder="パスワードを入力"
+            style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box;"
+            required
+          />
+        </div>
         
         <button
           type="submit"
@@ -8238,31 +8289,91 @@
       }
     }
     
-    // パスワード認証処理
-    function handlePOSLogin(event) {
+    // パスワード認証処理（店舗別認証）
+    let currentStoreId = null;
+    let currentStoreName = null;
+    
+    async function handlePOSLogin(event) {
       event.preventDefault();
       
-      const passwordInput = document.getElementById('posPasswordInput');
+      const storeNameInput = document.getElementById('posStoreNameInput').value.trim();
+      const passwordInput = document.getElementById('posPasswordInput').value;
       const loginError = document.getElementById('loginError');
-      const correctPassword = 'K12290619T';
       
-      if (passwordInput.value === correctPassword) {
-        // ログイン成功
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('mainContent').style.display = 'block';
-        
-        // セッションストレージに認証フラグを保存
-        sessionStorage.setItem('posAuthenticated', 'true');
-        
-        // 初期化処理を実行
-        if (window.firebaseReady) {
-          initializeApp();
-        } else {
-          window.addEventListener('firebaseReady', initializeApp);
+      if (!storeNameInput || !passwordInput) {
+        loginError.textContent = '店舗名とパスワードを入力してください';
+        loginError.style.display = 'block';
+        return;
+      }
+
+      try {
+        // Firebaseの初期化を待つ
+        if (!window.firebaseReady) {
+          loginError.textContent = 'システムの初期化中です。少々お待ちください。';
+          loginError.style.display = 'block';
+          return;
         }
-      } else {
-        // ログイン失敗
-        loginError.textContent = 'パスワードが正しくありません';
+
+        // 店舗名で検索
+        const storesRef = window.collection(window.db, 'stores');
+        const q = window.query(storesRef, window.where('storeName', '==', storeNameInput));
+        const querySnapshot = await window.getDocs(q);
+
+        if (querySnapshot.empty) {
+          loginError.textContent = '店舗が見つかりません';
+          loginError.style.display = 'block';
+          return;
+        }
+
+        let authenticated = false;
+        let storeData = null;
+        let storeDocId = null;
+
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.storePassword === passwordInput) {
+            if (!data.isActive) {
+              loginError.textContent = 'この店舗は無効化されています';
+              loginError.style.display = 'block';
+              return;
+            }
+            authenticated = true;
+            storeData = data;
+            storeDocId = doc.id;
+          }
+        });
+
+        if (authenticated && storeData) {
+          currentStoreId = storeDocId;
+          currentStoreName = storeData.storeName;
+          
+          // グローバル変数に設定
+          window.currentStoreId = currentStoreId;
+          window.currentStoreName = currentStoreName;
+          
+          sessionStorage.setItem('posStoreId', currentStoreId);
+          sessionStorage.setItem('posStoreName', currentStoreName);
+          sessionStorage.setItem('posAuthenticated', 'true');
+          
+          // ログイン成功
+          document.getElementById('loginScreen').style.display = 'none';
+          document.getElementById('mainContent').style.display = 'block';
+          
+          // ヘッダーに店舗名を表示
+          const headerTitle = document.querySelector('.header-title');
+          if (headerTitle) {
+            headerTitle.textContent = currentStoreName + ' - レジシステム';
+          }
+          
+          // 初期化処理を実行
+          if (window.firebaseReady) {
+            initializeApp();
+          } else {
+            window.addEventListener('firebaseReady', initializeApp);
+          }
+        } else {
+          // ログイン失敗
+          loginError.textContent = 'パスワードが正しくありません';
         loginError.style.display = 'block';
         passwordInput.value = '';
         passwordInput.focus();
@@ -8276,11 +8387,24 @@
     // ページ読み込み時にセッションをチェック
     window.addEventListener('DOMContentLoaded', () => {
       const isAuthenticated = sessionStorage.getItem('posAuthenticated');
+      const savedStoreId = sessionStorage.getItem('posStoreId');
+      const savedStoreName = sessionStorage.getItem('posStoreName');
       
-      if (isAuthenticated === 'true') {
+      if (isAuthenticated === 'true' && savedStoreId && savedStoreName) {
         // 既にログイン済み
+        currentStoreId = savedStoreId;
+        currentStoreName = savedStoreName;
+        window.currentStoreId = currentStoreId;
+        window.currentStoreName = currentStoreName;
+        
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
+        
+        // ヘッダーに店舗名を表示
+        const headerTitle = document.querySelector('.header-title');
+        if (headerTitle) {
+          headerTitle.textContent = currentStoreName + ' - レジシステム';
+        }
         
         // 初期化処理を実行
         if (window.firebaseReady) {
@@ -8294,7 +8418,7 @@
     // アプリケーション初期化処理
     function initializeApp() {
       // 既存の初期化処理が自動実行されるため、ここでは何もしない
-      console.log('✅ POSシステム初期化完了');
+      console.log('✅ POSシステム初期化完了 - 店舗:', window.currentStoreName);
     }
   </script>
   
