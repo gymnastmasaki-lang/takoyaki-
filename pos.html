@@ -48,6 +48,37 @@
     window.Timestamp = Timestamp;
     window.onSnapshot = onSnapshot;
     window.addDoc = addDoc;
+    
+    // 店舗別認証用の変数
+    window.currentStoreId = null;
+    window.currentStoreName = null;
+    
+    // ヘルパー関数：店舗別コレクション参照を取得
+    window.getStoreCollection = function(collectionName) {
+      if (!window.currentStoreId) {
+        // 旧データパスのマッピング
+        const oldPathMap = {
+          'menus': 'menu',
+          'employees': 'kintai_employees',
+          'attendance': 'kintai_attendance'
+        };
+        return collection(db, oldPathMap[collectionName] || collectionName);
+      }
+      return collection(db, 'stores', window.currentStoreId, collectionName);
+    };
+    
+    // ヘルパー関数：店舗別ドキュメント参照を取得
+    window.getStoreDoc = function(collectionName, docId) {
+      if (!window.currentStoreId) {
+        const oldPathMap = {
+          'menus': 'menu',
+          'employees': 'kintai_employees',
+          'attendance': 'kintai_attendance'
+        };
+        return doc(db, oldPathMap[collectionName] || collectionName, docId);
+      }
+      return doc(db, 'stores', window.currentStoreId, collectionName, docId);
+    };
     window.orderBy = orderBy;
     window.getDoc = getDoc;
     window.setDoc = setDoc;
@@ -70,7 +101,10 @@
     async function loadStaffList() {
       try {
         const staffSelect = document.getElementById('staffSelect');
-        const staffSnapshot = await getDocs(collection(db, 'kintai_employees'));
+        if (!staffSelect) return;
+        
+        const employeesCollection = window.getStoreCollection('employees');
+        const staffSnapshot = await getDocs(employeesCollection);
         
         // リセット
         staffSelect.innerHTML = '<option value="">選択してください</option>';
@@ -1048,17 +1082,32 @@
       <div style="text-align: center; margin-bottom: 30px;">
         <div style="font-size: 60px; margin-bottom: 10px;">🔐</div>
         <h2 style="font-size: 24px; font-weight: bold; color: #333; margin: 0;">POSシステム</h2>
-        <p style="color: #666; margin-top: 10px;">パスワードを入力してください</p>
+        <p style="color: #666; margin-top: 10px;">店舗情報を入力してください</p>
       </div>
       
-      <form onsubmit="handlePOSLogin(event)" style="margin: 0;">
-        <input
-          type="password"
-          id="posPasswordInput"
-          placeholder="パスワード"
-          style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box; margin-bottom: 20px;"
-          autofocus
-        />
+      <form onsubmit="return handlePOSLogin(event);" style="margin: 0;">
+        <div style="margin-bottom: 20px;">
+          <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px; font-size: 14px;">店舗名</label>
+          <input
+            type="text"
+            id="posStoreNameInput"
+            placeholder="店舗名を入力"
+            style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box;"
+            required
+            autofocus
+          />
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+          <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px; font-size: 14px;">パスワード</label>
+          <input
+            type="password"
+            id="posPasswordInput"
+            placeholder="パスワード"
+            style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box;"
+            required
+          />
+        </div>
         
         <button
           type="submit"
@@ -6008,9 +6057,13 @@
       try {
         const audio = new Audio('./order.wav');
         audio.volume = 1.0;
-        audio.play().catch(e => console.log('音声再生失敗:', e));
+        audio.addEventListener('loadeddata', () => console.log('✅ order.wav ロード成功'));
+        audio.addEventListener('error', (e) => console.error('❌ order.wav ロードエラー:', e));
+        audio.play()
+          .then(() => console.log('✅ order.wav 再生成功'))
+          .catch(e => console.error('❌ order.wav 再生失敗:', e));
       } catch (e) {
-        console.log('音声エラー:', e);
+        console.error('❌ order.wav エラー:', e);
       }
     }
     
@@ -6023,9 +6076,13 @@
       try {
         const audio = new Audio('./call.wav');
         audio.volume = 1.0;
-        audio.play().catch(e => console.log('音声再生失敗:', e));
+        audio.addEventListener('loadeddata', () => console.log('✅ call.wav ロード成功'));
+        audio.addEventListener('error', (e) => console.error('❌ call.wav ロードエラー:', e));
+        audio.play()
+          .then(() => console.log('✅ call.wav 再生成功'))
+          .catch(e => console.error('❌ call.wav 再生失敗:', e));
       } catch (e) {
-        console.log('音声エラー:', e);
+        console.error('❌ call.wav エラー:', e);
       }
     }
     
@@ -8231,36 +8288,101 @@
     }
     
     // パスワード認証処理
-    function handlePOSLogin(event) {
+    async function handlePOSLogin(event) {
       event.preventDefault();
       
-      const passwordInput = document.getElementById('posPasswordInput');
+      const storeNameInput = document.getElementById('posStoreNameInput').value.trim();
+      const passwordInput = document.getElementById('posPasswordInput').value;
       const loginError = document.getElementById('loginError');
-      const correctPassword = 'K12290619T';
       
-      if (passwordInput.value === correctPassword) {
-        // ログイン成功
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('mainContent').style.display = 'block';
-        
-        // セッションストレージに認証フラグを保存
-        sessionStorage.setItem('posAuthenticated', 'true');
-        
-        // 初期化処理を実行
-        if (window.firebaseReady) {
-          initializeApp();
-        } else {
-          window.addEventListener('firebaseReady', initializeApp);
-        }
-      } else {
-        // ログイン失敗
-        loginError.textContent = 'パスワードが正しくありません';
+      if (!storeNameInput || !passwordInput) {
+        loginError.textContent = '店舗名とパスワードを入力してください';
         loginError.style.display = 'block';
-        passwordInput.value = '';
-        passwordInput.focus();
+        return false;
+      }
+      
+      try {
+        // 旧システム認証（下赤塚店）
+        if (storeNameInput === '下赤塚' && passwordInput === 'K12290619T') {
+          window.currentStoreId = null; // 旧データパスを使用
+          window.currentStoreName = '下赤塚';
+          
+          sessionStorage.setItem('posStoreId', '');
+          sessionStorage.setItem('posStoreName', '下赤塚');
+          sessionStorage.setItem('posAuthenticated', 'true');
+          
+          document.getElementById('loginScreen').style.display = 'none';
+          document.getElementById('mainContent').style.display = 'block';
+          
+          console.log('✅ 旧システムログイン成功:', window.currentStoreName);
+          
+          // 初期化処理を実行
+          if (window.firebaseReady) {
+            initializeApp();
+          } else {
+            window.addEventListener('firebaseReady', initializeApp);
+          }
+          
+          // 担当者リストを読み込み
+          await loadStaffList();
+          
+          return false;
+        }
+        
+        // 新システム認証
+        const storesRef = window.collection(window.db, 'stores');
+        const q = window.query(storesRef, window.where('storeName', '==', storeNameInput));
+        const snapshot = await window.getDocs(q);
+        
+        if (!snapshot.empty) {
+          let found = false;
+          snapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.storePassword === passwordInput && data.isActive) {
+              found = true;
+              window.currentStoreId = doc.id;
+              window.currentStoreName = data.storeName;
+            }
+          });
+          
+          if (found) {
+            sessionStorage.setItem('posStoreId', window.currentStoreId);
+            sessionStorage.setItem('posStoreName', window.currentStoreName);
+            sessionStorage.setItem('posAuthenticated', 'true');
+            
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'block';
+            
+            console.log('✅ 店舗別ログイン成功:', window.currentStoreName, 'ID:', window.currentStoreId);
+            
+            if (window.firebaseReady) {
+              initializeApp();
+            } else {
+              window.addEventListener('firebaseReady', initializeApp);
+            }
+            
+            // 担当者リストを読み込み
+            await loadStaffList();
+            
+            return false;
+          }
+        }
+        
+        loginError.textContent = 'ログインに失敗しました';
+        loginError.style.display = 'block';
+        document.getElementById('posPasswordInput').value = '';
         
         setTimeout(() => {
           loginError.style.display = 'none';
+        }, 3000);
+      } catch (error) {
+        console.error('ログインエラー:', error);
+        loginError.textContent = 'エラー: ' + error.message;
+        loginError.style.display = 'block';
+      }
+      
+      return false;
+    }
         }, 3000);
       }
     }
@@ -8268,11 +8390,18 @@
     // ページ読み込み時にセッションをチェック
     window.addEventListener('DOMContentLoaded', () => {
       const isAuthenticated = sessionStorage.getItem('posAuthenticated');
+      const savedStoreId = sessionStorage.getItem('posStoreId');
+      const savedStoreName = sessionStorage.getItem('posStoreName');
       
-      if (isAuthenticated === 'true') {
-        // 既にログイン済み
+      if (isAuthenticated === 'true' && savedStoreName) {
+        // 既にログイン済み - 店舗情報を復元
+        window.currentStoreId = savedStoreId || null;
+        window.currentStoreName = savedStoreName;
+        
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
+        
+        console.log('✅ セッションから復元:', window.currentStoreName, 'ID:', window.currentStoreId || '(旧システム)');
         
         // 初期化処理を実行
         if (window.firebaseReady) {
@@ -8280,13 +8409,16 @@
         } else {
           window.addEventListener('firebaseReady', initializeApp);
         }
+        
+        // 担当者リストを読み込み
+        loadStaffList();
       }
     });
     
     // アプリケーション初期化処理
     function initializeApp() {
       // 既存の初期化処理が自動実行されるため、ここでは何もしない
-      console.log('✅ POSシステム初期化完了');
+      console.log('✅ POSシステム初期化完了 - 店舗:', window.currentStoreName);
     }
   </script>
   
