@@ -371,51 +371,17 @@
   </style>
 </head>
 <body>
-  <!-- ログイン画面 -->
-  <div id="loginScreen" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); z-index: 10000; display: flex; align-items: center; justify-content: center;">
-    <div style="background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); max-width: 400px; width: 90%;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px;">
-          <svg style="width: 40px; height: 40px; color: white;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-          </svg>
-        </div>
-        <h1 style="font-size: 28px; font-weight: bold; color: #333; margin-bottom: 10px;">注文管理コントローラー</h1>
-        <p style="color: #666;">店舗情報を入力してください</p>
-      </div>
-      
-      <form id="controllerLoginForm" onsubmit="return false;">
-        <div style="margin-bottom: 20px;">
-          <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px;">店舗名</label>
-          <input type="text" id="controllerStoreNameInput" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;" placeholder="店舗名を入力" required>
-        </div>
-        
-        <div style="margin-bottom: 25px;">
-          <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px;">パスワード</label>
-          <input type="password" id="controllerPasswordInput" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;" placeholder="パスワードを入力" required>
-        </div>
-        
-        <div id="controllerLoginError" style="display: none; background: #fee; color: #c33; padding: 12px; border-radius: 8px; margin-bottom: 20px; text-align: center; font-weight: bold;"></div>
-        
-        <button type="submit" onclick="handleControllerLogin(event)" style="width: 100%; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;">
-          ログイン
-        </button>
-      </form>
-    </div>
+  <div class="connection-indicator online" id="connection-indicator">
+    <div class="connection-dot"></div>
+    <span>オンライン</span>
   </div>
 
-  <div id="mainContent" style="display: none;">
-    <div class="connection-indicator online" id="connection-indicator">
-      <div class="connection-dot"></div>
-      <span>オンライン</span>
-    </div>
+  <!-- 音声案内ボタンセクション -->
+  <div class="audio-buttons-section">
+    <div class="audio-button-grid" id="audio-button-grid"></div>
+  </div>
 
-    <!-- 音声案内ボタンセクション -->
-    <div class="audio-buttons-section">
-      <div class="audio-button-grid" id="audio-button-grid"></div>
-    </div>
-
-    <div id="page-orders">
+  <div id="page-orders">
     <div class="top-controls">
       <button class="big-btn btn-refresh" onclick="loadOrders()">更新</button>
       <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">待1</button>
@@ -453,7 +419,7 @@
 
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, getDocs, getDoc, doc, deleteDoc, setDoc, updateDoc, Timestamp, onSnapshot, query, where } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getFirestore, collection, getDocs, getDoc, doc, deleteDoc, setDoc, updateDoc, Timestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
     const app = initializeApp({
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -466,11 +432,6 @@
     
     const db = getFirestore(app);
     window.db = db;
-    
-    // Firebaseモジュールをグローバルに公開（ログイン処理で使用）
-    window.firebaseModules = {
-      collection, getDocs, getDoc, doc, deleteDoc, setDoc, updateDoc, Timestamp, onSnapshot, query, where
-    };
 
     let audioEnabled = false;
     let isFirstOrderLoad = true;
@@ -722,14 +683,8 @@
 
     function watchStaffCalls() {
       let isFirstLoad = true;
-      
-      // 店舗別のスタッフ呼び出しを監視
-      const callsCollection = currentStoreId 
-        ? collection(db, 'stores', currentStoreId, 'staff_calls')
-        : collection(db, 'staff_calls'); // フォールバック（旧データ用）
-      
       const unsubscribe = onSnapshot(
-        callsCollection,
+        collection(db, 'staff_calls'),
         (snapshot) => {
         const container = document.getElementById('staff-calls-container');
         container.innerHTML = '';
@@ -771,43 +726,8 @@
     }
 
     window.dismissCall = async (id) => {
-      try {
-        console.log('🔥 対応完了処理開始');
-        console.log('削除ID:', id);
-        console.log('現在の店舗ID:', currentStoreId);
-        
-        // グローバル変数から取得
-        const { doc, deleteDoc } = window.firebaseModules;
-        const database = window.db;
-        
-        if (!doc || !deleteDoc || !database) {
-          console.error('❌ Firebase関数またはDBが見つかりません');
-          console.log('doc:', doc);
-          console.log('deleteDoc:', deleteDoc);
-          console.log('database:', database);
-          alert('システムエラー: Firebase関数が見つかりません');
-          return;
-        }
-        
-        let docRef;
-        if (currentStoreId) {
-          docRef = doc(database, 'stores', currentStoreId, 'staff_calls', id);
-          console.log('削除パス: stores/' + currentStoreId + '/staff_calls/' + id);
-        } else {
-          docRef = doc(database, 'staff_calls', id);
-          console.log('削除パス: staff_calls/' + id);
-        }
-        
-        console.log('削除実行中...');
-        await deleteDoc(docRef);
-        console.log('✅ 削除成功');
-        showToast('✓ 対応完了');
-      } catch (error) {
-        console.error('❌ スタッフ呼び出し削除エラー:', error);
-        console.error('エラー内容:', error.message);
-        alert('削除エラー: ' + error.message);
-        showToast('✗ 削除に失敗しました');
-      }
+      await deleteDoc(doc(db, 'staff_calls', id));
+      showToast('✓ 対応完了');
     };
 
     function playOrderSound() {
@@ -845,14 +765,8 @@
 
     async function loadOrders() {
       const orders = [];
-      console.log('🔄 注文データ読み込み開始 - 店舗ID:', currentStoreId);
-      
-      // 店舗別の注文を読み込む
-      const ordersCollection = currentStoreId 
-        ? collection(db, 'stores', currentStoreId, 'orders')
-        : collection(db, 'orders'); // フォールバック（旧データ用）
-      
-      (await getDocs(ordersCollection)).forEach(doc => {
+      console.log('🔄 注文データ読み込み開始');
+      (await getDocs(collection(db, 'orders'))).forEach(doc => {
         const d = doc.data();
         
         console.log('📋 注文データ:', {
@@ -1922,161 +1836,6 @@
       </div>
     </div>
   </div>
-  
-  </div> <!-- mainContent終了 -->
-
-  <script>
-    // 店舗別ログイン処理
-    let currentStoreId = null;
-    let currentStoreName = null;
-
-    async function handleControllerLogin(event) {
-      event.preventDefault();
-      
-      const storeNameInput = document.getElementById('controllerStoreNameInput').value.trim();
-      const passwordInput = document.getElementById('controllerPasswordInput').value;
-      const loginError = document.getElementById('controllerLoginError');
-      
-      if (!storeNameInput || !passwordInput) {
-        loginError.textContent = '店舗名とパスワードを入力してください';
-        loginError.style.display = 'block';
-        return;
-      }
-
-      try {
-        // Firebaseの初期化を待つ
-        if (!window.db) {
-          loginError.textContent = 'システムの初期化中です。少々お待ちください。';
-          loginError.style.display = 'block';
-          return;
-        }
-
-        const { collection, query, where, getDocs } = window.firebaseModules || {};
-        if (!collection || !query || !where || !getDocs) {
-          loginError.textContent = 'システムエラーが発生しました';
-          loginError.style.display = 'block';
-          return;
-        }
-
-        // 店舗名で検索
-        const storesRef = collection(window.db, 'stores');
-        const q = query(storesRef, where('storeName', '==', storeNameInput));
-        const querySnapshot = await getDocs(q);
-
-        // 新しい店舗別認証
-        if (!querySnapshot.empty) {
-          let authenticated = false;
-          let storeData = null;
-          let storeDocId = null;
-
-          querySnapshot.forEach((doc) => {
-            const data = doc.data();
-            if (data.storePassword === passwordInput) {
-              if (!data.isActive) {
-                loginError.textContent = 'この店舗は無効化されています';
-                loginError.style.display = 'block';
-                return;
-              }
-              authenticated = true;
-              storeData = data;
-              storeDocId = doc.id;
-            }
-          });
-
-          if (authenticated && storeData) {
-            currentStoreId = storeDocId;
-            currentStoreName = storeData.storeName;
-            
-            sessionStorage.setItem('controllerStoreId', currentStoreId);
-            sessionStorage.setItem('controllerStoreName', currentStoreName);
-            sessionStorage.setItem('controllerAuthenticated', 'true');
-            
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('mainContent').style.display = 'block';
-            
-            // ヘッダーに店舗名を表示
-            const header = document.querySelector('.header h1');
-            if (header) {
-              header.textContent = currentStoreName + ' - 注文管理コントローラー';
-            }
-            
-            console.log('✅ 店舗別ログイン成功:', currentStoreName, 'ID:', currentStoreId);
-            
-            // 初期化処理を実行
-            initController();
-            return;
-          }
-        }
-        
-        // 店舗が見つからない場合、旧パスワード認証を試す（下赤塚店用フォールバック）
-        if (storeNameInput === '下赤塚' && passwordInput === 'K12290619T') {
-          currentStoreId = null; // nullの場合は旧データパスを使用
-          currentStoreName = '下赤塚';
-          
-          sessionStorage.setItem('controllerStoreId', '');
-          sessionStorage.setItem('controllerStoreName', currentStoreName);
-          sessionStorage.setItem('controllerAuthenticated', 'true');
-          
-          document.getElementById('loginScreen').style.display = 'none';
-          document.getElementById('mainContent').style.display = 'block';
-          
-          const header = document.querySelector('.header h1');
-          if (header) {
-            header.textContent = currentStoreName + ' - 注文管理コントローラー';
-          }
-          
-          console.log('✅ 旧システムログイン成功（移行前）:', currentStoreName);
-          
-          initController();
-          return;
-        }
-
-        // ログイン失敗
-        loginError.textContent = 'パスワードが正しくありません';
-        loginError.style.display = 'block';
-        document.getElementById('controllerPasswordInput').value = '';
-      } catch (error) {
-        console.error('ログインエラー:', error);
-        loginError.textContent = 'ログインに失敗しました: ' + error.message;
-        loginError.style.display = 'block';
-      }
-    }
-
-    // 初期化処理
-    function initController() {
-      console.log('コントローラー初期化:', currentStoreName);
-      // loadOrders などの既存の初期化関数を呼び出す
-      if (typeof loadOrders === 'function') {
-        loadOrders();
-      }
-    }
-
-    // ページ読み込み時の処理
-    window.addEventListener('DOMContentLoaded', () => {
-      const savedAuth = sessionStorage.getItem('controllerAuthenticated');
-      const savedStoreId = sessionStorage.getItem('controllerStoreId');
-      const savedStoreName = sessionStorage.getItem('controllerStoreName');
-      
-      if (savedAuth === 'true' && savedStoreName) {
-        // 空文字列もOK（旧システム用）
-        currentStoreId = savedStoreId || null;
-        currentStoreName = savedStoreName;
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('mainContent').style.display = 'block';
-        
-        const header = document.querySelector('.header h1');
-        if (header) {
-          header.textContent = currentStoreName + ' - 注文管理コントローラー';
-        }
-        
-        // 初期化処理を実行
-        initController();
-      } else {
-        document.getElementById('loginScreen').style.display = 'flex';
-        document.getElementById('mainContent').style.display = 'none';
-      }
-    });
-  </script>
   
 </body>
 </html>
