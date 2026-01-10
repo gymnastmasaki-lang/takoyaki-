@@ -372,7 +372,7 @@
 </head>
 <body>
   <!-- ログイン画面 -->
-  <div id="loginScreen" style="display: flex; align-items: center; justify-content: center; min-height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+  <div id="loginScreen" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; align-items: center; justify-content: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); z-index: 10000;">
     <div style="background: white; padding: 40px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-width: 400px; width: 90%;">
       <div style="text-align: center; margin-bottom: 30px;">
         <div style="font-size: 60px; margin-bottom: 10px;">🎛️</div>
@@ -380,44 +380,26 @@
         <p style="color: #666; margin-top: 10px;">店舗情報を入力してください</p>
       </div>
       
-      <form id="controllerLoginForm" style="margin: 0;">
+      <form onsubmit="return handleLogin(event);">
         <div style="margin-bottom: 20px;">
           <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px; font-size: 14px;">店舗名</label>
-          <input
-            type="text"
-            id="controllerStoreNameInput"
-            placeholder="店舗名を入力"
-            style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box;"
-            required
-            autofocus
-          />
+          <input type="text" id="storeNameInput" placeholder="店舗名を入力" style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box;" required autofocus />
         </div>
         
         <div style="margin-bottom: 20px;">
           <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px; font-size: 14px;">パスワード</label>
-          <input
-            type="password"
-            id="controllerPasswordInput"
-            placeholder="パスワードを入力"
-            style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box;"
-            required
-          />
+          <input type="password" id="passwordInput" placeholder="パスワードを入力" style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box;" required />
         </div>
         
         <div id="loginError" style="display: none; color: #f44336; text-align: center; margin-bottom: 15px; font-size: 14px;"></div>
         
-        <button
-          type="submit"
-          style="width: 100%; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: all 0.3s;"
-        >
-          ログイン
-        </button>
+        <button type="submit" style="width: 100%; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;">ログイン</button>
       </form>
     </div>
   </div>
 
   <!-- メインコンテンツ -->
-  <div id="mainContent" style="display: none;">
+  <div id="mainContent">
   <div class="connection-indicator online" id="connection-indicator">
     <div class="connection-dot"></div>
     <span>オンライン</span>
@@ -466,7 +448,7 @@
 
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, getDocs, getDoc, doc, deleteDoc, setDoc, updateDoc, Timestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getFirestore, collection, getDocs, getDoc, doc, deleteDoc, setDoc, updateDoc, Timestamp, onSnapshot, query, where } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
     const app = initializeApp({
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -479,10 +461,20 @@
     
     const db = getFirestore(app);
     window.db = db;
+    
+    // Firebaseモジュールをグローバルにエクスポート（ログイン処理で使用）
+    window.collection = collection;
+    window.getDocs = getDocs;
+    window.query = query;
+    window.where = where;
+    window.doc = doc;
+    window.deleteDoc = deleteDoc;
 
     // 店舗別認証用の変数
     let currentStoreId = null;
     let currentStoreName = null;
+    window.currentStoreId = null;
+    window.currentStoreName = null;
 
     let audioEnabled = false;
     let isFirstOrderLoad = true;
@@ -735,9 +727,9 @@
     function watchStaffCalls() {
       let isFirstLoad = true;
       
-      // 店舗別のスタッフ呼び出しを監視
-      const callsCollection = currentStoreId 
-        ? collection(db, 'stores', currentStoreId, 'staff_calls')
+      const storeId = window.currentStoreId || currentStoreId;
+      const callsCollection = storeId 
+        ? collection(db, 'stores', storeId, 'staff_calls')
         : collection(db, 'staff_calls');
       
       const unsubscribe = onSnapshot(
@@ -784,15 +776,15 @@
 
     window.dismissCall = async (id) => {
       try {
-        if (currentStoreId) {
-          await deleteDoc(doc(db, 'stores', currentStoreId, 'staff_calls', id));
+        const storeId = window.currentStoreId || currentStoreId;
+        if (storeId) {
+          await deleteDoc(doc(db, 'stores', storeId, 'staff_calls', id));
         } else {
           await deleteDoc(doc(db, 'staff_calls', id));
         }
         showToast('✓ 対応完了');
       } catch (error) {
         console.error('削除エラー:', error);
-        alert('削除に失敗しました');
       }
     };
 
@@ -831,11 +823,11 @@
 
     async function loadOrders() {
       const orders = [];
-      console.log('🔄 注文データ読み込み開始 - 店舗ID:', currentStoreId);
+      const storeId = window.currentStoreId || currentStoreId;
+      console.log('🔄 注文データ読み込み開始 - 店舗ID:', storeId);
       
-      // 店舗別の注文を読み込む
-      const ordersCollection = currentStoreId 
-        ? collection(db, 'stores', currentStoreId, 'orders')
+      const ordersCollection = storeId 
+        ? collection(db, 'stores', storeId, 'orders')
         : collection(db, 'orders');
       
       (await getDocs(ordersCollection)).forEach(doc => {
@@ -1909,116 +1901,69 @@
     </div>
   </div>
   </div> <!-- mainContent -->
-
+  
   <script>
-    // ログイン処理
-    async function handleControllerLogin(event) {
+    // ログイン処理（グローバルスコープ）
+    async function handleLogin(event) {
       event.preventDefault();
       
-      const storeNameInput = document.getElementById('controllerStoreNameInput').value.trim();
-      const passwordInput = document.getElementById('controllerPasswordInput').value;
+      const storeName = document.getElementById('storeNameInput').value.trim();
+      const password = document.getElementById('passwordInput').value;
       const loginError = document.getElementById('loginError');
       
-      if (!storeNameInput || !passwordInput) {
-        loginError.textContent = '店舗名とパスワードを入力してください';
-        loginError.style.display = 'block';
-        return;
-      }
-
       try {
-        // 新しい店舗別認証を試みる
-        const storesRef = collection(db, 'stores');
-        const q = query(storesRef, where('storeName', '==', storeNameInput));
-        const querySnapshot = await getDocs(q);
-
-        if (!querySnapshot.empty) {
-          let authenticated = false;
-          let storeData = null;
-          let storeDocId = null;
-
-          querySnapshot.forEach((doc) => {
-            const data = doc.data();
-            if (data.storePassword === passwordInput && data.isActive) {
-              authenticated = true;
-              storeData = data;
-              storeDocId = doc.id;
-            }
-          });
-
-          if (authenticated && storeData) {
-            currentStoreId = storeDocId;
-            currentStoreName = storeData.storeName;
-            
-            sessionStorage.setItem('controllerStoreId', currentStoreId);
-            sessionStorage.setItem('controllerStoreName', currentStoreName);
-            sessionStorage.setItem('controllerAuthenticated', 'true');
-            
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('mainContent').style.display = 'block';
-            
-            const header = document.querySelector('.header h1');
-            if (header) {
-              header.textContent = currentStoreName + ' - 注文管理コントローラー';
-            }
-            
-            console.log('✅ 店舗別ログイン成功:', currentStoreName, 'ID:', currentStoreId);
-            return;
-          }
-        }
-        
-        // 旧パスワード認証（下赤塚店用フォールバック）
-        if (storeNameInput === '下赤塚' && passwordInput === 'K12290619T') {
-          currentStoreId = null;
-          currentStoreName = '下赤塚';
-          
-          sessionStorage.setItem('controllerStoreId', '');
-          sessionStorage.setItem('controllerStoreName', currentStoreName);
-          sessionStorage.setItem('controllerAuthenticated', 'true');
-          
+        // 旧システム認証（下赤塚店）
+        if (storeName === '下赤塚' && password === 'K12290619T') {
           document.getElementById('loginScreen').style.display = 'none';
           document.getElementById('mainContent').style.display = 'block';
-          
-          const header = document.querySelector('.header h1');
-          if (header) {
-            header.textContent = currentStoreName + ' - 注文管理コントローラー';
-          }
-          
-          console.log('✅ 旧システムログイン成功:', currentStoreName);
-          return;
+          sessionStorage.setItem('controllerAuth', 'true');
+          console.log('✅ ログイン成功（旧システム）');
+          return false;
         }
-
-        loginError.textContent = 'パスワードが正しくありません';
+        
+        // 新システム認証
+        const storesRef = window.collection(window.db, 'stores');
+        const q = window.query(storesRef, window.where('storeName', '==', storeName));
+        const snapshot = await window.getDocs(q);
+        
+        if (!snapshot.empty) {
+          let found = false;
+          snapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.storePassword === password && data.isActive) {
+              found = true;
+              window.currentStoreId = doc.id;
+              window.currentStoreName = data.storeName;
+            }
+          });
+          
+          if (found) {
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'block';
+            sessionStorage.setItem('controllerAuth', 'true');
+            sessionStorage.setItem('controllerStoreId', window.currentStoreId);
+            console.log('✅ ログイン成功:', window.currentStoreName);
+            return false;
+          }
+        }
+        
+        loginError.textContent = 'ログインに失敗しました';
         loginError.style.display = 'block';
-        document.getElementById('controllerPasswordInput').value = '';
       } catch (error) {
         console.error('ログインエラー:', error);
-        loginError.textContent = 'ログインに失敗しました: ' + error.message;
+        loginError.textContent = 'エラー: ' + error.message;
         loginError.style.display = 'block';
       }
+      
+      return false;
     }
-
-    // ログインフォームのイベントリスナー
-    document.addEventListener('DOMContentLoaded', () => {
-      const loginForm = document.getElementById('controllerLoginForm');
-      if (loginForm) {
-        loginForm.addEventListener('submit', handleControllerLogin);
-      }
-      
-      // セッションチェック
-      const savedAuth = sessionStorage.getItem('controllerAuthenticated');
-      const savedStoreId = sessionStorage.getItem('controllerStoreId');
-      const savedStoreName = sessionStorage.getItem('controllerStoreName');
-      
-      if (savedAuth === 'true' && savedStoreName) {
-        currentStoreId = savedStoreId || null;
-        currentStoreName = savedStoreName;
+    
+    // ページ読み込み時の認証チェック
+    window.addEventListener('DOMContentLoaded', () => {
+      const isAuth = sessionStorage.getItem('controllerAuth');
+      if (isAuth === 'true') {
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
-        
-        const header = document.querySelector('.header h1');
-        if (header) {
-          header.textContent = currentStoreName + ' - 注文管理コントローラー';
-        }
       } else {
         document.getElementById('loginScreen').style.display = 'flex';
         document.getElementById('mainContent').style.display = 'none';
