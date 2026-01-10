@@ -1931,54 +1931,78 @@
         const q = query(storesRef, where('storeName', '==', storeNameInput));
         const querySnapshot = await getDocs(q);
 
-        if (querySnapshot.empty) {
-          loginError.textContent = '店舗が見つかりません';
-          loginError.style.display = 'block';
-          return;
-        }
+        // 新しい店舗別認証
+        if (!querySnapshot.empty) {
+          let authenticated = false;
+          let storeData = null;
+          let storeDocId = null;
 
-        let authenticated = false;
-        let storeData = null;
-        let storeDocId = null;
-
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
-          if (data.storePassword === passwordInput) {
-            if (!data.isActive) {
-              loginError.textContent = 'この店舗は無効化されています';
-              loginError.style.display = 'block';
-              return;
+          querySnapshot.forEach((doc) => {
+            const data = doc.data();
+            if (data.storePassword === passwordInput) {
+              if (!data.isActive) {
+                loginError.textContent = 'この店舗は無効化されています';
+                loginError.style.display = 'block';
+                return;
+              }
+              authenticated = true;
+              storeData = data;
+              storeDocId = doc.id;
             }
-            authenticated = true;
-            storeData = data;
-            storeDocId = doc.id;
-          }
-        });
+          });
 
-        if (authenticated && storeData) {
-          currentStoreId = storeDocId;
-          currentStoreName = storeData.storeName;
+          if (authenticated && storeData) {
+            currentStoreId = storeDocId;
+            currentStoreName = storeData.storeName;
+            
+            sessionStorage.setItem('controllerStoreId', currentStoreId);
+            sessionStorage.setItem('controllerStoreName', currentStoreName);
+            sessionStorage.setItem('controllerAuthenticated', 'true');
+            
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'block';
+            
+            // ヘッダーに店舗名を表示
+            const header = document.querySelector('.header h1');
+            if (header) {
+              header.textContent = currentStoreName + ' - 注文管理コントローラー';
+            }
+            
+            console.log('✅ 店舗別ログイン成功:', currentStoreName, 'ID:', currentStoreId);
+            
+            // 初期化処理を実行
+            initController();
+            return;
+          }
+        }
+        
+        // 店舗が見つからない場合、旧パスワード認証を試す（下赤塚店用フォールバック）
+        if (storeNameInput === '下赤塚' && passwordInput === 'K12290619T') {
+          currentStoreId = null; // nullの場合は旧データパスを使用
+          currentStoreName = '下赤塚';
           
-          sessionStorage.setItem('controllerStoreId', currentStoreId);
+          sessionStorage.setItem('controllerStoreId', '');
           sessionStorage.setItem('controllerStoreName', currentStoreName);
           sessionStorage.setItem('controllerAuthenticated', 'true');
           
           document.getElementById('loginScreen').style.display = 'none';
           document.getElementById('mainContent').style.display = 'block';
           
-          // ヘッダーに店舗名を表示
           const header = document.querySelector('.header h1');
           if (header) {
             header.textContent = currentStoreName + ' - 注文管理コントローラー';
           }
           
-          // 初期化処理を実行
+          console.log('✅ 旧システムログイン成功（移行前）:', currentStoreName);
+          
           initController();
-        } else {
-          loginError.textContent = 'パスワードが正しくありません';
-          loginError.style.display = 'block';
-          document.getElementById('controllerPasswordInput').value = '';
+          return;
         }
+
+        // ログイン失敗
+        loginError.textContent = 'パスワードが正しくありません';
+        loginError.style.display = 'block';
+        document.getElementById('controllerPasswordInput').value = '';
       } catch (error) {
         console.error('ログインエラー:', error);
         loginError.textContent = 'ログインに失敗しました: ' + error.message;
@@ -2001,8 +2025,9 @@
       const savedStoreId = sessionStorage.getItem('controllerStoreId');
       const savedStoreName = sessionStorage.getItem('controllerStoreName');
       
-      if (savedAuth === 'true' && savedStoreId && savedStoreName) {
-        currentStoreId = savedStoreId;
+      if (savedAuth === 'true' && savedStoreName) {
+        // 空文字列もOK（旧システム用）
+        currentStoreId = savedStoreId || null;
         currentStoreName = savedStoreName;
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
@@ -2011,6 +2036,9 @@
         if (header) {
           header.textContent = currentStoreName + ' - 注文管理コントローラー';
         }
+        
+        // 初期化処理を実行
+        initController();
       } else {
         document.getElementById('loginScreen').style.display = 'flex';
         document.getElementById('mainContent').style.display = 'none';
