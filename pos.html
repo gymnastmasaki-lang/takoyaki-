@@ -1266,7 +1266,6 @@
         </div>
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <button onclick="showTableManagementModal()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">テーブル</button>
-          <button onclick="logout()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">ログアウト</button>
         </div>
       </div>
     </div>
@@ -1651,8 +1650,11 @@
     async function initializeSystem() {
       // Firebaseからメニューを取得
       try {
-        const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
-        const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
+        const menuCollection = window.getStoreCollection('menus');
+        const soldOutCollection = window.getStoreCollection('sold_out');
+        
+        const menuSnapshot = await window.getDocs(menuCollection);
+        const soldOutSnapshot = await window.getDocs(soldOutCollection);
         const soldOutIds = new Set();
         soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
         
@@ -5975,15 +5977,17 @@
         console.log('📍 toggleSoldOut:', menuId, setSoldOut);
         
         if (setSoldOut) {
-          // 品切れに設定
-          await window.setDoc(window.doc(window.db, 'sold_out', menuId), {
+          // 品切れに設定（店舗別）
+          const soldOutDoc = window.getStoreDoc('sold_out', menuId);
+          await window.setDoc(soldOutDoc, {
             menuId: menuId,
             timestamp: window.Timestamp.now()
           });
           showToast('品切れに設定');
         } else {
-          // 再販：menuIdに一致するドキュメントを検索して削除
-          const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
+          // 再販：menuIdに一致するドキュメントを検索して削除（店舗別）
+          const soldOutCollection = window.getStoreCollection('sold_out');
+          const soldOutSnapshot = await window.getDocs(soldOutCollection);
           const deletePromises = [];
           let foundCount = 0;
           
@@ -6033,13 +6037,17 @@
         if (!confirmed) return;
         
         try {
-          const menuSnapshot = await window.getDocs(window.collection(window.db, 'menu'));
+          // 店舗別のメニューコレクションを取得
+          const menuCollection = window.getStoreCollection('menus');
+          const menuSnapshot = await window.getDocs(menuCollection);
           const promises = [];
           
           menuSnapshot.forEach(docSnap => {
             const data = docSnap.data();
             if (data.id) {
-              promises.push(window.setDoc(window.doc(window.db, 'sold_out', data.id), {
+              // 店舗別のsold_outドキュメントを作成
+              const soldOutDoc = window.getStoreDoc('sold_out', data.id);
+              promises.push(window.setDoc(soldOutDoc, {
                 menuId: data.id,
                 timestamp: window.Timestamp.now()
               }));
@@ -6067,7 +6075,9 @@
         if (!confirmed) return;
         
         try {
-          const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
+          // 店舗別のsold_outコレクションを取得
+          const soldOutCollection = window.getStoreCollection('sold_out');
+          const soldOutSnapshot = await window.getDocs(soldOutCollection);
           const promises = [];
           soldOutSnapshot.forEach(docSnap => promises.push(window.deleteDoc(docSnap.ref)));
           
@@ -6650,26 +6660,6 @@
     </div>
   </div>
 
-  <!-- ログアウト確認モーダル -->
-  <div id="logoutConfirmModal" class="modal-overlay hidden">
-    <div class="modal" style="max-width: 500px;">
-      <div style="text-align: center; margin-bottom: 20px;">
-        <div style="font-size: 60px; margin-bottom: 10px;">🚪</div>
-        <h3 style="margin: 0; font-size: 24px; color: #667eea;">ログアウトしますか？</h3>
-      </div>
-      
-      <div style="background: #e3f2fd; border: 2px solid #2196F3; border-radius: 10px; padding: 20px; margin: 20px 0;">
-        <div style="color: #666; line-height: 1.8; text-align: center;">
-          ログアウトすると、再度ログインが必要になります
-        </div>
-      </div>
-      
-      <div style="display: flex; gap: 10px; margin-top: 20px;">
-        <button class="btn btn-secondary" style="flex: 1;" onclick="closeLogoutConfirmModal()">キャンセル</button>
-        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;" onclick="confirmLogout()">🚪 ログアウト</button>
-      </div>
-    </div>
-  </div>
 
   <!-- 金額変更モーダル -->
   <div id="priceChangeModal" class="modal-overlay hidden">
@@ -7284,31 +7274,6 @@
     // テーブル管理モーダルを閉じる
     window.closeTableManagementModal = function() {
       document.getElementById('tableManagementModal').classList.add('hidden');
-    };
-    
-    // ログアウト関数
-    window.logout = function() {
-      // カスタムログアウト確認モーダルを表示
-      document.getElementById('logoutConfirmModal').classList.remove('hidden');
-    };
-    
-    // ログアウト確認モーダルを閉じる
-    window.closeLogoutConfirmModal = function() {
-      document.getElementById('logoutConfirmModal').classList.add('hidden');
-    };
-    
-    // ログアウトを確定
-    window.confirmLogout = async function() {
-      closeLogoutConfirmModal();
-      
-      try {
-        await window.signOut(window.auth);
-        // ログインページにリダイレクト
-        window.location.href = 'index.html';
-      } catch (error) {
-        console.error('ログアウトエラー:', error);
-        showErrorMessage('ログアウトに失敗しました: ' + error.message);
-      }
     };
     
     // 金額変更モーダルを閉じる
@@ -8595,8 +8560,16 @@
     }
     
     // ログアウト処理
-    function handleLogout() {
-      if (confirm('ログアウトしますか？')) {
+    async function handleLogout() {
+      const confirmed = await showCustomConfirm({
+        icon: '🚪',
+        title: 'ログアウト',
+        message: 'ログアウトしますか？\n再度ログインが必要になります。',
+        btnText: 'ログアウト',
+        btnClass: 'modal-btn-danger'
+      });
+      
+      if (confirmed) {
         sessionStorage.removeItem('posAuthenticated');
         sessionStorage.removeItem('posStoreId');
         sessionStorage.removeItem('posStoreName');
