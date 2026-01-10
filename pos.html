@@ -48,42 +48,15 @@
     window.Timestamp = Timestamp;
     window.onSnapshot = onSnapshot;
     window.addDoc = addDoc;
-    
-    // 店舗別認証用の変数
-    window.currentStoreId = null;
-    window.currentStoreName = null;
-    
-    // ヘルパー関数：店舗別コレクション参照を取得
-    window.getStoreCollection = function(collectionName) {
-      if (!window.currentStoreId) {
-        // 旧データパスのマッピング
-        const oldPathMap = {
-          'menus': 'menu',
-          'employees': 'kintai_employees',
-          'attendance': 'kintai_attendance'
-        };
-        return collection(db, oldPathMap[collectionName] || collectionName);
-      }
-      return collection(db, 'stores', window.currentStoreId, collectionName);
-    };
-    
-    // ヘルパー関数：店舗別ドキュメント参照を取得
-    window.getStoreDoc = function(collectionName, docId) {
-      if (!window.currentStoreId) {
-        const oldPathMap = {
-          'menus': 'menu',
-          'employees': 'kintai_employees',
-          'attendance': 'kintai_attendance'
-        };
-        return doc(db, oldPathMap[collectionName] || collectionName, docId);
-      }
-      return doc(db, 'stores', window.currentStoreId, collectionName, docId);
-    };
     window.orderBy = orderBy;
     window.getDoc = getDoc;
     window.setDoc = setDoc;
     window.limit = limit;
     window.deleteDoc = deleteDoc;
+    
+    // 店舗別認証用の変数
+    window.currentStoreId = null;
+    window.currentStoreName = null;
     
     // 初期化完了フラグ
     window.firebaseReady = true;
@@ -92,8 +65,8 @@
     // 初期化完了イベントを発行
     window.dispatchEvent(new Event('firebaseReady'));
     
-    // 担当者リストを読み込む
-    loadStaffList();
+    // 担当者リストを読み込む（ログイン後に実行）
+    // loadStaffList();
   </script>
   
   <script>
@@ -101,10 +74,7 @@
     async function loadStaffList() {
       try {
         const staffSelect = document.getElementById('staffSelect');
-        if (!staffSelect) return;
-        
-        const employeesCollection = window.getStoreCollection('employees');
-        const staffSnapshot = await getDocs(employeesCollection);
+        const staffSnapshot = await getDocs(collection(db, 'kintai_employees'));
         
         // リセット
         staffSelect.innerHTML = '<option value="">選択してください</option>';
@@ -1082,32 +1052,17 @@
       <div style="text-align: center; margin-bottom: 30px;">
         <div style="font-size: 60px; margin-bottom: 10px;">🔐</div>
         <h2 style="font-size: 24px; font-weight: bold; color: #333; margin: 0;">POSシステム</h2>
-        <p style="color: #666; margin-top: 10px;">店舗情報を入力してください</p>
+        <p style="color: #666; margin-top: 10px;">パスワードを入力してください</p>
       </div>
       
-      <form onsubmit="return handlePOSLogin(event);" style="margin: 0;">
-        <div style="margin-bottom: 20px;">
-          <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px; font-size: 14px;">店舗名</label>
-          <input
-            type="text"
-            id="posStoreNameInput"
-            placeholder="店舗名を入力"
-            style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box;"
-            required
-            autofocus
-          />
-        </div>
-        
-        <div style="margin-bottom: 20px;">
-          <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px; font-size: 14px;">パスワード</label>
-          <input
-            type="password"
-            id="posPasswordInput"
-            placeholder="パスワード"
-            style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box;"
-            required
-          />
-        </div>
+      <form onsubmit="handlePOSLogin(event)" style="margin: 0;">
+        <input
+          type="password"
+          id="posPasswordInput"
+          placeholder="パスワード"
+          style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; box-sizing: border-box; margin-bottom: 20px;"
+          autofocus
+        />
         
         <button
           type="submit"
@@ -7172,35 +7127,27 @@
     
     // ログアウト関数
     window.logout = function() {
-      // セッションをクリア
-      sessionStorage.removeItem('posAuthenticated');
-      sessionStorage.removeItem('posStoreId');
-      sessionStorage.removeItem('posStoreName');
-      window.currentStoreId = null;
-      window.currentStoreName = null;
-      
-      // ログイン画面に戻る
-      document.getElementById('mainContent').style.display = 'none';
-      document.getElementById('loginScreen').style.display = 'flex';
-      
-      // 入力をクリア
-      document.getElementById('posStoreNameInput').value = '';
-      document.getElementById('posPasswordInput').value = '';
-      
-      console.log('✅ ログアウト完了');
+      // カスタムログアウト確認モーダルを表示
+      document.getElementById('logoutConfirmModal').classList.remove('hidden');
     };
     
     // ログアウト確認モーダルを閉じる
     window.closeLogoutConfirmModal = function() {
-      const modal = document.getElementById('logoutConfirmModal');
-      if (modal) modal.classList.add('hidden');
+      document.getElementById('logoutConfirmModal').classList.add('hidden');
     };
     
     // ログアウトを確定
-    window.confirmLogout = function() {
+    window.confirmLogout = async function() {
       closeLogoutConfirmModal();
-      logout();
-    };
+      
+      try {
+        await window.signOut(window.auth);
+        // ログインページにリダイレクト
+        window.location.href = 'index.html';
+      } catch (error) {
+        console.error('ログアウトエラー:', error);
+        showErrorMessage('ログアウトに失敗しました: ' + error.message);
+      }
     };
     
     // 金額変更モーダルを閉じる
@@ -8296,135 +8243,28 @@
     }
     
     // パスワード認証処理
-    async function handlePOSLogin(event) {
+    function handlePOSLogin(event) {
       event.preventDefault();
-      console.log('=== ログイン処理開始 ===');
       
-      const storeNameInput = document.getElementById('posStoreNameInput').value.trim();
-      const passwordInput = document.getElementById('posPasswordInput').value;
+      const passwordInput = document.getElementById('posPasswordInput');
       const loginError = document.getElementById('loginError');
+      const correctPassword = 'K12290619T';
       
-      console.log('店舗名:', storeNameInput);
-      console.log('パスワード長:', passwordInput.length);
-      
-      if (!storeNameInput || !passwordInput) {
-        loginError.textContent = '店舗名とパスワードを入力してください';
-        loginError.style.display = 'block';
-        return false;
-      }
-      
-      try {
-        // 旧システム認証（下赤塚店）
-        if (storeNameInput === '下赤塚' && passwordInput === 'K12290619T') {
-          console.log('旧システム認証に一致');
-          window.currentStoreId = null; // 旧データパスを使用
-          window.currentStoreName = '下赤塚';
-          
-          sessionStorage.setItem('posStoreId', '');
-          sessionStorage.setItem('posStoreName', '下赤塚');
-          sessionStorage.setItem('posAuthenticated', 'true');
-          
-          console.log('画面切り替え開始');
-          const loginScreen = document.getElementById('loginScreen');
-          const mainContent = document.getElementById('mainContent');
-          console.log('loginScreen:', loginScreen);
-          console.log('mainContent:', mainContent);
-          
-          if (loginScreen) loginScreen.style.display = 'none';
-          if (mainContent) mainContent.style.display = 'block';
-          
-          console.log('✅ 旧システムログイン成功:', window.currentStoreName);
-          console.log('firebaseReady:', window.firebaseReady);
-          
-          // 初期化処理を実行
-          if (window.firebaseReady) {
-            console.log('初期化処理実行');
-            initializeApp();
-          } else {
-            console.log('firebaseReady待機中');
-            window.addEventListener('firebaseReady', initializeApp);
-          }
-          
-          // 担当者リストを読み込み
-          console.log('担当者リスト読み込み開始');
-          await loadStaffList();
-          
-          return false;
-        }
+      if (passwordInput.value === correctPassword) {
+        // 下赤塚店として認証
+        window.currentStoreId = null; // 旧データパスを使用
+        window.currentStoreName = '下赤塚';
         
-        // 新システム認証
-        const storesRef = window.collection(window.db, 'stores');
-        const q = window.query(storesRef, window.where('storeName', '==', storeNameInput));
-        const snapshot = await window.getDocs(q);
+        // セッションストレージに認証フラグを保存
+        sessionStorage.setItem('posAuthenticated', 'true');
+        sessionStorage.setItem('posStoreId', '');
+        sessionStorage.setItem('posStoreName', '下赤塚');
         
-        if (!snapshot.empty) {
-          let found = false;
-          snapshot.forEach(doc => {
-            const data = doc.data();
-            if (data.storePassword === passwordInput && data.isActive) {
-              found = true;
-              window.currentStoreId = doc.id;
-              window.currentStoreName = data.storeName;
-            }
-          });
-          
-          if (found) {
-            sessionStorage.setItem('posStoreId', window.currentStoreId);
-            sessionStorage.setItem('posStoreName', window.currentStoreName);
-            sessionStorage.setItem('posAuthenticated', 'true');
-            
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('mainContent').style.display = 'block';
-            
-            console.log('✅ 店舗別ログイン成功:', window.currentStoreName, 'ID:', window.currentStoreId);
-            
-            if (window.firebaseReady) {
-              initializeApp();
-            } else {
-              window.addEventListener('firebaseReady', initializeApp);
-            }
-            
-            // 担当者リストを読み込み
-            await loadStaffList();
-            
-            return false;
-          }
-        }
-        
-        loginError.textContent = 'ログインに失敗しました';
-        loginError.style.display = 'block';
-        document.getElementById('posPasswordInput').value = '';
-        
-        setTimeout(() => {
-          loginError.style.display = 'none';
-        }, 3000);
-      } catch (error) {
-        console.error('ログインエラー:', error);
-        loginError.textContent = 'エラー: ' + error.message;
-        loginError.style.display = 'block';
-      }
-      
-      return false;
-    }
-        }, 3000);
-      }
-    }
-    
-    // ページ読み込み時にセッションをチェック
-    window.addEventListener('DOMContentLoaded', () => {
-      const isAuthenticated = sessionStorage.getItem('posAuthenticated');
-      const savedStoreId = sessionStorage.getItem('posStoreId');
-      const savedStoreName = sessionStorage.getItem('posStoreName');
-      
-      if (isAuthenticated === 'true' && savedStoreName) {
-        // 既にログイン済み - 店舗情報を復元
-        window.currentStoreId = savedStoreId || null;
-        window.currentStoreName = savedStoreName;
-        
+        // ログイン成功
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
         
-        console.log('✅ セッションから復元:', window.currentStoreName, 'ID:', window.currentStoreId || '(旧システム)');
+        console.log('✅ ログイン成功:', window.currentStoreName);
         
         // 初期化処理を実行
         if (window.firebaseReady) {
@@ -8432,9 +8272,41 @@
         } else {
           window.addEventListener('firebaseReady', initializeApp);
         }
+      } else {
+        // ログイン失敗
+        loginError.textContent = 'パスワードが正しくありません';
+        loginError.style.display = 'block';
+        passwordInput.value = '';
+        passwordInput.focus();
         
-        // 担当者リストを読み込み
-        loadStaffList();
+        setTimeout(() => {
+          loginError.style.display = 'none';
+        }, 3000);
+      }
+    }
+    
+    // ページ読み込み時にセッションをチェック
+    window.addEventListener('DOMContentLoaded', () => {
+      const isAuthenticated = sessionStorage.getItem('posAuthenticated');
+      const savedStoreName = sessionStorage.getItem('posStoreName');
+      
+      if (isAuthenticated === 'true') {
+        // 店舗情報を復元
+        window.currentStoreId = sessionStorage.getItem('posStoreId') || null;
+        window.currentStoreName = savedStoreName || '下赤塚';
+        
+        // 既にログイン済み
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('mainContent').style.display = 'block';
+        
+        console.log('✅ セッションから復元:', window.currentStoreName);
+        
+        // 初期化処理を実行
+        if (window.firebaseReady) {
+          initializeApp();
+        } else {
+          window.addEventListener('firebaseReady', initializeApp);
+        }
       }
     });
     
