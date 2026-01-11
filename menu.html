@@ -675,6 +675,56 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
+    // 店舗ID管理
+    let currentStoreId = null;
+    let currentStoreName = null;
+
+    // 店舗別コレクション参照を取得
+    window.getStoreCollection = function(collectionName) {
+      if (!currentStoreId) {
+        const oldPathMap = {
+          "menus": "menu",
+          "employees": "kintai_employees",
+          "attendance": "kintai_attendance"
+        };
+        return collection(db, oldPathMap[collectionName] || collectionName);
+      }
+      return collection(db, "stores", currentStoreId, collectionName);
+    };
+
+    // 店舗別ドキュメント参照を取得
+    window.getStoreDoc = function(collectionName, docId) {
+      if (!currentStoreId) {
+        const oldPathMap = {
+          "menus": "menu",
+          "employees": "kintai_employees",
+          "attendance": "kintai_attendance"
+        };
+        return doc(db, oldPathMap[collectionName] || collectionName, docId);
+      }
+      return doc(db, "stores", currentStoreId, collectionName, docId);
+    };
+
+    // URLパラメータから店舗IDを取得
+    const urlParams = new URLSearchParams(window.location.search);
+    const storeIdParam = urlParams.get('store');
+    
+    if (storeIdParam && storeIdParam !== 'shimoakatsuka') {
+      // 新しい店舗
+      currentStoreId = storeIdParam;
+      console.log('✅ URLパラメータから店舗ID取得:', currentStoreId);
+    } else if (storeIdParam === 'shimoakatsuka') {
+      // 下赤塚店（旧システム）
+      currentStoreId = null;
+      currentStoreName = '下赤塚';
+      console.log('✅ 下赤塚店として動作');
+    } else {
+      // パラメータなし = 下赤塚店（後方互換性）
+      currentStoreId = null;
+      currentStoreName = '下赤塚';
+      console.log('✅ デフォルト: 下赤塚店として動作');
+    }
+
     let cart = [];
     let currentItem = null;
     let selectedToppings = [];
@@ -686,6 +736,11 @@
     let bagQuantity = 0;
     let bagNeeded = false;
     const BAG_PRICE = 3;
+    
+    // 二重送信防止用フラグ
+    let isOrderProcessing = false;
+    let lastOrderTimestamp = 0;
+    const ORDER_COOLDOWN = 3000; // 3秒間のクールダウン
     
     const urlParams = new URLSearchParams(window.location.search);
     const tableNumber = urlParams.get('table') || 'テイクアウト';
@@ -778,7 +833,7 @@
       // テーブルパラメータがある場合、テーブルの存在確認
       if (tableNumber && tableNumber !== 'テイクアウト' && tableNumber !== '即会計') {
         try {
-          const tablesSnapshot = await getDocs(collection(db, 'tables'));
+          const tablesSnapshot = await getDocs(window.getStoreCollection('tables'));
           let tableExists = false;
           let tableMemoEnabled = false;
           
@@ -848,7 +903,7 @@
       // 🆕 時間外解除設定を確認
       let timeOverrideEnabled = false;
       try {
-        const settingsRef = await getDoc(doc(db, 'settings', 'timeOverride'));
+        const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
         timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
         console.log('時間外解除設定:', timeOverrideEnabled);
       } catch (e) {
@@ -917,7 +972,7 @@
         watchSoldOutItems();
         
         // settingsの変更を監視（手動カウントの変更を反映）
-        onSnapshot(collection(db, 'settings'), () => {
+        onSnapshot(window.getStoreCollection('settings'), () => {
           updateTopWaitingCount().catch(e => console.error('待ち人数更新エラー:', e));
         });
         
@@ -943,7 +998,7 @@
       }
       
       currentOrderId = orderId;
-      const orderRef = doc(db, 'orders', orderId);
+      const orderRef = window.getStoreDoc('orders', orderId);
       
       orderStatusUnsubscribe = onSnapshot(orderRef, async (docSnap) => {
         if (!docSnap.exists()) {
@@ -992,7 +1047,7 @@
         allOrdersUnsubscribe();
       }
       
-      const ordersRef = collection(db, 'orders');
+      const ordersRef = window.getStoreCollection('orders');
       allOrdersUnsubscribe = onSnapshot(ordersRef, async (snapshot) => {
         // 待ち人数を更新
         await updateTopWaitingCount();
@@ -1017,7 +1072,7 @@
         
         // snapshotが渡されていない場合は取得
         if (!ordersSnapshot) {
-          ordersSnapshot = await getDocs(collection(db, 'orders'));
+          ordersSnapshot = await getDocs(window.getStoreCollection('orders'));
         }
         
         // 有効な注文（未削除・未キャンセル・削除予定時刻前）を抽出
@@ -1108,7 +1163,7 @@
     }
 
     function watchSoldOutItems() {
-      const soldOutRef = collection(db, 'sold_out');
+      const soldOutRef = window.getStoreCollection('sold_out');
       
       onSnapshot(soldOutRef, (snapshot) => {
         soldOutIds.clear();
@@ -1142,7 +1197,7 @@
 
     async function updateTopWaitingCount() {
       try {
-        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        const ordersSnapshot = await getDocs(window.getStoreCollection('orders'));
         const now = new Date();
         const validOrders = new Set();
         
@@ -1162,7 +1217,7 @@
           validOrders.add(data.orderNumber);
         });
         
-        const settingsSnapshot = await getDocs(collection(db, 'settings'));
+        const settingsSnapshot = await getDocs(window.getStoreCollection('settings'));
         let manualCount = 0;
         settingsSnapshot.forEach(doc => {
           if (doc.id === 'waiting') {
@@ -1191,7 +1246,7 @@
     async function loadAllData() {
       try {
         console.log('データ読み込み開始');
-        const menuSnapshot = await getDocs(collection(db, 'menu'));
+        const menuSnapshot = await getDocs(window.getStoreCollection('menus'));
         const isEatIn = tableNumber !== 'テイクアウト';
         
         console.log('メニューアイテム数:', menuSnapshot.size);
@@ -1253,7 +1308,7 @@
 
     async function loadAllMenu() {
       try {
-        const menuSnapshot = await getDocs(collection(db, 'menu'));
+        const menuSnapshot = await getDocs(window.getStoreCollection('menus'));
         const items = [];
         const isEatIn = tableNumber !== 'テイクアウト';
         
@@ -1294,7 +1349,7 @@
 
     async function loadSoldOutItems() {
       try {
-        const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
+        const soldOutSnapshot = await getDocs(window.getStoreCollection('sold_out'));
         soldOutIds.clear();
 
         soldOutSnapshot.forEach(doc => {
@@ -1495,7 +1550,7 @@
         console.log('⚠️ 古いtoppingsId形式を使用');
         
         const toppingIds = item.toppingsId.split(',').map(id => id.trim());
-        const toppingsSnapshot = await getDocs(collection(db, 'toppings'));
+        const toppingsSnapshot = await getDocs(window.getStoreCollection('toppings'));
         const toppings = [];
         const seenIds = new Set();
         
@@ -1752,34 +1807,80 @@
     };
 
     window.confirmOrder = async function() {
-      if (cart.length === 0) {
+      // ========== 二重送信防止 ==========
+      // 既に処理中の場合は何もしない
+      if (isOrderProcessing) {
+        console.log('⚠️ 注文処理中のため、リクエストを無視します');
+        return;
+      }
+      
+      // クールダウン期間中の場合は何もしない
+      const now = Date.now();
+      if (now - lastOrderTimestamp < ORDER_COOLDOWN) {
+        console.log('⚠️ クールダウン期間中のため、リクエストを無視します');
+        showCustomAlert('注文を送信中です。\nしばらくお待ちください。');
+        return;
+      }
+      
+      // ========== カートの厳密なバリデーション ==========
+      if (!cart || cart.length === 0) {
         showCustomAlert('カートが空です');
         return;
       }
       
-      const soldOutItems = [];
+      // カート内の商品が有効かチェック
+      let hasValidItems = false;
       for (const item of cart) {
-        if (soldOutIds.has(item.id)) {
-          soldOutItems.push(item.name);
+        if (item && item.name && item.price >= 0 && item.quantity > 0) {
+          hasValidItems = true;
+          break;
         }
       }
       
-      if (soldOutItems.length > 0) {
-        showCustomAlert('申し訳ございません。\n以下の商品が品切れになりました:\n\n' + soldOutItems.join('\n') + '\n\nカートから削除してください。');
-        cart = cart.filter(item => !soldOutIds.has(item.id));
-        
-        if (cart.length === 0) {
-          showCustomAlert('全ての商品が品切れになったため、カートが空になりました。');
-          backToMenu();
-        } else {
-          showCart();
-        }
+      if (!hasValidItems) {
+        showCustomAlert('カートに有効な商品がありません');
+        cart = []; // 無効なカートをクリア
+        backToMenu();
         return;
       }
       
+      // 処理中フラグをON
+      isOrderProcessing = true;
+      lastOrderTimestamp = now;
+      
+      // 注文ボタンを無効化
+      const confirmBtn = document.querySelector('button[onclick="confirmOrder()"]');
+      if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.style.opacity = '0.5';
+        confirmBtn.style.cursor = 'not-allowed';
+        confirmBtn.textContent = '注文送信中...';
+      }
+      
       try {
-        const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        // 品切れチェック
+        const soldOutItems = [];
+        for (const item of cart) {
+          if (soldOutIds.has(item.id)) {
+            soldOutItems.push(item.name);
+          }
+        }
+        
+        if (soldOutItems.length > 0) {
+          showCustomAlert('申し訳ございません。\n以下の商品が品切れになりました:\n\n' + soldOutItems.join('\n') + '\n\nカートから削除してください。');
+          cart = cart.filter(item => !soldOutIds.has(item.id));
+          
+          if (cart.length === 0) {
+            showCustomAlert('全ての商品が品切れになったため、カートが空になりました。');
+            backToMenu();
+          } else {
+            showCart();
+          }
+          return;
+        }
+        
+        const orderNow = new Date();
+        const jstNow = new Date(orderNow.getTime() + (9 * 60 * 60 * 1000));
         
         const todayStart = new Date(jstNow);
         todayStart.setHours(1, 0, 0, 0);
@@ -1787,9 +1888,10 @@
           todayStart.setDate(todayStart.getDate() - 1);
         }
         
-        const ordersSnapshot = await getDocs(collection(db, 'orders'));
+        const ordersSnapshot = await getDocs(window.getStoreCollection('orders'));
         let maxOrderNumber = 618;
         let hasActiveOrders = false;
+        const existingOrderNumbers = new Set(); // 重複チェック用
         
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
@@ -1797,6 +1899,7 @@
           // 削除されていない注文があるかチェック
           if (!data.deleted) {
             hasActiveOrders = true;
+            existingOrderNumbers.add(data.orderNumber); // 既存の注文番号を記録
             
             // 削除されていない注文のみから最大番号を取得
             const orderDate = data.timestamp.toDate();
@@ -1809,12 +1912,19 @@
         });
         
         // 削除されていない注文が0件なら619番から開始
-        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
+        let orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
+        
+        // 重複チェック（念のため）
+        while (existingOrderNumbers.has(orderNumber)) {
+          console.warn('⚠️ 注文番号が重複しているため、次の番号を使用します:', orderNumber);
+          orderNumber++;
+        }
         
         console.log('注文番号生成:', {
           hasActiveOrders,
           maxOrderNumber,
-          nextOrderNumber: orderNumber
+          nextOrderNumber: orderNumber,
+          existingCount: existingOrderNumbers.size
         });
         
         // テイクアウトかどうか判定
@@ -1842,14 +1952,14 @@
         totalAmount += bagTotal;
         tax10Total += bagTotal;
         
-        const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
+        const deleteAt = new Date(orderNow.getTime() + 10 * 60 * 1000);
         
         // お客様メモを取得
         const customerMemo = document.getElementById('customer-memo') ? document.getElementById('customer-memo').value.trim() : '';
         
         const orderData = {
           orderNumber: orderNumber,
-          timestamp: Timestamp.fromDate(now),
+          timestamp: Timestamp.fromDate(orderNow),
           tableNumber: tableNumber,
           items: cart,
           totalAmount: totalAmount,
@@ -1869,7 +1979,7 @@
           notifiedPaid: false
         };
         
-        const docRef = await addDoc(collection(db, 'orders'), orderData);
+        const docRef = await addDoc(window.getStoreCollection('orders'), orderData);
         
         await updateDoc(docRef, {
           orderId: docRef.id
@@ -1878,7 +1988,7 @@
         const validOrders = [];
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
-          if (data.deleteAt && data.deleteAt.toDate() > now && !data.cancelledAt) {
+          if (data.deleteAt && data.deleteAt.toDate() > orderNow && !data.cancelledAt) {
             validOrders.push(data.orderNumber);
           }
         });
@@ -1951,9 +2061,22 @@
         bagNeeded = false;
         showPage('page-complete');
         
+        console.log('✅ 注文送信成功 - 注文番号:', orderNumber);
+        
       } catch (e) {
-        console.error('注文エラー:', e);
-        showCustomAlert('注文に失敗しました: ' + e.message);
+        console.error('❌ 注文エラー:', e);
+        showCustomAlert('注文に失敗しました。\nもう一度お試しください。\n\nエラー: ' + e.message);
+      } finally {
+        // 処理中フラグをOFF（成功・失敗に関わらず）
+        isOrderProcessing = false;
+        
+        // ボタンを元に戻す
+        if (confirmBtn) {
+          confirmBtn.disabled = false;
+          confirmBtn.style.opacity = '1';
+          confirmBtn.style.cursor = 'pointer';
+          confirmBtn.textContent = '注文を確定する';
+        }
       }
     };
 
@@ -1975,7 +2098,7 @@
           timestamp: Timestamp.now(),
           type: 'call'
         };
-        await addDoc(collection(db, 'staff_calls'), callData);
+        await addDoc(window.getStoreCollection('staff_calls'), callData);
         
         showCustomAlert('店員を呼びました!');
       } catch (e) {
@@ -1991,7 +2114,7 @@
           timestamp: Timestamp.now(),
           type: 'call'
         };
-        await addDoc(collection(db, 'staff_calls'), callData);
+        await addDoc(window.getStoreCollection('staff_calls'), callData);
         
         showCustomAlert('店員を呼びました!\n\n注文の変更・キャンセルなど\nお気軽にお申し付けください');
       } catch (e) {
@@ -2007,7 +2130,7 @@
           timestamp: Timestamp.now(),
           type: 'bill'
         };
-        await addDoc(collection(db, 'staff_calls'), billData);
+        await addDoc(window.getStoreCollection('staff_calls'), billData);
         
         showCustomAlert('お会計を呼びました!\n\n先にお会計を済ませておくと\n商品受取後スムーズに退店できます');
       } catch (e) {

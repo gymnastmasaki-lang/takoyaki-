@@ -53,7 +53,9 @@
             const [formData, setFormData] = useState({
                 storeName: '',
                 storePassword: '',
-                isActive: true
+                isActive: true,
+                createMode: 'new',  // 'new' または 'copy'
+                sourceStoreId: ''   // コピー元店舗ID
             });
 
             // 店舗一覧を読み込み
@@ -96,9 +98,14 @@
                     alert('店舗名とパスワードを入力してください');
                     return;
                 }
+                
+                if (formData.createMode === 'copy' && !formData.sourceStoreId) {
+                    alert('コピー元の店舗を選択してください');
+                    return;
+                }
 
                 try {
-                    const { collection, setDoc, doc, Timestamp } = window.firebaseModules;
+                    const { collection, setDoc, doc, Timestamp, getDocs } = window.firebaseModules;
                     
                     // 店舗IDを生成（店舗名をベースにした安全なID）
                     const storeId = formData.storeName.replace(/\s+/g, '_').toLowerCase();
@@ -113,7 +120,7 @@
 
                     await setDoc(doc(window.db, 'stores', storeId), storeData);
 
-                    // 初期テーブル設定を作成
+                    // 初期テーブル設定を作成（テーブルはコピーしない）
                     const initialTables = [
                         { id: 'sokukaikei', name: '即会計', status: 'empty', order: null },
                         { id: 'takeout', name: 'テイクアウト', status: 'empty', order: null }
@@ -124,15 +131,38 @@
                         updatedAt: Timestamp.now()
                     });
 
-                    // 空のメニューリストを作成
-                    await setDoc(doc(window.db, 'store_menus', storeId), {
-                        menus: [],
-                        updatedAt: Timestamp.now()
-                    });
+                    // メニューのコピー処理
+                    if (formData.createMode === 'copy') {
+                        // コピー元のメニューを取得（新しい構造）
+                        const sourceMenusRef = collection(window.db, 'stores', formData.sourceStoreId, 'menus');
+                        const sourceMenusSnapshot = await getDocs(sourceMenusRef);
+                        
+                        if (!sourceMenusSnapshot.empty) {
+                            // 新しい店舗にメニューをコピー
+                            const copyPromises = [];
+                            sourceMenusSnapshot.forEach((menuDoc) => {
+                                const menuData = menuDoc.data();
+                                const newMenuRef = doc(window.db, 'stores', storeId, 'menus', menuDoc.id);
+                                copyPromises.push(setDoc(newMenuRef, menuData));
+                            });
+                            await Promise.all(copyPromises);
+                            console.log(`✅ ${sourceMenusSnapshot.size}件のメニューをコピーしました`);
+                        } else {
+                            console.log('⚠️ コピー元にメニューがありません');
+                        }
+                    }
 
-                    alert('店舗を追加しました');
+                    alert(formData.createMode === 'copy' 
+                        ? '店舗を追加し、メニューをコピーしました' 
+                        : '店舗を追加しました');
                     setShowAddStore(false);
-                    setFormData({ storeName: '', storePassword: '', isActive: true });
+                    setFormData({ 
+                        storeName: '', 
+                        storePassword: '', 
+                        isActive: true,
+                        createMode: 'new',
+                        sourceStoreId: ''
+                    });
                 } catch (error) {
                     console.error('店舗追加エラー:', error);
                     alert('店舗の追加に失敗しました: ' + error.message);
@@ -160,7 +190,13 @@
 
                     alert('店舗情報を更新しました');
                     setEditingStore(null);
-                    setFormData({ storeName: '', storePassword: '', isActive: true });
+                    setFormData({ 
+                        storeName: '', 
+                        storePassword: '', 
+                        isActive: true,
+                        createMode: 'new',
+                        sourceStoreId: ''
+                    });
                 } catch (error) {
                     console.error('店舗更新エラー:', error);
                     alert('店舗情報の更新に失敗しました');
@@ -355,6 +391,67 @@
                                             />
                                         </div>
 
+                                        <div className="mb-4">
+                                            <label className="block text-gray-700 text-sm font-bold mb-3">
+                                                作成モード *
+                                            </label>
+                                            <div className="space-y-2">
+                                                <label className="flex items-center p-3 border-2 border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-all">
+                                                    <input
+                                                        type="radio"
+                                                        name="createMode"
+                                                        value="new"
+                                                        checked={formData.createMode === 'new'}
+                                                        onChange={(e) => setFormData({...formData, createMode: e.target.value, sourceStoreId: ''})}
+                                                        className="w-4 h-4 text-blue-600"
+                                                    />
+                                                    <div className="ml-3">
+                                                        <span className="font-bold text-gray-700">新規作成</span>
+                                                        <p className="text-sm text-gray-500">白紙の状態からスタート</p>
+                                                    </div>
+                                                </label>
+                                                
+                                                <label className="flex items-center p-3 border-2 border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-all">
+                                                    <input
+                                                        type="radio"
+                                                        name="createMode"
+                                                        value="copy"
+                                                        checked={formData.createMode === 'copy'}
+                                                        onChange={(e) => setFormData({...formData, createMode: e.target.value})}
+                                                        className="w-4 h-4 text-blue-600"
+                                                    />
+                                                    <div className="ml-3">
+                                                        <span className="font-bold text-gray-700">データコピー</span>
+                                                        <p className="text-sm text-gray-500">既存店舗のメニューをコピー</p>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        {formData.createMode === 'copy' && (
+                                            <div className="mb-4">
+                                                <label className="block text-gray-700 text-sm font-bold mb-2">
+                                                    コピー元の店舗 *
+                                                </label>
+                                                <select
+                                                    value={formData.sourceStoreId}
+                                                    onChange={(e) => setFormData({...formData, sourceStoreId: e.target.value})}
+                                                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                                                    required={formData.createMode === 'copy'}
+                                                >
+                                                    <option value="">店舗を選択してください</option>
+                                                    {stores.filter(s => s.isActive).map(store => (
+                                                        <option key={store.id} value={store.id}>
+                                                            {store.storeName}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <p className="text-xs text-gray-500 mt-2">
+                                                    ⚠️ メニューのみコピーされます（テーブル設定はコピーされません）
+                                                </p>
+                                            </div>
+                                        )}
+
                                         <div className="mb-6">
                                             <label className="flex items-center">
                                                 <input
@@ -372,7 +469,13 @@
                                                 type="button"
                                                 onClick={() => {
                                                     setShowAddStore(false);
-                                                    setFormData({ storeName: '', storePassword: '', isActive: true });
+                                                    setFormData({ 
+                                                        storeName: '', 
+                                                        storePassword: '', 
+                                                        isActive: true,
+                                                        createMode: 'new',
+                                                        sourceStoreId: ''
+                                                    });
                                                 }}
                                                 className="flex-1 bg-gray-300 text-gray-700 py-3 rounded-lg font-bold hover:bg-gray-400 transition-all"
                                             >
@@ -440,7 +543,13 @@
                                                 type="button"
                                                 onClick={() => {
                                                     setEditingStore(null);
-                                                    setFormData({ storeName: '', storePassword: '', isActive: true });
+                                                    setFormData({ 
+                                                        storeName: '', 
+                                                        storePassword: '', 
+                                                        isActive: true,
+                                                        createMode: 'new',
+                                                        sourceStoreId: ''
+                                                    });
                                                 }}
                                                 className="flex-1 bg-gray-300 text-gray-700 py-3 rounded-lg font-bold hover:bg-gray-400 transition-all"
                                             >

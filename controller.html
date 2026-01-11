@@ -460,6 +460,36 @@
     });
     
     const db = getFirestore(app);
+
+    // 店舗ID管理
+    let currentStoreId = null;
+    let currentStoreName = null;
+
+    // 店舗別コレクション参照を取得
+    window.getStoreCollection = function(collectionName) {
+      if (!currentStoreId) {
+        const oldPathMap = {
+          "menus": "menu",
+          "employees": "kintai_employees",
+          "attendance": "kintai_attendance"
+        };
+        return collection(db, oldPathMap[collectionName] || collectionName);
+      }
+      return collection(db, "stores", currentStoreId, collectionName);
+    };
+
+    // 店舗別ドキュメント参照を取得
+    window.getStoreDoc = function(collectionName, docId) {
+      if (!currentStoreId) {
+        const oldPathMap = {
+          "menus": "menu",
+          "employees": "kintai_employees",
+          "attendance": "kintai_attendance"
+        };
+        return doc(db, oldPathMap[collectionName] || collectionName, docId);
+      }
+      return doc(db, "stores", currentStoreId, collectionName, docId);
+    };
     window.db = db;
     
     // Firebaseモジュールをグローバルにエクスポート（ログイン処理で使用）
@@ -469,12 +499,10 @@
     window.where = where;
     window.doc = doc;
     window.deleteDoc = deleteDoc;
-
-    // 店舗別認証用の変数
-    let currentStoreId = null;
-    let currentStoreName = null;
-    window.currentStoreId = null;
-    window.currentStoreName = null;
+    
+    // 店舗IDをグローバルに公開
+    window.currentStoreId = currentStoreId;
+    window.currentStoreName = currentStoreName;
 
     let audioEnabled = false;
     let isFirstOrderLoad = true;
@@ -692,7 +720,7 @@
 
     function watchOrders() {
       const unsubscribe = onSnapshot(
-        collection(db, 'orders'), 
+        window.getStoreCollection('orders'), 
         (snapshot) => {
           const currentCount = snapshot.size;
           
@@ -712,7 +740,7 @@
 
     function watchWaiting() {
       const unsubscribe = onSnapshot(
-        doc(db, 'settings', 'waiting'), 
+        window.getStoreDoc('settings', 'waiting'), 
         (doc) => {
           if (doc.exists()) {
             const count = doc.data().manualCount || 0;
@@ -730,7 +758,7 @@
       const storeId = window.currentStoreId || currentStoreId;
       const callsCollection = storeId 
         ? collection(db, 'stores', storeId, 'staff_calls')
-        : collection(db, 'staff_calls');
+        : window.getStoreCollection('staff_calls');
       
       const unsubscribe = onSnapshot(
         callsCollection,
@@ -780,7 +808,7 @@
         if (storeId) {
           await deleteDoc(doc(db, 'stores', storeId, 'staff_calls', id));
         } else {
-          await deleteDoc(doc(db, 'staff_calls', id));
+          await deleteDoc(window.getStoreDoc('staff_calls', id));
         }
         showToast('✓ 対応完了');
       } catch (error) {
@@ -828,7 +856,7 @@
       
       const ordersCollection = storeId 
         ? collection(db, 'stores', storeId, 'orders')
-        : collection(db, 'orders');
+        : window.getStoreCollection('orders');
       
       (await getDocs(ordersCollection)).forEach(doc => {
         const d = doc.data();
@@ -1123,7 +1151,7 @@
           }
         });
         
-        await updateDoc(doc(db, 'orders', order.id), { memo: newMemo });
+        await updateDoc(window.getStoreDoc('orders', order.id), { memo: newMemo });
         showToast('✓ メモを保存しました');
         overlay.remove();
         loadOrders();
@@ -1134,7 +1162,7 @@
 
     async function completeOrder(orderId, tableNumber, orderNumber) {
       try {
-        await updateDoc(doc(db, 'orders', orderId), {
+        await updateDoc(window.getStoreDoc('orders', orderId), {
           status: 'completed',
           completedAt: Timestamp.now()
         });
@@ -1149,7 +1177,7 @@
 
     async function cancelOrder(orderId, tableNumber, orderNumber) {
       try {
-        await updateDoc(doc(db, 'orders', orderId), {
+        await updateDoc(window.getStoreDoc('orders', orderId), {
           cancelledAt: Timestamp.now()
         });
         
@@ -1164,7 +1192,7 @@
     async function deleteOrder(orderId) {
       try {
         // deleteDocではなくdeletedフラグを立てる
-        await updateDoc(doc(db, 'orders', orderId), {
+        await updateDoc(window.getStoreDoc('orders', orderId), {
           deleted: true,
           deletedAt: Timestamp.now()
         });
@@ -1189,7 +1217,7 @@
           const confirmed = await showConfirmDialog('会計を未済に戻しますか?');
           if (!confirmed) return;
           
-          await updateDoc(doc(db, 'orders', order.id), {
+          await updateDoc(window.getStoreDoc('orders', order.id), {
             paidAt: null
           });
           
@@ -1269,7 +1297,7 @@
         
         // 注文を会計済みに更新
         console.log('💾 Firestore更新中...');
-        await updateDoc(doc(db, 'orders', order.id), {
+        await updateDoc(window.getStoreDoc('orders', order.id), {
           paidAt: Timestamp.now(),
           notifiedPaid: true,
           paymentMethod: selectedPaymentMethod,
@@ -1632,7 +1660,7 @@
       const btn = document.getElementById('time-override-btn');
       
       try {
-        const settingsRef = doc(db, 'settings', 'timeOverride');
+        const settingsRef = window.getStoreDoc('settings', 'timeOverride');
         const settingsSnap = await getDoc(settingsRef);
         const currentOverride = settingsSnap.exists() ? settingsSnap.data().enabled : false;
         
@@ -1662,7 +1690,7 @@
     
     async function loadTimeOverrideStatus() {
       try {
-        const settingsRef = doc(db, 'settings', 'timeOverride');
+        const settingsRef = window.getStoreDoc('settings', 'timeOverride');
         const settingsSnap = await getDoc(settingsRef);
         const overrideEnabled = settingsSnap.exists() ? settingsSnap.data().enabled : false;
         
@@ -1766,8 +1794,8 @@
     }
 
     window.increaseWaiting = async () => {
-      const ref = doc(db, 'settings', 'waiting');
-      const snapshot = await getDocs(collection(db, 'settings'));
+      const ref = window.getStoreDoc('settings', 'waiting');
+      const snapshot = await getDocs(window.getStoreCollection('settings'));
       let count = 0;
       snapshot.forEach(d => { if (d.id === 'waiting') count = d.data().manualCount || 0; });
       await setDoc(ref, { manualCount: count + 1 });
@@ -1775,7 +1803,7 @@
     };
 
     window.resetWaiting = async () => {
-      await setDoc(doc(db, 'settings', 'waiting'), { manualCount: 0 });
+      await setDoc(window.getStoreDoc('settings', 'waiting'), { manualCount: 0 });
       showToast('✓ リセット');
     };
 
@@ -1922,9 +1950,9 @@
         }
         
         // 新システム認証
-        const storesRef = window.collection(window.db, 'stores');
-        const q = window.query(storesRef, window.where('storeName', '==', storeName));
-        const snapshot = await window.getDocs(q);
+        const storesRef = collection(db, 'stores');
+        const q = query(storesRef, where('storeName', '==', storeName));
+        const snapshot = await getDocs(q);
         
         if (!snapshot.empty) {
           let found = false;
@@ -1938,10 +1966,13 @@
           });
           
           if (found) {
+            currentStoreId = window.currentStoreId;
+            currentStoreName = window.currentStoreName;
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('mainContent').style.display = 'block';
             sessionStorage.setItem('controllerAuth', 'true');
             sessionStorage.setItem('controllerStoreId', window.currentStoreId);
+            sessionStorage.setItem('controllerStoreName', window.currentStoreName);
             console.log('✅ ログイン成功:', window.currentStoreName);
             return false;
           }
@@ -1961,9 +1992,18 @@
     // ページ読み込み時の認証チェック
     window.addEventListener('DOMContentLoaded', () => {
       const isAuth = sessionStorage.getItem('controllerAuth');
+      const savedStoreId = sessionStorage.getItem('controllerStoreId');
+      const savedStoreName = sessionStorage.getItem('controllerStoreName');
+      
       if (isAuth === 'true') {
+        currentStoreId = savedStoreId || null;
+        currentStoreName = savedStoreName || null;
+        window.currentStoreId = currentStoreId;
+        window.currentStoreName = currentStoreName;
+        
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
+        console.log('✅ セッション復元:', currentStoreName);
       } else {
         document.getElementById('loginScreen').style.display = 'flex';
         document.getElementById('mainContent').style.display = 'none';
