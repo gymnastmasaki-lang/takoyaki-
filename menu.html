@@ -751,6 +751,11 @@
     let bagNeeded = false;
     const BAG_PRICE = 3;
     
+    // 二重送信防止用フラグ
+    let isOrderProcessing = false;
+    let lastOrderTimestamp = 0;
+    const ORDER_COOLDOWN = 3000; // 3秒間のクールダウン
+    
     const tableNumber = urlParams.get('table') || 'テイクアウト';
 
     // LocalStorageから注文情報を復元
@@ -1815,32 +1820,78 @@
     };
 
     window.confirmOrder = async function() {
-      if (cart.length === 0) {
+      // ========== 二重送信防止 ==========
+      // 既に処理中の場合は何もしない
+      if (isOrderProcessing) {
+        console.log('⚠️ 注文処理中のため、リクエストを無視します');
+        return;
+      }
+      
+      // クールダウン期間中の場合は何もしない
+      const now = Date.now();
+      if (now - lastOrderTimestamp < ORDER_COOLDOWN) {
+        console.log('⚠️ クールダウン期間中のため、リクエストを無視します');
+        showCustomAlert('注文を送信中です。\nしばらくお待ちください。');
+        return;
+      }
+      
+      // ========== カートの厳密なバリデーション ==========
+      if (!cart || cart.length === 0) {
         showCustomAlert('カートが空です');
         return;
       }
       
-      const soldOutItems = [];
+      // カート内の商品が有効かチェック
+      let hasValidItems = false;
       for (const item of cart) {
-        if (soldOutIds.has(item.id)) {
-          soldOutItems.push(item.name);
+        if (item && item.name && item.price >= 0 && item.quantity > 0) {
+          hasValidItems = true;
+          break;
         }
       }
       
-      if (soldOutItems.length > 0) {
-        showCustomAlert('申し訳ございません。\n以下の商品が品切れになりました:\n\n' + soldOutItems.join('\n') + '\n\nカートから削除してください。');
-        cart = cart.filter(item => !soldOutIds.has(item.id));
-        
-        if (cart.length === 0) {
-          showCustomAlert('全ての商品が品切れになったため、カートが空になりました。');
-          backToMenu();
-        } else {
-          showCart();
-        }
+      if (!hasValidItems) {
+        showCustomAlert('カートに有効な商品がありません');
+        cart = []; // 無効なカートをクリア
+        backToMenu();
         return;
       }
       
+      // 処理中フラグをON
+      isOrderProcessing = true;
+      lastOrderTimestamp = now;
+      
+      // 注文ボタンを無効化
+      const confirmBtn = document.querySelector('button[onclick="confirmOrder()"]');
+      if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.style.opacity = '0.5';
+        confirmBtn.style.cursor = 'not-allowed';
+        confirmBtn.textContent = '注文送信中...';
+      }
+      
       try {
+        // 品切れチェック
+        const soldOutItems = [];
+        for (const item of cart) {
+          if (soldOutIds.has(item.id)) {
+            soldOutItems.push(item.name);
+          }
+        }
+        
+        if (soldOutItems.length > 0) {
+          showCustomAlert('申し訳ございません。\n以下の商品が品切れになりました:\n\n' + soldOutItems.join('\n') + '\n\nカートから削除してください。');
+          cart = cart.filter(item => !soldOutIds.has(item.id));
+          
+          if (cart.length === 0) {
+            showCustomAlert('全ての商品が品切れになったため、カートが空になりました。');
+            backToMenu();
+          } else {
+            showCart();
+          }
+          return;
+        }
+        
         const now = new Date();
         const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
         
@@ -2014,9 +2065,23 @@
         bagNeeded = false;
         showPage('page-complete');
         
+        console.log('✅ 注文送信成功');
+        
       } catch (e) {
-        console.error('注文エラー:', e);
-        showCustomAlert('注文に失敗しました: ' + e.message);
+        console.error('❌ 注文エラー:', e);
+        showCustomAlert('注文に失敗しました。\nもう一度お試しください。\n\nエラー: ' + e.message);
+      } finally {
+        // 処理中フラグをOFF（成功・失敗に関わらず）
+        isOrderProcessing = false;
+        
+        // ボタンを元に戻す
+        const confirmBtn = document.querySelector('button[onclick="confirmOrder()"]');
+        if (confirmBtn) {
+          confirmBtn.disabled = false;
+          confirmBtn.style.opacity = '1';
+          confirmBtn.style.cursor = 'pointer';
+          confirmBtn.textContent = '注文を確定する';
+        }
       }
     };
 
