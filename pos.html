@@ -5989,6 +5989,14 @@
           displaySoldOutItems(filtered);
         };
         
+        // 🆕 一括品切れボタンのイベントリスナーを設定
+        const bulkBtn = document.getElementById('bulk-soldout-btn');
+        if (bulkBtn && !bulkBtn.hasAttribute('data-listener-added')) {
+          bulkBtn.removeAttribute('onclick'); // 既存のonclick属性を削除
+          bulkBtn.addEventListener('click', window.toggleBulkSoldOut);
+          bulkBtn.setAttribute('data-listener-added', 'true'); // 重複防止
+        }
+        
         await displaySoldOutItems(allMenuItems);
         document.getElementById('page-soldout').style.display = 'block';
       } catch (e) {
@@ -6029,10 +6037,19 @@
             ${isSoldOut ? '<span class="soldout-badge">品切れ中</span>' : ''}
           </div>
           <button class="soldout-toggle-btn ${isSoldOut ? 'set-available' : 'set-soldout'}" 
-                  onclick="toggleSoldOut('${item.id}', ${!isSoldOut})">
+                  data-menu-id="${item.id}" 
+                  data-set-soldout="${!isSoldOut}">
             ${isSoldOut ? '販売再開' : '品切れ'}
           </button>
         `;
+        
+        // 🆕 イベントリスナーを直接追加
+        const button = div.querySelector('.soldout-toggle-btn');
+        button.addEventListener('click', async function() {
+          const menuId = this.getAttribute('data-menu-id');
+          const setSoldOut = this.getAttribute('data-set-soldout') === 'true';
+          await window.toggleSoldOut(menuId, setSoldOut);
+        });
         
         list.appendChild(div);
       });
@@ -6041,17 +6058,25 @@
     // 個別品切れ切り替え
     window.toggleSoldOut = async function(menuId, setSoldOut) {
       try {
-        console.log('📍 toggleSoldOut:', menuId, setSoldOut);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📍 toggleSoldOut 呼び出し');
+        console.log('   menuId:', menuId);
+        console.log('   setSoldOut:', setSoldOut);
+        console.log('   currentStoreId:', window.currentStoreId);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
         
         if (setSoldOut) {
           // 品切れに設定
+          console.log('   → 品切れに設定');
           await window.setDoc(window.getStoreDoc('sold_out', menuId), {
             menuId: menuId,
             timestamp: window.Timestamp.now()
           });
           showToast('品切れに設定');
+          console.log('   ✅ 品切れ設定完了');
         } else {
           // 再販：menuIdに一致するドキュメントを検索して削除
+          console.log('   → 販売再開');
           const soldOutSnapshot = await window.getDocs(window.getStoreCollection('sold_out'));
           const deletePromises = [];
           let foundCount = 0;
@@ -6071,26 +6096,39 @@
           if (deletePromises.length > 0) {
             await Promise.all(deletePromises);
             showToast(`販売再開 (${foundCount}件)`);
+            console.log('   ✅ 販売再開完了:', foundCount, '件');
           } else {
             console.warn('削除するドキュメントが見つかりません。menuId:', menuId);
             showToast('⚠️ 削除対象なし');
           }
         }
         
+        console.log('   🔄 リスト更新中...');
         const sel = document.getElementById('soldout-category-select');
         const filtered = sel.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === sel.value);
         await displaySoldOutItems(filtered);
+        console.log('   ✅ リスト更新完了');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
       } catch (e) {
-        console.error('toggleSoldOut error:', e);
+        console.error('❌ toggleSoldOut error:', e);
+        console.error('   エラー詳細:', e.message);
+        console.error('   スタックトレース:', e.stack);
         alert('エラー: ' + e.message);
       }
     };
     
     // 一括品切れ切り替え
     window.toggleBulkSoldOut = async function() {
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📍 toggleBulkSoldOut 呼び出し');
+      console.log('   currentStoreId:', window.currentStoreId);
+      console.log('   isBulkSoldOut:', isBulkSoldOut);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
       const btn = document.getElementById('bulk-soldout-btn');
       
       if (!isBulkSoldOut) {
+        console.log('   → 一括品切れ設定モード');
         const confirmed = await showCustomConfirm({
           icon: '🚫',
           title: '一括品切れ設定',
@@ -6099,15 +6137,20 @@
           btnClass: 'modal-btn-danger'
         });
         
-        if (!confirmed) return;
+        if (!confirmed) {
+          console.log('   ✖️ キャンセルされました');
+          return;
+        }
         
         try {
+          console.log('   🔄 メニュー取得中...');
           const menuSnapshot = await window.getDocs(window.getStoreCollection('menus'));
           const promises = [];
           
           menuSnapshot.forEach(docSnap => {
             const data = docSnap.data();
             if (data.id) {
+              console.log('     品切れ設定:', data.id, data.name);
               promises.push(window.setDoc(window.getStoreDoc('sold_out', data.id), {
                 menuId: data.id,
                 timestamp: window.Timestamp.now()
@@ -6115,16 +6158,19 @@
             }
           });
           
+          console.log('   ⏳ 一括設定実行中...', promises.length, '件');
           await Promise.all(promises);
           isBulkSoldOut = true;
           btn.textContent = '再販';
           btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
           showToast('全商品を品切れに設定しました');
+          console.log('   ✅ 一括品切れ設定完了');
         } catch (e) {
-          console.error(e);
+          console.error('❌ 一括品切れエラー:', e);
           alert('エラー: ' + e.message);
         }
       } else {
+        console.log('   → 一括販売再開モード');
         const confirmed = await showCustomConfirm({
           icon: '✅',
           title: '販売再開',
@@ -6133,23 +6179,37 @@
           btnClass: 'modal-btn-success'
         });
         
-        if (!confirmed) return;
+        if (!confirmed) {
+          console.log('   ✖️ キャンセルされました');
+          return;
+        }
         
         try {
+          console.log('   🔄 品切れ一覧取得中...');
           const soldOutSnapshot = await window.getDocs(window.getStoreCollection('sold_out'));
           const promises = [];
-          soldOutSnapshot.forEach(docSnap => promises.push(window.deleteDoc(docSnap.ref)));
+          soldOutSnapshot.forEach(docSnap => {
+            console.log('     削除:', docSnap.id);
+            promises.push(window.deleteDoc(docSnap.ref));
+          });
           
+          console.log('   ⏳ 一括削除実行中...', promises.length, '件');
           await Promise.all(promises);
           isBulkSoldOut = false;
           btn.textContent = '一括';
           btn.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
-          showToast('全商品を販売再開しました');
+          showToast('全商品の販売を再開しました');
+          console.log('   ✅ 一括販売再開完了');
         } catch (e) {
-          console.error(e);
+          console.error('❌ 一括販売再開エラー:', e);
           alert('エラー: ' + e.message);
         }
       }
+      
+      console.log('   🔄 リスト更新中...');
+      await displaySoldOutItems(allMenuItems);
+      console.log('   ✅ リスト更新完了');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
     };
     
     // 時間外設定切り替え
