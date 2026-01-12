@@ -1533,6 +1533,7 @@
           name: item.name,
           price: item.price,
           toppings: '標準トッピング',
+          toppingsData: [], // 🆕 構造化データ（空配列）
           toppingPrice: 0,
           quantity: 1
         });
@@ -1706,16 +1707,26 @@
       }
       
       let toppingPrice = 0;
-      const toppingNames = selectedToppings.map(t => {
+      
+      // 🆕 トッピングセット情報を含めた構造化データ
+      const toppingsData = selectedToppings.map(t => {
         toppingPrice += t.price || 0;
-        return t.name;
-      }).join(', ') || '標準トッピング';  // 🆕 「なし」→「標準トッピング」
+        return {
+          setName: t.setName || 'トッピング',
+          name: t.name,
+          price: t.price || 0
+        };
+      });
+      
+      // 表示用のテキスト（後方互換性のため残す）
+      const toppingNames = selectedToppings.map(t => t.name).join(', ') || '標準トッピング';
       
       cart.push({
         id: currentItem.id,
         name: currentItem.name,
         price: currentItem.price,
-        toppings: toppingNames,
+        toppings: toppingNames, // 表示用（後方互換性）
+        toppingsData: toppingsData, // 🆕 構造化データ
         toppingPrice: toppingPrice,
         quantity: qty
       });
@@ -1766,6 +1777,28 @@
           hasSoldOut = true;
         }
         
+        // トッピング表示の改善
+        let toppingsHtml = '';
+        if (item.toppingsData && item.toppingsData.length > 0) {
+          const groupedBySet = {};
+          item.toppingsData.forEach(topping => {
+            const setName = topping.setName || 'トッピング';
+            if (!groupedBySet[setName]) {
+              groupedBySet[setName] = [];
+            }
+            groupedBySet[setName].push(topping.name);
+          });
+          
+          toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+            return `
+              <div class="cart-item-details" style="color: #4CAF50; font-weight: bold; margin-top: 5px;">${setName}:</div>
+              ${options.map(opt => `<div class="cart-item-details" style="color: #4CAF50; margin-left: 10px;">・${opt}</div>`).join('')}
+            `;
+          }).join('');
+        } else if (item.toppings && item.toppings !== '標準トッピング') {
+          toppingsHtml = `<div class="cart-item-details" style="color: #4CAF50;">トッピング: ${item.toppings}</div>`;
+        }
+        
         div.innerHTML = `
           <button class="cart-item-delete-btn" onclick="removeFromCart(${index})">×</button>
           <div class="cart-item-header">
@@ -1775,9 +1808,7 @@
           <div class="cart-item-details">
             単価: ¥${item.price.toLocaleString()} × ${item.quantity}個
           </div>
-          <div class="cart-item-details" style="color: #4CAF50;">
-            トッピング: ${item.toppings}
-          </div>
+          ${toppingsHtml}
         `;
         list.appendChild(div);
       });
@@ -2065,13 +2096,36 @@
           const subtotal = (item.price + item.toppingPrice) * item.quantity;
           const div = document.createElement('div');
           div.className = 'cart-item';
+          
+          // トッピング表示の改善
+          let toppingsHtml = '';
+          if (item.toppingsData && item.toppingsData.length > 0) {
+            const groupedBySet = {};
+            item.toppingsData.forEach(topping => {
+              const setName = topping.setName || 'トッピング';
+              if (!groupedBySet[setName]) {
+                groupedBySet[setName] = [];
+              }
+              groupedBySet[setName].push(topping.name);
+            });
+            
+            toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+              return `
+                <div class="cart-item-details" style="color: #4CAF50; font-weight: bold; margin-top: 5px;">${setName}:</div>
+                ${options.map(opt => `<div class="cart-item-details" style="color: #4CAF50; margin-left: 10px;">・${opt}</div>`).join('')}
+              `;
+            }).join('');
+          } else if (item.toppings && item.toppings !== '標準トッピング') {
+            toppingsHtml = `<div class="cart-item-details" style="color: #4CAF50;">トッピング: ${item.toppings}</div>`;
+          }
+          
           div.innerHTML = `
             <div class="cart-item-header">
               <div class="cart-item-name">${item.name}</div>
               <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
             </div>
             <div class="cart-item-details">数量: ${item.quantity}個</div>
-            <div class="cart-item-details" style="color: #4CAF50;">トッピング: ${item.toppings}</div>
+            ${toppingsHtml}
           `;
           list.appendChild(div);
         });
