@@ -2779,47 +2779,50 @@
         console.log('注文ID:', currentEditingOrder.id);
         console.log('注文番号:', currentEditingOrder.orderNumber);
         console.log('paidAt:', currentEditingOrder.paidAt);
-        console.log('paidAtタイプ:', typeof currentEditingOrder.paidAt);
+        console.log('timestamp:', currentEditingOrder.timestamp);
         console.log('旧支払方法:', oldPaymentMethod);
         console.log('新支払方法:', paymentMethod);
         console.log('旧金額:', oldTotalAmount);
         console.log('新金額:', newTotalAmount);
         
-        // 🚨 paidAtがない場合は売上データを更新しない（未会計の注文）
-        if (!currentEditingOrder.paidAt) {
-          console.warn('⚠️ paidAtが存在しません。未会計の注文のため、売上データは更新しません。');
-          
-          // 注文データのみ更新
-          await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
-            tableNumber: tableNumber,
-            paymentMethod: paymentMethod,
-            items: currentEditingOrder.items,
-            totalAmount: currentEditingOrder.totalAmount
-          });
-          
-          showCustomAlert('注文を更新しました', '✅ 完了', '💾');
-          closeEditOrderModal();
-          await loadHistory();
-          return;
-        }
-        
         // 元のpaidAtから日付を取得（売上データ更新用）
         let originalDateStr = null;
+        let useTimestamp = false;
+        
         try {
-          const paidDate = currentEditingOrder.paidAt.toDate();
-          let targetDate = new Date(paidDate);
+          let dateToUse = null;
           
-          // 午前3時より前なら昨日扱い
-          if (paidDate.getHours() < 3) {
-            targetDate.setDate(targetDate.getDate() - 1);
+          // paidAtがある場合はそれを使用
+          if (currentEditingOrder.paidAt) {
+            dateToUse = currentEditingOrder.paidAt.toDate();
+            console.log('📅 paidAtを使用:', dateToUse);
+          }
+          // paidAtがない場合はtimestampを使用
+          else if (currentEditingOrder.timestamp) {
+            dateToUse = currentEditingOrder.timestamp.toDate();
+            useTimestamp = true;
+            console.log('📅 timestampを使用:', dateToUse);
+            console.log('⚠️ paidAtがないため、timestampから日付を取得しました');
           }
           
-          originalDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
-          console.log('📅 元の会計日付:', originalDateStr);
-          console.log('   paidAt:', paidDate.toLocaleString('ja-JP'));
+          if (dateToUse) {
+            let targetDate = new Date(dateToUse);
+            
+            // 午前3時より前なら昨日扱い
+            if (dateToUse.getHours() < 3) {
+              targetDate.setDate(targetDate.getDate() - 1);
+            }
+            
+            originalDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
+            console.log('📅 元の会計日付:', originalDateStr);
+            console.log('   元の日時:', dateToUse.toLocaleString('ja-JP'));
+          } else {
+            throw new Error('paidAtもtimestampも存在しません');
+          }
         } catch (error) {
-          console.error('❌ paidAtの変換エラー:', error);
-          console.error('   paidAt値:', currentEditingOrder.paidAt);
+          console.error('❌ 日付の変換エラー:', error);
+          console.error('   paidAt:', currentEditingOrder.paidAt);
+          console.error('   timestamp:', currentEditingOrder.timestamp);
           showCustomAlert('日付の取得に失敗しました。注文データのみ更新します。', '⚠️ 警告', '⚠️');
           
           // 注文データのみ更新
@@ -2845,13 +2848,22 @@
         console.log('📅 本日の日付:', todayDateStr);
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
         
-        // 注文を更新（paidAtは元の値を保持）
-        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
+        // 注文を更新
+        const orderUpdates = {
           tableNumber: tableNumber,
           paymentMethod: paymentMethod,
           items: currentEditingOrder.items,
           totalAmount: currentEditingOrder.totalAmount
-        });
+        };
+        
+        // 🆕 timestampから日付を取得した場合は、paidAtを設定
+        if (useTimestamp && !currentEditingOrder.paidAt) {
+          console.log('💡 timestampから取得したため、paidAtを設定します');
+          orderUpdates.paidAt = currentEditingOrder.timestamp;
+          orderUpdates.notifiedPaid = true;
+        }
+        
+        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), orderUpdates);
         console.log('✅ 注文データ更新完了');
         
         // 売上データを修正
@@ -3085,7 +3097,7 @@
       const confirmed = await showCustomConfirm({
         icon: '🔄',
         title: '注文を復元',
-        message: `注文 #${currentEditingOrder.orderNumber} を復元しますか？`,
+        message: `注文 #${currentEditingOrder.orderNumber} を復元しますか？\n\n※ paidAtがない場合は現在時刻で会計済みとして復元します`,
         confirmText: '復元する',
         confirmColor: '#2196F3'
       });
@@ -3093,10 +3105,24 @@
       if (!confirmed) return;
       
       try {
-        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
+        const updates = {
           deleted: false,
           deletedAt: null
-        });
+        };
+        
+        // 🆕 paidAtがない場合は現在時刻を設定（会計済みとして復元）
+        if (!currentEditingOrder.paidAt) {
+          console.log('⚠️ paidAtがないため、現在時刻で設定します');
+          updates.paidAt = window.Timestamp.now();
+          updates.notifiedPaid = true;
+          
+          // paymentMethodがない場合はデフォルトで現金
+          if (!currentEditingOrder.paymentMethod) {
+            updates.paymentMethod = 'cash';
+          }
+        }
+        
+        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), updates);
         
         showCustomAlert('注文を復元しました', '✅ 成功', '🔄');
         closeEditOrderModal();
