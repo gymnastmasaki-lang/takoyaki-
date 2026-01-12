@@ -2561,7 +2561,8 @@
         const orderData = orderDoc.data();
         currentEditingOrder = {
           id: orderId,
-          ...orderData
+          ...orderData,
+          originalTotalAmount: orderData.totalAmount  // 🆕 元の金額を保存
         };
         
         // 支払方法の選択肢
@@ -2707,6 +2708,9 @@
       if (!currentEditingOrder) return;
       
       if (confirm('この商品を削除しますか？')) {
+        // 🆕 元の金額を一時保存
+        const originalAmount = currentEditingOrder.originalTotalAmount;
+        
         currentEditingOrder.items.splice(index, 1);
         
         // 合計金額を再計算
@@ -2718,6 +2722,9 @@
         
         // 表示を更新（モーダルを再描画）
         editOrder(currentEditingOrder.id);
+        
+        // 🆕 元の金額を復元
+        currentEditingOrder.originalTotalAmount = originalAmount;
       }
     };
     
@@ -2747,6 +2754,26 @@
         const tableNumber = document.getElementById('editTableNumber').value;
         const paymentMethod = document.getElementById('editPaymentMethod').value;
         
+        // 🆕 元の支払い方法と金額を取得（売上データの修正用）
+        const oldPaymentMethod = currentEditingOrder.paymentMethod;
+        const oldTotalAmount = currentEditingOrder.originalTotalAmount || currentEditingOrder.totalAmount;
+        const newTotalAmount = currentEditingOrder.totalAmount;
+        
+        // 🆕 元のpaidAtから日付を取得（売上データ更新用）
+        let targetDateStr = null;
+        if (currentEditingOrder.paidAt) {
+          const paidDate = currentEditingOrder.paidAt.toDate();
+          let targetDate = new Date(paidDate);
+          
+          // 午前3時より前なら昨日扱い
+          if (paidDate.getHours() < 3) {
+            targetDate.setDate(targetDate.getDate() - 1);
+          }
+          
+          targetDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
+          console.log('📅 修正対象日付:', targetDateStr, 'from paidAt:', paidDate);
+        }
+        
         // 注文を更新（paidAtは元の値を保持）
         await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
           tableNumber: tableNumber,
@@ -2754,6 +2781,55 @@
           items: currentEditingOrder.items,
           totalAmount: currentEditingOrder.totalAmount
         });
+        
+        // 🆕 売上データを修正（支払い方法または金額が変更された場合）
+        if (targetDateStr && (oldPaymentMethod !== paymentMethod || oldTotalAmount !== newTotalAmount)) {
+          console.log('💰 売上データ修正開始:', {
+            日付: targetDateStr,
+            旧支払方法: oldPaymentMethod,
+            新支払方法: paymentMethod,
+            旧金額: oldTotalAmount,
+            新金額: newTotalAmount
+          });
+          
+          const salesRef = window.getStoreDoc('dailySales', targetDateStr);
+          const salesDoc = await window.getDoc(salesRef);
+          
+          if (salesDoc.exists()) {
+            const salesData = salesDoc.data();
+            const updates = {
+              updatedAt: window.Timestamp.now()
+            };
+            
+            // 旧支払い方法の金額を減算
+            if (oldPaymentMethod === 'cash') {
+              updates.cashSales = (salesData.cashSales || 0) - oldTotalAmount;
+            } else if (oldPaymentMethod === 'emoney') {
+              updates.emoneSales = (salesData.emoneSales || 0) - oldTotalAmount;
+            } else if (oldPaymentMethod === 'credit') {
+              updates.creditSales = (salesData.creditSales || 0) - oldTotalAmount;
+            }
+            
+            // 新支払い方法の金額を加算
+            if (paymentMethod === 'cash') {
+              updates.cashSales = (updates.cashSales !== undefined ? updates.cashSales : salesData.cashSales || 0) + newTotalAmount;
+            } else if (paymentMethod === 'emoney') {
+              updates.emoneSales = (updates.emoneSales !== undefined ? updates.emoneSales : salesData.emoneSales || 0) + newTotalAmount;
+            } else if (paymentMethod === 'credit') {
+              updates.creditSales = (updates.creditSales !== undefined ? updates.creditSales : salesData.creditSales || 0) + newTotalAmount;
+            }
+            
+            // 合計売上の差額を調整
+            const amountDiff = newTotalAmount - oldTotalAmount;
+            updates.totalSales = (salesData.totalSales || 0) + amountDiff;
+            
+            console.log('💾 売上データ更新:', updates);
+            await window.updateDoc(salesRef, updates);
+            console.log('✅ 売上データ修正完了');
+          } else {
+            console.warn('⚠️ 対象日の売上データが見つかりません:', targetDateStr);
+          }
+        }
         
         showCustomAlert('注文を更新しました', '✅ 完了', '💾');
         closeEditOrderModal();
