@@ -43,6 +43,7 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, deleteDoc, doc, setDoc, query, where, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
         import { getStorage, ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
         const firebaseConfig = {
             apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -56,13 +57,17 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const storage = getStorage(app);
+        const auth = getAuth(app);
 
         window.db = db;
         window.storage = storage;
+        window.auth = auth;
         window.firebaseModules = { 
             collection, getDocs, getDoc, addDoc, onSnapshot, 
             updateDoc, deleteDoc, doc, setDoc, query, where, Timestamp,
-            ref, uploadBytes, getDownloadURL
+            ref, uploadBytes, getDownloadURL,
+            signInAnonymously, onAuthStateChanged
+        };
         };
         window.FirebaseReady = true;
     </script>
@@ -183,6 +188,26 @@
             const showConfirm = (title, message, onConfirm) => {
                 setConfirmModal({ isOpen: true, title, message, onConfirm });
             };
+            
+            // 🆕 初期化時にsessionStorageをチェック＆Firebase匿名ログイン
+            useEffect(() => {
+                const checkAuth = async () => {
+                    if (sessionStorage.getItem('superAdminAuth') === 'true') {
+                        setIsAuthenticated(true);
+                        
+                        // Firebase匿名ログインも実行
+                        try {
+                            const { signInAnonymously } = window.firebaseModules;
+                            await signInAnonymously(window.auth);
+                            console.log('✅ セッション復元＆Firebase匿名ログイン成功');
+                        } catch (error) {
+                            console.error('Firebase匿名ログインエラー:', error);
+                        }
+                    }
+                };
+                
+                checkAuth();
+            }, []);
 
             // 店舗一覧を読み込み
             useEffect(() => {
@@ -205,11 +230,24 @@
             }, [isAuthenticated]);
 
             // ログイン処理
-            const handleLogin = (e) => {
+            const handleLogin = async (e) => {
                 e.preventDefault();
                 if (passwordInput === SUPER_ADMIN_PASSWORD) {
-                    setIsAuthenticated(true);
-                    sessionStorage.setItem('superAdminAuth', 'true');
+                    try {
+                        // Firebase Authenticationで匿名ログイン（Storage権限のため）
+                        const { signInAnonymously } = window.firebaseModules;
+                        await signInAnonymously(window.auth);
+                        console.log('✅ Firebase匿名ログイン成功');
+                        
+                        setIsAuthenticated(true);
+                        sessionStorage.setItem('superAdminAuth', 'true');
+                    } catch (error) {
+                        console.error('Firebase匿名ログインエラー:', error);
+                        // 匿名ログイン失敗でもスーパー管理者としてはログイン可能
+                        setIsAuthenticated(true);
+                        sessionStorage.setItem('superAdminAuth', 'true');
+                        showAlert('warning', '警告', 'Firebase認証に失敗しました。画像アップロード機能が使えない可能性があります。');
+                    }
                 } else {
                     showAlert('error', 'エラー', 'パスワードが正しくありません');
                     setPasswordInput('');
