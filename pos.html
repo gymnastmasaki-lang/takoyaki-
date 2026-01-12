@@ -2559,10 +2559,24 @@
         }
         
         const orderData = orderDoc.data();
+        
+        // 🔍 デバッグログ: 注文データの確認
+        console.log('🔍 注文編集開始:', {
+          注文ID: orderId,
+          注文番号: orderData.orderNumber,
+          テーブル: orderData.tableNumber,
+          金額: orderData.totalAmount,
+          支払方法: orderData.paymentMethod,
+          paidAt: orderData.paidAt,
+          paidAtタイプ: typeof orderData.paidAt,
+          timestamp: orderData.timestamp
+        });
+        
         currentEditingOrder = {
           id: orderId,
           ...orderData,
-          originalTotalAmount: orderData.totalAmount  // 🆕 元の金額を保存
+          originalTotalAmount: orderData.totalAmount,  // 🆕 元の金額を保存
+          originalPaymentMethod: orderData.paymentMethod  // 🆕 元の支払方法も保存
         };
         
         // 支払方法の選択肢
@@ -2754,24 +2768,44 @@
         const tableNumber = document.getElementById('editTableNumber').value;
         const paymentMethod = document.getElementById('editPaymentMethod').value;
         
-        // 🆕 元の支払い方法と金額を取得（売上データの修正用）
-        const oldPaymentMethod = currentEditingOrder.paymentMethod;
+        // 元の支払い方法と金額を取得（売上データの修正用）
+        const oldPaymentMethod = currentEditingOrder.originalPaymentMethod || currentEditingOrder.paymentMethod;
         const oldTotalAmount = currentEditingOrder.originalTotalAmount || currentEditingOrder.totalAmount;
         const newTotalAmount = currentEditingOrder.totalAmount;
         
-        console.log('📝 注文編集保存開始:', {
-          注文ID: currentEditingOrder.id,
-          注文番号: currentEditingOrder.orderNumber,
-          旧支払方法: oldPaymentMethod,
-          新支払方法: paymentMethod,
-          旧金額: oldTotalAmount,
-          新金額: newTotalAmount,
-          paidAtあり: !!currentEditingOrder.paidAt
-        });
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📝 注文編集保存開始');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('注文ID:', currentEditingOrder.id);
+        console.log('注文番号:', currentEditingOrder.orderNumber);
+        console.log('paidAt:', currentEditingOrder.paidAt);
+        console.log('paidAtタイプ:', typeof currentEditingOrder.paidAt);
+        console.log('旧支払方法:', oldPaymentMethod);
+        console.log('新支払方法:', paymentMethod);
+        console.log('旧金額:', oldTotalAmount);
+        console.log('新金額:', newTotalAmount);
         
-        // 🆕 元のpaidAtから日付を取得（売上データ更新用）
+        // 🚨 paidAtがない場合は売上データを更新しない（未会計の注文）
+        if (!currentEditingOrder.paidAt) {
+          console.warn('⚠️ paidAtが存在しません。未会計の注文のため、売上データは更新しません。');
+          
+          // 注文データのみ更新
+          await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
+            tableNumber: tableNumber,
+            paymentMethod: paymentMethod,
+            items: currentEditingOrder.items,
+            totalAmount: currentEditingOrder.totalAmount
+          });
+          
+          showCustomAlert('注文を更新しました', '✅ 完了', '💾');
+          closeEditOrderModal();
+          await loadHistory();
+          return;
+        }
+        
+        // 元のpaidAtから日付を取得（売上データ更新用）
         let originalDateStr = null;
-        if (currentEditingOrder.paidAt) {
+        try {
           const paidDate = currentEditingOrder.paidAt.toDate();
           let targetDate = new Date(paidDate);
           
@@ -2781,10 +2815,27 @@
           }
           
           originalDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
-          console.log('📅 元の会計日付:', originalDateStr, 'from paidAt:', paidDate);
+          console.log('📅 元の会計日付:', originalDateStr);
+          console.log('   paidAt:', paidDate.toLocaleString('ja-JP'));
+        } catch (error) {
+          console.error('❌ paidAtの変換エラー:', error);
+          console.error('   paidAt値:', currentEditingOrder.paidAt);
+          showCustomAlert('日付の取得に失敗しました。注文データのみ更新します。', '⚠️ 警告', '⚠️');
+          
+          // 注文データのみ更新
+          await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
+            tableNumber: tableNumber,
+            paymentMethod: paymentMethod,
+            items: currentEditingOrder.items,
+            totalAmount: currentEditingOrder.totalAmount
+          });
+          
+          closeEditOrderModal();
+          await loadHistory();
+          return;
         }
         
-        // 🆕 現在の日付を取得（本日の売上から減算するため）
+        // 現在の日付を取得（本日の売上から減算するため）
         const now = new Date();
         let todayDate = new Date(now);
         if (now.getHours() < 3) {
@@ -2792,6 +2843,7 @@
         }
         const todayDateStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth()+1).padStart(2,'0')}-${String(todayDate.getDate()).padStart(2,'0')}`;
         console.log('📅 本日の日付:', todayDateStr);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
         
         // 注文を更新（paidAtは元の値を保持）
         await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
@@ -2800,32 +2852,59 @@
           items: currentEditingOrder.items,
           totalAmount: currentEditingOrder.totalAmount
         });
+        console.log('✅ 注文データ更新完了');
         
-        // 🆕 売上データを修正
+        // 売上データを修正
         // 【重要】元の日付と本日が異なる場合、または支払方法/金額が変更された場合
-        const needsUpdate = (originalDateStr && originalDateStr !== todayDateStr) || 
-                           (oldPaymentMethod !== paymentMethod) || 
-                           (oldTotalAmount !== newTotalAmount);
+        const isDateDifferent = originalDateStr !== todayDateStr;
+        const isPaymentMethodChanged = oldPaymentMethod !== paymentMethod;
+        const isAmountChanged = oldTotalAmount !== newTotalAmount;
+        const needsUpdate = isDateDifferent || isPaymentMethodChanged || isAmountChanged;
         
-        if (needsUpdate && originalDateStr) {
-          console.log('💰 売上データ修正が必要:', {
-            元の日付: originalDateStr,
-            本日: todayDateStr,
-            日付が異なる: originalDateStr !== todayDateStr,
-            支払方法変更: oldPaymentMethod !== paymentMethod,
-            金額変更: oldTotalAmount !== newTotalAmount
-          });
+        console.log('💡 売上更新判定:', {
+          元の日付: originalDateStr,
+          本日: todayDateStr,
+          日付が異なる: isDateDifferent,
+          支払方法変更: isPaymentMethodChanged,
+          金額変更: isAmountChanged,
+          更新が必要: needsUpdate
+        });
+        
+        if (!needsUpdate) {
+          console.log('ℹ️ 売上データの更新は不要です');
+          showCustomAlert('注文を更新しました', '✅ 完了', '💾');
+          closeEditOrderModal();
+          await loadHistory();
+          return;
+        }
+        
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('💰 売上データ修正開始');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
           
           // ============================================
           // STEP 1: 本日の売上から減算（誤って本日に計上されている分）
           // ============================================
-          if (originalDateStr !== todayDateStr) {
-            console.log('🔽 本日の売上から減算:', todayDateStr);
+          if (isDateDifferent) {
+            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            console.log('🔽 STEP 1: 本日の売上から減算');
+            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            console.log('対象日付:', todayDateStr);
+            console.log('減算する金額:', oldTotalAmount);
+            console.log('減算する支払方法:', oldPaymentMethod);
+            
             const todaySalesRef = window.getStoreDoc('dailySales', todayDateStr);
             const todaySalesDoc = await window.getDoc(todaySalesRef);
             
             if (todaySalesDoc.exists()) {
               const todayData = todaySalesDoc.data();
+              console.log('本日の売上データ（更新前）:', {
+                totalSales: todayData.totalSales,
+                cashSales: todayData.cashSales,
+                emoneSales: todayData.emoneSales,
+                creditSales: todayData.creditSales
+              });
+              
               const todayUpdates = {
                 updatedAt: window.Timestamp.now()
               };
@@ -2834,71 +2913,106 @@
               // 支払方法は「編集前」のものを使う
               if (oldPaymentMethod === 'cash') {
                 todayUpdates.cashSales = Math.max(0, (todayData.cashSales || 0) - oldTotalAmount);
+                console.log(`   現金売上: ${todayData.cashSales} - ${oldTotalAmount} = ${todayUpdates.cashSales}`);
               } else if (oldPaymentMethod === 'emoney') {
                 todayUpdates.emoneSales = Math.max(0, (todayData.emoneSales || 0) - oldTotalAmount);
+                console.log(`   電子マネー売上: ${todayData.emoneSales} - ${oldTotalAmount} = ${todayUpdates.emoneSales}`);
               } else if (oldPaymentMethod === 'credit') {
                 todayUpdates.creditSales = Math.max(0, (todayData.creditSales || 0) - oldTotalAmount);
+                console.log(`   クレジット売上: ${todayData.creditSales} - ${oldTotalAmount} = ${todayUpdates.creditSales}`);
               }
               
               todayUpdates.totalSales = Math.max(0, (todayData.totalSales || 0) - oldTotalAmount);
+              console.log(`   合計売上: ${todayData.totalSales} - ${oldTotalAmount} = ${todayUpdates.totalSales}`);
               
-              console.log('💾 本日の売上を更新:', todayUpdates);
               await window.updateDoc(todaySalesRef, todayUpdates);
               console.log('✅ 本日の売上から減算完了');
             } else {
               console.warn('⚠️ 本日の売上データが見つかりません:', todayDateStr);
             }
+          } else {
+            console.log('ℹ️ 本日と元の日付が同じなので、STEP 1はスキップ');
           }
           
           // ============================================
           // STEP 2: 元の日付の売上を修正（正しい日付に計上）
           // ============================================
-          console.log('🔼 元の日付の売上に加算/修正:', originalDateStr);
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.log('🔼 STEP 2: 元の日付の売上を修正');
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.log('対象日付:', originalDateStr);
+          
           const originalSalesRef = window.getStoreDoc('dailySales', originalDateStr);
           const originalSalesDoc = await window.getDoc(originalSalesRef);
           
           if (originalSalesDoc.exists()) {
             const originalData = originalSalesDoc.data();
+            console.log('元の日付の売上データ（更新前）:', {
+              totalSales: originalData.totalSales,
+              cashSales: originalData.cashSales,
+              emoneSales: originalData.emoneSales,
+              creditSales: originalData.creditSales
+            });
+            
             const originalUpdates = {
               updatedAt: window.Timestamp.now()
             };
             
             // 【パターンA】元の日付と本日が異なる場合
             // → 元の日付に新しい内容を「加算」
-            if (originalDateStr !== todayDateStr) {
+            if (isDateDifferent) {
+              console.log('📌 パターンA: 異なる日付なので新しい内容を加算');
+              console.log('   加算する金額:', newTotalAmount);
+              console.log('   加算する支払方法:', paymentMethod);
+              
               if (paymentMethod === 'cash') {
                 originalUpdates.cashSales = (originalData.cashSales || 0) + newTotalAmount;
+                console.log(`   現金売上: ${originalData.cashSales} + ${newTotalAmount} = ${originalUpdates.cashSales}`);
               } else if (paymentMethod === 'emoney') {
                 originalUpdates.emoneSales = (originalData.emoneSales || 0) + newTotalAmount;
+                console.log(`   電子マネー売上: ${originalData.emoneSales} + ${newTotalAmount} = ${originalUpdates.emoneSales}`);
               } else if (paymentMethod === 'credit') {
                 originalUpdates.creditSales = (originalData.creditSales || 0) + newTotalAmount;
+                console.log(`   クレジット売上: ${originalData.creditSales} + ${newTotalAmount} = ${originalUpdates.creditSales}`);
               }
               originalUpdates.totalSales = (originalData.totalSales || 0) + newTotalAmount;
+              console.log(`   合計売上: ${originalData.totalSales} + ${newTotalAmount} = ${originalUpdates.totalSales}`);
             }
             // 【パターンB】元の日付と本日が同じ場合
             // → 支払方法や金額の変更を反映（差分計算）
             else {
+              console.log('📌 パターンB: 同じ日付なので差分を計算');
+              console.log('   旧:', oldPaymentMethod, oldTotalAmount);
+              console.log('   新:', paymentMethod, newTotalAmount);
+              
               // 旧支払方法から減算
               if (oldPaymentMethod === 'cash') {
                 originalUpdates.cashSales = (originalData.cashSales || 0) - oldTotalAmount;
+                console.log(`   現金売上（減算）: ${originalData.cashSales} - ${oldTotalAmount} = ${originalUpdates.cashSales}`);
               } else if (oldPaymentMethod === 'emoney') {
                 originalUpdates.emoneSales = (originalData.emoneSales || 0) - oldTotalAmount;
+                console.log(`   電子マネー売上（減算）: ${originalData.emoneSales} - ${oldTotalAmount} = ${originalUpdates.emoneSales}`);
               } else if (oldPaymentMethod === 'credit') {
                 originalUpdates.creditSales = (originalData.creditSales || 0) - oldTotalAmount;
+                console.log(`   クレジット売上（減算）: ${originalData.creditSales} - ${oldTotalAmount} = ${originalUpdates.creditSales}`);
               }
               
               // 新支払方法に加算
               if (paymentMethod === 'cash') {
                 originalUpdates.cashSales = (originalUpdates.cashSales !== undefined ? originalUpdates.cashSales : originalData.cashSales || 0) + newTotalAmount;
+                console.log(`   現金売上（加算）: + ${newTotalAmount} = ${originalUpdates.cashSales}`);
               } else if (paymentMethod === 'emoney') {
                 originalUpdates.emoneSales = (originalUpdates.emoneSales !== undefined ? originalUpdates.emoneSales : originalData.emoneSales || 0) + newTotalAmount;
+                console.log(`   電子マネー売上（加算）: + ${newTotalAmount} = ${originalUpdates.emoneSales}`);
               } else if (paymentMethod === 'credit') {
                 originalUpdates.creditSales = (originalUpdates.creditSales !== undefined ? originalUpdates.creditSales : originalData.creditSales || 0) + newTotalAmount;
+                console.log(`   クレジット売上（加算）: + ${newTotalAmount} = ${originalUpdates.creditSales}`);
               }
               
               // 合計売上の差額
               const amountDiff = newTotalAmount - oldTotalAmount;
               originalUpdates.totalSales = (originalData.totalSales || 0) + amountDiff;
+              console.log(`   合計売上: ${originalData.totalSales} + ${amountDiff} = ${originalUpdates.totalSales}`);
             }
             
             // 負の値にならないように調整
@@ -2907,13 +3021,16 @@
             if (originalUpdates.creditSales !== undefined) originalUpdates.creditSales = Math.max(0, originalUpdates.creditSales);
             if (originalUpdates.totalSales !== undefined) originalUpdates.totalSales = Math.max(0, originalUpdates.totalSales);
             
-            console.log('💾 元の日付の売上を更新:', originalUpdates);
+            console.log('最終更新データ:', originalUpdates);
             await window.updateDoc(originalSalesRef, originalUpdates);
             console.log('✅ 元の日付の売上修正完了');
           } else {
-            console.warn('⚠️ 元の日付の売上データが見つかりません:', originalDateStr);
+            console.error('❌ 元の日付の売上データが見つかりません:', originalDateStr);
           }
-        }
+        
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('🎉 売上データ修正完了');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
         
         showCustomAlert('注文を更新しました', '✅ 完了', '💾');
         closeEditOrderModal();
