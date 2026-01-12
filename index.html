@@ -105,22 +105,109 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// URLパラメータからテーブル番号を取得
+// 🆕 URLパラメータからstoreとtableを取得
 const urlParams = new URLSearchParams(window.location.search);
+const storeId = urlParams.get('store');
 const tableNumber = urlParams.get('table') || 'テイクアウト';
 
-// 注文開始ボタンをクリックした時の処理
-function startOrder() {
-  if (urlParams.get('table')) {
-    // テーブル番号がある場合（店内飲食）
-    window.location.href = 'menu.html?table=' + encodeURIComponent(tableNumber) + '&fromIndex=1';
-  } else {
-    // テーブル番号がない場合（テイクアウト）
-    window.location.href = 'menu.html';
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+console.log('📍 index.html 初期化');
+console.log('   店舗ID:', storeId);
+console.log('   テーブル:', tableNumber);
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+// 🆕 店舗別コレクション参照を取得
+window.getStoreCollection = function(collectionName) {
+  if (!storeId || storeId === 'shimoakatsuka') {
+    // 下赤塚店（旧システム）
+    return collection(db, collectionName);
+  }
+  // 新店舗
+  return collection(db, "stores", storeId, collectionName);
+};
+
+// 🆕 店舗画像を読み込む
+async function loadStoreImages() {
+  if (!storeId || storeId === 'shimoakatsuka') {
+    console.log('   下赤塚店: デフォルト画像を使用');
+    return; // デフォルト画像を使用
+  }
+  
+  try {
+    const { getDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+    const storeDoc = await getDoc(doc(db, 'stores', storeId));
+    
+    if (storeDoc.exists()) {
+      const storeData = storeDoc.data();
+      console.log('   店舗データ取得:', storeData.storeName);
+      
+      // 看板画像
+      if (storeData.mainImageUrl) {
+        const mainImg = document.querySelector('.top-image');
+        if (mainImg) {
+          mainImg.src = storeData.mainImageUrl;
+          console.log('   ✅ 看板画像を設定');
+        }
+      }
+      
+      // いらっしゃいませ画像
+      if (storeData.welcomeImageUrl) {
+        const welcomeImg = document.querySelector('img[alt="いらっしゃいませ"]');
+        if (welcomeImg) {
+          welcomeImg.src = storeData.welcomeImageUrl;
+          console.log('   ✅ いらっしゃいませ画像を設定');
+        }
+      }
+      
+      // ボタン画像
+      if (storeData.buttonImageUrl) {
+        const buttonImg = document.querySelector('img[alt="注文開始"]');
+        if (buttonImg) {
+          buttonImg.src = storeData.buttonImageUrl;
+          console.log('   ✅ ボタン画像を設定');
+        }
+      }
+      
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    }
+  } catch (error) {
+    console.error('   画像読み込みエラー:', error);
   }
 }
 
-// 呼び出しボタン
+// ページ読み込み時に画像を設定
+window.addEventListener('DOMContentLoaded', loadStoreImages);
+
+// 🆕 注文開始ボタンをクリックした時の処理
+function startOrder() {
+  console.log('🚀 注文開始ボタンクリック');
+  
+  let menuUrl = 'menu.html';
+  const params = new URLSearchParams();
+  
+  // storeパラメータを引き継ぐ（最重要！）
+  if (storeId) {
+    params.append('store', storeId);
+    console.log('   店舗IDを引き継ぎ:', storeId);
+  }
+  
+  // tableパラメータを引き継ぐ
+  if (urlParams.get('table')) {
+    params.append('table', tableNumber);
+    console.log('   テーブルを引き継ぎ:', tableNumber);
+  }
+  
+  // fromIndexパラメータを追加
+  params.append('fromIndex', '1');
+  
+  const finalUrl = menuUrl + '?' + params.toString();
+  console.log('   リダイレクト先:', finalUrl);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
+  window.location.href = finalUrl;
+}
+
+// 🆕 呼び出しボタン（店舗別対応）
 window.callStaff = async function() {
   try {
     const callData = {
@@ -128,15 +215,19 @@ window.callStaff = async function() {
       timestamp: Timestamp.now(),
       type: 'call'
     };
-    await addDoc(collection(db, 'staff_calls'), callData);
+    
+    // 店舗別コレクションに保存
+    await addDoc(window.getStoreCollection('staff_calls'), callData);
+    
     showCustomAlert('店員を呼びました!');
+    console.log('📞 店員呼び出し完了 - テーブル:', tableNumber, '店舗:', storeId || '下赤塚');
   } catch (e) {
     console.error('呼び出しエラー:', e);
     showCustomAlert('呼び出しに失敗しました');
   }
 };
 
-// お会計ボタン
+// 🆕 お会計ボタン（店舗別対応）
 window.requestBill = async function() {
   try {
     const billData = {
@@ -144,8 +235,12 @@ window.requestBill = async function() {
       timestamp: Timestamp.now(),
       type: 'bill'
     };
-    await addDoc(collection(db, 'staff_calls'), billData);
+    
+    // 店舗別コレクションに保存
+    await addDoc(window.getStoreCollection('staff_calls'), billData);
+    
     showCustomAlert('お会計です。');
+    console.log('💵 お会計呼び出し完了 - テーブル:', tableNumber, '店舗:', storeId || '下赤塚');
   } catch (e) {
     console.error('お会計エラー:', e);
     showCustomAlert('お会計呼び出しに失敗しました');
