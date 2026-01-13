@@ -367,14 +367,15 @@
       
       <form id="loginForm" onsubmit="handleLogin(event)">
         <div class="form-group">
-          <label>店舗名</label>
-          <input
-            type="text"
-            id="storeNameInput"
-            placeholder="店舗名を入力"
+          <label>店舗を選択</label>
+          <select
+            id="storeSelect"
             required
             autofocus
-          />
+            onchange="updatePasswordField()"
+          >
+            <option value="">店舗を選択してください</option>
+          </select>
         </div>
         
         <div class="form-group">
@@ -491,6 +492,47 @@
     let currentStoreName = null;
     let currentDate = null;
     let expenses = [];
+    let storesData = []; // 店舗データを保持
+
+    // 店舗リストを読み込み
+    async function loadStoresList() {
+      try {
+        const storesSnapshot = await window.getDocs(window.collection(window.db, 'stores'));
+        const storeSelect = document.getElementById('storeSelect');
+        
+        storesData = [];
+        storeSelect.innerHTML = '<option value="">店舗を選択してください</option>';
+        
+        // 旧システム用オプション
+        storeSelect.innerHTML += '<option value="old:下赤塚">下赤塚店（旧システム）</option>';
+        
+        storesSnapshot.forEach(doc => {
+          const data = doc.data();
+          storesData.push({ id: doc.id, ...data });
+          
+          const option = document.createElement('option');
+          option.value = doc.id;
+          option.textContent = data.storeName;
+          storeSelect.appendChild(option);
+        });
+        
+        console.log('✅ 店舗リスト読み込み完了:', storesData.length, '店舗');
+      } catch (e) {
+        console.error('❌ 店舗リスト読み込みエラー:', e);
+      }
+    }
+
+    // パスワードフィールドの更新（オプション）
+    function updatePasswordField() {
+      const storeSelect = document.getElementById('storeSelect');
+      const passwordInput = document.getElementById('passwordInput');
+      
+      if (storeSelect.value === 'old:下赤塚') {
+        passwordInput.placeholder = 'shimoakatsuka';
+      } else {
+        passwordInput.placeholder = 'パスワードを入力';
+      }
+    }
 
     // 今日の日付を設定
     function setToday() {
@@ -504,28 +546,59 @@
     async function handleLogin(e) {
       e.preventDefault();
       
-      const storeName = document.getElementById('storeNameInput').value.trim();
-      const password = document.getElementById('passwordInput').value;
+      const storeSelectValue = document.getElementById('storeSelect').value;
+      const password = document.getElementById('passwordInput').value.trim();
       const loginError = document.getElementById('loginError');
       
       try {
-        console.log('🔐 ログイン試行:', storeName);
+        console.log('🔐 ログイン試行:', storeSelectValue);
         
-        // Firestoreから店舗情報を取得
-        const storesSnapshot = await window.getDocs(window.collection(window.db, 'stores'));
-        
-        let authenticated = false;
-        let storeData = null;
-        
-        storesSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.storeName === storeName && data.password === password) {
-            authenticated = true;
-            storeData = { id: doc.id, ...data };
+        // 旧システムログイン
+        if (storeSelectValue === 'old:下赤塚') {
+          if (password === 'shimoakatsuka') {
+            currentStoreId = null;
+            currentStoreName = '下赤塚';
+            window.currentStoreId = null;
+            window.currentStoreName = currentStoreName;
+            
+            sessionStorage.setItem('keihiStoreId', '');
+            sessionStorage.setItem('keihiStoreName', currentStoreName);
+            sessionStorage.setItem('keihiAuthenticated', 'true');
+            
+            console.log('✅ 旧システムログイン成功');
+            
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'block';
+            
+            setToday();
+            await loadStaffList();
+            await loadExpenses();
+            return;
+          } else {
+            loginError.textContent = 'パスワードが正しくありません';
+            loginError.style.display = 'block';
+            document.getElementById('passwordInput').value = '';
+            setTimeout(() => { loginError.style.display = 'none'; }, 3000);
+            return;
           }
-        });
+        }
         
-        if (authenticated) {
+        // 新システムログイン
+        const storeData = storesData.find(s => s.id === storeSelectValue);
+        
+        if (!storeData) {
+          loginError.textContent = '店舗が見つかりません';
+          loginError.style.display = 'block';
+          setTimeout(() => { loginError.style.display = 'none'; }, 3000);
+          return;
+        }
+        
+        console.log('店舗データ:', storeData.storeName);
+        console.log('入力パスワード:', `"${password}"`);
+        console.log('保存パスワード:', `"${storeData.password}"`);
+        console.log('パスワード一致:', password === storeData.password);
+        
+        if (password === storeData.password) {
           currentStoreId = storeData.id;
           currentStoreName = storeData.storeName;
           window.currentStoreId = currentStoreId;
@@ -536,26 +609,6 @@
           sessionStorage.setItem('keihiAuthenticated', 'true');
           
           console.log('✅ ログイン成功:', currentStoreName);
-          
-          document.getElementById('loginScreen').style.display = 'none';
-          document.getElementById('mainContent').style.display = 'block';
-          
-          setToday();
-          await loadStaffList();
-          await loadExpenses();
-          
-        } else if (storeName === '下赤塚' && password === 'shimoakatsuka') {
-          // 旧システム用
-          currentStoreId = null;
-          currentStoreName = '下赤塚';
-          window.currentStoreId = null;
-          window.currentStoreName = currentStoreName;
-          
-          sessionStorage.setItem('keihiStoreId', '');
-          sessionStorage.setItem('keihiStoreName', currentStoreName);
-          sessionStorage.setItem('keihiAuthenticated', 'true');
-          
-          console.log('✅ 旧システムログイン成功:', currentStoreName);
           
           document.getElementById('loginScreen').style.display = 'none';
           document.getElementById('mainContent').style.display = 'block';
@@ -966,6 +1019,15 @@
 
     // ページ読み込み時
     window.addEventListener('DOMContentLoaded', () => {
+      // 店舗リストを読み込む
+      if (window.firebaseReady) {
+        loadStoresList();
+      } else {
+        window.addEventListener('firebaseReady', () => {
+          loadStoresList();
+        });
+      }
+      
       const isAuthenticated = sessionStorage.getItem('keihiAuthenticated');
       const savedStoreId = sessionStorage.getItem('keihiStoreId');
       const savedStoreName = sessionStorage.getItem('keihiStoreName');
