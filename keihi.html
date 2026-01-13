@@ -353,6 +353,99 @@
     .hidden {
       display: none !important;
     }
+    
+    /* カスタムアラート */
+    .custom-alert-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+      animation: fadeIn 0.2s ease-out;
+    }
+    
+    .custom-alert-box {
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+      max-width: 400px;
+      width: 90%;
+      animation: slideUp 0.3s ease-out;
+    }
+    
+    .custom-alert-icon {
+      font-size: 48px;
+      text-align: center;
+      margin-bottom: 15px;
+    }
+    
+    .custom-alert-title {
+      font-size: 20px;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 10px;
+      color: #333;
+    }
+    
+    .custom-alert-message {
+      font-size: 16px;
+      text-align: center;
+      margin-bottom: 20px;
+      color: #666;
+    }
+    
+    .custom-alert-buttons {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    
+    .custom-alert-btn {
+      padding: 12px 30px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    .custom-alert-btn-primary {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      color: white;
+    }
+    
+    .custom-alert-btn-secondary {
+      background: linear-gradient(135deg, #999 0%, #777 100%);
+      color: white;
+    }
+    
+    .custom-alert-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
   </style>
 </head>
 <body>
@@ -360,7 +453,6 @@
   <div id="loginScreen">
     <div class="login-box">
       <div class="login-title">
-        <div class="login-icon">💰</div>
         <h2>経費管理システム</h2>
         <p>店舗情報を入力してください</p>
       </div>
@@ -492,6 +584,82 @@
     let currentDate = null;
     let expenses = [];
     let storesData = []; // 店舗データを保持
+
+    // カスタムアラート表示
+    function showCustomAlert(message, title = '通知', icon = 'ℹ️') {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'custom-alert-overlay';
+        overlay.innerHTML = `
+          <div class="custom-alert-box">
+            <div class="custom-alert-icon">${icon}</div>
+            <div class="custom-alert-title">${title}</div>
+            <div class="custom-alert-message">${message}</div>
+            <div class="custom-alert-buttons">
+              <button class="custom-alert-btn custom-alert-btn-primary" onclick="this.closest('.custom-alert-overlay').remove()">OK</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+        
+        setTimeout(() => {
+          overlay.querySelector('.custom-alert-btn').focus();
+        }, 100);
+        
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            overlay.remove();
+            resolve();
+          }
+        });
+        
+        overlay.querySelector('.custom-alert-btn').addEventListener('click', () => {
+          resolve();
+        });
+      });
+    }
+
+    // カスタム確認ダイアログ
+    function showCustomConfirm(message, title = '確認', icon = '❓') {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'custom-alert-overlay';
+        overlay.innerHTML = `
+          <div class="custom-alert-box">
+            <div class="custom-alert-icon">${icon}</div>
+            <div class="custom-alert-title">${title}</div>
+            <div class="custom-alert-message">${message}</div>
+            <div class="custom-alert-buttons">
+              <button class="custom-alert-btn custom-alert-btn-secondary" id="cancelBtn">キャンセル</button>
+              <button class="custom-alert-btn custom-alert-btn-primary" id="confirmBtn">OK</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+        
+        const confirmBtn = overlay.querySelector('#confirmBtn');
+        const cancelBtn = overlay.querySelector('#cancelBtn');
+        
+        confirmBtn.focus();
+        
+        confirmBtn.addEventListener('click', () => {
+          overlay.remove();
+          resolve(true);
+        });
+        
+        cancelBtn.addEventListener('click', () => {
+          overlay.remove();
+          resolve(false);
+        });
+        
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            overlay.remove();
+            resolve(false);
+          }
+        });
+      });
+    }
 
     // 店舗リストを読み込み
     async function loadStoresList() {
@@ -687,7 +855,7 @@
       const amount = parseFloat(document.getElementById('amount').value);
       
       if (!storeName || !category || !detail || !amount) {
-        alert('すべての項目を入力してください');
+        showCustomAlert('すべての項目を入力してください', '⚠️ 入力エラー', '⚠️');
         return;
       }
       
@@ -712,8 +880,9 @@
     }
 
     // 支出を削除
-    function deleteExpense(index) {
-      if (confirm('この支出を削除しますか？')) {
+    async function deleteExpense(index) {
+      const confirmed = await showCustomConfirm('この支出を削除しますか？', '🗑️ 削除確認', '🗑️');
+      if (confirmed) {
         expenses.splice(index, 1);
         renderExpenses();
         updateSummary();
@@ -768,7 +937,7 @@
     async function saveExpenses() {
       try {
         if (!currentDate) {
-          alert('日付を選択してください');
+          await showCustomAlert('日付を選択してください', '⚠️ エラー', '⚠️');
           return;
         }
         
@@ -788,11 +957,11 @@
         });
         
         console.log('✅ 支出保存完了');
-        alert('支出を保存しました');
+        await showCustomAlert('支出を保存しました', '✅ 保存完了', '✅');
         
       } catch (e) {
         console.error('❌ 支出保存エラー:', e);
-        alert('支出の保存に失敗しました: ' + e.message);
+        await showCustomAlert('支出の保存に失敗しました: ' + e.message, '❌ エラー', '❌');
       }
     }
 
@@ -936,11 +1105,11 @@
         // 総合計
         const grandTotal = tax8Total + tax10Total + transportTotal;
         excelData.push(['', '', '', '', '']);
-        excelData.push(['8%合計金額:', tax8Total, '', '', '']);
-        excelData.push(['10%合計金額:', tax10Total, '', '', '']);
-        excelData.push(['交通費合計金額:', transportTotal, '', '', '']);
+        excelData.push(['', '', '', '8%合計金額:', tax8Total]);
+        excelData.push(['', '', '', '10%合計金額:', tax10Total]);
+        excelData.push(['', '', '', '交通費合計金額:', transportTotal]);
         excelData.push(['', '', '', '', '']);
-        excelData.push(['合計の合計金額:', grandTotal, '', '', '']);
+        excelData.push(['', '', '', '合計:', grandTotal]);
         
         // SheetJSでExcel生成
         const wb = XLSX.utils.book_new();
@@ -990,14 +1159,55 @@
               };
             }
             
-            // 合計行のスタイル
-            if (excelData[R] && excelData[R][3] && (excelData[R][3].includes('合計') || excelData[R][0].includes('合計'))) {
+            // 合計行のスタイル（8%、10%、交通費の各区分）
+            if (excelData[R] && excelData[R][3] && 
+                (excelData[R][3] === '8%合計:' || excelData[R][3] === '10%合計:' || excelData[R][3] === '交通費合計:')) {
               ws[cellAddress].s.fill = {
                 patternType: 'solid',
-                fgColor: { rgb: 'FFFFCC' }
+                fgColor: { rgb: 'FFE599' }  // 薄い黄色
               };
               ws[cellAddress].s.font = {
-                bold: true
+                bold: true,
+                sz: 11
+              };
+              // 金額列は右寄せ
+              if (C === 4) {
+                ws[cellAddress].s.alignment = {
+                  horizontal: 'right'
+                };
+              }
+            }
+            
+            // 最終合計行のスタイル（8%合計金額、10%合計金額、交通費合計金額、合計）
+            if (excelData[R] && excelData[R][3] && 
+                (excelData[R][3] === '8%合計金額:' || excelData[R][3] === '10%合計金額:' || 
+                 excelData[R][3] === '交通費合計金額:' || excelData[R][3] === '合計:')) {
+              ws[cellAddress].s.fill = {
+                patternType: 'solid',
+                fgColor: { rgb: 'FFC7CE' }  // 薄いピンク
+              };
+              ws[cellAddress].s.font = {
+                bold: true,
+                sz: 12
+              };
+              // 金額列は右寄せ
+              if (C === 4) {
+                ws[cellAddress].s.alignment = {
+                  horizontal: 'right'
+                };
+              }
+            }
+            
+            // 「合計:」行は特に強調
+            if (excelData[R] && excelData[R][3] === '合計:') {
+              ws[cellAddress].s.fill = {
+                patternType: 'solid',
+                fgColor: { rgb: 'FFB6C1' }  // 濃いピンク
+              };
+              ws[cellAddress].s.font = {
+                bold: true,
+                sz: 14,
+                color: { rgb: 'FF0000' }  // 赤文字
               };
             }
           }
@@ -1009,17 +1219,18 @@
         XLSX.writeFile(wb, fileName);
         
         console.log('✅ 経費出力完了:', fileName);
-        alert(`経費を出力しました！\n${fileName}`);
+        await showCustomAlert(`経費を出力しました！\n${fileName}`, '✅ 出力完了', '✅');
         
       } catch (e) {
         console.error('❌ 経費出力エラー:', e);
-        alert('経費の出力に失敗しました: ' + e.message);
+        await showCustomAlert('経費の出力に失敗しました: ' + e.message, '❌ エラー', '❌');
       }
     }
 
     // ログアウト
     async function handleLogout() {
-      if (confirm('ログアウトしますか？\n保存されていないデータは失われます。')) {
+      const confirmed = await showCustomConfirm('ログアウトしますか？\n保存されていないデータは失われます。', '🚪 ログアウト確認', '🚪');
+      if (confirmed) {
         sessionStorage.removeItem('keihiAuthenticated');
         sessionStorage.removeItem('keihiStoreId');
         sessionStorage.removeItem('keihiStoreName');
@@ -1028,8 +1239,6 @@
         location.reload();
       }
     }
-
-    // ページ読み込み時
     window.addEventListener('DOMContentLoaded', () => {
       // 店舗リストを読み込む
       if (window.firebaseReady) {
