@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <title>経費管理システム - 粉もん屋 八</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, query, where, getDocs, updateDoc, doc, Timestamp, onSnapshot, addDoc, orderBy, getDoc, setDoc, limit, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+    
+    const firebaseConfig = {
+      apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+      authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+      projectId: "takoyaki-order-system-bacd7",
+      storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+      messagingSenderId: "104494752890",
+      appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+    
+    window.db = db;
+    window.auth = auth;
+    window.signOut = signOut;
+    window.collection = collection;
+    window.query = query;
+    window.where = where;
+    window.getDocs = getDocs;
+    window.updateDoc = updateDoc;
+    window.doc = doc;
+    window.Timestamp = Timestamp;
+    window.onSnapshot = onSnapshot;
+    window.addDoc = addDoc;
+    window.orderBy = orderBy;
+    window.getDoc = getDoc;
+    window.setDoc = setDoc;
+    window.limit = limit;
+    window.deleteDoc = deleteDoc;
+    
+    // 店舗別コレクション参照
+    window.getStoreCollection = function(collectionName) {
+      if (!window.currentStoreId || window.currentStoreId === '') {
+        const oldPathMap = {
+          'expenses': 'expenses',
+          'employees': 'kintai_employees'
+        };
+        return collection(db, oldPathMap[collectionName] || collectionName);
+      }
+      return collection(db, 'stores', window.currentStoreId, collectionName);
+    };
+    
+    window.getStoreDoc = function(collectionName, docId) {
+      if (!window.currentStoreId || window.currentStoreId === '') {
+        const oldPathMap = {
+          'expenses': 'expenses',
+          'employees': 'kintai_employees'
+        };
+        return doc(db, oldPathMap[collectionName] || collectionName, docId);
+      }
+      return doc(db, 'stores', window.currentStoreId, collectionName, docId);
+    };
+    
+    window.firebaseReady = true;
+    console.log('✅ Firebase初期化完了');
+    window.dispatchEvent(new Event('firebaseReady'));
+  </script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 0;
+      margin: 0;
+    }
+    
+    /* ログイン画面 */
+    #loginScreen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    
+    .login-box {
+      background: white;
+      padding: 40px;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-width: 400px;
+      width: 90%;
+    }
+    
+    .login-title {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    
+    .login-icon {
+      font-size: 60px;
+      margin-bottom: 10px;
+    }
+    
+    .login-box h2 {
+      font-size: 24px;
+      font-weight: bold;
+      color: #333;
+      margin: 0;
+    }
+    
+    .login-box p {
+      color: #666;
+      margin-top: 10px;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    .form-group label {
+      display: block;
+      color: #333;
+      font-weight: bold;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    
+    .form-group input {
+      width: 100%;
+      padding: 15px;
+      border: 2px solid #ddd;
+      border-radius: 10px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+    
+    .form-group input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    .btn-login {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    .btn-login:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px rgba(102,126,234,0.4);
+    }
+    
+    #loginError {
+      display: none;
+      margin-top: 20px;
+      padding: 15px;
+      background: #fee;
+      border: 1px solid #fcc;
+      border-radius: 10px;
+      color: #c00;
+      text-align: center;
+      font-weight: bold;
+    }
+    
+    /* メインコンテンツ */
+    #mainContent {
+      display: none;
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    .header {
+      background: white;
+      padding: 20px;
+      border-radius: 15px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+    
+    .header h1 {
+      font-size: 24px;
+      color: #333;
+      margin: 0;
+    }
+    
+    .header-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    
+    .btn {
+      padding: 12px 24px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: all 0.3s;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      color: white;
+    }
+    
+    .btn-secondary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .btn-danger {
+      background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+      color: white;
+    }
+    
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    
+    .content-box {
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    
+    .form-field {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .form-field label {
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 5px;
+      font-size: 14px;
+    }
+    
+    .form-field input,
+    .form-field select {
+      padding: 10px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    
+    .form-field input:focus,
+    .form-field select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    .expense-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    
+    .expense-table th,
+    .expense-table td {
+      border: 1px solid #ddd;
+      padding: 12px;
+      text-align: left;
+    }
+    
+    .expense-table th {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      font-weight: bold;
+    }
+    
+    .expense-table tr:nth-child(even) {
+      background: #f9f9f9;
+    }
+    
+    .expense-table tr:hover {
+      background: #f0f0f0;
+    }
+    
+    .btn-delete {
+      background: #f44336;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .btn-delete:hover {
+      background: #d32f2f;
+    }
+    
+    .summary-box {
+      margin-top: 30px;
+      padding: 20px;
+      background: linear-gradient(135deg, #fff3cd 0%, #fff8dc 100%);
+      border-radius: 10px;
+      border: 2px solid #ffc107;
+    }
+    
+    .summary-box h3 {
+      color: #856404;
+      margin-bottom: 15px;
+    }
+    
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #ffc107;
+    }
+    
+    .summary-row:last-child {
+      border-bottom: none;
+      font-weight: bold;
+      font-size: 18px;
+      color: #333;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <!-- ログイン画面 -->
+  <div id="loginScreen">
+    <div class="login-box">
+      <div class="login-title">
+        <div class="login-icon">💰</div>
+        <h2>経費管理システム</h2>
+        <p>店舗情報を入力してください</p>
+      </div>
+      
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label>店舗名</label>
+          <input
+            type="text"
+            id="storeNameInput"
+            placeholder="店舗名を入力"
+            required
+            autofocus
+          />
+        </div>
+        
+        <div class="form-group">
+          <label>パスワード</label>
+          <input
+            type="password"
+            id="passwordInput"
+            placeholder="パスワードを入力"
+            required
+          />
+        </div>
+        
+        <button type="submit" class="btn-login">ログイン</button>
+      </form>
+      
+      <div id="loginError"></div>
+    </div>
+  </div>
+
+  <!-- メインコンテンツ -->
+  <div id="mainContent">
+    <div class="header">
+      <h1>💰 経費管理システム</h1>
+      <div class="header-actions">
+        <select id="staffSelect" style="padding: 10px; border-radius: 8px; border: 2px solid #667eea;">
+          <option value="">担当者を選択</option>
+        </select>
+        <input type="date" id="dateSelect" style="padding: 10px; border-radius: 8px; border: 2px solid #667eea;" />
+        <button class="btn btn-secondary" onclick="exportExpenses()">📊 経費出力</button>
+        <button class="btn btn-danger" onclick="handleLogout()">ログアウト</button>
+      </div>
+    </div>
+
+    <div class="content-box">
+      <h2 style="margin-bottom: 20px; color: #333;">支出入力</h2>
+      
+      <div class="form-row">
+        <div class="form-field">
+          <label>店名</label>
+          <input type="text" id="storeName" placeholder="例: ウェルシア" />
+        </div>
+        
+        <div class="form-field">
+          <label>勘定科目</label>
+          <select id="category">
+            <option value="">選択してください</option>
+            <option value="材料費">材料費（8%）</option>
+            <option value="日用品">日用品（10%）</option>
+            <option value="水光熱費">水光熱費（10%）</option>
+            <option value="雑費・雑品">雑費・雑品（10%）</option>
+            <option value="交通費">交通費（10%）</option>
+            <option value="その他">その他（10%）</option>
+          </select>
+        </div>
+        
+        <div class="form-field">
+          <label>詳細</label>
+          <input type="text" id="detail" placeholder="例: ティッシュ" />
+        </div>
+        
+        <div class="form-field">
+          <label>金額</label>
+          <input type="number" id="amount" placeholder="398" />
+        </div>
+      </div>
+      
+      <button class="btn btn-primary" onclick="addExpense()" style="width: 100%;">
+        ➕ 支出を追加
+      </button>
+
+      <table class="expense-table">
+        <thead>
+          <tr>
+            <th>店名</th>
+            <th>勘定科目</th>
+            <th>詳細</th>
+            <th>金額</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="expenseList">
+          <!-- 動的に追加 -->
+        </tbody>
+      </table>
+
+      <div class="summary-box">
+        <h3>📊 本日の集計</h3>
+        <div class="summary-row">
+          <span>8% 合計</span>
+          <span id="tax8Total">¥0</span>
+        </div>
+        <div class="summary-row">
+          <span>10% 合計</span>
+          <span id="tax10Total">¥0</span>
+        </div>
+        <div class="summary-row">
+          <span>交通費 合計</span>
+          <span id="transportTotal">¥0</span>
+        </div>
+        <div class="summary-row">
+          <span>総合計</span>
+          <span id="grandTotal">¥0</span>
+        </div>
+      </div>
+      
+      <button class="btn btn-secondary" onclick="saveExpenses()" style="width: 100%; margin-top: 20px;">
+        💾 保存する
+      </button>
+    </div>
+  </div>
+
+  <script>
+    let currentStoreId = null;
+    let currentStoreName = null;
+    let currentDate = null;
+    let expenses = [];
+
+    // 今日の日付を設定
+    function setToday() {
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      document.getElementById('dateSelect').value = today;
+      currentDate = today;
+    }
+
+    // ログイン処理
+    async function handleLogin(e) {
+      e.preventDefault();
+      
+      const storeName = document.getElementById('storeNameInput').value.trim();
+      const password = document.getElementById('passwordInput').value;
+      const loginError = document.getElementById('loginError');
+      
+      try {
+        console.log('🔐 ログイン試行:', storeName);
+        
+        // Firestoreから店舗情報を取得
+        const storesSnapshot = await window.getDocs(window.collection(window.db, 'stores'));
+        
+        let authenticated = false;
+        let storeData = null;
+        
+        storesSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.storeName === storeName && data.password === password) {
+            authenticated = true;
+            storeData = { id: doc.id, ...data };
+          }
+        });
+        
+        if (authenticated) {
+          currentStoreId = storeData.id;
+          currentStoreName = storeData.storeName;
+          window.currentStoreId = currentStoreId;
+          window.currentStoreName = currentStoreName;
+          
+          sessionStorage.setItem('keihiStoreId', currentStoreId);
+          sessionStorage.setItem('keihiStoreName', currentStoreName);
+          sessionStorage.setItem('keihiAuthenticated', 'true');
+          
+          console.log('✅ ログイン成功:', currentStoreName);
+          
+          document.getElementById('loginScreen').style.display = 'none';
+          document.getElementById('mainContent').style.display = 'block';
+          
+          setToday();
+          await loadStaffList();
+          await loadExpenses();
+          
+        } else if (storeName === '下赤塚' && password === 'shimoakatsuka') {
+          // 旧システム用
+          currentStoreId = null;
+          currentStoreName = '下赤塚';
+          window.currentStoreId = null;
+          window.currentStoreName = currentStoreName;
+          
+          sessionStorage.setItem('keihiStoreId', '');
+          sessionStorage.setItem('keihiStoreName', currentStoreName);
+          sessionStorage.setItem('keihiAuthenticated', 'true');
+          
+          console.log('✅ 旧システムログイン成功:', currentStoreName);
+          
+          document.getElementById('loginScreen').style.display = 'none';
+          document.getElementById('mainContent').style.display = 'block';
+          
+          setToday();
+          await loadStaffList();
+          await loadExpenses();
+          
+        } else {
+          loginError.textContent = 'パスワードが正しくありません';
+          loginError.style.display = 'block';
+          document.getElementById('passwordInput').value = '';
+          
+          setTimeout(() => {
+            loginError.style.display = 'none';
+          }, 3000);
+        }
+        
+      } catch (error) {
+        console.error('❌ ログインエラー:', error);
+        loginError.textContent = 'ログインエラー: ' + error.message;
+        loginError.style.display = 'block';
+      }
+    }
+
+    // 担当者リスト読み込み
+    async function loadStaffList() {
+      try {
+        const employeesSnapshot = await window.getDocs(window.getStoreCollection('employees'));
+        const select = document.getElementById('staffSelect');
+        
+        select.innerHTML = '<option value="">担当者を選択</option>';
+        
+        employeesSnapshot.forEach(doc => {
+          const data = doc.data();
+          const option = document.createElement('option');
+          option.value = data.name;
+          option.textContent = data.name;
+          select.appendChild(option);
+        });
+        
+        console.log('✅ 担当者リスト読み込み完了');
+      } catch (e) {
+        console.error('担当者リスト読み込みエラー:', e);
+      }
+    }
+
+    // 日付変更時
+    document.addEventListener('DOMContentLoaded', () => {
+      const dateSelect = document.getElementById('dateSelect');
+      if (dateSelect) {
+        dateSelect.addEventListener('change', () => {
+          currentDate = dateSelect.value;
+          loadExpenses();
+        });
+      }
+    });
+
+    // 支出を追加
+    function addExpense() {
+      const storeName = document.getElementById('storeName').value.trim();
+      const category = document.getElementById('category').value;
+      const detail = document.getElementById('detail').value.trim();
+      const amount = parseFloat(document.getElementById('amount').value);
+      
+      if (!storeName || !category || !detail || !amount) {
+        alert('すべての項目を入力してください');
+        return;
+      }
+      
+      const expense = {
+        storeName: storeName,
+        category: category,
+        detail: detail,
+        amount: amount,
+        date: currentDate
+      };
+      
+      expenses.push(expense);
+      
+      // フォームをクリア
+      document.getElementById('storeName').value = '';
+      document.getElementById('category').value = '';
+      document.getElementById('detail').value = '';
+      document.getElementById('amount').value = '';
+      
+      renderExpenses();
+      updateSummary();
+    }
+
+    // 支出を削除
+    function deleteExpense(index) {
+      if (confirm('この支出を削除しますか？')) {
+        expenses.splice(index, 1);
+        renderExpenses();
+        updateSummary();
+      }
+    }
+
+    // 支出一覧を表示
+    function renderExpenses() {
+      const tbody = document.getElementById('expenseList');
+      tbody.innerHTML = '';
+      
+      expenses.forEach((expense, index) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${expense.storeName}</td>
+          <td>${expense.category}</td>
+          <td>${expense.detail}</td>
+          <td>¥${expense.amount.toLocaleString()}</td>
+          <td>
+            <button class="btn-delete" onclick="deleteExpense(${index})">削除</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // 集計を更新
+    function updateSummary() {
+      let tax8 = 0;
+      let tax10 = 0;
+      let transport = 0;
+      
+      expenses.forEach(expense => {
+        if (expense.category === '材料費') {
+          tax8 += expense.amount;
+        } else if (expense.category === '交通費') {
+          transport += expense.amount;
+        } else {
+          tax10 += expense.amount;
+        }
+      });
+      
+      const total = tax8 + tax10 + transport;
+      
+      document.getElementById('tax8Total').textContent = '¥' + tax8.toLocaleString();
+      document.getElementById('tax10Total').textContent = '¥' + tax10.toLocaleString();
+      document.getElementById('transportTotal').textContent = '¥' + transport.toLocaleString();
+      document.getElementById('grandTotal').textContent = '¥' + total.toLocaleString();
+    }
+
+    // Firestoreに保存
+    async function saveExpenses() {
+      try {
+        if (!currentDate) {
+          alert('日付を選択してください');
+          return;
+        }
+        
+        const tax8 = expenses.filter(e => e.category === '材料費').reduce((sum, e) => sum + e.amount, 0);
+        const tax10 = expenses.filter(e => e.category !== '材料費' && e.category !== '交通費').reduce((sum, e) => sum + e.amount, 0);
+        const transport = expenses.filter(e => e.category === '交通費').reduce((sum, e) => sum + e.amount, 0);
+        const total = tax8 + tax10 + transport;
+        
+        await window.setDoc(window.getStoreDoc('expenses', currentDate), {
+          date: currentDate,
+          items: expenses,
+          tax8Total: tax8,
+          tax10Total: tax10,
+          transportTotal: transport,
+          total: total,
+          updatedAt: window.Timestamp.now()
+        });
+        
+        console.log('✅ 支出保存完了');
+        alert('支出を保存しました');
+        
+      } catch (e) {
+        console.error('❌ 支出保存エラー:', e);
+        alert('支出の保存に失敗しました: ' + e.message);
+      }
+    }
+
+    // Firestoreから読み込み
+    async function loadExpenses() {
+      try {
+        if (!currentDate) return;
+        
+        const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', currentDate));
+        
+        if (expenseDoc.exists()) {
+          const data = expenseDoc.data();
+          expenses = data.items || [];
+          renderExpenses();
+          updateSummary();
+          console.log('✅ 支出データ読み込み完了:', currentDate);
+        } else {
+          expenses = [];
+          renderExpenses();
+          updateSummary();
+          console.log('ℹ️ この日の支出データはありません:', currentDate);
+        }
+        
+      } catch (e) {
+        console.error('❌ 支出読み込みエラー:', e);
+      }
+    }
+
+    // 経費出力（Excel）
+    async function exportExpenses() {
+      try {
+        console.log('📊 経費出力開始');
+        
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        
+        // 月の全データを取得
+        const expensesSnapshot = await window.getDocs(window.getStoreCollection('expenses'));
+        
+        const monthlyExpenses = [];
+        expensesSnapshot.forEach(doc => {
+          const data = doc.data();
+          const date = data.date;
+          
+          if (date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
+            if (data.items && Array.isArray(data.items)) {
+              data.items.forEach(item => {
+                monthlyExpenses.push({
+                  date: date,
+                  storeName: item.storeName,
+                  category: item.category,
+                  detail: item.detail,
+                  amount: item.amount
+                });
+              });
+            }
+          }
+        });
+        
+        // 日付順にソート
+        monthlyExpenses.sort((a, b) => a.date.localeCompare(b.date));
+        
+        console.log('取得したデータ:', monthlyExpenses.length, '件');
+        
+        // Excelデータ作成
+        const excelData = [];
+        
+        // ヘッダー
+        excelData.push(['経費明細書', '', '', '', '']);
+        excelData.push([`${year}年${month}月`, '', '', '', '']);
+        excelData.push(['出力日時:', new Date().toLocaleString('ja-JP'), '', '', '']);
+        excelData.push(['', '', '', '', '']);
+        
+        // 8%区分
+        excelData.push(['【8%区分】', '', '', '', '']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        
+        const tax8Items = monthlyExpenses.filter(e => e.category === '材料費');
+        let tax8Total = 0;
+        
+        tax8Items.forEach(item => {
+          const dateStr = item.date.split('-').slice(1).join('/');
+          excelData.push([
+            dateStr,
+            item.storeName,
+            item.category,
+            item.detail,
+            item.amount
+          ]);
+          tax8Total += item.amount;
+        });
+        
+        excelData.push(['', '', '', '8%合計:', tax8Total]);
+        excelData.push(['', '', '', '', '']);
+        
+        // 10%区分
+        excelData.push(['【10%区分】', '', '', '', '']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        
+        const tax10Items = monthlyExpenses.filter(e => e.category !== '材料費' && e.category !== '交通費');
+        let tax10Total = 0;
+        
+        tax10Items.forEach(item => {
+          const dateStr = item.date.split('-').slice(1).join('/');
+          excelData.push([
+            dateStr,
+            item.storeName,
+            item.category,
+            item.detail,
+            item.amount
+          ]);
+          tax10Total += item.amount;
+        });
+        
+        excelData.push(['', '', '', '10%合計:', tax10Total]);
+        excelData.push(['', '', '', '', '']);
+        
+        // 交通費区分
+        excelData.push(['【交通費区分】', '', '', '', '']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        
+        const transportItems = monthlyExpenses.filter(e => e.category === '交通費');
+        let transportTotal = 0;
+        
+        transportItems.forEach(item => {
+          const dateStr = item.date.split('-').slice(1).join('/');
+          excelData.push([
+            dateStr,
+            item.storeName,
+            item.category,
+            item.detail,
+            item.amount
+          ]);
+          transportTotal += item.amount;
+        });
+        
+        excelData.push(['', '', '', '交通費合計:', transportTotal]);
+        excelData.push(['', '', '', '', '']);
+        
+        // 総合計
+        const grandTotal = tax8Total + tax10Total + transportTotal;
+        excelData.push(['', '', '', '', '']);
+        excelData.push(['8%合計金額:', tax8Total, '', '', '']);
+        excelData.push(['10%合計金額:', tax10Total, '', '', '']);
+        excelData.push(['交通費合計金額:', transportTotal, '', '', '']);
+        excelData.push(['', '', '', '', '']);
+        excelData.push(['合計の合計金額:', grandTotal, '', '', '']);
+        
+        // SheetJSでExcel生成
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+        
+        // 列幅設定
+        ws['!cols'] = [
+          { wch: 10 },  // 日付
+          { wch: 15 },  // 店名
+          { wch: 12 },  // 勘定科目
+          { wch: 25 },  // 詳細
+          { wch: 12 }   // 金額
+        ];
+        
+        // 罫線とスタイル設定
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        
+        for (let R = range.s.r; R <= range.e.r; R++) {
+          for (let C = range.s.c; C <= range.e.c; C++) {
+            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+            
+            if (!ws[cellAddress]) {
+              ws[cellAddress] = { t: 's', v: '' };
+            }
+            
+            if (!ws[cellAddress].s) {
+              ws[cellAddress].s = {};
+            }
+            
+            // 罫線
+            ws[cellAddress].s.border = {
+              top: { style: 'thin', color: { rgb: '000000' } },
+              bottom: { style: 'thin', color: { rgb: '000000' } },
+              left: { style: 'thin', color: { rgb: '000000' } },
+              right: { style: 'thin', color: { rgb: '000000' } }
+            };
+            
+            // ヘッダー行のスタイル
+            if (R === 0 || (excelData[R] && excelData[R][0] && excelData[R][0].includes('【'))) {
+              ws[cellAddress].s.fill = {
+                patternType: 'solid',
+                fgColor: { rgb: 'D3D3D3' }
+              };
+              ws[cellAddress].s.font = {
+                bold: true,
+                sz: 12
+              };
+            }
+            
+            // 合計行のスタイル
+            if (excelData[R] && excelData[R][3] && (excelData[R][3].includes('合計') || excelData[R][0].includes('合計'))) {
+              ws[cellAddress].s.fill = {
+                patternType: 'solid',
+                fgColor: { rgb: 'FFFFCC' }
+              };
+              ws[cellAddress].s.font = {
+                bold: true
+              };
+            }
+          }
+        }
+        
+        XLSX.utils.book_append_sheet(wb, ws, '経費明細');
+        
+        const fileName = `経費明細_${year}年${month}月.xlsx`;
+        XLSX.writeFile(wb, fileName);
+        
+        console.log('✅ 経費出力完了:', fileName);
+        alert(`経費を出力しました！\n${fileName}`);
+        
+      } catch (e) {
+        console.error('❌ 経費出力エラー:', e);
+        alert('経費の出力に失敗しました: ' + e.message);
+      }
+    }
+
+    // ログアウト
+    async function handleLogout() {
+      if (confirm('ログアウトしますか？\n保存されていないデータは失われます。')) {
+        sessionStorage.removeItem('keihiAuthenticated');
+        sessionStorage.removeItem('keihiStoreId');
+        sessionStorage.removeItem('keihiStoreName');
+        window.currentStoreId = null;
+        window.currentStoreName = null;
+        location.reload();
+      }
+    }
+
+    // ページ読み込み時
+    window.addEventListener('DOMContentLoaded', () => {
+      const isAuthenticated = sessionStorage.getItem('keihiAuthenticated');
+      const savedStoreId = sessionStorage.getItem('keihiStoreId');
+      const savedStoreName = sessionStorage.getItem('keihiStoreName');
+      
+      if (isAuthenticated === 'true' && savedStoreName) {
+        currentStoreId = (savedStoreId && savedStoreId !== '') ? savedStoreId : null;
+        currentStoreName = savedStoreName;
+        window.currentStoreId = currentStoreId;
+        window.currentStoreName = currentStoreName;
+        
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('mainContent').style.display = 'block';
+        
+        setToday();
+        
+        if (window.firebaseReady) {
+          loadStaffList();
+          loadExpenses();
+        } else {
+          window.addEventListener('firebaseReady', () => {
+            loadStaffList();
+            loadExpenses();
+          });
+        }
+        
+        console.log('✅ セッション復元:', currentStoreName);
+      }
+    });
+  </script>
+</body>
+</html>
