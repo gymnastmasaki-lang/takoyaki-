@@ -2788,6 +2788,7 @@
         // 元のpaidAtから日付を取得（売上データ更新用）
         let originalDateStr = null;
         let useTimestamp = false;
+        let isUnpaidOrder = false;
         
         try {
           let dateToUse = null;
@@ -2801,8 +2802,9 @@
           else if (currentEditingOrder.timestamp) {
             dateToUse = currentEditingOrder.timestamp.toDate();
             useTimestamp = true;
+            isUnpaidOrder = true;
             console.log('📅 timestampを使用:', dateToUse);
-            console.log('⚠️ paidAtがないため、timestampから日付を取得しました');
+            console.log('⚠️ この注文は未会計です');
           }
           
           if (dateToUse) {
@@ -2856,26 +2858,38 @@
           totalAmount: currentEditingOrder.totalAmount
         };
         
-        // 🆕 timestampから日付を取得した場合は、paidAtを設定
-        if (useTimestamp && !currentEditingOrder.paidAt) {
-          console.log('💡 timestampから取得したため、paidAtを設定します');
+        // 🆕 未会計の注文を編集した場合は、会計済みにする
+        if (isUnpaidOrder) {
+          console.log('💡 未会計の注文なので、会計済みとして更新します');
+          console.log('   元の注文日時:', currentEditingOrder.timestamp.toDate().toLocaleString('ja-JP'));
+          console.log('   paidAtとして設定する日時:', currentEditingOrder.timestamp.toDate().toLocaleString('ja-JP'));
+          
+          // timestampをpaidAtとして設定（元の注文日時で会計済みにする）
           orderUpdates.paidAt = currentEditingOrder.timestamp;
           orderUpdates.notifiedPaid = true;
+          
+          showCustomAlert(
+            `注文を更新し、会計済みとしました\n\n会計日時: ${originalDateStr}`,
+            '✅ 完了',
+            '💾'
+          );
         }
         
         await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), orderUpdates);
         console.log('✅ 注文データ更新完了');
         
         // 売上データを修正
-        // 【重要】元の日付と本日が異なる場合、または支払方法/金額が変更された場合
         const isDateDifferent = originalDateStr !== todayDateStr;
         const isPaymentMethodChanged = oldPaymentMethod !== paymentMethod;
         const isAmountChanged = oldTotalAmount !== newTotalAmount;
-        const needsUpdate = isDateDifferent || isPaymentMethodChanged || isAmountChanged;
+        
+        // 🆕 未会計注文の場合は常に更新が必要
+        const needsUpdate = isUnpaidOrder || isDateDifferent || isPaymentMethodChanged || isAmountChanged;
         
         console.log('💡 売上更新判定:', {
           元の日付: originalDateStr,
           本日: todayDateStr,
+          未会計注文: isUnpaidOrder,
           日付が異なる: isDateDifferent,
           支払方法変更: isPaymentMethodChanged,
           金額変更: isAmountChanged,
@@ -2896,8 +2910,9 @@
           
           // ============================================
           // STEP 1: 本日の売上から減算（誤って本日に計上されている分）
+          // ※ 未会計注文の場合はスキップ（まだ売上に計上されていない）
           // ============================================
-          if (isDateDifferent) {
+          if (isDateDifferent && !isUnpaidOrder) {
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
             console.log('🔽 STEP 1: 本日の売上から減算');
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -2943,7 +2958,7 @@
               console.warn('⚠️ 本日の売上データが見つかりません:', todayDateStr);
             }
           } else {
-            console.log('ℹ️ 本日と元の日付が同じなので、STEP 1はスキップ');
+            console.log('ℹ️ 本日と元の日付が同じ、または未会計注文のため、STEP 1はスキップ');
           }
           
           // ============================================
@@ -2970,10 +2985,32 @@
               updatedAt: window.Timestamp.now()
             };
             
-            // 【パターンA】元の日付と本日が異なる場合
+            // 🆕 【パターンA】未会計注文の場合
+            // → 単純に新しい内容を加算（減算は不要）
+            if (isUnpaidOrder) {
+              console.log('📌 パターンA: 未会計注文なので新しい内容を加算');
+              console.log('   加算する金額:', newTotalAmount);
+              console.log('   加算する支払方法:', paymentMethod);
+              
+              if (paymentMethod === 'cash') {
+                originalUpdates.cashSales = (originalData.cashSales || 0) + newTotalAmount;
+                console.log(`   現金売上: ${originalData.cashSales} + ${newTotalAmount} = ${originalUpdates.cashSales}`);
+              } else if (paymentMethod === 'emoney') {
+                originalUpdates.emoneSales = (originalData.emoneSales || 0) + newTotalAmount;
+                console.log(`   電子マネー売上: ${originalData.emoneSales} + ${newTotalAmount} = ${originalUpdates.emoneSales}`);
+              } else if (paymentMethod === 'credit') {
+                originalUpdates.creditSales = (originalData.creditSales || 0) + newTotalAmount;
+                console.log(`   クレジット売上: ${originalData.creditSales} + ${newTotalAmount} = ${originalUpdates.creditSales}`);
+              }
+              originalUpdates.totalSales = (originalData.totalSales || 0) + newTotalAmount;
+              originalUpdates.customerCount = (originalData.customerCount || 0) + 1;  // 客数も加算
+              console.log(`   合計売上: ${originalData.totalSales} + ${newTotalAmount} = ${originalUpdates.totalSales}`);
+              console.log(`   客数: ${originalData.customerCount} + 1 = ${originalUpdates.customerCount}`);
+            }
+            // 【パターンB】元の日付と本日が異なる場合
             // → 元の日付に新しい内容を「加算」
-            if (isDateDifferent) {
-              console.log('📌 パターンA: 異なる日付なので新しい内容を加算');
+            else if (isDateDifferent) {
+              console.log('📌 パターンB: 異なる日付なので新しい内容を加算');
               console.log('   加算する金額:', newTotalAmount);
               console.log('   加算する支払方法:', paymentMethod);
               
@@ -2990,10 +3027,10 @@
               originalUpdates.totalSales = (originalData.totalSales || 0) + newTotalAmount;
               console.log(`   合計売上: ${originalData.totalSales} + ${newTotalAmount} = ${originalUpdates.totalSales}`);
             }
-            // 【パターンB】元の日付と本日が同じ場合
+            // 【パターンC】元の日付と本日が同じ場合
             // → 支払方法や金額の変更を反映（差分計算）
             else {
-              console.log('📌 パターンB: 同じ日付なので差分を計算');
+              console.log('📌 パターンC: 同じ日付なので差分を計算');
               console.log('   旧:', oldPaymentMethod, oldTotalAmount);
               console.log('   新:', paymentMethod, newTotalAmount);
               
@@ -3044,7 +3081,10 @@
         console.log('🎉 売上データ修正完了');
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
         
-        showCustomAlert('注文を更新しました', '✅ 完了', '💾');
+        // 未会計注文の場合は上で既にアラート表示済み
+        if (!isUnpaidOrder) {
+          showCustomAlert('注文を更新しました', '✅ 完了', '💾');
+        }
         closeEditOrderModal();
         
         // 履歴を再読み込み
@@ -3093,11 +3133,19 @@
     window.restoreOrder = async function() {
       if (!currentEditingOrder) return;
       
+      // paidAtの有無を確認
+      const hasPaidAt = !!currentEditingOrder.paidAt;
+      
       // カスタム確認ダイアログを表示
+      let message = `注文 #${currentEditingOrder.orderNumber} を復元しますか？`;
+      if (!hasPaidAt) {
+        message += '\n\n⚠️ この注文は未会計です。\n復元後に会計処理を行ってください。';
+      }
+      
       const confirmed = await showCustomConfirm({
         icon: '🔄',
         title: '注文を復元',
-        message: `注文 #${currentEditingOrder.orderNumber} を復元しますか？\n\n※ paidAtがない場合は現在時刻で会計済みとして復元します`,
+        message: message,
         confirmText: '復元する',
         confirmColor: '#2196F3'
       });
@@ -3110,21 +3158,20 @@
           deletedAt: null
         };
         
-        // 🆕 paidAtがない場合は現在時刻を設定（会計済みとして復元）
-        if (!currentEditingOrder.paidAt) {
-          console.log('⚠️ paidAtがないため、現在時刻で設定します');
-          updates.paidAt = window.Timestamp.now();
-          updates.notifiedPaid = true;
-          
-          // paymentMethodがない場合はデフォルトで現金
-          if (!currentEditingOrder.paymentMethod) {
-            updates.paymentMethod = 'cash';
-          }
-        }
+        // paidAtは元の状態を保持（あればそのまま、なければnullのまま）
+        console.log('🔄 注文復元:', {
+          注文番号: currentEditingOrder.orderNumber,
+          paidAt: hasPaidAt ? '会計済み' : '未会計',
+          timestamp: currentEditingOrder.timestamp
+        });
         
         await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), updates);
         
-        showCustomAlert('注文を復元しました', '✅ 成功', '🔄');
+        showCustomAlert(
+          hasPaidAt ? '注文を復元しました（会計済み）' : '注文を復元しました（未会計）\n会計処理が必要です',
+          '✅ 成功',
+          '🔄'
+        );
         closeEditOrderModal();
         
         // 履歴を再読み込み
