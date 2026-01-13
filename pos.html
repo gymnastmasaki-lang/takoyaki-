@@ -96,6 +96,151 @@
     // 初期化完了イベントを発行
     window.dispatchEvent(new Event('firebaseReady'));
     
+    // ========== 📅 営業日選択機能 ==========
+    
+    // 選択された営業日を保存
+    window.selectedBusinessDate = null;
+    
+    // 日付選択モーダルを表示
+    window.showDateSelectionModal = function() {
+      // 本日、昨日、一昨日の日付を計算（3時基準）
+      const now = new Date();
+      let today = new Date(now);
+      if (now.getHours() < 3) {
+        today.setDate(today.getDate() - 1);
+      }
+      
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      const dayBeforeYesterday = new Date(today);
+      dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2);
+      
+      // 日付表示を更新
+      document.getElementById('todayDateDisplay').textContent = formatDateJP(today);
+      document.getElementById('yesterdayDateDisplay').textContent = formatDateJP(yesterday);
+      document.getElementById('dayBeforeYesterdayDateDisplay').textContent = formatDateJP(dayBeforeYesterday);
+      
+      // カスタム日付の初期値を昨日に設定
+      document.getElementById('customDateInput').value = formatDateISO(yesterday);
+      document.getElementById('customDateInput').max = formatDateISO(today);  // 未来の日付は選択不可
+      
+      // モーダルを表示
+      document.getElementById('dateSelectionModal').style.display = 'flex';
+    };
+    
+    // 営業日を選択
+    window.selectBusinessDate = function(type) {
+      const now = new Date();
+      let today = new Date(now);
+      if (now.getHours() < 3) {
+        today.setDate(today.getDate() - 1);
+      }
+      
+      let selectedDate;
+      
+      if (type === 'today') {
+        selectedDate = today;
+      } else if (type === 'yesterday') {
+        selectedDate = new Date(today);
+        selectedDate.setDate(selectedDate.getDate() - 1);
+      } else if (type === 'dayBeforeYesterday') {
+        selectedDate = new Date(today);
+        selectedDate.setDate(selectedDate.getDate() - 2);
+      } else if (type === 'custom') {
+        const customInput = document.getElementById('customDateInput').value;
+        if (!customInput) {
+          alert('日付を選択してください');
+          return;
+        }
+        selectedDate = new Date(customInput + 'T00:00:00');
+      }
+      
+      // 営業日を保存
+      window.selectedBusinessDate = formatDateISO(selectedDate);
+      sessionStorage.setItem('businessDate', window.selectedBusinessDate);
+      
+      console.log('📅 営業日選択:', window.selectedBusinessDate);
+      
+      // ヘッダーの営業日表示を更新
+      updateBusinessDateDisplay();
+      
+      // モーダルを閉じてメインコンテンツを表示
+      document.getElementById('dateSelectionModal').style.display = 'none';
+      document.getElementById('mainContent').style.display = 'block';
+      
+      // 初期化処理を実行
+      if (window.firebaseReady) {
+        initializeApp();
+      } else {
+        window.addEventListener('firebaseReady', initializeApp);
+      }
+    };
+    
+    // 営業日表示を更新
+    window.updateBusinessDateDisplay = function() {
+      if (!window.selectedBusinessDate) return;
+      
+      const date = new Date(window.selectedBusinessDate + 'T00:00:00');
+      const now = new Date();
+      let today = new Date(now);
+      if (now.getHours() < 3) {
+        today.setDate(today.getDate() - 1);
+      }
+      
+      const todayStr = formatDateISO(today);
+      
+      let displayText;
+      if (window.selectedBusinessDate === todayStr) {
+        displayText = '営業日: 本日 ' + formatDateJP(date);
+      } else {
+        displayText = '営業日: ' + formatDateJP(date);
+      }
+      
+      document.getElementById('businessDateText').textContent = displayText;
+    };
+    
+    // 営業日を変更
+    window.changeDateSelection = function() {
+      if (confirm('営業日を変更しますか？\n\n変更すると現在の作業内容がリセットされます。')) {
+        showDateSelectionModal();
+      }
+    };
+    
+    // 日付フォーマット（日本語）
+    function formatDateJP(date) {
+      const year = date.getFullYear();
+      const month = date.getMonth() + 1;
+      const day = date.getDate();
+      const weekday = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()];
+      return `${year}年${month}月${day}日 (${weekday})`;
+    }
+    
+    // 日付フォーマット（ISO）
+    function formatDateISO(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    
+    // 営業日から日付文字列を取得（売上記録用）
+    window.getBusinessDateString = function() {
+      if (window.selectedBusinessDate) {
+        return window.selectedBusinessDate;
+      }
+      
+      // 選択されていない場合は本日（3時基準）
+      const now = new Date();
+      let today = new Date(now);
+      if (now.getHours() < 3) {
+        today.setDate(today.getDate() - 1);
+      }
+      return formatDateISO(today);
+    };
+    
+    // ========== 営業日選択機能ここまで ==========
+    
     // 担当者リストは認証後に読み込む
   </script>
   
@@ -1224,12 +1369,60 @@
       </div>
     </div>
   </div>
+  
+  <!-- 📅 日付選択モーダル -->
+  <div id="dateSelectionModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 40px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-width: 500px; width: 90%;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <div style="font-size: 60px; margin-bottom: 10px;">📅</div>
+        <h2 style="font-size: 28px; font-weight: bold; color: #333; margin: 0;">営業日を選択</h2>
+        <p style="color: #666; margin-top: 10px;">本日または過去の日付を選択してください</p>
+      </div>
+      
+      <div style="display: flex; flex-direction: column; gap: 15px;">
+        <!-- 本日ボタン -->
+        <button onclick="selectBusinessDate('today')" style="padding: 20px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(76,175,80,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 25px rgba(76,175,80,0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(76,175,80,0.3)';">
+          ✅ 本日 <span id="todayDateDisplay" style="font-size: 16px; opacity: 0.9;"></span>
+        </button>
+        
+        <!-- 昨日ボタン -->
+        <button onclick="selectBusinessDate('yesterday')" style="padding: 20px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(33,150,243,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 25px rgba(33,150,243,0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(33,150,243,0.3)';">
+          📆 昨日 <span id="yesterdayDateDisplay" style="font-size: 16px; opacity: 0.9;"></span>
+        </button>
+        
+        <!-- 一昨日ボタン -->
+        <button onclick="selectBusinessDate('dayBeforeYesterday')" style="padding: 20px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 15px rgba(255,152,0,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 25px rgba(255,152,0,0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(255,152,0,0.3)';">
+          📅 一昨日 <span id="dayBeforeYesterdayDateDisplay" style="font-size: 16px; opacity: 0.9;"></span>
+        </button>
+        
+        <!-- カスタム日付 -->
+        <div style="margin-top: 10px;">
+          <label style="display: block; color: #333; font-weight: bold; margin-bottom: 8px; font-size: 14px;">その他の日付</label>
+          <div style="display: flex; gap: 10px;">
+            <input type="date" id="customDateInput" style="flex: 1; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;" />
+            <button onclick="selectBusinessDate('custom')" style="padding: 15px 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer;">選択</button>
+          </div>
+        </div>
+      </div>
+      
+      <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 10px; font-size: 14px; color: #856404;">
+        <strong>⚠️ 注意:</strong> 過去の日付を選択すると、その日の売上として記録されます
+      </div>
+    </div>
+  </div>
+  
   <div id="mainContent" style="display: none;">
   <div class="container">
     
     <div class="header">
       <div class="header-left">
         <div class="status">
+          <!-- 📅 営業日表示 -->
+          <div id="businessDateDisplay" style="padding: 8px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px; font-weight: bold; margin-right: 15px; font-size: 16px; cursor: pointer;" onclick="changeDateSelection()">
+            <span style="margin-right: 5px;">📅</span>
+            <span id="businessDateText">営業日: 読み込み中...</span>
+          </div>
+          
           <label for="staffSelect" style="margin-right: 10px; font-weight: bold;">担当者:</label>
           <select id="staffSelect" style="padding: 8px 12px; font-size: 16px; border: 2px solid #667eea; border-radius: 8px; background: white; cursor: pointer;">
             <option value="">選択してください</option>
@@ -6138,18 +6331,19 @@
     // 日次売上更新関数
     window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0, customerCountIncrement = 0, items = []) {
       try {
-        // 午前3時基準で日付を決定
-        const now = new Date();
-        let targetDate = new Date(now);
+        // 🆕 選択された営業日を使用（選択されていない場合は本日）
+        const dateStr = window.getBusinessDateString();
         
-        // 午前3時より前なら昨日扱い
-        if (now.getHours() < 3) {
-          targetDate.setDate(targetDate.getDate() - 1);
-        }
-        
-        const dateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
-        
-        console.log('📊 日次売上更新開始:', { dateStr, totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount, customerCountIncrement });
+        console.log('📊 日次売上更新開始:', { 
+          営業日: dateStr,
+          totalAmount, 
+          paymentMethod, 
+          itemCount, 
+          tax8Total, 
+          tax10Total, 
+          discountAmount, 
+          customerCountIncrement 
+        });
         
         // デバッグ: itemCountが0の場合は警告
         if (itemCount === 0) {
@@ -9223,8 +9417,11 @@
           
           console.log('セッションストレージ保存完了');
           
+          // 🆕 ログイン成功後、日付選択モーダルを表示
           document.getElementById('loginScreen').style.display = 'none';
-          document.getElementById('mainContent').style.display = 'block';
+          showDateSelectionModal();
+          
+          // メインコンテンツは日付選択後に表示
           
           const headerTitle = document.querySelector('.header-title');
           if (headerTitle) {
@@ -9278,10 +9475,24 @@
         window.currentStoreId = currentStoreId;
         window.currentStoreName = currentStoreName;
         
-        console.log('🔧 セッション復元 - StoreID:', window.currentStoreId, 'StoreName:', currentStoreName);
+        // 🆕 営業日をセッションから復元
+        const savedBusinessDate = sessionStorage.getItem('businessDate');
+        if (savedBusinessDate) {
+          window.selectedBusinessDate = savedBusinessDate;
+          console.log('📅 営業日復元:', window.selectedBusinessDate);
+        } else {
+          // セッションにない場合は本日を設定
+          window.selectedBusinessDate = window.getBusinessDateString();
+          sessionStorage.setItem('businessDate', window.selectedBusinessDate);
+        }
+        
+        console.log('🔧 セッション復元 - StoreID:', window.currentStoreId, 'StoreName:', currentStoreName, '営業日:', window.selectedBusinessDate);
         
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
+        
+        // 🆕 営業日表示を更新
+        updateBusinessDateDisplay();
         
         // ヘッダーに店舗名を表示
         const headerTitle = document.querySelector('.header-title');
@@ -9326,8 +9537,10 @@
         sessionStorage.removeItem('posAuthenticated');
         sessionStorage.removeItem('posStoreId');
         sessionStorage.removeItem('posStoreName');
+        sessionStorage.removeItem('businessDate');  // 🆕 営業日もクリア
         window.currentStoreId = null;
         window.currentStoreName = null;
+        window.selectedBusinessDate = null;  // 🆕
         
         // ログアウト完了メッセージ
         await showCustomConfirm({
