@@ -516,9 +516,12 @@
             <option value="">選択してください</option>
             <option value="材料費">材料費（8%）</option>
             <option value="日用品">日用品（10%）</option>
-            <option value="水光熱費">水光熱費（10%）</option>
             <option value="雑費・雑品">雑費・雑品（10%）</option>
-            <option value="交通費">交通費（10%）</option>
+            <option value="食費">食費（8%）</option>
+            <option value="接待交際費">接待交際費（8%）</option>
+            <option value="水光熱費">水光熱費（10%）</option>
+            <option value="交通費8%">交通費（8%）</option>
+            <option value="交通費10%">交通費（10%）</option>
             <option value="その他">その他（10%）</option>
           </select>
         </div>
@@ -706,7 +709,7 @@
       e.preventDefault();
       
       const storeSelectValue = document.getElementById('storeSelect').value;
-      const password = document.getElementById('passwordInput').value.trim();
+      const password = document.getElementById('passwordInput').value;  // trimしない
       const loginError = document.getElementById('loginError');
       
       if (!storeSelectValue) {
@@ -738,11 +741,18 @@
         console.log('=== デバッグ情報 ===');
         console.log('店舗名:', storeData.storeName);
         console.log('店舗ID:', storeData.id);
-        console.log('入力パスワード:', `"${password}"`);
-        console.log('保存パスワード:', `"${storeData.password}"`);
+        console.log('入力パスワード:', JSON.stringify(password));
+        console.log('入力パスワード長:', password.length);
+        console.log('保存パスワード:', JSON.stringify(storeData.password));
+        console.log('保存パスワード長:', storeData.password ? storeData.password.length : 0);
         console.log('完全一致:', password === storeData.password);
+        console.log('trim後一致:', password.trim() === (storeData.password || '').trim());
         
-        if (password === storeData.password) {
+        // パスワードチェック（trim版も試す）
+        const passwordMatch = password === storeData.password || 
+                             password.trim() === (storeData.password || '').trim();
+        
+        if (passwordMatch) {
           currentStoreId = storeData.id;
           currentStoreName = storeData.storeName;
           window.currentStoreId = currentStoreId;
@@ -759,17 +769,20 @@
           
           setToday();
           await loadStaffList();
-          await loadExpenses();
           
         } else {
           console.error('❌ パスワード不一致');
-          loginError.textContent = 'パスワードが正しくありません';
+          console.error('⚠️ F12を押してコンソールを確認してください');
+          console.error('⚠️ 入力:', JSON.stringify(password));
+          console.error('⚠️ 保存:', JSON.stringify(storeData.password));
+          
+          loginError.innerHTML = `パスワードが正しくありません<br><small style="color:#999;">F12キーを押してコンソールを確認してください</small>`;
           loginError.style.display = 'block';
           document.getElementById('passwordInput').value = '';
           
           setTimeout(() => {
             loginError.style.display = 'none';
-          }, 3000);
+          }, 5000);
         }
         
       } catch (error) {
@@ -894,23 +907,27 @@
     function updateSummary() {
       let tax8 = 0;
       let tax10 = 0;
-      let transport = 0;
+      let transport8 = 0;
+      let transport10 = 0;
       
       expenses.forEach(expense => {
-        if (expense.category === '材料費') {
+        const cat = expense.category;
+        if (cat === '材料費' || cat === '食費' || cat === '接待交際費') {
           tax8 += expense.amount;
-        } else if (expense.category === '交通費') {
-          transport += expense.amount;
+        } else if (cat === '交通費8%') {
+          transport8 += expense.amount;
+        } else if (cat === '交通費10%') {
+          transport10 += expense.amount;
         } else {
           tax10 += expense.amount;
         }
       });
       
-      const total = tax8 + tax10 + transport;
+      const total = tax8 + tax10 + transport8 + transport10;
       
       document.getElementById('tax8Total').textContent = '¥' + tax8.toLocaleString();
       document.getElementById('tax10Total').textContent = '¥' + tax10.toLocaleString();
-      document.getElementById('transportTotal').textContent = '¥' + transport.toLocaleString();
+      document.getElementById('transportTotal').textContent = '¥' + (transport8 + transport10).toLocaleString();
       document.getElementById('grandTotal').textContent = '¥' + total.toLocaleString();
     }
 
@@ -927,10 +944,25 @@
           return;
         }
         
-        const tax8 = expenses.filter(e => e.category === '材料費').reduce((sum, e) => sum + e.amount, 0);
-        const tax10 = expenses.filter(e => e.category !== '材料費' && e.category !== '交通費').reduce((sum, e) => sum + e.amount, 0);
-        const transport = expenses.filter(e => e.category === '交通費').reduce((sum, e) => sum + e.amount, 0);
-        const total = tax8 + tax10 + transport;
+        let tax8 = 0;
+        let tax10 = 0;
+        let transport8 = 0;
+        let transport10 = 0;
+        
+        expenses.forEach(expense => {
+          const cat = expense.category;
+          if (cat === '材料費' || cat === '食費' || cat === '接待交際費') {
+            tax8 += expense.amount;
+          } else if (cat === '交通費8%') {
+            transport8 += expense.amount;
+          } else if (cat === '交通費10%') {
+            transport10 += expense.amount;
+          } else {
+            tax10 += expense.amount;
+          }
+        });
+        
+        const total = tax8 + tax10 + transport8 + transport10;
         
         // 担当者別にドキュメントIDを作成
         const docId = `${currentDate}_${currentStaff}`;
@@ -941,7 +973,8 @@
           items: expenses,
           tax8Total: tax8,
           tax10Total: tax10,
-          transportTotal: transport,
+          transport8Total: transport8,
+          transport10Total: transport10,
           total: total,
           updatedAt: window.Timestamp.now()
         });
@@ -984,7 +1017,12 @@
     // 経費出力（Excel）
     async function exportExpenses() {
       try {
-        console.log('📊 経費出力開始');
+        if (!currentStaff) {
+          await showCustomAlert('担当者を選択してください', '⚠️ エラー', '⚠️');
+          return;
+        }
+        
+        console.log('📊 経費出力開始（担当者:', currentStaff, ')');
         
         const now = new Date();
         const year = now.getFullYear();
@@ -997,14 +1035,15 @@
         expensesSnapshot.forEach(doc => {
           const data = doc.data();
           const date = data.date;
-          const staff = data.staff || '不明';  // 担当者情報を取得
+          const staff = data.staff || '不明';
           
-          if (date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
+          // 現在の担当者のデータのみ
+          if (staff === currentStaff && date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
             if (data.items && Array.isArray(data.items)) {
               data.items.forEach(item => {
                 monthlyExpenses.push({
                   date: date,
-                  staff: staff,  // 担当者を追加
+                  staff: staff,
                   storeName: item.storeName,
                   category: item.category,
                   detail: item.detail,
@@ -1026,21 +1065,23 @@
         // ヘッダー
         excelData.push(['経費明細書', '', '', '', '', '']);
         excelData.push([`${year}年${month}月`, '', '', '', '', '']);
+        excelData.push(['担当者:', currentStaff, '', '', '', '']);
         excelData.push(['出力日時:', new Date().toLocaleString('ja-JP'), '', '', '', '']);
         excelData.push(['', '', '', '', '', '']);
         
         // 8%区分
         excelData.push(['【8%区分】', '', '', '', '', '']);
-        excelData.push(['日付', '担当者', '店名', '勘定科目', '詳細', '金額']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
         
-        const tax8Items = monthlyExpenses.filter(e => e.category === '材料費');
+        const tax8Items = monthlyExpenses.filter(e => 
+          e.category === '材料費' || e.category === '食費' || e.category === '接待交際費'
+        );
         let tax8Total = 0;
         
         tax8Items.forEach(item => {
           const dateStr = item.date.split('-').slice(1).join('/');
           excelData.push([
             dateStr,
-            item.staff,
             item.storeName,
             item.category,
             item.detail,
@@ -1049,21 +1090,23 @@
           tax8Total += item.amount;
         });
         
-        excelData.push(['', '', '', '', '8%合計:', tax8Total]);
-        excelData.push(['', '', '', '', '', '']);
+        excelData.push(['', '', '', '8%合計:', tax8Total]);
+        excelData.push(['', '', '', '', '']);
         
         // 10%区分
         excelData.push(['【10%区分】', '', '', '', '', '']);
-        excelData.push(['日付', '担当者', '店名', '勘定科目', '詳細', '金額']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
         
-        const tax10Items = monthlyExpenses.filter(e => e.category !== '材料費' && e.category !== '交通費');
+        const tax10Items = monthlyExpenses.filter(e => 
+          e.category === '日用品' || e.category === '雑費・雑品' || 
+          e.category === '水光熱費' || e.category === 'その他'
+        );
         let tax10Total = 0;
         
         tax10Items.forEach(item => {
           const dateStr = item.date.split('-').slice(1).join('/');
           excelData.push([
             dateStr,
-            item.staff,
             item.storeName,
             item.category,
             item.detail,
@@ -1072,40 +1115,62 @@
           tax10Total += item.amount;
         });
         
-        excelData.push(['', '', '', '', '10%合計:', tax10Total]);
-        excelData.push(['', '', '', '', '', '']);
+        excelData.push(['', '', '', '10%合計:', tax10Total]);
+        excelData.push(['', '', '', '', '']);
         
-        // 交通費区分
-        excelData.push(['【交通費区分】', '', '', '', '', '']);
-        excelData.push(['日付', '担当者', '店名', '勘定科目', '詳細', '金額']);
+        // 交通費（8%）区分
+        excelData.push(['【交通費（8%）区分】', '', '', '', '', '']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
         
-        const transportItems = monthlyExpenses.filter(e => e.category === '交通費');
-        let transportTotal = 0;
+        const transport8Items = monthlyExpenses.filter(e => e.category === '交通費8%');
+        let transport8Total = 0;
         
-        transportItems.forEach(item => {
+        transport8Items.forEach(item => {
           const dateStr = item.date.split('-').slice(1).join('/');
           excelData.push([
             dateStr,
-            item.staff,
             item.storeName,
             item.category,
             item.detail,
             item.amount
           ]);
-          transportTotal += item.amount;
+          transport8Total += item.amount;
         });
         
-        excelData.push(['', '', '', '', '交通費合計:', transportTotal]);
-        excelData.push(['', '', '', '', '', '']);
+        excelData.push(['', '', '', '交通費（8%）合計:', transport8Total]);
+        excelData.push(['', '', '', '', '']);
+        
+        // 交通費（10%）区分
+        excelData.push(['【交通費（10%）区分】', '', '', '', '', '']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        
+        const transport10Items = monthlyExpenses.filter(e => e.category === '交通費10%');
+        let transport10Total = 0;
+        
+        transport10Items.forEach(item => {
+          const dateStr = item.date.split('-').slice(1).join('/');
+          excelData.push([
+            dateStr,
+            item.storeName,
+            item.category,
+            item.detail,
+            item.amount
+          ]);
+          transport10Total += item.amount;
+        });
+        
+        excelData.push(['', '', '', '交通費（10%）合計:', transport10Total]);
+        excelData.push(['', '', '', '', '']);
         
         // 総合計
-        const grandTotal = tax8Total + tax10Total + transportTotal;
-        excelData.push(['', '', '', '', '', '']);
-        excelData.push(['', '', '', '', '8%合計金額:', tax8Total]);
-        excelData.push(['', '', '', '', '10%合計金額:', tax10Total]);
-        excelData.push(['', '', '', '', '交通費合計金額:', transportTotal]);
-        excelData.push(['', '', '', '', '', '']);
-        excelData.push(['', '', '', '', '合計:', grandTotal]);
+        const grandTotal = tax8Total + tax10Total + transport8Total + transport10Total;
+        excelData.push(['', '', '', '', '']);
+        excelData.push(['', '', '', '8%合計金額:', tax8Total]);
+        excelData.push(['', '', '', '10%合計金額:', tax10Total]);
+        excelData.push(['', '', '', '交通費（8%）合計金額:', transport8Total]);
+        excelData.push(['', '', '', '交通費（10%）合計金額:', transport10Total]);
+        excelData.push(['', '', '', '', '']);
+        excelData.push(['', '', '', '合計:', grandTotal]);
         
         // SheetJSでExcel生成
         const wb = XLSX.utils.book_new();
@@ -1114,9 +1179,8 @@
         // 列幅設定
         ws['!cols'] = [
           { wch: 10 },  // 日付
-          { wch: 12 },  // 担当者
           { wch: 15 },  // 店名
-          { wch: 12 },  // 勘定科目
+          { wch: 15 },  // 勘定科目
           { wch: 25 },  // 詳細
           { wch: 12 }   // 金額
         ];
@@ -1157,8 +1221,9 @@
             }
             
             // 合計行のスタイル（8%、10%、交通費の各区分）
-            if (excelData[R] && excelData[R][4] && 
-                (excelData[R][4] === '8%合計:' || excelData[R][4] === '10%合計:' || excelData[R][4] === '交通費合計:')) {
+            if (excelData[R] && excelData[R][3] && 
+                (excelData[R][3] === '8%合計:' || excelData[R][3] === '10%合計:' || 
+                 excelData[R][3] === '交通費（8%）合計:' || excelData[R][3] === '交通費（10%）合計:')) {
               ws[cellAddress].s.fill = {
                 patternType: 'solid',
                 fgColor: { rgb: 'FFE599' }  // 薄い黄色
@@ -1168,7 +1233,7 @@
                 sz: 11
               };
               // 金額列は右寄せ
-              if (C === 5) {
+              if (C === 4) {
                 ws[cellAddress].s.alignment = {
                   horizontal: 'right'
                 };
@@ -1176,9 +1241,10 @@
             }
             
             // 最終合計行のスタイル（8%合計金額、10%合計金額、交通費合計金額、合計）
-            if (excelData[R] && excelData[R][4] && 
-                (excelData[R][4] === '8%合計金額:' || excelData[R][4] === '10%合計金額:' || 
-                 excelData[R][4] === '交通費合計金額:' || excelData[R][4] === '合計:')) {
+            if (excelData[R] && excelData[R][3] && 
+                (excelData[R][3] === '8%合計金額:' || excelData[R][3] === '10%合計金額:' || 
+                 excelData[R][3] === '交通費（8%）合計金額:' || excelData[R][3] === '交通費（10%）合計金額:' ||
+                 excelData[R][3] === '合計:')) {
               ws[cellAddress].s.fill = {
                 patternType: 'solid',
                 fgColor: { rgb: 'FFC7CE' }  // 薄いピンク
@@ -1188,7 +1254,7 @@
                 sz: 12
               };
               // 金額列は右寄せ
-              if (C === 5) {
+              if (C === 4) {
                 ws[cellAddress].s.alignment = {
                   horizontal: 'right'
                 };
@@ -1196,7 +1262,7 @@
             }
             
             // 「合計:」行は特に強調
-            if (excelData[R] && excelData[R][4] === '合計:') {
+            if (excelData[R] && excelData[R][3] === '合計:') {
               ws[cellAddress].s.fill = {
                 patternType: 'solid',
                 fgColor: { rgb: 'FFB6C1' }  // 濃いピンク
@@ -1212,7 +1278,7 @@
         
         XLSX.utils.book_append_sheet(wb, ws, '経費明細');
         
-        const fileName = `経費明細_${year}年${month}月.xlsx`;
+        const fileName = `経費明細_${year}年${month}月_${currentStaff}.xlsx`;
         XLSX.writeFile(wb, fileName);
         
         console.log('✅ 経費出力完了:', fileName);
