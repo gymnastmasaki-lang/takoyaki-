@@ -471,11 +471,12 @@
         </div>
         
         <div class="form-group">
-          <label>パスワード <small style="color: #999;">（一時的に空欄でもログイン可）</small></label>
+          <label>パスワード</label>
           <input
             type="password"
             id="passwordInput"
-            placeholder="パスワードを入力（空欄可）"
+            placeholder="パスワードを入力"
+            required
           />
         </div>
         
@@ -582,6 +583,7 @@
     let currentStoreId = null;
     let currentStoreName = null;
     let currentDate = null;
+    let currentStaff = null; // 現在の担当者
     let expenses = [];
     let storesData = []; // 店舗データを保持
 
@@ -670,9 +672,6 @@
         storesData = [];
         storeSelect.innerHTML = '<option value="">店舗を選択してください</option>';
         
-        // 旧システム用オプション
-        storeSelect.innerHTML += '<option value="old:下赤塚">下赤塚店（旧システム）</option>';
-        
         storesSnapshot.forEach(doc => {
           const data = doc.data();
           storesData.push({ id: doc.id, ...data });
@@ -689,16 +688,9 @@
       }
     }
 
-    // パスワードフィールドの更新（オプション）
+    // パスワードフィールドの更新
     function updatePasswordField() {
-      const storeSelect = document.getElementById('storeSelect');
-      const passwordInput = document.getElementById('passwordInput');
-      
-      if (storeSelect.value === 'old:下赤塚') {
-        passwordInput.placeholder = 'shimoakatsuka';
-      } else {
-        passwordInput.placeholder = 'パスワードを入力';
-      }
+      // 何もしない（旧システム削除のため）
     }
 
     // 今日の日付を設定
@@ -724,35 +716,16 @@
         return;
       }
       
+      if (!password) {
+        loginError.textContent = 'パスワードを入力してください';
+        loginError.style.display = 'block';
+        setTimeout(() => { loginError.style.display = 'none'; }, 3000);
+        return;
+      }
+      
       try {
         console.log('🔐 ログイン試行:', storeSelectValue);
         
-        // 旧システムログイン
-        if (storeSelectValue === 'old:下赤塚') {
-          // パスワードチェックを緩く（空でもOK、または正しいパスワード）
-          if (password === '' || password === 'shimoakatsuka') {
-            currentStoreId = null;
-            currentStoreName = '下赤塚';
-            window.currentStoreId = null;
-            window.currentStoreName = currentStoreName;
-            
-            sessionStorage.setItem('keihiStoreId', '');
-            sessionStorage.setItem('keihiStoreName', currentStoreName);
-            sessionStorage.setItem('keihiAuthenticated', 'true');
-            
-            console.log('✅ 旧システムログイン成功');
-            
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('mainContent').style.display = 'block';
-            
-            setToday();
-            await loadStaffList();
-            await loadExpenses();
-            return;
-          }
-        }
-        
-        // 新システムログイン
         const storeData = storesData.find(s => s.id === storeSelectValue);
         
         if (!storeData) {
@@ -766,18 +739,10 @@
         console.log('店舗名:', storeData.storeName);
         console.log('店舗ID:', storeData.id);
         console.log('入力パスワード:', `"${password}"`);
-        console.log('入力パスワード長:', password.length);
         console.log('保存パスワード:', `"${storeData.password}"`);
-        console.log('保存パスワード長:', storeData.password ? storeData.password.length : 0);
         console.log('完全一致:', password === storeData.password);
-        console.log('小文字変換で一致:', password.toLowerCase() === (storeData.password || '').toLowerCase());
         
-        // 🆕 パスワードチェックを緩く：空でもOK、または一致
-        const passwordMatch = password === '' || 
-                             password === storeData.password || 
-                             password.toLowerCase() === (storeData.password || '').toLowerCase();
-        
-        if (passwordMatch) {
+        if (password === storeData.password) {
           currentStoreId = storeData.id;
           currentStoreName = storeData.storeName;
           window.currentStoreId = currentStoreId;
@@ -798,13 +763,13 @@
           
         } else {
           console.error('❌ パスワード不一致');
-          loginError.textContent = 'パスワードが正しくありません（パスワードを空欄にすると一時的にログインできます）';
+          loginError.textContent = 'パスワードが正しくありません';
           loginError.style.display = 'block';
           document.getElementById('passwordInput').value = '';
           
           setTimeout(() => {
             loginError.style.display = 'none';
-          }, 5000);
+          }, 3000);
         }
         
       } catch (error) {
@@ -830,6 +795,14 @@
           select.appendChild(option);
         });
         
+        // 担当者変更時にデータを読み込み
+        select.addEventListener('change', async function() {
+          currentStaff = this.value;
+          if (currentStaff && currentDate) {
+            await loadExpenses();
+          }
+        });
+        
         console.log('✅ 担当者リスト読み込み完了');
       } catch (e) {
         console.error('担当者リスト読み込みエラー:', e);
@@ -840,9 +813,11 @@
     document.addEventListener('DOMContentLoaded', () => {
       const dateSelect = document.getElementById('dateSelect');
       if (dateSelect) {
-        dateSelect.addEventListener('change', () => {
+        dateSelect.addEventListener('change', async () => {
           currentDate = dateSelect.value;
-          loadExpenses();
+          if (currentStaff && currentDate) {
+            await loadExpenses();
+          }
         });
       }
     });
@@ -854,6 +829,11 @@
       const detail = document.getElementById('detail').value.trim();
       const amount = parseFloat(document.getElementById('amount').value);
       
+      if (!currentStaff) {
+        showCustomAlert('担当者を選択してください', '⚠️ 入力エラー', '⚠️');
+        return;
+      }
+      
       if (!storeName || !category || !detail || !amount) {
         showCustomAlert('すべての項目を入力してください', '⚠️ 入力エラー', '⚠️');
         return;
@@ -864,7 +844,8 @@
         category: category,
         detail: detail,
         amount: amount,
-        date: currentDate
+        date: currentDate,
+        staff: currentStaff  // 担当者を追加
       };
       
       expenses.push(expense);
@@ -941,13 +922,22 @@
           return;
         }
         
+        if (!currentStaff) {
+          await showCustomAlert('担当者を選択してください', '⚠️ エラー', '⚠️');
+          return;
+        }
+        
         const tax8 = expenses.filter(e => e.category === '材料費').reduce((sum, e) => sum + e.amount, 0);
         const tax10 = expenses.filter(e => e.category !== '材料費' && e.category !== '交通費').reduce((sum, e) => sum + e.amount, 0);
         const transport = expenses.filter(e => e.category === '交通費').reduce((sum, e) => sum + e.amount, 0);
         const total = tax8 + tax10 + transport;
         
-        await window.setDoc(window.getStoreDoc('expenses', currentDate), {
+        // 担当者別にドキュメントIDを作成
+        const docId = `${currentDate}_${currentStaff}`;
+        
+        await window.setDoc(window.getStoreDoc('expenses', docId), {
           date: currentDate,
+          staff: currentStaff,
           items: expenses,
           tax8Total: tax8,
           tax10Total: tax10,
@@ -956,7 +946,7 @@
           updatedAt: window.Timestamp.now()
         });
         
-        console.log('✅ 支出保存完了');
+        console.log('✅ 支出保存完了:', docId);
         await showCustomAlert('支出を保存しました', '✅ 保存完了', '✅');
         
       } catch (e) {
@@ -968,21 +958,22 @@
     // Firestoreから読み込み
     async function loadExpenses() {
       try {
-        if (!currentDate) return;
+        if (!currentDate || !currentStaff) return;
         
-        const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', currentDate));
+        const docId = `${currentDate}_${currentStaff}`;
+        const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', docId));
         
         if (expenseDoc.exists()) {
           const data = expenseDoc.data();
           expenses = data.items || [];
           renderExpenses();
           updateSummary();
-          console.log('✅ 支出データ読み込み完了:', currentDate);
+          console.log('✅ 支出データ読み込み完了:', docId);
         } else {
           expenses = [];
           renderExpenses();
           updateSummary();
-          console.log('ℹ️ この日の支出データはありません:', currentDate);
+          console.log('ℹ️ この日・担当者の支出データはありません:', docId);
         }
         
       } catch (e) {
@@ -1006,12 +997,14 @@
         expensesSnapshot.forEach(doc => {
           const data = doc.data();
           const date = data.date;
+          const staff = data.staff || '不明';  // 担当者情報を取得
           
           if (date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
             if (data.items && Array.isArray(data.items)) {
               data.items.forEach(item => {
                 monthlyExpenses.push({
                   date: date,
+                  staff: staff,  // 担当者を追加
                   storeName: item.storeName,
                   category: item.category,
                   detail: item.detail,
@@ -1031,14 +1024,14 @@
         const excelData = [];
         
         // ヘッダー
-        excelData.push(['経費明細書', '', '', '', '']);
-        excelData.push([`${year}年${month}月`, '', '', '', '']);
-        excelData.push(['出力日時:', new Date().toLocaleString('ja-JP'), '', '', '']);
-        excelData.push(['', '', '', '', '']);
+        excelData.push(['経費明細書', '', '', '', '', '']);
+        excelData.push([`${year}年${month}月`, '', '', '', '', '']);
+        excelData.push(['出力日時:', new Date().toLocaleString('ja-JP'), '', '', '', '']);
+        excelData.push(['', '', '', '', '', '']);
         
         // 8%区分
-        excelData.push(['【8%区分】', '', '', '', '']);
-        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        excelData.push(['【8%区分】', '', '', '', '', '']);
+        excelData.push(['日付', '担当者', '店名', '勘定科目', '詳細', '金額']);
         
         const tax8Items = monthlyExpenses.filter(e => e.category === '材料費');
         let tax8Total = 0;
@@ -1047,6 +1040,7 @@
           const dateStr = item.date.split('-').slice(1).join('/');
           excelData.push([
             dateStr,
+            item.staff,
             item.storeName,
             item.category,
             item.detail,
@@ -1055,12 +1049,12 @@
           tax8Total += item.amount;
         });
         
-        excelData.push(['', '', '', '8%合計:', tax8Total]);
-        excelData.push(['', '', '', '', '']);
+        excelData.push(['', '', '', '', '8%合計:', tax8Total]);
+        excelData.push(['', '', '', '', '', '']);
         
         // 10%区分
-        excelData.push(['【10%区分】', '', '', '', '']);
-        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        excelData.push(['【10%区分】', '', '', '', '', '']);
+        excelData.push(['日付', '担当者', '店名', '勘定科目', '詳細', '金額']);
         
         const tax10Items = monthlyExpenses.filter(e => e.category !== '材料費' && e.category !== '交通費');
         let tax10Total = 0;
@@ -1069,6 +1063,7 @@
           const dateStr = item.date.split('-').slice(1).join('/');
           excelData.push([
             dateStr,
+            item.staff,
             item.storeName,
             item.category,
             item.detail,
@@ -1077,12 +1072,12 @@
           tax10Total += item.amount;
         });
         
-        excelData.push(['', '', '', '10%合計:', tax10Total]);
-        excelData.push(['', '', '', '', '']);
+        excelData.push(['', '', '', '', '10%合計:', tax10Total]);
+        excelData.push(['', '', '', '', '', '']);
         
         // 交通費区分
-        excelData.push(['【交通費区分】', '', '', '', '']);
-        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        excelData.push(['【交通費区分】', '', '', '', '', '']);
+        excelData.push(['日付', '担当者', '店名', '勘定科目', '詳細', '金額']);
         
         const transportItems = monthlyExpenses.filter(e => e.category === '交通費');
         let transportTotal = 0;
@@ -1091,6 +1086,7 @@
           const dateStr = item.date.split('-').slice(1).join('/');
           excelData.push([
             dateStr,
+            item.staff,
             item.storeName,
             item.category,
             item.detail,
@@ -1099,17 +1095,17 @@
           transportTotal += item.amount;
         });
         
-        excelData.push(['', '', '', '交通費合計:', transportTotal]);
-        excelData.push(['', '', '', '', '']);
+        excelData.push(['', '', '', '', '交通費合計:', transportTotal]);
+        excelData.push(['', '', '', '', '', '']);
         
         // 総合計
         const grandTotal = tax8Total + tax10Total + transportTotal;
-        excelData.push(['', '', '', '', '']);
-        excelData.push(['', '', '', '8%合計金額:', tax8Total]);
-        excelData.push(['', '', '', '10%合計金額:', tax10Total]);
-        excelData.push(['', '', '', '交通費合計金額:', transportTotal]);
-        excelData.push(['', '', '', '', '']);
-        excelData.push(['', '', '', '合計:', grandTotal]);
+        excelData.push(['', '', '', '', '', '']);
+        excelData.push(['', '', '', '', '8%合計金額:', tax8Total]);
+        excelData.push(['', '', '', '', '10%合計金額:', tax10Total]);
+        excelData.push(['', '', '', '', '交通費合計金額:', transportTotal]);
+        excelData.push(['', '', '', '', '', '']);
+        excelData.push(['', '', '', '', '合計:', grandTotal]);
         
         // SheetJSでExcel生成
         const wb = XLSX.utils.book_new();
@@ -1118,6 +1114,7 @@
         // 列幅設定
         ws['!cols'] = [
           { wch: 10 },  // 日付
+          { wch: 12 },  // 担当者
           { wch: 15 },  // 店名
           { wch: 12 },  // 勘定科目
           { wch: 25 },  // 詳細
@@ -1160,8 +1157,8 @@
             }
             
             // 合計行のスタイル（8%、10%、交通費の各区分）
-            if (excelData[R] && excelData[R][3] && 
-                (excelData[R][3] === '8%合計:' || excelData[R][3] === '10%合計:' || excelData[R][3] === '交通費合計:')) {
+            if (excelData[R] && excelData[R][4] && 
+                (excelData[R][4] === '8%合計:' || excelData[R][4] === '10%合計:' || excelData[R][4] === '交通費合計:')) {
               ws[cellAddress].s.fill = {
                 patternType: 'solid',
                 fgColor: { rgb: 'FFE599' }  // 薄い黄色
@@ -1171,7 +1168,7 @@
                 sz: 11
               };
               // 金額列は右寄せ
-              if (C === 4) {
+              if (C === 5) {
                 ws[cellAddress].s.alignment = {
                   horizontal: 'right'
                 };
@@ -1179,9 +1176,9 @@
             }
             
             // 最終合計行のスタイル（8%合計金額、10%合計金額、交通費合計金額、合計）
-            if (excelData[R] && excelData[R][3] && 
-                (excelData[R][3] === '8%合計金額:' || excelData[R][3] === '10%合計金額:' || 
-                 excelData[R][3] === '交通費合計金額:' || excelData[R][3] === '合計:')) {
+            if (excelData[R] && excelData[R][4] && 
+                (excelData[R][4] === '8%合計金額:' || excelData[R][4] === '10%合計金額:' || 
+                 excelData[R][4] === '交通費合計金額:' || excelData[R][4] === '合計:')) {
               ws[cellAddress].s.fill = {
                 patternType: 'solid',
                 fgColor: { rgb: 'FFC7CE' }  // 薄いピンク
@@ -1191,7 +1188,7 @@
                 sz: 12
               };
               // 金額列は右寄せ
-              if (C === 4) {
+              if (C === 5) {
                 ws[cellAddress].s.alignment = {
                   horizontal: 'right'
                 };
@@ -1199,7 +1196,7 @@
             }
             
             // 「合計:」行は特に強調
-            if (excelData[R] && excelData[R][3] === '合計:') {
+            if (excelData[R] && excelData[R][4] === '合計:') {
               ws[cellAddress].s.fill = {
                 patternType: 'solid',
                 fgColor: { rgb: 'FFB6C1' }  // 濃いピンク
