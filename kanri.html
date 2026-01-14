@@ -187,6 +187,17 @@
                     empSnapshot.forEach(doc => {
                         empList.push({ id: doc.id, ...doc.data() });
                     });
+                    
+                    // sortOrderでソート（sortOrderがない場合は名前順）
+                    empList.sort((a, b) => {
+                        if (a.sortOrder !== undefined && b.sortOrder !== undefined) {
+                            return a.sortOrder - b.sortOrder;
+                        }
+                        if (a.sortOrder !== undefined) return -1;
+                        if (b.sortOrder !== undefined) return 1;
+                        return (a.name || '').localeCompare(b.name || '');
+                    });
+                    
                     setEmployees(empList);
                     
                     // 店舗別の勤怠データを取得（現在の月のみ）
@@ -433,6 +444,37 @@
                     showCustomAlertFunc('従業員の更新に失敗しました: ' + err.message, '❌ エラー', '❌');
                 } finally {
                     setIsLoading(false);
+                }
+            };
+
+            // 従業員の並び順を変更
+            const moveEmployee = async (index, direction) => {
+                if (direction === 'up' && index === 0) return;
+                if (direction === 'down' && index === employees.length - 1) return;
+                
+                const newIndex = direction === 'up' ? index - 1 : index + 1;
+                const newEmployees = [...employees];
+                const temp = newEmployees[index];
+                newEmployees[index] = newEmployees[newIndex];
+                newEmployees[newIndex] = temp;
+                
+                setEmployees(newEmployees);
+                
+                // Firestoreに新しい順序を保存
+                try {
+                    const { doc, updateDoc } = window.firebaseModules;
+                    
+                    for (let i = 0; i < newEmployees.length; i++) {
+                        const empRef = doc(window.db, `stores/${window.currentStoreId}/employees`, newEmployees[i].id);
+                        await updateDoc(empRef, {
+                            sortOrder: i
+                        });
+                    }
+                    
+                    console.log('✅ 並び順を保存しました');
+                } catch (err) {
+                    console.error('並び順保存エラー:', err);
+                    showCustomAlertFunc('並び順の保存に失敗しました: ' + err.message, '❌ エラー', '❌');
                 }
             };
 
@@ -735,7 +777,7 @@
                             </div>
 
                             <div className="space-y-3">
-                                {employees.map(emp => (
+                                {employees.map((emp, index) => (
                                     <div key={emp.id} className="border rounded-lg p-4 flex justify-between items-center hover:bg-gray-50">
                                         {editingEmployee === emp.id ? (
                                             <EditEmployeeForm
@@ -745,11 +787,35 @@
                                             />
                                         ) : (
                                             <>
-                                                <div className="flex-1">
-                                                    <div className="font-bold text-lg">{emp.name}</div>
-                                                    <div className="text-sm text-gray-600">
-                                                        時給: ¥{emp.hourlyRate?.toLocaleString() || 0} | 
-                                                        交通費: ¥{emp.transportAllowance?.toLocaleString() || 0}/日
+                                                <div className="flex items-center gap-3">
+                                                    <div className="flex flex-col gap-1">
+                                                        <button
+                                                            onClick={() => moveEmployee(index, 'up')}
+                                                            disabled={index === 0}
+                                                            className={`p-1 rounded ${index === 0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+                                                            title="上に移動"
+                                                        >
+                                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <polyline points="18 15 12 9 6 15"></polyline>
+                                                            </svg>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => moveEmployee(index, 'down')}
+                                                            disabled={index === employees.length - 1}
+                                                            className={`p-1 rounded ${index === employees.length - 1 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+                                                            title="下に移動"
+                                                        >
+                                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <polyline points="6 9 12 15 18 9"></polyline>
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <div className="font-bold text-lg">{emp.name}</div>
+                                                        <div className="text-sm text-gray-600">
+                                                            時給: ¥{emp.hourlyRate?.toLocaleString() || 0} | 
+                                                            交通費: ¥{emp.transportAllowance?.toLocaleString() || 0}/日
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 <div className="flex gap-2">
