@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>発注システム</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
     * {
       margin: 0;
@@ -408,42 +407,6 @@
       transform: translateY(0);
     }
 
-    /* PNG出力用テーブル */
-    #pngOutput {
-      position: fixed;
-      left: -9999px;
-      top: 0;
-      background: white;
-      padding: 20px;
-      font-family: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', sans-serif;
-    }
-
-    #pngOutput table {
-      border-collapse: collapse;
-      width: 100%;
-      font-size: 14px;
-    }
-
-    #pngOutput th, #pngOutput td {
-      border: 1px solid #000;
-      padding: 8px;
-      text-align: left;
-    }
-
-    #pngOutput th {
-      background-color: #d4edda;
-      font-weight: bold;
-    }
-
-    #pngOutput .header-row {
-      background-color: #f8f9fa;
-      font-weight: bold;
-    }
-
-    #pngOutput .title-cell {
-      font-weight: bold;
-      background-color: #e9ecef;
-    }
   </style>
 </head>
 <body>
@@ -508,9 +471,9 @@
     </div>
     
     <div class="action-buttons">
-      <button class="btn btn-save" onclick="saveAndSend()">
-        <span>💾</span>
-        <span>保存して発注</span>
+      <button class="btn btn-save" onclick="sendOrder()">
+        <span>📧</span>
+        <span>発注する</span>
       </button>
     </div>
 
@@ -520,31 +483,24 @@
         <li>顧客コード（任意）、店舗名、発注者名を入力してください</li>
         <li>各商品のケース数・バラ数を選択してください</li>
         <li>必要に応じて備考欄に記入してください</li>
-        <li>「保存して発注」ボタンをクリックすると、PNG画像が保存され、メールソフトが立ち上がります</li>
-        <li>保存されたPNG画像をメールに添付して送信してください</li>
+        <li>「発注する」ボタンをクリックすると、メールソフトが立ち上がります</li>
+        <li>メール本文に発注内容が自動で記載されますので、内容を確認して送信してください</li>
       </ol>
       <div class="warning">
         ⚠️ 注意: ケース発注の商品をバラで発注されてもケース発注になりますのでご注意ください
       </div>
-      <div class="warning" style="margin-top: 8px;">
-        ⚠️ 重要: ファイルを添付されないと発注できませんのでご注意ください
-      </div>
     </div>
   </div>
-
-  <!-- PNG出力用の隠しテーブル -->
-  <div id="pngOutput"></div>
 
   <!-- モーダル -->
   <div class="modal-overlay" id="modalOverlay"></div>
   <div class="modal" id="successModal">
     <div class="modal-content">
       <div class="modal-icon">✨</div>
-      <h2>発注データを保存しました！</h2>
+      <h2>発注メールを作成しました！</h2>
       <p>
-        PNG画像のダウンロードが完了しました。<br>
-        この後、メールソフトが自動的に立ち上がります。<br>
-        <strong style="color: #e65100;">必ず保存された画像ファイルをメールに添付して送信してください。</strong>
+        メールソフトが自動的に立ち上がります。<br>
+        <strong style="color: #e65100;">メール本文に発注内容が記載されていますので、内容を確認して送信してください。</strong>
       </p>
       <button class="modal-btn" onclick="closeModal()">OK</button>
     </div>
@@ -578,7 +534,7 @@
       { code: '506', name: '手もみカツオ', caseOptions: generateOptions(1, 10), baraOptions: [''] },
       { code: '2366', name: 'ゲソの唐揚げ　栄和', caseOptions: [''], baraOptions: generateOptions(3, 30, 3) },
       { code: '2906', name: '枝豆', caseOptions: [''], baraOptions: generateOptions(3, 30, 3) },
-      { code: '2430', name: 'ポテト　栄和', caseOptions: generateOptions(1, 10), baraOptions: generateOptions(1, 10) },
+      { code: '2430', name: 'ポテト　栄和', caseOptions: generateOptions(1, 10), baraOptions: generateOptions(3, 30, 3) },
       { code: '2355', name: 'なんこつ500ｇ　栄和', caseOptions: [''], baraOptions: generateOptions(3, 30, 3) },
       { code: '208', name: 'ウスターソース', caseOptions: [''], baraOptions: generateOptions(1, 10) },
       { code: '246', name: '塩だれ', caseOptions: [''], baraOptions: generateOptions(1, 10) },
@@ -716,80 +672,10 @@
     function closeModal() {
       document.getElementById('modalOverlay').style.display = 'none';
       document.getElementById('successModal').style.display = 'none';
-      
-      // メールソフトを起動
-      if (savedFile) {
-        const customerCode = document.getElementById('customerCode').value;
-        const storeName = document.getElementById('storeName').value;
-        const ordererName = document.getElementById('ordererName').value;
-        const remarks = document.getElementById('remarks').value;
-        const today = new Date();
-        const orderDate = today.toISOString().split('T')[0];
-        
-        // 選択された商品情報を収集
-        let orderItems = '\n【選択した商品】\n';
-        
-        // 食材
-        orderItems += '\n[食材]\n';
-        document.querySelectorAll('#shokuzaiBody tr').forEach(row => {
-          const code = row.cells[0].textContent;
-          const name = row.cells[1].textContent;
-          const caseSelect = row.querySelector('.qty-case');
-          const baraSelect = row.querySelector('.qty-bara');
-          const caseQty = caseSelect ? caseSelect.value : '';
-          const baraQty = baraSelect ? baraSelect.value : '';
-          
-          if (caseQty || baraQty) {
-            let itemLine = `${code ? code + ' - ' : ''}${name}`;
-            if (caseQty) itemLine += ` ケース:${caseQty}`;
-            if (baraQty) itemLine += ` バラ:${baraQty}`;
-            orderItems += itemLine + '\n';
-          }
-        });
-        
-        // 包材
-        orderItems += '\n[包材]\n';
-        document.querySelectorAll('#houzaiBody tr').forEach(row => {
-          const code = row.cells[0].textContent;
-          const name = row.cells[1].textContent;
-          const caseSelect = row.querySelector('.qty-case');
-          const baraSelect = row.querySelector('.qty-bara');
-          const caseQty = caseSelect ? caseSelect.value : '';
-          const baraQty = baraSelect ? baraSelect.value : '';
-          
-          if (caseQty || baraQty) {
-            let itemLine = `${code ? code + ' - ' : ''}${name}`;
-            if (caseQty) itemLine += ` ケース:${caseQty}`;
-            if (baraQty) itemLine += ` バラ:${baraQty}`;
-            orderItems += itemLine + '\n';
-          }
-        });
-        
-        // 備考
-        if (remarks) {
-          orderItems += `\n【備考】\n${remarks}\n`;
-        }
-        
-        const subject = encodeURIComponent(`【発注】${storeName} - ${orderDate}`);
-        const body = encodeURIComponent(
-          `発注データを添付しています。\n\n` +
-          `顧客コード: ${customerCode || '未入力'}\n` +
-          `店舗名: ${storeName}\n` +
-          `発注者: ${ordererName}\n` +
-          `発注日: ${orderDate}\n` +
-          orderItems +
-          `\n※必ず保存された画像ファイルをこのメールに添付して送信してください。\n` +
-          `※上記は添付ファイル忘れ防止用の商品リストです。正式な発注内容は添付画像をご確認ください。`
-        );
-        
-        window.location.href = `mailto:eiwa-hattyu@eiwa-shokuhin.com?subject=${subject}&body=${body}`;
-      }
     }
     
-    // PNG保存とメール送信
-    let savedFile = null;
-
-    function saveAndSend() {
+    // 発注メール送信
+    function sendOrder() {
       const customerCode = document.getElementById('customerCode').value;
       const storeName = document.getElementById('storeName').value;
       const ordererName = document.getElementById('ordererName').value;
@@ -803,140 +689,70 @@
       const today = new Date();
       const orderDate = today.toISOString().split('T')[0];
       
-      // PNG出力用のHTMLを作成
-      const pngOutput = document.getElementById('pngOutput');
-      pngOutput.innerHTML = '';
+      // 選択された商品情報を収集
+      let orderItems = '\n【選択した商品】\n';
       
-      const table = document.createElement('table');
-      table.style.borderCollapse = 'collapse';
-      table.style.width = '1123px'; // A4横 (297mm ≈ 1123px at 96dpi)
-      table.style.fontSize = '18px';
-      table.style.fontFamily = 'Arial, sans-serif';
-      table.style.fontWeight = 'bold';
-      
-      // ヘッダー情報
-      table.innerHTML = `
-        <tr class="header-row">
-          <td colspan="9" style="border: 1px solid #000; padding: 12px; text-align: center; font-size: 24px; font-weight: bold;">発注表</td>
-        </tr>
-        <tr>
-          <td class="title-cell" style="border: 1px solid #000; padding: 10px; width: 120px; font-weight: bold; font-size: 18px;">顧客コード</td>
-          <td colspan="2" style="border: 1px solid #000; padding: 10px; font-weight: bold; font-size: 18px;">${customerCode || ''}</td>
-          <td class="title-cell" style="border: 1px solid #000; padding: 10px; width: 100px; font-weight: bold; font-size: 18px;">店舗名</td>
-          <td colspan="3" style="border: 1px solid #000; padding: 10px; font-weight: bold; font-size: 18px;">${storeName}</td>
-          <td class="title-cell" style="border: 1px solid #000; padding: 10px; width: 100px; font-weight: bold; font-size: 18px;">発注者</td>
-          <td style="border: 1px solid #000; padding: 10px; font-weight: bold; font-size: 18px;">${ordererName}</td>
-        </tr>
-        <tr>
-          <td class="title-cell" style="border: 1px solid #000; padding: 10px; font-weight: bold; font-size: 18px;">発注日</td>
-          <td colspan="8" style="border: 1px solid #000; padding: 10px; font-weight: bold; font-size: 18px;">${orderDate}</td>
-        </tr>
-        <tr><td colspan="9" style="border: 1px solid #000; padding: 5px;"></td></tr>
-        <tr>
-          <th style="border: 1px solid #000; padding: 10px; background-color: #d4edda; font-size: 18px; font-weight: bold;">商品コード</th>
-          <th style="border: 1px solid #000; padding: 10px; background-color: #d4edda; font-size: 18px; font-weight: bold;">商品名</th>
-          <th style="border: 1px solid #000; padding: 10px; background-color: #d4edda; width: 100px; font-size: 18px; font-weight: bold;">ケース数</th>
-          <th style="border: 1px solid #000; padding: 10px; background-color: #d4edda; width: 100px; font-size: 18px; font-weight: bold;">バラ数</th>
-          <th style="border: 1px solid #000; padding: 10px; width: 20px;"></th>
-          <th style="border: 1px solid #000; padding: 10px; background-color: #d4edda; font-size: 18px; font-weight: bold;">商品コード</th>
-          <th style="border: 1px solid #000; padding: 10px; background-color: #d4edda; font-size: 18px; font-weight: bold;">商品名</th>
-          <th style="border: 1px solid #000; padding: 10px; background-color: #d4edda; width: 100px; font-size: 18px; font-weight: bold;">ケース数</th>
-          <th style="border: 1px solid #000; padding: 10px; background-color: #d4edda; width: 100px; font-size: 18px; font-weight: bold;">バラ数</th>
-        </tr>
-      `;
-      
-      // 食材と包材を横並びで配置
-      const maxRows = Math.max(shokuzaiProducts.length, houzaiProducts.length);
-      
-      for (let i = 0; i < maxRows; i++) {
-        const row = document.createElement('tr');
+      // 食材
+      orderItems += '\n[食材]\n';
+      document.querySelectorAll('#shokuzaiBody tr').forEach(row => {
+        const code = row.cells[0].textContent;
+        const name = row.cells[1].textContent;
+        const caseSelect = row.querySelector('.qty-case');
+        const baraSelect = row.querySelector('.qty-bara');
+        const caseQty = caseSelect ? caseSelect.value : '';
+        const baraQty = baraSelect ? baraSelect.value : '';
         
-        // 食材データ
-        if (i < shokuzaiProducts.length) {
-          const shokuzaiRow = document.querySelectorAll('#shokuzaiBody tr')[i];
-          const code = shokuzaiRow.cells[0].textContent;
-          const name = shokuzaiRow.cells[1].textContent;
-          const caseSelect = shokuzaiRow.querySelector('.qty-case');
-          const baraSelect = shokuzaiRow.querySelector('.qty-bara');
-          const caseQty = caseSelect ? (caseSelect.value || '') : '';
-          const baraQty = baraSelect ? (baraSelect.value || '') : '';
-          row.innerHTML += `
-            <td style="border: 1px solid #000; padding: 10px; font-weight: bold; font-size: 18px;">${code}</td>
-            <td style="border: 1px solid #000; padding: 10px; font-weight: bold; font-size: 18px;">${name}</td>
-            <td style="border: 1px solid #000; padding: 10px; text-align: center; font-weight: bold; font-size: 18px;">${caseQty}</td>
-            <td style="border: 1px solid #000; padding: 10px; text-align: center; font-weight: bold; font-size: 18px;">${baraQty}</td>
-          `;
-        } else {
-          row.innerHTML += `
-            <td style="border: 1px solid #000; padding: 10px;"></td>
-            <td style="border: 1px solid #000; padding: 10px;"></td>
-            <td style="border: 1px solid #000; padding: 10px;"></td>
-            <td style="border: 1px solid #000; padding: 10px;"></td>
-          `;
+        if (caseQty || baraQty) {
+          let itemLine = `${code ? code + ' - ' : ''}${name}`;
+          if (caseQty) itemLine += ` ケース:${caseQty}`;
+          if (baraQty) itemLine += ` バラ:${baraQty}`;
+          orderItems += itemLine + '\n';
         }
+      });
+      
+      // 包材
+      orderItems += '\n[包材]\n';
+      document.querySelectorAll('#houzaiBody tr').forEach(row => {
+        const code = row.cells[0].textContent;
+        const name = row.cells[1].textContent;
+        const caseSelect = row.querySelector('.qty-case');
+        const baraSelect = row.querySelector('.qty-bara');
+        const caseQty = caseSelect ? caseSelect.value : '';
+        const baraQty = baraSelect ? baraSelect.value : '';
         
-        row.innerHTML += `<td style="border: 1px solid #000; padding: 10px;"></td>`;
-        
-        // 包材データ
-        if (i < houzaiProducts.length) {
-          const houzaiRow = document.querySelectorAll('#houzaiBody tr')[i];
-          const code = houzaiRow.cells[0].textContent;
-          const name = houzaiRow.cells[1].textContent;
-          const caseSelect = houzaiRow.querySelector('.qty-case');
-          const baraSelect = houzaiRow.querySelector('.qty-bara');
-          const caseQty = caseSelect ? (caseSelect.value || '') : '';
-          const baraQty = baraSelect ? (baraSelect.value || '') : '';
-          row.innerHTML += `
-            <td style="border: 1px solid #000; padding: 10px; font-weight: bold; font-size: 18px;">${code}</td>
-            <td style="border: 1px solid #000; padding: 10px; font-weight: bold; font-size: 18px;">${name}</td>
-            <td style="border: 1px solid #000; padding: 10px; text-align: center; font-weight: bold; font-size: 18px;">${caseQty}</td>
-            <td style="border: 1px solid #000; padding: 10px; text-align: center; font-weight: bold; font-size: 18px;">${baraQty}</td>
-          `;
-        } else {
-          row.innerHTML += `
-            <td style="border: 1px solid #000; padding: 10px;"></td>
-            <td style="border: 1px solid #000; padding: 10px;"></td>
-            <td style="border: 1px solid #000; padding: 10px;"></td>
-            <td style="border: 1px solid #000; padding: 10px;"></td>
-          `;
+        if (caseQty || baraQty) {
+          let itemLine = `${code ? code + ' - ' : ''}${name}`;
+          if (caseQty) itemLine += ` ケース:${caseQty}`;
+          if (baraQty) itemLine += ` バラ:${baraQty}`;
+          orderItems += itemLine + '\n';
         }
-        
-        table.appendChild(row);
+      });
+      
+      // 備考
+      if (remarks) {
+        orderItems += `\n【備考】\n${remarks}\n`;
       }
       
-      // 備考欄
-      table.innerHTML += `
-        <tr><td colspan="9" style="border: 1px solid #000; padding: 5px;"></td></tr>
-        <tr><td colspan="9" class="title-cell" style="border: 1px solid #000; padding: 10px; font-weight: bold; font-size: 18px;">備考欄</td></tr>
-        <tr><td colspan="9" style="border: 1px solid #000; padding: 10px; min-height: 150px; height: 150px; font-weight: bold; font-size: 18px; vertical-align: top;">${remarks}</td></tr>
-      `;
+      const subject = encodeURIComponent(`【発注】${storeName} - ${orderDate}`);
+      const body = encodeURIComponent(
+        `発注内容をお送りします。\n\n` +
+        `顧客コード: ${customerCode || '未入力'}\n` +
+        `店舗名: ${storeName}\n` +
+        `発注者: ${ordererName}\n` +
+        `発注日: ${orderDate}\n` +
+        orderItems +
+        `\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `このメールは高田発注システムより送信されています\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━`
+      );
       
-      pngOutput.appendChild(table);
+      // モーダルを表示してからメール起動
+      showModal();
       
-      // html2canvasでPNG生成
-      html2canvas(pngOutput, {
-        backgroundColor: '#ffffff',
-        scale: 2
-      }).then(canvas => {
-        // PNGとしてダウンロード
-        const filename = `発注_${storeName}_${orderDate}.png`;
-        canvas.toBlob(blob => {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-          
-          // ファイル名を保存
-          savedFile = filename;
-          
-          // モーダルを表示
-          showModal();
-        });
-      });
+      // 少し遅延させてモーダルが表示されてからメールを起動
+      setTimeout(() => {
+        window.location.href = `mailto:eiwa-hattyu@eiwa-shokuhin.com?subject=${subject}&body=${body}`;
+      }, 100);
     }
     
     // ページ読み込み時にテーブルを初期化
