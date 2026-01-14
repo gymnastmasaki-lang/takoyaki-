@@ -269,7 +269,11 @@
     <div class="info-section">
       <div class="info-row">
         <label>顧客コード:</label>
-        <input type="text" id="customerCode" value="2965" placeholder="顧客コードを入力">
+        <input type="text" id="customerCode" value="" placeholder="顧客コードを入力">
+      </div>
+      <div class="info-row">
+        <label>店舗名:</label>
+        <input type="text" id="storeName" value="" placeholder="店舗名を入力">
       </div>
       <div class="info-row">
         <label>発注日:</label>
@@ -565,11 +569,14 @@
     
     // PDF生成
     function generatePDF() {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF();
-      
       const customerCode = document.getElementById('customerCode').value;
+      const storeName = document.getElementById('storeName').value;
       const orderDate = document.getElementById('orderDate').value;
+      
+      if (!customerCode || !storeName) {
+        alert('顧客コードと店舗名を入力してください');
+        return;
+      }
       
       // 数量が選択された商品を収集
       const orders = [];
@@ -582,12 +589,10 @@
         if (caseQty || baraQty) {
           const code = caseSelect.dataset.code || '';
           const product = caseSelect.dataset.product;
-          const unit = caseSelect.dataset.unit;
           
           orders.push({
             code: code,
             product: product,
-            unit: unit,
             caseQty: caseQty,
             baraQty: baraQty
           });
@@ -599,43 +604,76 @@
         return;
       }
       
-      // PDFのヘッダー
-      doc.setFontSize(18);
-      doc.text('発注表（食材）', 105, 20, { align: 'center' });
+      // 印刷用ウィンドウを作成
+      const printWindow = window.open('', '_blank');
       
-      doc.setFontSize(12);
-      doc.text(`顧客コード: ${customerCode}`, 20, 35);
-      doc.text(`発注日: ${orderDate}`, 20, 42);
+      let html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>発注表（食材）</title>
+          <style>
+            @page { size: A4; margin: 20mm; }
+            body { font-family: "MS Gothic", "Hiragino Kaku Gothic ProN", sans-serif; font-size: 12pt; }
+            .header { text-align: center; margin-bottom: 20px; }
+            .header h1 { font-size: 18pt; margin: 0 0 10px 0; }
+            .info { margin-bottom: 20px; }
+            .info div { margin: 5px 0; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+            th { background: #f0f0f0; }
+            @media print {
+              button { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>発注表（食材）</h1>
+          </div>
+          <div class="info">
+            <div>顧客コード: ${customerCode}</div>
+            <div>店舗名: ${storeName}</div>
+            <div>発注日: ${orderDate}</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>商品コード</th>
+                <th>商品名</th>
+                <th>ケース数</th>
+                <th>バラ数</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
       
-      // テーブルヘッダー
-      doc.setFontSize(10);
-      let y = 55;
-      doc.text('商品コード', 20, y);
-      doc.text('商品名', 60, y);
-      doc.text('ケース数', 130, y);
-      doc.text('バラ数', 165, y);
-      
-      doc.line(20, y + 2, 200, y + 2);
-      
-      y += 8;
-      
-      // 商品リスト
       orders.forEach(order => {
-        if (y > 270) {
-          doc.addPage();
-          y = 20;
-        }
-        
-        doc.text(order.code, 20, y);
-        doc.text(order.product, 60, y);
-        doc.text(order.caseQty || '-', 130, y);
-        doc.text(order.baraQty || '-', 165, y);
-        
-        y += 7;
+        html += `
+          <tr>
+            <td>${order.code}</td>
+            <td>${order.product}</td>
+            <td>${order.caseQty || '-'}</td>
+            <td>${order.baraQty || '-'}</td>
+          </tr>
+        `;
       });
       
-      // PDFダウンロード
-      doc.save(`食材発注_${orderDate}.pdf`);
+      html += `
+            </tbody>
+          </table>
+          <script>
+            window.onload = function() {
+              window.print();
+            };
+          </script>
+        </body>
+        </html>
+      `;
+      
+      printWindow.document.write(html);
+      printWindow.document.close();
     }
     
     // CSV出力（PCA商魂商管用）
@@ -695,10 +733,16 @@
     // メール送信（Firebase Functions使用）
     async function sendOrder() {
       const customerCode = document.getElementById('customerCode').value;
+      const storeName = document.getElementById('storeName').value;
       const orderDate = document.getElementById('orderDate').value;
       
       if (!customerCode) {
         alert('顧客コードを入力してください');
+        return;
+      }
+      
+      if (!storeName) {
+        alert('店舗名を入力してください');
         return;
       }
       
@@ -740,6 +784,7 @@
         const sendOrderFunction = window.httpsCallable(window.firebaseFunctions, 'sendOrder');
         const result = await sendOrderFunction({
           customerCode: customerCode,
+          storeName: storeName,
           orderDate: orderDate,
           orders: orders,
           orderType: 'shokuzai'
