@@ -98,6 +98,40 @@
             const [editingTime, setEditingTime] = useState(null);
             const [editingValue, setEditingValue] = useState('');
             const [editingMemo, setEditingMemo] = useState('');
+            
+            // カスタムアラート用の状態
+            const [showCustomAlert, setShowCustomAlert] = useState(false);
+            const [alertMessage, setAlertMessage] = useState('');
+            const [alertTitle, setAlertTitle] = useState('');
+            const [alertIcon, setAlertIcon] = useState('');
+            const [showCustomConfirm, setShowCustomConfirm] = useState(false);
+            const [confirmMessage, setConfirmMessage] = useState('');
+            const [confirmTitle, setConfirmTitle] = useState('');
+            const [confirmIcon, setConfirmIcon] = useState('');
+            const [confirmResolve, setConfirmResolve] = useState(null);
+            
+            // カスタムアラート表示関数
+            const showCustomAlertFunc = (message, title = 'お知らせ', icon = 'ℹ️') => {
+                setAlertMessage(message);
+                setAlertTitle(title);
+                setAlertIcon(icon);
+                setShowCustomAlert(true);
+            };
+            
+            // カスタム確認ダイアログ表示関数
+            const showCustomConfirmFunc = (message, title = '確認', icon = '❓') => {
+                return new Promise((resolve) => {
+                    setConfirmMessage(message);
+                    setConfirmTitle(title);
+                    setConfirmIcon(icon);
+                    setConfirmResolve(() => resolve);
+                    setShowCustomConfirm(true);
+                });
+            };
+            
+            // グローバルに公開
+            window.showCustomAlert = showCustomAlertFunc;
+            window.showCustomConfirm = showCustomConfirmFunc;
             const [editingIsHoliday, setEditingIsHoliday] = useState(false);
             const [editingHourlyRate, setEditingHourlyRate] = useState('');
             const [isLoading, setIsLoading] = useState(false);
@@ -205,7 +239,7 @@
                     const querySnapshot = await getDocs(q);
 
                     if (querySnapshot.empty) {
-                        alert('店舗が見つかりません');
+                        showCustomAlertFunc('店舗が見つかりません', '❌ エラー', '❌');
                         return;
                     }
 
@@ -217,7 +251,7 @@
                         const data = doc.data();
                         if (data.storePassword === passwordInput) {
                             if (!data.isActive) {
-                                alert('この店舗は無効化されています');
+                                showCustomAlertFunc('この店舗は無効化されています', '⚠️ 警告', '⚠️');
                                 return;
                             }
                             authenticated = true;
@@ -236,7 +270,7 @@
                         setIsAdminAuthenticated(true);
                         setPasswordInput('');
                     } else {
-                        alert('パスワードが正しくありません');
+                        showCustomAlertFunc('パスワードが正しくありません', '❌ エラー', '❌');
                     }
                 } catch (err) {
                     console.error('ログインエラー:', err);
@@ -368,7 +402,7 @@
                     setShowAddEmployee(false);
                 } catch (err) {
                     console.error('従業員追加エラー:', err);
-                    alert('従業員の追加に失敗しました: ' + err.message);
+                    showCustomAlertFunc('従業員の追加に失敗しました: ' + err.message, '❌ エラー', '❌');
                 } finally {
                     setIsLoading(false);
                 }
@@ -379,7 +413,10 @@
                 try {
                     const { doc, updateDoc, Timestamp } = window.firebaseModules;
                     
-                    await updateDoc(doc(window.db, 'kintai_employees', id), {
+                    // 店舗別のemployeesコレクションを使用
+                    const employeeRef = doc(window.db, `stores/${selectedStore.id}/employees`, id);
+                    
+                    await updateDoc(employeeRef, {
                         name,
                         hourlyRate: parseFloat(hourlyRate) || 0,
                         transportAllowance: parseFloat(transportAllowance) || 0,
@@ -388,9 +425,12 @@
                     
                     await loadAllData();
                     setEditingEmployee(null);
+                    
+                    // カスタムアラート
+                    showCustomAlert('従業員情報を更新しました', '✅ 更新完了', '✅');
                 } catch (err) {
                     console.error('従業員更新エラー:', err);
-                    alert('従業員の更新に失敗しました: ' + err.message);
+                    showCustomAlert('従業員の更新に失敗しました: ' + err.message, '❌ エラー', '❌');
                 } finally {
                     setIsLoading(false);
                 }
@@ -434,7 +474,7 @@
                 const timeRegex = /^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$/;
                 
                 if (editingValue && !timeRegex.test(editingValue)) {
-                    alert('時刻の形式が正しくありません(HH:MM形式で入力してください)');
+                    showCustomAlertFunc('時刻の形式が正しくありません(HH:MM形式で入力してください)', '⚠️ 入力エラー', '⚠️');
                     return;
                 }
                 
@@ -544,6 +584,33 @@
                 link.download = `給与明細_${employee.name}_${currentYear}年${currentMonth + 1}月.csv`;
                 link.click();
             };
+
+            
+            // カスタムアラートUI
+            const CustomAlert = () => showCustomAlert && (
+                <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000}} onClick={() => setShowCustomAlert(false)}>
+                    <div style={{background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', borderRadius: '16px', padding: '30px', maxWidth: '400px', width: '90%', boxShadow: '0 10px 40px rgba(0,0,0,0.3)', animation: 'fadeIn 0.3s ease-out'}} onClick={e => e.stopPropagation()}>
+                        <div style={{fontSize: '48px', textAlign: 'center', marginBottom: '15px'}}>{alertIcon}</div>
+                        <h3 style={{color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '15px', textAlign: 'center'}}>{alertTitle}</h3>
+                        <p style={{color: 'white', fontSize: '16px', marginBottom: '25px', textAlign: 'center', lineHeight: '1.5'}}>{alertMessage}</p>
+                        <button onClick={() => setShowCustomAlert(false)} style={{width: '100%', padding: '12px', background: 'white', color: '#667eea', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s'}}>OK</button>
+                    </div>
+                </div>
+            );
+            
+            const CustomConfirm = () => showCustomConfirm && (
+                <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000}} onClick={() => {setShowCustomConfirm(false); confirmResolve && confirmResolve(false);}}>
+                    <div style={{background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', borderRadius: '16px', padding: '30px', maxWidth: '400px', width: '90%', boxShadow: '0 10px 40px rgba(0,0,0,0.3)', animation: 'fadeIn 0.3s ease-out'}} onClick={e => e.stopPropagation()}>
+                        <div style={{fontSize: '48px', textAlign: 'center', marginBottom: '15px'}}>{confirmIcon}</div>
+                        <h3 style={{color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '15px', textAlign: 'center'}}>{confirmTitle}</h3>
+                        <p style={{color: 'white', fontSize: '16px', marginBottom: '25px', textAlign: 'center', lineHeight: '1.5'}}>{confirmMessage}</p>
+                        <div style={{display: 'flex', gap: '10px'}}>
+                            <button onClick={() => {setShowCustomConfirm(false); confirmResolve && confirmResolve(false);}} style={{flex: 1, padding: '12px', background: 'rgba(255,255,255,0.3)', color: 'white', border: '2px solid white', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer'}}>キャンセル</button>
+                            <button onClick={() => {setShowCustomConfirm(false); confirmResolve && confirmResolve(true);}} style={{flex: 1, padding: '12px', background: 'white', color: '#f5576c', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer'}}>OK</button>
+                        </div>
+                    </div>
+                </div>
+            );
 
             // ログイン画面
             if (!isAdminAuthenticated) {
@@ -1000,6 +1067,8 @@
                             </div>
                         </div>
                     )}
+                    <CustomAlert />
+                    <CustomConfirm />
                 </div>
             );
         };
@@ -1101,7 +1170,7 @@
                                     setRate('');
                                     setTransport('');
                                 } else {
-                                    alert('名前と時給を入力してください');
+                                    showCustomAlertFunc('名前と時給を入力してください', '⚠️ 入力エラー', '⚠️');
                                 }
                             }}
                             className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
