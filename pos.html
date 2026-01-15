@@ -4351,17 +4351,21 @@
       const day = String(todayStart.getDate()).padStart(2, '0');
       currentExpenseDate = `${year}-${month}-${day}`;
       
-      console.log('支出モーダル表示:', currentExpenseDate);
+      console.log('📅 支出モーダル表示 - 本日の日付:', currentExpenseDate);
+      console.log('📅 現在時刻(JST):', jstNow.toLocaleString('ja-JP'));
       
       // Firebaseから本日の支出データを取得
       try {
         const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', currentExpenseDate));
         
         if (expenseDoc.exists()) {
-          expenseRows = expenseDoc.data().items || [];
-          console.log('既存の支出データを読み込み:', expenseRows);
+          const data = expenseDoc.data();
+          expenseRows = data.items || [];
+          console.log('✅ 既存の支出データを読み込み:', currentExpenseDate, '件数:', expenseRows.length);
+          console.log('📋 データ内容:', expenseRows);
         } else {
           // 新規の場合は初期行を追加
+          console.log('📝 新規作成:', currentExpenseDate);
           expenseRows = [
             { storeName: '', category: '', detail: '', amount: 0 },
             { storeName: '', category: '', detail: '', amount: 0 },
@@ -4369,7 +4373,7 @@
           ];
         }
       } catch (e) {
-        console.error('支出データ読み込みエラー:', e);
+        console.error('❌ 支出データ読み込みエラー:', e);
         expenseRows = [
           { storeName: '', category: '', detail: '', amount: 0 },
           { storeName: '', category: '', detail: '', amount: 0 },
@@ -4473,19 +4477,28 @@
     // 支出を保存
     window.saveExpenses = async function() {
       try {
-        console.log('支出を保存中:', currentExpenseDate, expenseRows);
+        console.log('💾 支出を保存中 - 日付:', currentExpenseDate);
+        console.log('💾 保存データ:', expenseRows);
         
-        const total = expenseRows.reduce((sum, row) => sum + (parseFloat(row.amount) || 0), 0);
+        // 空行を除外
+        const validRows = expenseRows.filter(row => 
+          row.storeName || row.category || row.detail || row.amount
+        );
+        
+        const total = validRows.reduce((sum, row) => sum + (parseFloat(row.amount) || 0), 0);
+        
+        const currentStaff = document.getElementById('staffSelect')?.value || 'POS入力';
         
         await window.setDoc(window.getStoreDoc('expenses', currentExpenseDate), {
           date: currentExpenseDate,
-          items: expenseRows,
+          staff: currentStaff,
+          items: validRows,
           total: total,
           updatedAt: window.Timestamp.now()
         });
         
-        console.log('✅ 支出保存完了');
-        alert('支出を保存しました');
+        console.log('✅ 支出保存完了 - 日付:', currentExpenseDate, '件数:', validRows.length, '合計:', total);
+        alert(`支出を保存しました\n日付: ${currentExpenseDate}\n件数: ${validRows.length}件\n合計: ¥${total.toLocaleString()}`);
         closeExpenseModal();
         
       } catch (e) {
