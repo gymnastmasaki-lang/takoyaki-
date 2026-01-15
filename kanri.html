@@ -442,7 +442,7 @@
                 const employee = employees.find(e => e.id === employeeId);
                 if (!employee) return { 
                     hours: 0, basePay: 0, overtimePay: 0, holidayPay: 0, transport: 0, 
-                    workDays: 0, salaryType: '時間給',
+                    workDays: 0, salaryType: '時間給', minimumWage: 1000,
                     // 時間給ベース
                     hourlyGrossPay: 0, hourlyAllowances: 0, hourlyTotalGross: 0,
                     hourlyDeductions: {}, hourlyNetPay: 0,
@@ -451,7 +451,8 @@
                     fixedAllowances: 0, fixedTotalGross: 0,
                     fixedDeductions: {}, fixedNetPay: 0,
                     // 差額
-                    grossDifference: 0, netDifference: 0
+                    grossDifference: 0, netDifference: 0,
+                    displayGrossDifference: 0, displayNetDifference: 0
                 };
                 
                 let totalHours = 0;
@@ -461,8 +462,16 @@
                 let workDays = 0;
                 
                 const daysInMonth = getDaysInMonth(currentMonth, currentYear);
+                const salaryType = employee.salaryType || '時間給';
+                const minimumWage = employee.minimumWage || 1000;
                 
                 // 勤怠データから時間給計算
+                // 固定給の場合は最低賃金で計算
+                const calculationRate = (salaryType === '固定給' && employee.monthlySalary > 0) ? minimumWage : employee.hourlyRate;
+                
+                // 一時的に時給を最低賃金に変更して計算
+                const tempEmployee = { ...employee, hourlyRate: calculationRate };
+                
                 for (let day = 1; day <= daysInMonth; day++) {
                     const dateKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                     const record = attendanceData[employeeId]?.[dateKey];
@@ -470,7 +479,7 @@
                     if (record && record.clockIn) {
                         workDays++;
                         totalHours += calculateWorkHours(record);
-                        const dailyPay = calculateDailyPay(employee, record);
+                        const dailyPay = calculateDailyPay(tempEmployee, record);
                         totalBasePay += dailyPay.base;
                         totalOvertimePay += dailyPay.overtime;
                         totalHolidayPay += dailyPay.holiday;
@@ -484,8 +493,6 @@
                 const totalAllowances = (allowances.family || 0) + (allowances.sales || 0) + 
                                        (allowances.position || 0) + (allowances.commuting || 0) +
                                        (allowances.expense || 0) + (allowances.housing || 0);
-                
-                const salaryType = employee.salaryType || '時間給';
                 
                 // ========== 時間給ベースの計算 ==========
                 const hourlyBasePay = totalBasePay + totalOvertimePay + totalHolidayPay + transport;
@@ -502,6 +509,8 @@
                 let fixedNetPay = 0;
                 let grossDifference = 0;
                 let netDifference = 0;
+                let displayGrossDifference = 0;
+                let displayNetDifference = 0;
                 
                 if (salaryType === '固定給' && employee.monthlySalary > 0) {
                     fixedSalary = employee.monthlySalary;
@@ -511,10 +520,13 @@
                     fixedDeductions = calculateDeductions(employee, fixedTotalGross);
                     fixedNetPay = fixedTotalGross - fixedDeductions.totalDeductions;
                     
-                    // 差額計算（控除前）
+                    // 差額計算（内部計算は正確に）
                     grossDifference = hourlyTotalGross - fixedTotalGross;
-                    // 差額計算（控除後）
                     netDifference = hourlyNetPay - fixedNetPay;
+                    
+                    // 表示用差額（マイナスの場合は0）
+                    displayGrossDifference = Math.max(0, grossDifference);
+                    displayNetDifference = Math.max(0, netDifference);
                 }
                 
                 return {
@@ -525,6 +537,7 @@
                     transport,
                     workDays,
                     salaryType,
+                    minimumWage,
                     allowances: employee.allowances || {},
                     totalAllowances,
                     
@@ -542,9 +555,12 @@
                     fixedDeductions,
                     fixedNetPay,
                     
-                    // 差額
+                    // 差額（内部計算用）
                     grossDifference,
-                    netDifference
+                    netDifference,
+                    // 差額（表示用）
+                    displayGrossDifference,
+                    displayNetDifference
                 };
             };
 
@@ -594,12 +610,16 @@
                         let totalHolidayPay = 0;
                         let workDays = 0;
                         
+                        // 固定給の場合は最低賃金で計算
+                        const minimumWage = employee.minimumWage || 1000;
+                        const tempEmployee = { ...employee, hourlyRate: minimumWage };
+                        
                         monthlyData[yearMonth].forEach(({ record }) => {
                             if (record.clockIn) {
                                 workDays++;
                                 const workHours = calculateWorkHours(record);
                                 totalHours += workHours;
-                                const dailyPay = calculateDailyPay(employee, record);
+                                const dailyPay = calculateDailyPay(tempEmployee, record);
                                 totalBasePay += dailyPay.base;
                                 totalOvertimePay += dailyPay.overtime;
                                 totalHolidayPay += dailyPay.holiday;
@@ -646,10 +666,20 @@
                         totalNetDifference += netDifference;
                     });
                     
-                    return { totalGrossDifference, totalNetDifference, months };
+                    // 表示用累計差額（マイナスの場合は0）
+                    const displayTotalGrossDifference = Math.max(0, totalGrossDifference);
+                    const displayTotalNetDifference = Math.max(0, totalNetDifference);
+                    
+                    return { 
+                        totalGrossDifference, 
+                        totalNetDifference, 
+                        displayTotalGrossDifference,
+                        displayTotalNetDifference,
+                        months 
+                    };
                 } catch (err) {
                     console.error('累計差異計算エラー:', err);
-                    return { totalGrossDifference: 0, totalNetDifference: 0, months: [] };
+                    return { totalGrossDifference: 0, totalNetDifference: 0, displayTotalGrossDifference: 0, displayTotalNetDifference: 0, months: [] };
                 }
             };
 
@@ -987,7 +1017,7 @@
                 const totals = calculateMonthlyTotals(employeeId);
                 const daysInMonth = getDaysInMonth(currentMonth, currentYear);
                 const prefecture = employee.prefecture || '東京';
-                const minimumWage = employee.minimumWage || INSURANCE_DATA.minimumWage[prefecture] || 1000;
+                const minimumWage = INSURANCE_DATA.minimumWage[prefecture] || 1000;
                 
                 // 累計差異を取得（固定給の場合のみ）
                 let cumulativeData = { totalGrossDifference: 0, totalNetDifference: 0, months: [] };
@@ -1888,7 +1918,6 @@
             const [monthlySalary, setMonthlySalary] = useState(employee?.monthlySalary || 0);
             const [prefecture, setPrefecture] = useState(employee?.prefecture || '東京');
             const [age, setAge] = useState(employee?.age || 30);
-            const [minimumWage, setMinimumWage] = useState(employee?.minimumWage || INSURANCE_DATA.minimumWage[employee?.prefecture || '東京']);
             const [allowances, setAllowances] = useState(employee?.allowances || {
                 family: 0, sales: 0, position: 0, commuting: 0, expense: 0, housing: 0
             });
@@ -1897,11 +1926,7 @@
             });
 
             const prefectures = Object.keys(INSURANCE_DATA.minimumWage);
-            
-            const handlePrefectureChange = (newPref) => {
-                setPrefecture(newPref);
-                setMinimumWage(INSURANCE_DATA.minimumWage[newPref] || 1000);
-            };
+            const minimumWage = INSURANCE_DATA.minimumWage[prefecture] || 1000;
 
             return (
                 <div className="space-y-3 p-4 bg-gray-50 rounded w-full max-h-[70vh] overflow-y-auto">
@@ -2077,7 +2102,7 @@
                         <button
                             onClick={() => {
                                 if (employee?.id) {
-                                    onSave(employee.id, name, rate, transport, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage);
+                                    onSave(employee.id, name, rate, transport, salaryType, monthlySalary, prefecture, age, allowances, deductions);
                                 }
                             }}
                             className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-2"
@@ -2113,7 +2138,7 @@
 
             const prefectures = Object.keys(INSURANCE_DATA.minimumWage);
             
-            // 都道府県変更時に最低賃金を更新
+            // 都道府県変更時に参考値として最低賃金を更新
             const handlePrefectureChange = (newPref) => {
                 setPrefecture(newPref);
                 setMinimumWage(INSURANCE_DATA.minimumWage[newPref] || 1000);
@@ -2179,7 +2204,9 @@
                             className="w-full p-2 border rounded"
                             placeholder="1000"
                         />
-                        <div className="text-xs text-gray-500 mt-1">※参考: {prefecture}の法定最低賃金は¥{INSURANCE_DATA.minimumWage[prefecture]}です</div>
+                        <div className="text-xs text-gray-500 mt-1">
+                            ※参考: {prefecture}の法定最低賃金は¥{INSURANCE_DATA.minimumWage[prefecture]}です（固定給の場合、この最低賃金で時間給計算されます）
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -2200,9 +2227,8 @@
                                 value={transport}
                                 onChange={(e) => setTransport(e.target.value)}
                                 className="w-full p-2 border rounded"
-                                    placeholder="500"
-                                />
-                            </div>
+                                placeholder="500"
+                            />
                         </div>
                     </div>
 
@@ -2216,6 +2242,9 @@
                                 className="w-full p-2 border rounded"
                                 placeholder="250000"
                             />
+                            <div className="text-xs text-gray-500 mt-1">
+                                ※固定給の場合、実際の支給額は固定給ですが、時間給換算は最低賃金で計算されます
+                            </div>
                         </div>
                     )}
 
