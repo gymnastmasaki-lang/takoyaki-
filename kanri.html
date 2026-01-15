@@ -350,7 +350,7 @@
 
             const calculateMonthlyTotals = (employeeId) => {
                 const employee = employees.find(e => e.id === employeeId);
-                if (!employee) return { hours: 0, basePay: 0, overtimePay: 0, holidayPay: 0, transport: 0, total: 0 };
+                if (!employee) return { hours: 0, basePay: 0, overtimePay: 0, holidayPay: 0, transport: 0, total: 0, actualWage: 0, fixedSalary: 0, difference: 0 };
                 
                 let totalHours = 0;
                 let totalBasePay = 0;
@@ -375,7 +375,21 @@
                 }
                 
                 const transport = (employee.transportAllowance || 0) * workDays;
-                const total = totalBasePay + totalOvertimePay + totalHolidayPay + transport;
+                const actualWage = totalBasePay + totalOvertimePay + totalHolidayPay + transport;
+                
+                // 固定給の場合の計算
+                let fixedSalary = 0;
+                let difference = 0;
+                let dailyFixedRate = 0;
+                let total = actualWage;
+                
+                if (employee.salaryType === '固定給' && employee.monthlySalary > 0) {
+                    fixedSalary = employee.monthlySalary;
+                    dailyFixedRate = fixedSalary / daysInMonth;
+                    const fixedPayForWorkDays = dailyFixedRate * workDays;
+                    difference = actualWage - fixedPayForWorkDays;
+                    total = fixedPayForWorkDays;
+                }
                 
                 return {
                     hours: totalHours,
@@ -384,11 +398,16 @@
                     holidayPay: totalHolidayPay,
                     transport,
                     total,
-                    workDays
+                    workDays,
+                    actualWage,
+                    fixedSalary,
+                    dailyFixedRate,
+                    difference,
+                    salaryType: employee.salaryType || '時間給'
                 };
             };
 
-            const addEmployee = async (name, hourlyRate, transportAllowance) => {
+            const addEmployee = async (name, hourlyRate, transportAllowance, salaryType = '時間給', monthlySalary = 0) => {
                 setIsLoading(true);
                 try {
                     const { collection, addDoc, Timestamp } = window.firebaseModules;
@@ -402,6 +421,8 @@
                         name,
                         hourlyRate: parseFloat(hourlyRate) || 0,
                         transportAllowance: parseFloat(transportAllowance) || 0,
+                        salaryType: salaryType,
+                        monthlySalary: parseFloat(monthlySalary) || 0,
                         createdAt: Timestamp.now()
                     });
                     
@@ -415,7 +436,7 @@
                 }
             };
 
-            const updateEmployee = async (id, name, hourlyRate, transportAllowance) => {
+            const updateEmployee = async (id, name, hourlyRate, transportAllowance, salaryType = '時間給', monthlySalary = 0) => {
                 setIsLoading(true);
                 try {
                     const { doc, updateDoc, Timestamp } = window.firebaseModules;
@@ -431,6 +452,8 @@
                         name,
                         hourlyRate: parseFloat(hourlyRate) || 0,
                         transportAllowance: parseFloat(transportAllowance) || 0,
+                        salaryType: salaryType,
+                        monthlySalary: parseFloat(monthlySalary) || 0,
                         updatedAt: Timestamp.now()
                     });
                     
@@ -602,7 +625,14 @@
                 
                 let csvContent = '\uFEFF';
                 csvContent += `給与明細書\n${currentYear}年${currentMonth + 1}月分\n\n`;
-                csvContent += `氏名,${employee.name}\n時給,¥${employee.hourlyRate.toLocaleString()}\n交通費,¥${employee.transportAllowance.toLocaleString()}/日\n\n`;
+                csvContent += `氏名,${employee.name}\n`;
+                csvContent += `給与タイプ,${employee.salaryType || '時間給'}\n`;
+                csvContent += `時給,¥${employee.hourlyRate.toLocaleString()}\n`;
+                if (employee.salaryType === '固定給' && employee.monthlySalary > 0) {
+                    csvContent += `固定給(月額),¥${employee.monthlySalary.toLocaleString()}\n`;
+                    csvContent += `日額(固定給÷${daysInMonth}日),¥${Math.round(totals.dailyFixedRate).toLocaleString()}\n`;
+                }
+                csvContent += `交通費,¥${employee.transportAllowance.toLocaleString()}/日\n\n`;
                 csvContent += `日付,出勤,休憩入1,休憩出1,休憩入2,休憩出2,退勤,労働時間,日給,備考\n`;
                 
                 for (let day = 1; day <= daysInMonth; day++) {
@@ -618,7 +648,32 @@
                     }
                 }
                 
-                csvContent += `\n給与内訳\n項目,金額\n基本給,¥${Math.round(totals.basePay).toLocaleString()}\n時間外手当(25%),¥${Math.round(totals.overtimePay).toLocaleString()}\n休日出勤手当(35%),¥${Math.round(totals.holidayPay).toLocaleString()}\n交通費(${totals.workDays}日分),¥${totals.transport.toLocaleString()}\n合計労働時間,${totals.hours.toFixed(2)}時間\n総支給額,¥${Math.round(totals.total).toLocaleString()}\n`;
+                csvContent += `\n給与内訳\n項目,金額\n`;
+                
+                if (employee.salaryType === '固定給' && employee.monthlySalary > 0) {
+                    // 固定給の場合
+                    csvContent += `【時間給換算】\n`;
+                    csvContent += `基本給(時間給),¥${Math.round(totals.basePay).toLocaleString()}\n`;
+                    csvContent += `時間外手当(25%),¥${Math.round(totals.overtimePay).toLocaleString()}\n`;
+                    csvContent += `休日出勤手当(35%),¥${Math.round(totals.holidayPay).toLocaleString()}\n`;
+                    csvContent += `交通費(${totals.workDays}日分),¥${totals.transport.toLocaleString()}\n`;
+                    csvContent += `時間給換算合計,¥${Math.round(totals.actualWage).toLocaleString()}\n`;
+                    csvContent += `\n【固定給】\n`;
+                    csvContent += `固定給(${totals.workDays}日分),¥${Math.round(totals.dailyFixedRate * totals.workDays).toLocaleString()}\n`;
+                    csvContent += `\n【差額】\n`;
+                    const diffLabel = totals.difference >= 0 ? '時間給の方が多い' : '固定給の方が多い';
+                    csvContent += `差額,¥${Math.round(Math.abs(totals.difference)).toLocaleString()}(${diffLabel})\n`;
+                    csvContent += `\n合計労働時間,${totals.hours.toFixed(2)}時間\n`;
+                    csvContent += `総支給額(固定給),¥${Math.round(totals.total).toLocaleString()}\n`;
+                } else {
+                    // 時間給の場合
+                    csvContent += `基本給,¥${Math.round(totals.basePay).toLocaleString()}\n`;
+                    csvContent += `時間外手当(25%),¥${Math.round(totals.overtimePay).toLocaleString()}\n`;
+                    csvContent += `休日出勤手当(35%),¥${Math.round(totals.holidayPay).toLocaleString()}\n`;
+                    csvContent += `交通費(${totals.workDays}日分),¥${totals.transport.toLocaleString()}\n`;
+                    csvContent += `合計労働時間,${totals.hours.toFixed(2)}時間\n`;
+                    csvContent += `総支給額,¥${Math.round(totals.total).toLocaleString()}\n`;
+                }
                 
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement('a');
@@ -813,6 +868,17 @@
                                                     <div className="flex-1">
                                                         <div className="font-bold text-lg">{emp.name}</div>
                                                         <div className="text-sm text-gray-600">
+                                                            {emp.salaryType === '固定給' ? (
+                                                                <>
+                                                                    <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded">固定給</span> 
+                                                                    {' '}¥{emp.monthlySalary?.toLocaleString() || 0}/月 | 
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded">時間給</span> 
+                                                                    {' '}
+                                                                </>
+                                                            )}
                                                             時給: ¥{emp.hourlyRate?.toLocaleString() || 0} | 
                                                             交通費: ¥{emp.transportAllowance?.toLocaleString() || 0}/日
                                                         </div>
@@ -928,26 +994,76 @@
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                <tr>
-                                                    <td className="border p-3">基本給</td>
-                                                    <td className="border p-3 text-right font-bold">¥{Math.round(totals.basePay).toLocaleString()}</td>
-                                                </tr>
-                                                <tr>
-                                                    <td className="border p-3">時間外手当(25%割増)</td>
-                                                    <td className="border p-3 text-right font-bold">¥{Math.round(totals.overtimePay).toLocaleString()}</td>
-                                                </tr>
-                                                <tr>
-                                                    <td className="border p-3">休日出勤手当(35%割増)</td>
-                                                    <td className="border p-3 text-right font-bold">¥{Math.round(totals.holidayPay).toLocaleString()}</td>
-                                                </tr>
-                                                <tr>
-                                                    <td className="border p-3">交通費({totals.workDays}日分)</td>
-                                                    <td className="border p-3 text-right font-bold">¥{totals.transport.toLocaleString()}</td>
-                                                </tr>
-                                                <tr className="bg-blue-50">
-                                                    <td className="border p-3 font-bold text-lg">総支給額</td>
-                                                    <td className="border p-3 text-right font-bold text-lg text-blue-600">¥{Math.round(totals.total).toLocaleString()}</td>
-                                                </tr>
+                                                {totals.salaryType === '固定給' && totals.fixedSalary > 0 ? (
+                                                    <>
+                                                        <tr className="bg-yellow-50">
+                                                            <td colSpan="2" className="border p-2 font-bold text-center">【時間給換算】</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className="border p-3">基本給(時間給)</td>
+                                                            <td className="border p-3 text-right">¥{Math.round(totals.basePay).toLocaleString()}</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className="border p-3">時間外手当(25%割増)</td>
+                                                            <td className="border p-3 text-right">¥{Math.round(totals.overtimePay).toLocaleString()}</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className="border p-3">休日出勤手当(35%割増)</td>
+                                                            <td className="border p-3 text-right">¥{Math.round(totals.holidayPay).toLocaleString()}</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className="border p-3">交通費({totals.workDays}日分)</td>
+                                                            <td className="border p-3 text-right">¥{totals.transport.toLocaleString()}</td>
+                                                        </tr>
+                                                        <tr className="bg-blue-50">
+                                                            <td className="border p-3 font-bold">時間給換算合計</td>
+                                                            <td className="border p-3 text-right font-bold">¥{Math.round(totals.actualWage).toLocaleString()}</td>
+                                                        </tr>
+                                                        <tr className="bg-green-50">
+                                                            <td colSpan="2" className="border p-2 font-bold text-center">【固定給】</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className="border p-3">固定給({totals.workDays}日分)</td>
+                                                            <td className="border p-3 text-right font-bold">¥{Math.round(totals.dailyFixedRate * totals.workDays).toLocaleString()}</td>
+                                                        </tr>
+                                                        <tr className={totals.difference >= 0 ? 'bg-orange-50' : 'bg-purple-50'}>
+                                                            <td className="border p-3 font-bold">差額</td>
+                                                            <td className="border p-3 text-right font-bold">
+                                                                ¥{Math.round(Math.abs(totals.difference)).toLocaleString()}
+                                                                <span className="text-sm ml-2">
+                                                                    ({totals.difference >= 0 ? '時間給が多い' : '固定給が多い'})
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                        <tr className="bg-blue-50">
+                                                            <td className="border p-3 font-bold text-lg">総支給額(固定給)</td>
+                                                            <td className="border p-3 text-right font-bold text-lg text-blue-600">¥{Math.round(totals.total).toLocaleString()}</td>
+                                                        </tr>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <tr>
+                                                            <td className="border p-3">基本給</td>
+                                                            <td className="border p-3 text-right font-bold">¥{Math.round(totals.basePay).toLocaleString()}</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className="border p-3">時間外手当(25%割増)</td>
+                                                            <td className="border p-3 text-right font-bold">¥{Math.round(totals.overtimePay).toLocaleString()}</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className="border p-3">休日出勤手当(35%割増)</td>
+                                                            <td className="border p-3 text-right font-bold">¥{Math.round(totals.holidayPay).toLocaleString()}</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className="border p-3">交通費({totals.workDays}日分)</td>
+                                                            <td className="border p-3 text-right font-bold">¥{totals.transport.toLocaleString()}</td>
+                                                        </tr>
+                                                        <tr className="bg-blue-50">
+                                                            <td className="border p-3 font-bold text-lg">総支給額</td>
+                                                            <td className="border p-3 text-right font-bold text-lg text-blue-600">¥{Math.round(totals.total).toLocaleString()}</td>
+                                                        </tr>
+                                                    </>
+                                                )}
                                             </tbody>
                                         </table>
                                     </div>
@@ -1144,42 +1260,81 @@
             const [name, setName] = useState(employee.name);
             const [rate, setRate] = useState(employee.hourlyRate);
             const [transport, setTransport] = useState(employee.transportAllowance);
+            const [salaryType, setSalaryType] = useState(employee.salaryType || '時間給');
+            const [monthlySalary, setMonthlySalary] = useState(employee.monthlySalary || 0);
 
             return (
-                <div className="flex items-center gap-3 flex-1">
-                    <input
-                        type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        className="p-2 border rounded flex-1"
-                        placeholder="氏名"
-                    />
-                    <input
-                        type="number"
-                        value={rate}
-                        onChange={(e) => setRate(e.target.value)}
-                        className="p-2 border rounded w-24"
-                        placeholder="時給"
-                    />
-                    <input
-                        type="number"
-                        value={transport}
-                        onChange={(e) => setTransport(e.target.value)}
-                        className="p-2 border rounded w-24"
-                        placeholder="交通費"
-                    />
-                    <button
-                        onClick={() => onSave(employee.id, name, rate, transport)}
-                        className="p-2 bg-green-500 text-white rounded hover:bg-green-600"
-                    >
-                        <Save className="w-4 h-4" />
-                    </button>
-                    <button
-                        onClick={onCancel}
-                        className="p-2 bg-gray-500 text-white rounded hover:bg-gray-600"
-                    >
-                        <X className="w-4 h-4" />
-                    </button>
+                <div className="space-y-3 p-4 bg-gray-50 rounded">
+                    <div className="flex gap-3">
+                        <input
+                            type="text"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="p-2 border rounded flex-1"
+                            placeholder="氏名"
+                        />
+                    </div>
+                    <div className="flex gap-3 items-center">
+                        <label className="text-sm font-medium">給与タイプ:</label>
+                        <select
+                            value={salaryType}
+                            onChange={(e) => setSalaryType(e.target.value)}
+                            className="p-2 border rounded"
+                        >
+                            <option value="時間給">時間給</option>
+                            <option value="固定給">固定給</option>
+                        </select>
+                    </div>
+                    <div className="flex gap-3">
+                        <div className="flex-1">
+                            <label className="text-sm text-gray-600">時給(円)</label>
+                            <input
+                                type="number"
+                                value={rate}
+                                onChange={(e) => setRate(e.target.value)}
+                                className="w-full p-2 border rounded"
+                                placeholder="1500"
+                            />
+                        </div>
+                        <div className="flex-1">
+                            <label className="text-sm text-gray-600">交通費(円/日)</label>
+                            <input
+                                type="number"
+                                value={transport}
+                                onChange={(e) => setTransport(e.target.value)}
+                                className="w-full p-2 border rounded"
+                                placeholder="500"
+                            />
+                        </div>
+                    </div>
+                    {salaryType === '固定給' && (
+                        <div>
+                            <label className="text-sm text-gray-600">固定給(月額・円)</label>
+                            <input
+                                type="number"
+                                value={monthlySalary}
+                                onChange={(e) => setMonthlySalary(e.target.value)}
+                                className="w-full p-2 border rounded"
+                                placeholder="250000"
+                            />
+                        </div>
+                    )}
+                    <div className="flex gap-2 justify-end">
+                        <button
+                            onClick={() => onSave(employee.id, name, rate, transport, salaryType, monthlySalary)}
+                            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-2"
+                        >
+                            <Save className="w-4 h-4" />
+                            保存
+                        </button>
+                        <button
+                            onClick={onCancel}
+                            className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 flex items-center gap-2"
+                        >
+                            <X className="w-4 h-4" />
+                            キャンセル
+                        </button>
+                    </div>
                 </div>
             );
         };
@@ -1188,6 +1343,8 @@
             const [name, setName] = useState('');
             const [rate, setRate] = useState('');
             const [transport, setTransport] = useState('');
+            const [salaryType, setSalaryType] = useState('時間給');
+            const [monthlySalary, setMonthlySalary] = useState('');
 
             return (
                 <div className="space-y-4">
@@ -1200,6 +1357,17 @@
                             className="w-full p-2 border rounded"
                             placeholder="山田太郎"
                         />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-2">給与タイプ</label>
+                        <select
+                            value={salaryType}
+                            onChange={(e) => setSalaryType(e.target.value)}
+                            className="w-full p-2 border rounded"
+                        >
+                            <option value="時間給">時間給</option>
+                            <option value="固定給">固定給</option>
+                        </select>
                     </div>
                     <div>
                         <label className="block text-sm font-medium mb-2">時給(円)</label>
@@ -1221,9 +1389,46 @@
                             placeholder="500"
                         />
                     </div>
+                    {salaryType === '固定給' && (
+                        <div>
+                            <label className="block text-sm font-medium mb-2">固定給(月額・円)</label>
+                            <input
+                                type="number"
+                                value={monthlySalary}
+                                onChange={(e) => setMonthlySalary(e.target.value)}
+                                className="w-full p-2 border rounded"
+                                placeholder="250000"
+                            />
+                        </div>
+                    )}
                     <div className="flex gap-3 justify-end">
                         <button
                             onClick={onCancel}
+                            className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+                        >
+                            キャンセル
+                        </button>
+                        <button
+                            onClick={() => {
+                                if (name && rate) {
+                                    onSave(name, rate, transport || 0, salaryType, monthlySalary || 0);
+                                    setName('');
+                                    setRate('');
+                                    setTransport('');
+                                    setSalaryType('時間給');
+                                    setMonthlySalary('');
+                                } else {
+                                    showCustomAlertFunc('名前と時給を入力してください', '⚠️ 入力エラー', '⚠️');
+                                }
+                            }}
+                            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+                        >
+                            追加
+                        </button>
+                    </div>
+                </div>
+            );
+        };
                             className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
                         >
                             キャンセル
