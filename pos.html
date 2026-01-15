@@ -1782,7 +1782,8 @@
       
       <div style="display: flex; gap: 10px;">
         <button class="btn" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;" onclick="saveExpenses()">保存</button>
-        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="exportExpensesToCSV()">Excel出力</button>
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="exportExpensesToCSV()">本日分出力</button>
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white;" onclick="exportMonthlyExpenses()">経費出力</button>
         <button class="btn btn-secondary" style="flex: 1;" onclick="closeExpenseModal()">閉じる</button>
       </div>
     </div>
@@ -4743,6 +4744,308 @@
       } catch (e) {
         console.error('❌ 経費出力エラー:', e);
         alert('経費の出力に失敗しました: ' + e.message);
+      }
+    };
+    
+    // ===== 月次経費出力機能（1日からの集計） =====
+    window.exportMonthlyExpenses = async function() {
+      try {
+        console.log('📊 月次経費出力開始');
+        
+        const now = new Date();
+        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        
+        // 現在の年月を取得（午前3時基準）
+        const todayStart = new Date(jstNow);
+        todayStart.setHours(3, 0, 0, 0);
+        if (jstNow.getHours() < 3) {
+          todayStart.setDate(todayStart.getDate() - 1);
+        }
+        
+        const year = todayStart.getFullYear();
+        const month = todayStart.getMonth() + 1;
+        
+        // 月の全データを取得
+        const expensesSnapshot = await window.getDocs(window.getStoreCollection('expenses'));
+        
+        const monthlyExpenses = [];
+        expensesSnapshot.forEach(doc => {
+          const data = doc.data();
+          const date = data.date;
+          
+          // 現在の月のデータのみ
+          if (date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
+            if (data.items && Array.isArray(data.items)) {
+              data.items.forEach(item => {
+                monthlyExpenses.push({
+                  date: date,
+                  staff: data.staff || '不明',
+                  storeName: item.storeName,
+                  category: item.category,
+                  detail: item.detail,
+                  amount: item.amount
+                });
+              });
+            }
+          }
+        });
+        
+        // 日付順にソート
+        monthlyExpenses.sort((a, b) => a.date.localeCompare(b.date));
+        
+        console.log('取得したデータ:', monthlyExpenses.length, '件');
+        
+        if (monthlyExpenses.length === 0) {
+          alert('出力する経費データがありません');
+          return;
+        }
+        
+        // Excelデータ作成
+        const excelData = [];
+        
+        // ヘッダー
+        excelData.push(['経費明細書', '', '', '', '', '']);
+        excelData.push([`${year}年${month}月`, '', '', '', '', '']);
+        excelData.push(['出力日時:', new Date().toLocaleString('ja-JP'), '', '', '', '']);
+        excelData.push(['', '', '', '', '', '']);
+        
+        // 8%区分
+        excelData.push(['【8%区分】', '', '', '', '', '']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        
+        const tax8Items = monthlyExpenses.filter(e => 
+          e.category === '材料費' || e.category === '食費' || e.category === '接待交際費'
+        );
+        let tax8Total = 0;
+        
+        tax8Items.forEach(item => {
+          const dateStr = item.date.split('-').slice(1).join('/');
+          excelData.push([
+            dateStr,
+            item.storeName,
+            item.category,
+            item.detail,
+            item.amount
+          ]);
+          tax8Total += item.amount;
+        });
+        
+        excelData.push(['', '', '', '8%合計:', tax8Total]);
+        excelData.push(['', '', '', '', '']);
+        
+        // 10%区分
+        excelData.push(['【10%区分】', '', '', '', '', '']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        
+        const tax10Items = monthlyExpenses.filter(e => 
+          e.category === '日用品' || e.category === '雑費・雑品' || 
+          e.category === '水光熱費' || e.category === 'その他'
+        );
+        let tax10Total = 0;
+        
+        tax10Items.forEach(item => {
+          const dateStr = item.date.split('-').slice(1).join('/');
+          excelData.push([
+            dateStr,
+            item.storeName,
+            item.category,
+            item.detail,
+            item.amount
+          ]);
+          tax10Total += item.amount;
+        });
+        
+        excelData.push(['', '', '', '10%合計:', tax10Total]);
+        excelData.push(['', '', '', '', '']);
+        
+        // 交通費（8%）区分
+        excelData.push(['【交通費（8%）区分】', '', '', '', '', '']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        
+        const transport8Items = monthlyExpenses.filter(e => e.category === '交通費8%');
+        let transport8Total = 0;
+        
+        transport8Items.forEach(item => {
+          const dateStr = item.date.split('-').slice(1).join('/');
+          excelData.push([
+            dateStr,
+            item.storeName,
+            item.category,
+            item.detail,
+            item.amount
+          ]);
+          transport8Total += item.amount;
+        });
+        
+        excelData.push(['', '', '', '交通費（8%）合計:', transport8Total]);
+        excelData.push(['', '', '', '', '']);
+        
+        // 交通費（10%）区分
+        excelData.push(['【交通費（10%）区分】', '', '', '', '', '']);
+        excelData.push(['日付', '店名', '勘定科目', '詳細', '金額']);
+        
+        const transport10Items = monthlyExpenses.filter(e => e.category === '交通費10%');
+        let transport10Total = 0;
+        
+        transport10Items.forEach(item => {
+          const dateStr = item.date.split('-').slice(1).join('/');
+          excelData.push([
+            dateStr,
+            item.storeName,
+            item.category,
+            item.detail,
+            item.amount
+          ]);
+          transport10Total += item.amount;
+        });
+        
+        excelData.push(['', '', '', '交通費（10%）合計:', transport10Total]);
+        excelData.push(['', '', '', '', '']);
+        
+        // 総合計
+        const grandTotal = tax8Total + tax10Total + transport8Total + transport10Total;
+        excelData.push(['', '', '', '', '']);
+        excelData.push(['', '', '', '8%合計金額:', tax8Total]);
+        excelData.push(['', '', '', '10%合計金額:', tax10Total]);
+        excelData.push(['', '', '', '交通費（8%）合計金額:', transport8Total]);
+        excelData.push(['', '', '', '交通費（10%）合計金額:', transport10Total]);
+        excelData.push(['', '', '', '', '']);
+        excelData.push(['', '', '', '合計:', grandTotal]);
+        
+        // SheetJSでExcel生成
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+        
+        // 列幅設定
+        ws['!cols'] = [
+          { wch: 10 },  // 日付
+          { wch: 15 },  // 店名
+          { wch: 15 },  // 勘定科目
+          { wch: 25 },  // 詳細
+          { wch: 12 }   // 金額
+        ];
+        
+        // 罫線とスタイル設定
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        
+        for (let R = range.s.r; R <= range.e.r; ++R) {
+          for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+            
+            if (!ws[cellAddress]) continue;
+            
+            // 基本の罫線
+            ws[cellAddress].s = ws[cellAddress].s || {};
+            ws[cellAddress].s.border = {
+              top: { style: 'thin', color: { rgb: '000000' } },
+              bottom: { style: 'thin', color: { rgb: '000000' } },
+              left: { style: 'thin', color: { rgb: '000000' } },
+              right: { style: 'thin', color: { rgb: '000000' } }
+            };
+            
+            // ヘッダー行のスタイル
+            if (R === 0) {
+              ws[cellAddress].s.fill = {
+                patternType: 'solid',
+                fgColor: { rgb: 'ADD8E6' }  // 薄い青
+              };
+              ws[cellAddress].s.font = {
+                bold: true,
+                sz: 16
+              };
+            }
+            
+            // 区分タイトル行のスタイル（【8%区分】など）
+            if (excelData[R] && excelData[R][0] && excelData[R][0].startsWith('【')) {
+              ws[cellAddress].s.fill = {
+                patternType: 'solid',
+                fgColor: { rgb: 'FFFF99' }  // 薄い黄色
+              };
+              ws[cellAddress].s.font = {
+                bold: true,
+                sz: 12
+              };
+            }
+            
+            // 列ヘッダー行のスタイル（日付、店名、勘定科目、詳細、金額）
+            if (excelData[R] && excelData[R][0] === '日付') {
+              ws[cellAddress].s.fill = {
+                patternType: 'solid',
+                fgColor: { rgb: 'D3D3D3' }  // 灰色
+              };
+              ws[cellAddress].s.font = {
+                bold: true,
+                sz: 11
+              };
+            }
+            
+            // 合計行のスタイル（8%合計、10%合計など）
+            if (excelData[R] && excelData[R][3] && 
+                (excelData[R][3] === '8%合計:' || excelData[R][3] === '10%合計:' ||
+                 excelData[R][3] === '交通費（8%）合計:' || excelData[R][3] === '交通費（10%）合計:')) {
+              ws[cellAddress].s.fill = {
+                patternType: 'solid',
+                fgColor: { rgb: 'FFE4B5' }  // 薄いオレンジ
+              };
+              ws[cellAddress].s.font = {
+                bold: true,
+                sz: 11
+              };
+              // 金額列は右寄せ
+              if (C === 4) {
+                ws[cellAddress].s.alignment = {
+                  horizontal: 'right'
+                };
+              }
+            }
+            
+            // 最終合計行のスタイル（8%合計金額、10%合計金額、交通費合計金額、合計）
+            if (excelData[R] && excelData[R][3] && 
+                (excelData[R][3] === '8%合計金額:' || excelData[R][3] === '10%合計金額:' || 
+                 excelData[R][3] === '交通費（8%）合計金額:' || excelData[R][3] === '交通費（10%）合計金額:' ||
+                 excelData[R][3] === '合計:')) {
+              ws[cellAddress].s.fill = {
+                patternType: 'solid',
+                fgColor: { rgb: 'FFC7CE' }  // 薄いピンク
+              };
+              ws[cellAddress].s.font = {
+                bold: true,
+                sz: 12
+              };
+              // 金額列は右寄せ
+              if (C === 4) {
+                ws[cellAddress].s.alignment = {
+                  horizontal: 'right'
+                };
+              }
+            }
+            
+            // 「合計:」行は特に強調
+            if (excelData[R] && excelData[R][3] === '合計:') {
+              ws[cellAddress].s.fill = {
+                patternType: 'solid',
+                fgColor: { rgb: 'FFB6C1' }  // 濃いピンク
+              };
+              ws[cellAddress].s.font = {
+                bold: true,
+                sz: 14,
+                color: { rgb: 'FF0000' }  // 赤文字
+              };
+            }
+          }
+        }
+        
+        XLSX.utils.book_append_sheet(wb, ws, '経費明細');
+        
+        const fileName = `経費明細_${year}年${month}月_月次集計.xlsx`;
+        XLSX.writeFile(wb, fileName);
+        
+        console.log('✅ 月次経費Excel出力完了:', fileName);
+        alert(`月次経費を出力しました！\n${fileName}\n\n集計期間: ${year}年${month}月1日〜現在`);
+        
+      } catch (e) {
+        console.error('❌ 月次経費出力エラー:', e);
+        alert('月次経費の出力に失敗しました: ' + e.message);
       }
     };
     
