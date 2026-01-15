@@ -253,18 +253,6 @@
                 }
             }, [isAdminAuthenticated, currentMonth, currentYear]);
 
-            // セッション復元
-            useEffect(() => {
-                const storedStoreId = sessionStorage.getItem('kanriStoreId');
-                const storedStoreName = sessionStorage.getItem('kanriStoreName');
-                
-                if (storedStoreId && storedStoreName) {
-                    window.currentStoreId = storedStoreId;
-                    window.currentStoreName = storedStoreName;
-                    setIsAdminAuthenticated(true);
-                }
-            }, []);
-
             const loadAllData = async () => {
                 setIsLoading(true);
                 setError(null);
@@ -693,58 +681,6 @@
                     console.error('累計差異計算エラー:', err);
                     return { totalGrossDifference: 0, totalNetDifference: 0, displayTotalGrossDifference: 0, displayTotalNetDifference: 0, months: [] };
                 }
-            };
-
-            // 累計差額表示コンポーネント
-            const CumulativeDifferenceDisplay = ({ employeeId }) => {
-                const [cumulativeData, setCumulativeData] = useState(null);
-                const [loading, setLoading] = useState(true);
-
-                useEffect(() => {
-                    const fetchCumulative = async () => {
-                        setLoading(true);
-                        const data = await calculateCumulativeDifference(employeeId);
-                        setCumulativeData(data);
-                        setLoading(false);
-                    };
-                    
-                    if (employeeId) {
-                        fetchCumulative();
-                    }
-                }, [employeeId]);
-
-                if (loading) {
-                    return <div className="text-sm text-gray-500">累計差額を計算中...</div>;
-                }
-
-                if (!cumulativeData || cumulativeData.months.length <= 1) {
-                    return null;
-                }
-
-                return (
-                    <div className="mb-4">
-                        <h4 className="bg-purple-500 text-white p-2 font-bold">【累計差額（全{cumulativeData.months.length}ヶ月）】</h4>
-                        <table className="w-full border-collapse border">
-                            <tbody>
-                                <tr className="bg-purple-50">
-                                    <td className="border p-2 font-bold">控除前累計差額</td>
-                                    <td className="border p-2 text-right font-bold text-purple-600 text-lg">
-                                        ¥{Math.round(cumulativeData.displayTotalGrossDifference).toLocaleString()}
-                                    </td>
-                                </tr>
-                                <tr className="bg-purple-50">
-                                    <td className="border p-2 font-bold">控除後累計差額</td>
-                                    <td className="border p-2 text-right font-bold text-purple-600 text-lg">
-                                        ¥{Math.round(cumulativeData.displayTotalNetDifference).toLocaleString()}
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        <div className="text-xs text-gray-600 mt-1">
-                            ※全{cumulativeData.months.length}ヶ月の累計です。プラスの場合、会社に請求可能な金額です。
-                        </div>
-                    </div>
-                );
             };
 
             const addEmployee = async (name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage) => {
@@ -1322,34 +1258,41 @@
                             <tbody>
                                 <tr style="background: #fff3cd;">
                                     <td style="border: 2px solid #000; padding: 8px; font-weight: bold;">控除前差額</td>
-                                    <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; color: #ff6600;">
-                                        ¥${Math.round(totals.displayGrossDifference).toLocaleString()}
+                                    <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; color: ${grossDiffColor};">
+                                        ¥${Math.round(Math.abs(totals.grossDifference)).toLocaleString()}
+                                        <span style="font-size: 12px; margin-left: 8px;">(${totals.grossDifference >= 0 ? '時間給が多い' : '固定給が多い'})</span>
                                     </td>
                                 </tr>
                                 <tr style="background: #fff3cd;">
                                     <td style="border: 2px solid #000; padding: 8px; font-weight: bold;">控除後差額</td>
-                                    <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; color: #ff6600;">
-                                        ¥${Math.round(totals.displayNetDifference).toLocaleString()}
+                                    <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; color: ${netDiffColor};">
+                                        ¥${Math.round(Math.abs(totals.netDifference)).toLocaleString()}
+                                        <span style="font-size: 12px; margin-left: 8px;">(${totals.netDifference >= 0 ? '時間給が多い' : '固定給が多い'})</span>
                                     </td>
                                 </tr>
                             </tbody>
                         </table>`;
                     
                     if (cumulativeData.months.length > 1) {
+                        const cumGrossColor = cumulativeData.totalGrossDifference >= 0 ? '#ff3300' : '#6600ff';
+                        const cumNetColor = cumulativeData.totalNetDifference >= 0 ? '#ff3300' : '#6600ff';
+                        
                         tableHTML += `
                         <h3 style="font-size: 16px; margin: 20px 0 10px 0; padding: 5px 10px; background: #9C27B0; color: white; border-radius: 3px;">【累計差額（全${cumulativeData.months.length}ヶ月）】</h3>
                         <table style="width: 100%; border-collapse: collapse;">
                             <tbody>
                                 <tr style="background: #f3e5f5;">
                                     <td style="border: 2px solid #000; padding: 8px; font-weight: bold;">控除前累計差額</td>
-                                    <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; font-size: 16px; color: #ff3300;">
-                                        ¥${Math.round(cumulativeData.displayTotalGrossDifference).toLocaleString()}
+                                    <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; font-size: 16px; color: ${cumGrossColor};">
+                                        ¥${Math.round(Math.abs(cumulativeData.totalGrossDifference)).toLocaleString()}
+                                        <span style="font-size: 12px; margin-left: 8px;">(${cumulativeData.totalGrossDifference >= 0 ? '時間給が多い' : '固定給が多い'})</span>
                                     </td>
                                 </tr>
                                 <tr style="background: #f3e5f5;">
                                     <td style="border: 2px solid #000; padding: 8px; font-weight: bold;">控除後累計差額</td>
-                                    <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; font-size: 16px; color: #ff3300;">
-                                        ¥${Math.round(cumulativeData.displayTotalNetDifference).toLocaleString()}
+                                    <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; font-size: 16px; color: ${cumNetColor};">
+                                        ¥${Math.round(Math.abs(cumulativeData.totalNetDifference)).toLocaleString()}
+                                        <span style="font-size: 12px; margin-left: 8px;">(${cumulativeData.totalNetDifference >= 0 ? '時間給が多い' : '固定給が多い'})</span>
                                     </td>
                                 </tr>
                             </tbody>
@@ -1815,9 +1758,6 @@
                                                     </table>
                                                     <div className="text-xs text-gray-600 mt-1">※差額がプラスの場合、時間給換算の方が高く、会社に請求可能です</div>
                                                 </div>
-
-                                                {/* 累計差額（useEffectで取得） */}
-                                                <CumulativeDifferenceDisplay employeeId={selectedEmployee} />
                                             </>
                                         ) : (
                                             <>
@@ -2092,7 +2032,7 @@
                             <label className="text-sm font-medium">都道府県</label>
                             <select
                                 value={prefecture}
-                                onChange={(e) => handlePrefectureChange(e.target.value)}
+                                onChange={(e) => setPrefecture(e.target.value)}
                                 className="w-full p-2 border rounded text-sm"
                             >
                                 {prefectures.map(pref => (
@@ -2111,17 +2051,8 @@
                         </div>
                     </div>
 
-                    <div>
-                        <label className="text-sm font-medium">最低賃金(円/時)</label>
-                        <input
-                            type="number"
-                            value={minimumWage}
-                            onChange={(e) => setMinimumWage(e.target.value)}
-                            className="w-full p-2 border rounded"
-                        />
-                        <div className="text-xs text-gray-500 mt-1">
-                            ※参考: {prefecture}の法定最低賃金は¥{INSURANCE_DATA.minimumWage[prefecture]}です
-                        </div>
+                    <div className="bg-blue-50 p-2 rounded text-sm">
+                        最低賃金（{prefecture}）: ¥{minimumWage.toLocaleString()}/時
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
