@@ -302,25 +302,33 @@
                     
                     setEmployees(empList);
                     
-                    // 店舗別の勤怠データを取得（現在の月のみ）
+                    // 店舗別の勤怠データを取得（新形式：日付ごとのドキュメントに従業員データを格納）
                     const attRef = collection(window.db, 'stores', window.currentStoreId, 'attendance');
                     const attSnapshot = await getDocs(attRef);
                     const attData = {};
+                    
                     attSnapshot.forEach(doc => {
-                        const data = doc.data();
-                        const dateMatch = data.date && data.date.match(/^(\d{4})-(\d{2})-/);
+                        const dateKey = doc.id; // YYYY-MM-DD
+                        const dateData = doc.data();
+                        
+                        // 日付が現在の月のものか確認
+                        const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
                         if (dateMatch) {
                             const year = parseInt(dateMatch[1]);
                             const month = parseInt(dateMatch[2]) - 1;
                             
                             if (year === currentYear && month === currentMonth) {
-                                if (!attData[data.employeeId]) {
-                                    attData[data.employeeId] = {};
-                                }
-                                attData[data.employeeId][data.date] = data;
+                                // 各従業員のデータを展開
+                                Object.keys(dateData).forEach(employeeId => {
+                                    if (!attData[employeeId]) {
+                                        attData[employeeId] = {};
+                                    }
+                                    attData[employeeId][dateKey] = dateData[employeeId];
+                                });
                             }
                         }
                     });
+                    
                     setAttendanceData(attData);
                     
                 } catch (err) {
@@ -1110,9 +1118,10 @@
                 tempDiv.style.position = 'absolute';
                 tempDiv.style.left = '-9999px';
                 tempDiv.style.background = 'white';
-                tempDiv.style.padding = '40px';
-                tempDiv.style.width = '1400px';
+                tempDiv.style.padding = '30px';
+                tempDiv.style.width = '740px'; // A4幅（210mm - 余白）≈ 740px
                 tempDiv.style.fontFamily = 'Arial, sans-serif';
+                tempDiv.style.fontSize = '11px'; // フォントサイズを少し小さく
                 
                 const isFixed = employee.salaryType === '固定給' && employee.monthlySalary > 0;
                 
@@ -1147,8 +1156,8 @@
                             <tr>
                                 <td style="border: 2px solid #000; padding: 8px; background: #e0e0e0; font-weight: bold;">固定給(月額)</td>
                                 <td style="border: 2px solid #000; padding: 8px; font-weight: bold; color: #0066cc;">¥${employee.monthlySalary.toLocaleString()}</td>
-                                <td style="border: 2px solid #000; padding: 8px; background: #e0e0e0; font-weight: bold;">日額</td>
-                                <td style="border: 2px solid #000; padding: 8px;">¥${Math.round(totals.dailyFixedRate).toLocaleString()}</td>
+                                <td style="border: 2px solid #000; padding: 8px; background: #e0e0e0; font-weight: bold;">日額(固定給÷出勤日数)</td>
+                                <td style="border: 2px solid #000; padding: 8px;">¥${totals.workDays > 0 ? Math.round(employee.monthlySalary / totals.workDays).toLocaleString() : '0'}</td>
                             </tr>`;
                 }
                 
@@ -1385,9 +1394,11 @@
                 
                 try {
                     const canvas = await html2canvas(tempDiv, {
-                        scale: 2,
+                        scale: 2.5, // A4サイズに合わせて高解像度化
                         backgroundColor: '#ffffff',
-                        logging: false
+                        logging: false,
+                        width: 740,
+                        windowWidth: 740
                     });
                     
                     document.body.removeChild(tempDiv);
