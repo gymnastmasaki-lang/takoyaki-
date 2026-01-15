@@ -253,6 +253,18 @@
                 }
             }, [isAdminAuthenticated, currentMonth, currentYear]);
 
+            // セッション復元
+            useEffect(() => {
+                const storedStoreId = sessionStorage.getItem('kanriStoreId');
+                const storedStoreName = sessionStorage.getItem('kanriStoreName');
+                
+                if (storedStoreId && storedStoreName) {
+                    window.currentStoreId = storedStoreId;
+                    window.currentStoreName = storedStoreName;
+                    setIsAdminAuthenticated(true);
+                }
+            }, []);
+
             const loadAllData = async () => {
                 setIsLoading(true);
                 setError(null);
@@ -681,6 +693,58 @@
                     console.error('累計差異計算エラー:', err);
                     return { totalGrossDifference: 0, totalNetDifference: 0, displayTotalGrossDifference: 0, displayTotalNetDifference: 0, months: [] };
                 }
+            };
+
+            // 累計差額表示コンポーネント
+            const CumulativeDifferenceDisplay = ({ employeeId }) => {
+                const [cumulativeData, setCumulativeData] = useState(null);
+                const [loading, setLoading] = useState(true);
+
+                useEffect(() => {
+                    const fetchCumulative = async () => {
+                        setLoading(true);
+                        const data = await calculateCumulativeDifference(employeeId);
+                        setCumulativeData(data);
+                        setLoading(false);
+                    };
+                    
+                    if (employeeId) {
+                        fetchCumulative();
+                    }
+                }, [employeeId]);
+
+                if (loading) {
+                    return <div className="text-sm text-gray-500">累計差額を計算中...</div>;
+                }
+
+                if (!cumulativeData || cumulativeData.months.length <= 1) {
+                    return null;
+                }
+
+                return (
+                    <div className="mb-4">
+                        <h4 className="bg-purple-500 text-white p-2 font-bold">【累計差額（全{cumulativeData.months.length}ヶ月）】</h4>
+                        <table className="w-full border-collapse border">
+                            <tbody>
+                                <tr className="bg-purple-50">
+                                    <td className="border p-2 font-bold">控除前累計差額</td>
+                                    <td className="border p-2 text-right font-bold text-purple-600 text-lg">
+                                        ¥{Math.round(cumulativeData.displayTotalGrossDifference).toLocaleString()}
+                                    </td>
+                                </tr>
+                                <tr className="bg-purple-50">
+                                    <td className="border p-2 font-bold">控除後累計差額</td>
+                                    <td className="border p-2 text-right font-bold text-purple-600 text-lg">
+                                        ¥{Math.round(cumulativeData.displayTotalNetDifference).toLocaleString()}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div className="text-xs text-gray-600 mt-1">
+                            ※全{cumulativeData.months.length}ヶ月の累計です。プラスの場合、会社に請求可能な金額です。
+                        </div>
+                    </div>
+                );
             };
 
             const addEmployee = async (name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage) => {
@@ -1758,6 +1822,9 @@
                                                     </table>
                                                     <div className="text-xs text-gray-600 mt-1">※差額がプラスの場合、時間給換算の方が高く、会社に請求可能です</div>
                                                 </div>
+
+                                                {/* 累計差額 */}
+                                                <CumulativeDifferenceDisplay employeeId={selectedPayslipEmployee} />
                                             </>
                                         ) : (
                                             <>
@@ -1972,6 +2039,73 @@
                             </div>
                         </div>
                     )}
+                    
+                    {/* 時刻編集モーダル */}
+                    {editingTime && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setEditingTime(null)}>
+                            <div className="bg-white rounded-lg p-6 w-96" onClick={(e) => e.stopPropagation()}>
+                                <h3 className="text-lg font-bold mb-4">時刻編集</h3>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">時刻 (HH:MM)</label>
+                                        <input
+                                            type="text"
+                                            value={editingValue}
+                                            onChange={(e) => setEditingValue(e.target.value)}
+                                            className="w-full p-2 border rounded"
+                                            placeholder="09:00"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={editingIsHoliday}
+                                                onChange={(e) => setEditingIsHoliday(e.target.checked)}
+                                                className="mr-2"
+                                            />
+                                            休日出勤 (35%割増)
+                                        </label>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">時給（この日のみ）</label>
+                                        <input
+                                            type="number"
+                                            value={editingHourlyRate}
+                                            onChange={(e) => setEditingHourlyRate(e.target.value)}
+                                            className="w-full p-2 border rounded"
+                                            placeholder="1500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">メモ</label>
+                                        <textarea
+                                            value={editingMemo}
+                                            onChange={(e) => setEditingMemo(e.target.value)}
+                                            className="w-full p-2 border rounded"
+                                            rows="3"
+                                            placeholder="備考やメモを入力"
+                                        />
+                                    </div>
+                                    <div className="flex gap-2 justify-end">
+                                        <button
+                                            onClick={() => setEditingTime(null)}
+                                            className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+                                        >
+                                            キャンセル
+                                        </button>
+                                        <button
+                                            onClick={saveEditedTime}
+                                            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                                        >
+                                            保存
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
                     <CustomAlert />
                     <CustomConfirm />
                 </div>
