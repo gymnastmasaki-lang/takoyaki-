@@ -653,7 +653,7 @@
                 }
             };
 
-            const addEmployee = async (name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances) => {
+            const addEmployee = async (name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage) => {
                 setIsLoading(true);
                 try {
                     const { collection, addDoc, Timestamp } = window.firebaseModules;
@@ -671,6 +671,7 @@
                         monthlySalary: parseFloat(monthlySalary) || 0,
                         prefecture: prefecture || '東京',
                         age: parseInt(age) || 30,
+                        minimumWage: parseFloat(minimumWage) || 1000,
                         allowances: allowances || {
                             family: 0,
                             sales: 0,
@@ -679,7 +680,7 @@
                             expense: 0,
                             housing: 0
                         },
-                        deductions: {
+                        deductions: deductions || {
                             rent: 0,
                             utilities: 0
                         },
@@ -696,7 +697,7 @@
                 }
             };
 
-            const updateEmployee = async (id, name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions) => {
+            const updateEmployee = async (id, name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage) => {
                 setIsLoading(true);
                 try {
                     const { doc, updateDoc, Timestamp } = window.firebaseModules;
@@ -716,6 +717,7 @@
                         monthlySalary: parseFloat(monthlySalary) || 0,
                         prefecture: prefecture || '東京',
                         age: parseInt(age) || 30,
+                        minimumWage: parseFloat(minimumWage) || 1000,
                         allowances: allowances || {
                             family: 0,
                             sales: 0,
@@ -985,7 +987,7 @@
                 const totals = calculateMonthlyTotals(employeeId);
                 const daysInMonth = getDaysInMonth(currentMonth, currentYear);
                 const prefecture = employee.prefecture || '東京';
-                const minimumWage = INSURANCE_DATA.minimumWage[prefecture] || 1000;
+                const minimumWage = employee.minimumWage || INSURANCE_DATA.minimumWage[prefecture] || 1000;
                 
                 // 累計差異を取得（固定給の場合のみ）
                 let cumulativeData = { totalGrossDifference: 0, totalNetDifference: 0, months: [] };
@@ -1886,6 +1888,7 @@
             const [monthlySalary, setMonthlySalary] = useState(employee?.monthlySalary || 0);
             const [prefecture, setPrefecture] = useState(employee?.prefecture || '東京');
             const [age, setAge] = useState(employee?.age || 30);
+            const [minimumWage, setMinimumWage] = useState(employee?.minimumWage || INSURANCE_DATA.minimumWage[employee?.prefecture || '東京']);
             const [allowances, setAllowances] = useState(employee?.allowances || {
                 family: 0, sales: 0, position: 0, commuting: 0, expense: 0, housing: 0
             });
@@ -1894,7 +1897,11 @@
             });
 
             const prefectures = Object.keys(INSURANCE_DATA.minimumWage);
-            const minimumWage = INSURANCE_DATA.minimumWage[prefecture] || 1000;
+            
+            const handlePrefectureChange = (newPref) => {
+                setPrefecture(newPref);
+                setMinimumWage(INSURANCE_DATA.minimumWage[newPref] || 1000);
+            };
 
             return (
                 <div className="space-y-3 p-4 bg-gray-50 rounded w-full max-h-[70vh] overflow-y-auto">
@@ -2070,7 +2077,7 @@
                         <button
                             onClick={() => {
                                 if (employee?.id) {
-                                    onSave(employee.id, name, rate, transport, salaryType, monthlySalary, prefecture, age, allowances, deductions);
+                                    onSave(employee.id, name, rate, transport, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage);
                                 }
                             }}
                             className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-2"
@@ -2098,13 +2105,19 @@
             const [monthlySalary, setMonthlySalary] = useState('');
             const [prefecture, setPrefecture] = useState('東京');
             const [age, setAge] = useState('30');
+            const [minimumWage, setMinimumWage] = useState(INSURANCE_DATA.minimumWage['東京']);
             const [allowances, setAllowances] = useState({
                 family: 0, sales: 0, position: 0, commuting: 0, expense: 0, housing: 0
             });
             const [deductions, setDeductions] = useState({ rent: 0, utilities: 0 });
 
             const prefectures = Object.keys(INSURANCE_DATA.minimumWage);
-            const minimumWage = INSURANCE_DATA.minimumWage[prefecture] || 1000;
+            
+            // 都道府県変更時に最低賃金を更新
+            const handlePrefectureChange = (newPref) => {
+                setPrefecture(newPref);
+                setMinimumWage(INSURANCE_DATA.minimumWage[newPref] || 1000);
+            };
 
             return (
                 <div className="space-y-4 max-h-[70vh] overflow-y-auto p-4">
@@ -2137,7 +2150,7 @@
                             <label className="block text-sm font-medium mb-2">都道府県 *</label>
                             <select
                                 value={prefecture}
-                                onChange={(e) => setPrefecture(e.target.value)}
+                                onChange={(e) => handlePrefectureChange(e.target.value)}
                                 className="w-full p-2 border rounded"
                             >
                                 {prefectures.map(pref => (
@@ -2157,29 +2170,36 @@
                         </div>
                     </div>
 
-                    <div className="bg-blue-50 p-3 rounded">
-                        <div className="text-sm font-medium mb-2">
-                            最低賃金（{prefecture}）: ¥{minimumWage.toLocaleString()}/時
+                    <div>
+                        <label className="block text-sm font-medium mb-2">最低賃金(円/時) *</label>
+                        <input
+                            type="number"
+                            value={minimumWage}
+                            onChange={(e) => setMinimumWage(e.target.value)}
+                            className="w-full p-2 border rounded"
+                            placeholder="1000"
+                        />
+                        <div className="text-xs text-gray-500 mt-1">※参考: {prefecture}の法定最低賃金は¥{INSURANCE_DATA.minimumWage[prefecture]}です</div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium mb-2">時給(円) *</label>
+                            <input
+                                type="number"
+                                value={rate}
+                                onChange={(e) => setRate(e.target.value)}
+                                className="w-full p-2 border rounded"
+                                placeholder={minimumWage}
+                            />
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium mb-2">時給(円) *</label>
-                                <input
-                                    type="number"
-                                    value={rate}
-                                    onChange={(e) => setRate(e.target.value)}
-                                    className="w-full p-2 border rounded"
-                                    placeholder={minimumWage}
-                                    min={minimumWage}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium mb-2">交通費(円/日)</label>
-                                <input
-                                    type="number"
-                                    value={transport}
-                                    onChange={(e) => setTransport(e.target.value)}
-                                    className="w-full p-2 border rounded"
+                        <div>
+                            <label className="block text-sm font-medium mb-2">交通費(円/日)</label>
+                            <input
+                                type="number"
+                                value={transport}
+                                onChange={(e) => setTransport(e.target.value)}
+                                className="w-full p-2 border rounded"
                                     placeholder="500"
                                 />
                             </div>
@@ -2304,7 +2324,7 @@
                         <button
                             onClick={() => {
                                 if (name && rate) {
-                                    onSave(name, rate, transport || 0, salaryType, monthlySalary || 0, prefecture, age, allowances, deductions);
+                                    onSave(name, rate, transport || 0, salaryType, monthlySalary || 0, prefecture, age, allowances, deductions, minimumWage);
                                     setName('');
                                     setRate('');
                                     setTransport('');
