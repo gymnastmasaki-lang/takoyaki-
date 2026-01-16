@@ -3913,13 +3913,271 @@
                 <strong>¥${emoneSales.toLocaleString()}</strong>
               </div>
             </div>
+            
+            <div id="taxForecastSection" style="margin-top: 20px;">
+              <div style="text-align: center; padding: 10px;">納税額を計算中...</div>
+            </div>
           </div>
         `;
+        
+        // 納税額予測を非同期で計算・表示
+        calculateTaxForecast().then(html => {
+          document.getElementById('taxForecastSection').innerHTML = html;
+        }).catch(err => {
+          console.error('納税額予測エラー:', err);
+          document.getElementById('taxForecastSection').innerHTML = `
+            <div style="padding: 15px; background: #fff3cd; border-radius: 10px; color: #856404;">
+              <strong>⚠️ 納税額の計算に失敗しました</strong>
+              <div style="font-size: 12px; margin-top: 5px;">${err.message}</div>
+            </div>
+          `;
+        });
       } catch (e) {
         console.error('売上計算エラー:', e);
         container.innerHTML = '<div style="text-align: center; color: red;">エラーが発生しました</div>';
       }
     };
+    
+    // 納税額予測を計算
+    window.calculateTaxForecast = async function() {
+      try {
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1;
+        
+        // 今年と来年の年度を計算（1-3月は前年度）
+        const fiscalYear = currentMonth <= 3 ? currentYear - 1 : currentYear;
+        const nextFiscalYear = fiscalYear + 1;
+        const lastFiscalYear = fiscalYear - 1;
+        
+        console.log(`📊 納税額計算: 今年度=${fiscalYear}, 来年度=${nextFiscalYear}, 前年度=${lastFiscalYear}`);
+        
+        // 今年度のデータを集計（来年の納税額予測用）
+        const currentYearTax = await calculateYearlyConsumptionTax(fiscalYear);
+        
+        // 前年度のデータを集計（実績）
+        const lastYearTax = await calculateYearlyConsumptionTax(lastFiscalYear);
+        
+        const html = `
+          <div style="padding: 15px; background: linear-gradient(135deg, #FF6B6B 0%, #C92A2A 100%); border-radius: 10px; color: white;">
+            <h4 style="margin: 0 0 15px 0; display: flex; align-items: center; gap: 8px;">
+              💰 消費税納税額
+            </h4>
+            
+            <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+              <div style="font-size: 13px; opacity: 0.9; margin-bottom: 5px;">来年（${nextFiscalYear}年）の予測納税額</div>
+              <div style="font-size: 24px; font-weight: bold;">
+                ¥${Math.round(currentYearTax.netTax).toLocaleString()}
+              </div>
+              <div style="font-size: 11px; opacity: 0.8; margin-top: 5px;">
+                今年度（${fiscalYear}/${fiscalYear + 1}）の実績ベース
+              </div>
+            </div>
+            
+            <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 12px;">
+              <div style="font-size: 13px; opacity: 0.9; margin-bottom: 5px;">前年（${fiscalYear}年）の納税額</div>
+              <div style="font-size: 24px; font-weight: bold;">
+                ¥${Math.round(lastYearTax.netTax).toLocaleString()}
+              </div>
+              <div style="font-size: 11px; opacity: 0.8; margin-top: 5px;">
+                前年度（${lastFiscalYear}/${lastFiscalYear + 1}）の実績
+              </div>
+            </div>
+            
+            <div style="margin-top: 12px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 11px;">
+              <div style="margin-bottom: 5px;">
+                <strong>📈 内訳（今年度）</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                <span>仮受消費税（売上8%）</span>
+                <span>¥${Math.round(currentYearTax.receivedTax8).toLocaleString()}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                <span>仮受消費税（売上10%）</span>
+                <span>¥${Math.round(currentYearTax.receivedTax10).toLocaleString()}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 2px; padding-left: 10px; opacity: 0.9;">
+                <span>小計</span>
+                <span>¥${Math.round(currentYearTax.receivedTax).toLocaleString()}</span>
+              </div>
+              <div style="height: 1px; background: rgba(255,255,255,0.2); margin: 5px 0;"></div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                <span>仮払消費税（支出8%）</span>
+                <span>¥${Math.round(currentYearTax.paidTax8).toLocaleString()}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                <span>仮払消費税（支出10%）</span>
+                <span>¥${Math.round(currentYearTax.paidTax10).toLocaleString()}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 3px; padding-left: 10px; opacity: 0.9;">
+                <span>小計</span>
+                <span>¥${Math.round(currentYearTax.paidTax).toLocaleString()}</span>
+              </div>
+              <div style="height: 1px; background: rgba(255,255,255,0.2); margin: 5px 0;"></div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 3px; opacity: 0.7;">
+                <span>人件費（対象外）</span>
+                <span>¥${Math.round(currentYearTax.laborCost).toLocaleString()}</span>
+              </div>
+              <div style="height: 1px; background: rgba(255,255,255,0.3); margin: 8px 0;"></div>
+              <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 12px;">
+                <span>納税額</span>
+                <span>¥${Math.round(currentYearTax.netTax).toLocaleString()}</span>
+              </div>
+            </div>
+            
+            <div style="margin-top: 8px; font-size: 10px; opacity: 0.8;">
+              ※ 簡易課税制度・インボイス制度は考慮していません<br/>
+              ※ 実際の納税額は税理士にご確認ください
+            </div>
+          </div>
+        `;
+        
+        return html;
+      } catch (err) {
+        console.error('納税額予測計算エラー:', err);
+        throw err;
+      }
+    };
+    
+    // 年度の消費税を計算
+    async function calculateYearlyConsumptionTax(fiscalYear) {
+      const startDate = new Date(fiscalYear, 3, 1); // 4月1日
+      const endDate = new Date(fiscalYear + 1, 2, 31, 23, 59, 59); // 翌年3月31日
+      
+      console.log(`📅 集計期間: ${startDate.toLocaleDateString()} 〜 ${endDate.toLocaleDateString()}`);
+      
+      let receivedTax8 = 0; // 仮受消費税8%
+      let receivedTax10 = 0; // 仮受消費税10%
+      let paidTax8 = 0; // 仮払消費税8%
+      let paidTax10 = 0; // 仮払消費税10%
+      let laborCost = 0; // 人件費（消費税対象外）
+      
+      const startDateStr = `${fiscalYear}-${String(4).padStart(2, '0')}-01`;
+      const endYear = fiscalYear + 1;
+      const endDateStr = `${endYear}-${String(3).padStart(2, '0')}-31`;
+      
+      // 1. 注文データから仮受消費税を計算（商品ごとの税率を使用）
+      try {
+        const ordersQuery = window.query(
+          window.getStoreCollection('orders'),
+          window.where('paidAt', '>=', window.Timestamp.fromDate(startDate)),
+          window.where('paidAt', '<=', window.Timestamp.fromDate(endDate))
+        );
+        
+        const ordersSnapshot = await window.getDocs(ordersQuery);
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.items && Array.isArray(data.items)) {
+            data.items.forEach(item => {
+              const itemTotal = (item.price || 0) * (item.quantity || 1);
+              const taxRate = item.taxRate || 10;
+              
+              if (taxRate === 8) {
+                receivedTax8 += itemTotal * (8 / 108);
+              } else {
+                receivedTax10 += itemTotal * (10 / 110);
+              }
+            });
+          }
+        });
+        
+        console.log(`🧾 仮受消費税: 8%=¥${receivedTax8.toFixed(0)}, 10%=¥${receivedTax10.toFixed(0)}`);
+      } catch (err) {
+        console.warn('注文データ取得エラー:', err);
+      }
+      
+      // 2. 支出データから仮払消費税を計算
+      try {
+        const expensesSnapshot = await window.getDocs(window.getStoreCollection('expenses'));
+        
+        expensesSnapshot.forEach(doc => {
+          const data = doc.data();
+          const date = data.date;
+          
+          // 期間内のデータのみ
+          if (date && date >= startDateStr && date <= endDateStr) {
+            if (data.items && Array.isArray(data.items)) {
+              data.items.forEach(item => {
+                const amount = item.amount || 0;
+                const category = item.category;
+                
+                // カテゴリーごとの税率判定
+                if (category === '材料費' || category === '食費' || 
+                    category === '接待交際費' || category === '交通費') {
+                  // 8%対象
+                  paidTax8 += amount * (8 / 108);
+                } else if (category === '日用品' || category === '雑費・雑品' || 
+                           category === '水光熱費' || category === 'その他') {
+                  // 10%対象
+                  paidTax10 += amount * (10 / 110);
+                }
+                // その他のカテゴリーは消費税対象外
+              });
+            }
+          }
+        });
+        
+        console.log(`🧾 仮払消費税: 8%=¥${paidTax8.toFixed(0)}, 10%=¥${paidTax10.toFixed(0)}`);
+      } catch (err) {
+        console.warn('支出データ取得エラー:', err);
+      }
+      
+      // 3. 人件費データを取得
+      try {
+        const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
+        
+        attendanceSnapshot.forEach(doc => {
+          const data = doc.data();
+          const dateStr = data.date;
+          
+          // 期間内のデータのみ
+          if (dateStr && dateStr >= startDateStr && dateStr <= endDateStr) {
+            if (data.clockIn && data.clockOut) {
+              const clockIn = new Date(`${dateStr} ${data.clockIn}`);
+              const clockOut = new Date(`${dateStr} ${data.clockOut}`);
+              let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+              
+              // 休憩時間を引く
+              if (data.breakStart1 && data.breakEnd1) {
+                const breakStart1 = new Date(`${dateStr} ${data.breakStart1}`);
+                const breakEnd1 = new Date(`${dateStr} ${data.breakEnd1}`);
+                workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+              }
+              if (data.breakStart2 && data.breakEnd2) {
+                const breakStart2 = new Date(`${dateStr} ${data.breakStart2}`);
+                const breakEnd2 = new Date(`${dateStr} ${data.breakEnd2}`);
+                workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+              }
+              
+              const hourlyRate = data.hourlyRate || 1150;
+              laborCost += workHours * hourlyRate;
+            }
+          }
+        });
+        
+        console.log(`👷 人件費: ¥${laborCost.toFixed(0)}`);
+      } catch (err) {
+        console.warn('人件費データ取得エラー:', err);
+      }
+      
+      const receivedTax = receivedTax8 + receivedTax10;
+      const paidTax = paidTax8 + paidTax10;
+      const netTax = receivedTax - paidTax;
+      
+      console.log(`💰 計算結果: 仮受=¥${receivedTax.toFixed(0)}, 仮払=¥${paidTax.toFixed(0)}, 人件費=¥${laborCost.toFixed(0)}, 納税額=¥${netTax.toFixed(0)}`);
+      
+      return {
+        receivedTax,
+        receivedTax8,
+        receivedTax10,
+        paidTax,
+        paidTax8,
+        paidTax10,
+        laborCost,
+        netTax
+      };
+    }
     
     // 売上モーダルを閉じる
     window.closeSalesModal = function() {
