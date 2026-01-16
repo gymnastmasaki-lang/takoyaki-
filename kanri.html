@@ -432,30 +432,145 @@
             };
 
             const calculateDailyPay = (employee, record) => {
-                if (!record) return { base: 0, overtime: 0, holiday: 0, total: 0 };
+                if (!record) return { 
+                    base: 0, 
+                    overtime: 0, 
+                    holiday: 0, 
+                    lateNight: 0, 
+                    total: 0,
+                    overtimeHours: 0,
+                    lateNightHours: 0
+                };
                 
                 const workHours = calculateWorkHours(record);
-                if (workHours === 0) return { base: 0, overtime: 0, holiday: 0, total: 0 };
+                if (workHours === 0) return { 
+                    base: 0, 
+                    overtime: 0, 
+                    holiday: 0, 
+                    lateNight: 0, 
+                    total: 0,
+                    overtimeHours: 0,
+                    lateNightHours: 0
+                };
                 
                 // 日別の時給を優先、なければ従業員のデフォルト時給を使用
                 const hourlyRate = record.hourlyRate || employee?.hourlyRate || 0;
                 let basePay = 0;
                 let overtimePay = 0;
                 let holidayPay = 0;
+                let lateNightPay = 0;
+                let overtimeHours = 0;
+                let lateNightHours = 0;
+                
+                // 深夜労働時間を計算（22:00-翌5:00）
+                const calculateLateNightHours = () => {
+                    if (!record.clockIn || !record.clockOut) return 0;
+                    
+                    const parseTime = (timeStr) => {
+                        const [h, m] = timeStr.split(':').map(Number);
+                        return h * 60 + m;
+                    };
+                    
+                    let totalLateNightMinutes = 0;
+                    const clockInMinutes = parseTime(record.clockIn);
+                    const clockOutMinutes = parseTime(record.clockOut);
+                    
+                    // 22:00 = 1320分, 翌5:00 = 1440 + 300 = 1740分（日を跨ぐ場合）
+                    const lateNightStart = 22 * 60; // 1320
+                    const lateNightEnd = 5 * 60; // 300
+                    
+                    // 退勤が出勤より前の場合、日を跨いでいる
+                    if (clockOutMinutes < clockInMinutes) {
+                        // 出勤日の22:00以降
+                        if (clockInMinutes < 24 * 60) {
+                            const startMinutes = Math.max(clockInMinutes, lateNightStart);
+                            totalLateNightMinutes += (24 * 60 - startMinutes);
+                        }
+                        // 翌日の0:00-5:00
+                        const endMinutes = Math.min(clockOutMinutes, lateNightEnd);
+                        if (endMinutes > 0) {
+                            totalLateNightMinutes += endMinutes;
+                        }
+                    } else {
+                        // 同日内
+                        if (clockInMinutes >= lateNightStart) {
+                            // 22:00以降に出勤
+                            totalLateNightMinutes = clockOutMinutes - clockInMinutes;
+                        } else if (clockOutMinutes > lateNightStart) {
+                            // 22:00を跨ぐ
+                            totalLateNightMinutes = clockOutMinutes - lateNightStart;
+                        }
+                    }
+                    
+                    // 休憩時間を引く
+                    if (record.breakStart1 && record.breakEnd1) {
+                        const breakStart1 = parseTime(record.breakStart1);
+                        const breakEnd1 = parseTime(record.breakEnd1);
+                        
+                        // 休憩時間が深夜時間帯と重なる場合
+                        if (breakStart1 >= lateNightStart || breakEnd1 <= lateNightEnd || 
+                            (breakStart1 < lateNightEnd && breakEnd1 > lateNightStart)) {
+                            const overlapStart = Math.max(breakStart1, lateNightStart);
+                            const overlapEnd = Math.min(breakEnd1, 24 * 60);
+                            if (overlapEnd > overlapStart) {
+                                totalLateNightMinutes -= (overlapEnd - overlapStart);
+                            }
+                        }
+                    }
+                    
+                    if (record.breakStart2 && record.breakEnd2) {
+                        const breakStart2 = parseTime(record.breakStart2);
+                        const breakEnd2 = parseTime(record.breakEnd2);
+                        
+                        if (breakStart2 >= lateNightStart || breakEnd2 <= lateNightEnd || 
+                            (breakStart2 < lateNightEnd && breakEnd2 > lateNightStart)) {
+                            const overlapStart = Math.max(breakStart2, lateNightStart);
+                            const overlapEnd = Math.min(breakEnd2, 24 * 60);
+                            if (overlapEnd > overlapStart) {
+                                totalLateNightMinutes -= (overlapEnd - overlapStart);
+                            }
+                        }
+                    }
+                    
+                    return Math.max(0, totalLateNightMinutes / 60);
+                };
+                
+                lateNightHours = calculateLateNightHours();
                 
                 if (record.isHoliday) {
+                    // 休日出勤：35%割増
                     holidayPay = workHours * hourlyRate * 1.35;
+                    
+                    // 深夜労働：さらに25%割増（合計60%）
+                    if (lateNightHours > 0) {
+                        lateNightPay = lateNightHours * hourlyRate * 0.25;
+                    }
                 } else {
+                    // 通常勤務
                     if (workHours <= 8) {
                         basePay = workHours * hourlyRate;
                     } else {
                         basePay = 8 * hourlyRate;
-                        overtimePay = (workHours - 8) * hourlyRate * 1.25;
+                        overtimeHours = workHours - 8;
+                        overtimePay = overtimeHours * hourlyRate * 0.25; // 25%割増のみ（基本給は含まない）
+                    }
+                    
+                    // 深夜労働：25%割増
+                    if (lateNightHours > 0) {
+                        lateNightPay = lateNightHours * hourlyRate * 0.25;
                     }
                 }
                 
-                const total = basePay + overtimePay + holidayPay;
-                return { base: basePay, overtime: overtimePay, holiday: holidayPay, total };
+                const total = basePay + overtimePay + holidayPay + lateNightPay;
+                return { 
+                    base: basePay, 
+                    overtime: overtimePay, 
+                    holiday: holidayPay, 
+                    lateNight: lateNightPay,
+                    total,
+                    overtimeHours,
+                    lateNightHours
+                };
             };
 
             const calculateMonthlyTotals = (employeeId) => {
@@ -1539,8 +1654,14 @@
 
                     workDays.forEach(({ day, record, workHours, dailyPay }) => {
                         const memo = record.editHistory && record.editHistory.length > 0 
-                            ? record.editHistory[record.editHistory.length - 1].memo || '-'
-                            : '-';
+                            ? record.editHistory[record.editHistory.length - 1].memo || ''
+                            : '';
+                        
+                        let remarkText = '';
+                        if (record.isHoliday) remarkText += '休日出勤(35%)<br/>';
+                        if (dailyPay.overtimeHours > 0) remarkText += `超過分${dailyPay.overtimeHours.toFixed(2)}時間(25%)<br/>`;
+                        if (dailyPay.lateNightHours > 0) remarkText += `深夜賃金${dailyPay.lateNightHours.toFixed(2)}時間(25%)<br/>`;
+                        if (memo) remarkText += memo;
                         
                         tableHTML += `
                             <tr>
@@ -1553,7 +1674,7 @@
                                 <td style="border: 2px solid #000; padding: 8px; text-align: center;">${record.clockOut || '-'}</td>
                                 <td style="border: 2px solid #000; padding: 8px; text-align: center; background: #f9fafb;">${workHours.toFixed(2)}h</td>
                                 <td style="border: 2px solid #000; padding: 8px; text-align: right; background: #f9fafb;">¥${Math.round(dailyPay.total).toLocaleString()}</td>
-                                <td style="border: 2px solid #000; padding: 8px; text-align: center; font-size: 10px; background: #f9fafb;">${record.isHoliday ? '休日出勤 ' : ''}${memo}</td>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: left; font-size: 9px; background: #f9fafb; line-height: 1.4;">${remarkText || '-'}</td>
                             </tr>`;
                     });
 
@@ -2191,31 +2312,21 @@
                                                                 {renderEditableCell('clockOut', record?.clockOut)}
                                                                 <td className="border p-2 text-center bg-gray-50">{workHours.toFixed(2)}h</td>
                                                                 <td className="border p-2 text-right bg-gray-50">¥{Math.round(dailyPay.total).toLocaleString()}</td>
-                                                                <td className="border p-2 text-center text-xs bg-gray-50">
-                                                                    {record?.isHoliday && <span className="text-purple-600 font-bold block">🏖️ 休日出勤</span>}
-                                                                    {record?.editHistory && record.editHistory.length > 0 && (
-                                                                        <div className="text-left">
-                                                                            <span className="text-orange-600 font-bold block mt-1">
-                                                                                ✏️ 編集履歴
-                                                                            </span>
-                                                                            {record.editHistory.slice(-3).reverse().map((edit, idx) => (
-                                                                                <div key={idx} className="mt-1 text-gray-600 border-t pt-1">
-                                                                                    <div className="font-semibold text-blue-600">
-                                                                                        {edit.field === 'clockIn' ? '出勤' : 
-                                                                                         edit.field === 'clockOut' ? '退勤' :
-                                                                                         edit.field === 'breakStart1' ? '休憩入1' :
-                                                                                         edit.field === 'breakEnd1' ? '休憩出1' :
-                                                                                         edit.field === 'breakStart2' ? '休憩入2' :
-                                                                                         edit.field === 'breakEnd2' ? '休憩出2' : edit.field}:
-                                                                                    </div>
-                                                                                    <div>{edit.oldValue || '未設定'} → {edit.newValue || '削除'}</div>
-                                                                                    {edit.memo && (
-                                                                                        <div className="text-green-700 font-medium mt-0.5">
-                                                                                            📝 {edit.memo}
-                                                                                        </div>
-                                                                                    )}
-                                                                                </div>
-                                                                            ))}
+                                                                <td className="border p-2 text-left text-xs bg-gray-50">
+                                                                    {record?.isHoliday && <div className="text-purple-600 font-bold">休日出勤(35%)</div>}
+                                                                    {dailyPay.overtimeHours > 0 && (
+                                                                        <div className="text-orange-600 font-bold">
+                                                                            超過分{dailyPay.overtimeHours.toFixed(2)}時間(25%)
+                                                                        </div>
+                                                                    )}
+                                                                    {dailyPay.lateNightHours > 0 && (
+                                                                        <div className="text-blue-600 font-bold">
+                                                                            深夜賃金{dailyPay.lateNightHours.toFixed(2)}時間(25%)
+                                                                        </div>
+                                                                    )}
+                                                                    {record?.editHistory && record.editHistory.length > 0 && record.editHistory[record.editHistory.length - 1].memo && (
+                                                                        <div className="text-gray-600 mt-1">
+                                                                            {record.editHistory[record.editHistory.length - 1].memo}
                                                                         </div>
                                                                     )}
                                                                 </td>
@@ -2232,7 +2343,7 @@
 
                                     <div className="mt-8 text-sm text-gray-600">
                                         <p>※この給与明細書は労働基準法に基づき、5年間保管してください。</p>
-                                        <p>※時間外労働(8時間超過)は25%割増、休日出勤は35%割増にて計算されています。</p>
+                                        <p>※時間外労働(8時間超過)は25%割増、休日出勤は35%割増、深夜労働(22時-翌5時)は25%割増にて計算されています。</p>
                                         <p>※労働時間は15分単位で計算されています(出勤は切り上げ、退勤は切り捨て)</p>
                                     </div>
                                 </div>
