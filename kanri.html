@@ -511,20 +511,21 @@
                 // 各種手当
                 const allowances = employee.allowances || {};
                 
-                // 経費（収入だが所得ではない）
+                // 経費（収入だが所得ではない）- 表示用のみ
                 const expenseAmount = (allowances.commuting || 0) + (allowances.expense || 0);
                 
                 // 経費以外の手当
                 const totalAllowances = (allowances.family || 0) + (allowances.sales || 0) + 
                                        (allowances.position || 0) + (allowances.housing || 0);
                 
-                // ========== 時間給ベースの計算 ==========
+                // ========== 時間給ベースの計算（経費を除外して計算） ==========
                 const hourlyBasePay = totalBasePay + totalOvertimePay + totalHolidayPay + transport;
-                const hourlyTotalGross = hourlyBasePay + totalAllowances + expenseAmount; // 総支給額
-                const hourlyDeductions = calculateDeductions(employee, hourlyTotalGross, expenseAmount); // 経費を除外して計算
-                const hourlyNetPay = hourlyTotalGross - hourlyDeductions.totalDeductions;
+                const hourlyGrossBeforeExpense = hourlyBasePay + totalAllowances; // 経費除外の総支給額
+                const hourlyDeductions = calculateDeductions(employee, hourlyGrossBeforeExpense, 0); // 経費0で計算
+                const hourlyNetPay = hourlyGrossBeforeExpense - hourlyDeductions.totalDeductions;
+                const hourlyTotalGross = hourlyGrossBeforeExpense + expenseAmount; // 最後に経費を加算（表示用）
                 
-                // ========== 固定給ベースの計算 ==========
+                // ========== 固定給ベースの計算（経費を除外して計算） ==========
                 let fixedSalary = 0;
                 let dailyFixedRate = 0;
                 let fixedGrossPay = 0;
@@ -540,9 +541,10 @@
                     fixedSalary = employee.monthlySalary;
                     dailyFixedRate = fixedSalary / daysInMonth;
                     fixedGrossPay = fixedSalary; // 固定給は日割りしない
-                    fixedTotalGross = fixedGrossPay + totalAllowances + expenseAmount; // 総支給額
-                    fixedDeductions = calculateDeductions(employee, fixedTotalGross, expenseAmount); // 経費を除外して計算
-                    fixedNetPay = fixedTotalGross - fixedDeductions.totalDeductions;
+                    const fixedGrossBeforeExpense = fixedGrossPay + totalAllowances; // 経費除外の総支給額
+                    fixedDeductions = calculateDeductions(employee, fixedGrossBeforeExpense, 0); // 経費0で計算
+                    fixedNetPay = fixedGrossBeforeExpense - fixedDeductions.totalDeductions;
+                    fixedTotalGross = fixedGrossBeforeExpense + expenseAmount; // 最後に経費を加算（表示用）
                     
                     // 差額計算（内部計算は正確に）
                     grossDifference = hourlyTotalGross - fixedTotalGross;
@@ -877,7 +879,8 @@
             };
 
             // 社会保険料・税金計算関数
-            const calculateDeductions = (employee, grossPay, expenseAmount = 0) => {
+            // ★重要：この関数に渡されるgrossPayには既に経費が含まれていない
+            const calculateDeductions = (employee, grossPay) => {
                 if (!employee) return {
                     healthInsurance: 0,
                     pension: 0,
@@ -897,20 +900,17 @@
                     residentTax: true
                 };
                 
-                // 経費を除外した収入（健康保険・厚生年金・所得税・住民税の計算基準）
-                const incomeWithoutExpense = grossPay - expenseAmount;
-                
                 // 時間給の場合：88,000円未満なら社会保険料は0
                 const salaryType = employee.salaryType || '時間給';
-                const shouldCalculateInsurance = salaryType === '固定給' || incomeWithoutExpense >= 88000;
+                const shouldCalculateInsurance = salaryType === '固定給' || grossPay >= 88000;
 
                 let healthInsurance = 0;
                 let pension = 0;
                 
                 if (shouldCalculateInsurance) {
-                    // 標準報酬月額を決定（経費除外後の金額で判定）
+                    // 標準報酬月額を決定
                     let standardRemuneration = 58000;
-                    const monthlySalary = employee.monthlySalary || incomeWithoutExpense;
+                    const monthlySalary = employee.monthlySalary || grossPay;
                     for (const bracket of INSURANCE_DATA.standardMonthlyRemuneration) {
                         if (monthlySalary >= bracket.min && monthlySalary < bracket.max) {
                             standardRemuneration = bracket.standard;
@@ -932,13 +932,12 @@
                     }
                 }
 
-                // 雇用保険料計算（総支給額で計算、0.55%）
-                // ★重要：雇用保険料は経費を含む総支給額で計算
+                // 雇用保険料計算（総支給額の0.55%）
                 const employmentInsurance = Math.floor(grossPay * 0.0055);
 
-                // 所得税計算（経費除外後の金額で計算）
+                // 所得税計算
                 const socialInsuranceTotal = healthInsurance + pension + employmentInsurance;
-                const taxableIncome = incomeWithoutExpense - socialInsuranceTotal - 88000;
+                const taxableIncome = grossPay - socialInsuranceTotal - 88000;
                 let incomeTax = 0;
                 
                 if (taxableIncome > 0) {
@@ -961,7 +960,7 @@
                     }
                 }
 
-                // 住民税計算（スイッチONの場合のみ、経費除外後の金額で計算）
+                // 住民税計算（スイッチONの場合のみ）
                 let residentTax = 0;
                 if (insuranceSwitches.residentTax && taxableIncome > 0) {
                     residentTax = Math.floor(taxableIncome * 0.10);
