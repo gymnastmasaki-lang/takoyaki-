@@ -1364,6 +1364,19 @@
                             </tbody>
                         </table>
                         
+                        <!-- 控除額の計算説明 -->
+                        <div style="background: #fff3cd; padding: 10px; margin-bottom: 20px; border: 1px solid #ffc107; border-radius: 3px;">
+                            <div style="font-size: 12px; font-weight: bold; margin-bottom: 5px;">【控除額の計算方法】</div>
+                            <div style="font-size: 10px; line-height: 1.6;">
+                                • <strong>健康保険</strong>: 標準報酬月額 × 保険料率 ÷ 2（40歳以上は介護保険料を含む）<br/>
+                                • <strong>厚生年金</strong>: 標準報酬月額 × 18.3% ÷ 2<br/>
+                                • <strong>雇用保険</strong>: 総支給額（経費除く） × 0.55%<br/>
+                                • <strong>所得税</strong>: (総支給額 - 社会保険料 - 給与所得控除) に対する累進課税<br/>
+                                • <strong>住民税</strong>: 課税所得 × 10%（概算）<br/>
+                                ※時間給の場合、88,000円未満は健康保険・厚生年金が免除されます
+                            </div>
+                        </div>
+                        
                         <!-- 支給額 -->
                         <h3 style="font-size: 16px; margin: 20px 0 10px 0; padding: 5px 10px; background: #2196F3; color: white; border-radius: 3px;">【支給額】</h3>
                         <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
@@ -1469,6 +1482,106 @@
                     if (document.body.contains(tempDiv)) {
                         document.body.removeChild(tempDiv);
                     }
+                    showCustomAlertFunc('PNG出力に失敗しました', '❌ エラー', '❌');
+                }
+            };
+
+            // 勤怠詳細のPNG出力
+            const exportAttendanceDetailToPNG = async (employeeId) => {
+                const employee = employees.find(e => e.id === employeeId);
+                if (!employee) return;
+
+                try {
+                    const daysInMonth = getDaysInMonth(currentMonth, currentYear);
+                    const workDays = [];
+                    
+                    for (let day = 1; day <= daysInMonth; day++) {
+                        const dateKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        const record = attendanceData[employeeId]?.[dateKey];
+                        
+                        if (record && record.clockIn) {
+                            const workHours = calculateWorkHours(record);
+                            const dailyPay = calculateDailyPay(employee, record);
+                            workDays.push({ day, record, workHours, dailyPay });
+                        }
+                    }
+
+                    // 一時的なHTMLテーブルを作成
+                    const tempDiv = document.createElement('div');
+                    tempDiv.style.position = 'absolute';
+                    tempDiv.style.left = '-9999px';
+                    tempDiv.style.background = 'white';
+                    tempDiv.style.padding = '30px';
+                    tempDiv.style.width = '1200px';
+                    tempDiv.style.fontFamily = 'Arial, sans-serif';
+
+                    let tableHTML = `
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 10px;">勤怠詳細</h1>
+                            <div style="font-size: 14px; color: #666;">${employee.name} - ${currentYear}年${currentMonth + 1}月</div>
+                        </div>
+                        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                            <thead style="background: #f3f4f6;">
+                                <tr>
+                                    <th style="border: 2px solid #000; padding: 8px;">日付</th>
+                                    <th style="border: 2px solid #000; padding: 8px;">出勤</th>
+                                    <th style="border: 2px solid #000; padding: 8px;">休憩入1</th>
+                                    <th style="border: 2px solid #000; padding: 8px;">休憩出1</th>
+                                    <th style="border: 2px solid #000; padding: 8px;">休憩入2</th>
+                                    <th style="border: 2px solid #000; padding: 8px;">休憩出2</th>
+                                    <th style="border: 2px solid #000; padding: 8px;">退勤</th>
+                                    <th style="border: 2px solid #000; padding: 8px;">労働時間</th>
+                                    <th style="border: 2px solid #000; padding: 8px;">日給</th>
+                                    <th style="border: 2px solid #000; padding: 8px;">備考</th>
+                                </tr>
+                            </thead>
+                            <tbody>`;
+
+                    workDays.forEach(({ day, record, workHours, dailyPay }) => {
+                        const memo = record.editHistory && record.editHistory.length > 0 
+                            ? record.editHistory[record.editHistory.length - 1].memo || '-'
+                            : '-';
+                        
+                        tableHTML += `
+                            <tr>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: center; background: #f9fafb;">${day}日</td>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: center;">${record.clockIn || '-'}</td>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: center;">${record.breakStart1 || '-'}</td>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: center;">${record.breakEnd1 || '-'}</td>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: center;">${record.breakStart2 || '-'}</td>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: center;">${record.breakEnd2 || '-'}</td>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: center;">${record.clockOut || '-'}</td>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: center; background: #f9fafb;">${workHours.toFixed(2)}h</td>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: right; background: #f9fafb;">¥${Math.round(dailyPay.total).toLocaleString()}</td>
+                                <td style="border: 2px solid #000; padding: 8px; text-align: center; font-size: 10px; background: #f9fafb;">${record.isHoliday ? '休日出勤 ' : ''}${memo}</td>
+                            </tr>`;
+                    });
+
+                    tableHTML += `
+                            </tbody>
+                        </table>`;
+
+                    tempDiv.innerHTML = tableHTML;
+                    document.body.appendChild(tempDiv);
+
+                    const canvas = await html2canvas(tempDiv, {
+                        scale: 2,
+                        backgroundColor: '#ffffff',
+                        logging: false
+                    });
+
+                    document.body.removeChild(tempDiv);
+
+                    canvas.toBlob((blob) => {
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `勤怠詳細_${employee.name}_${currentYear}年${currentMonth + 1}月.png`;
+                        link.click();
+                        URL.revokeObjectURL(url);
+                    });
+                } catch (error) {
+                    console.error('PNG出力エラー:', error);
                     showCustomAlertFunc('PNG出力に失敗しました', '❌ エラー', '❌');
                 }
             };
@@ -1862,6 +1975,17 @@
                                                             </tr>
                                                         </tbody>
                                                     </table>
+                                                    <div className="bg-yellow-50 border border-yellow-300 p-3 mt-2 rounded text-xs">
+                                                        <div className="font-bold mb-1">【控除額の計算方法】</div>
+                                                        <div className="space-y-1 text-gray-700">
+                                                            <div>• <strong>健康保険</strong>: 標準報酬月額 × 保険料率 ÷ 2（40歳以上は介護保険料を含む）</div>
+                                                            <div>• <strong>厚生年金</strong>: 標準報酬月額 × 18.3% ÷ 2</div>
+                                                            <div>• <strong>雇用保険</strong>: 総支給額（経費除く） × 0.55%</div>
+                                                            <div>• <strong>所得税</strong>: (総支給額 - 社会保険料 - 給与所得控除) に対する累進課税</div>
+                                                            <div>• <strong>住民税</strong>: 課税所得 × 10%（概算）</div>
+                                                            <div className="text-red-600 font-bold mt-1">※時間給の場合、88,000円未満は健康保険・厚生年金が免除されます</div>
+                                                        </div>
+                                                    </div>
                                                 </div>
 
                                                 {/* 支給額 */}
@@ -1939,11 +2063,20 @@
                                     </div>
 
                                     <div className="mb-4">
-                                        <h3 className="text-xl font-bold mb-4">勤怠詳細</h3>
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h3 className="text-xl font-bold">勤怠詳細</h3>
+                                            <button
+                                                onClick={() => exportAttendanceDetailToPNG(selectedPayslipEmployee)}
+                                                className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 flex items-center gap-2"
+                                            >
+                                                <Download className="w-4 h-4" />
+                                                勤怠詳細をPNG保存
+                                            </button>
+                                        </div>
                                         <div className="text-sm text-gray-600 mb-2">
                                             合計労働時間: {totals.hours.toFixed(2)}時間 (15分単位で計算)
                                         </div>
-                                        <div className="overflow-x-auto">
+                                        <div className="overflow-x-auto" id="attendance-detail-table">
                                             <table className="w-full border-collapse border text-sm">
                                                 <thead className="bg-gray-100">
                                                     <tr>
