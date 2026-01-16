@@ -510,14 +510,18 @@
                 
                 // 各種手当
                 const allowances = employee.allowances || {};
+                
+                // 経費（収入だが所得ではない）
+                const expenseAmount = (allowances.commuting || 0) + (allowances.expense || 0);
+                
+                // 経費以外の手当
                 const totalAllowances = (allowances.family || 0) + (allowances.sales || 0) + 
-                                       (allowances.position || 0) + (allowances.commuting || 0) +
-                                       (allowances.expense || 0) + (allowances.housing || 0);
+                                       (allowances.position || 0) + (allowances.housing || 0);
                 
                 // ========== 時間給ベースの計算 ==========
                 const hourlyBasePay = totalBasePay + totalOvertimePay + totalHolidayPay + transport;
-                const hourlyTotalGross = hourlyBasePay + totalAllowances;
-                const hourlyDeductions = calculateDeductions(employee, hourlyTotalGross);
+                const hourlyTotalGross = hourlyBasePay + totalAllowances + expenseAmount; // 総支給額
+                const hourlyDeductions = calculateDeductions(employee, hourlyTotalGross, expenseAmount); // 経費を除外して計算
                 const hourlyNetPay = hourlyTotalGross - hourlyDeductions.totalDeductions;
                 
                 // ========== 固定給ベースの計算 ==========
@@ -536,8 +540,8 @@
                     fixedSalary = employee.monthlySalary;
                     dailyFixedRate = fixedSalary / daysInMonth;
                     fixedGrossPay = fixedSalary; // 固定給は日割りしない
-                    fixedTotalGross = fixedGrossPay + totalAllowances;
-                    fixedDeductions = calculateDeductions(employee, fixedTotalGross);
+                    fixedTotalGross = fixedGrossPay + totalAllowances + expenseAmount; // 総支給額
+                    fixedDeductions = calculateDeductions(employee, fixedTotalGross, expenseAmount); // 経費を除外して計算
                     fixedNetPay = fixedTotalGross - fixedDeductions.totalDeductions;
                     
                     // 差額計算（内部計算は正確に）
@@ -754,6 +758,12 @@
                                         ¥{Math.round(cumulativeData.displayTotalNetDifference).toLocaleString()}
                                     </td>
                                 </tr>
+                                <tr className="bg-blue-50">
+                                    <td className="border p-2 font-bold">累計納税額（差額分）</td>
+                                    <td className="border p-2 text-right font-bold text-blue-600 text-lg">
+                                        ¥{Math.round(cumulativeData.displayTotalGrossDifference - cumulativeData.displayTotalNetDifference).toLocaleString()}
+                                    </td>
+                                </tr>
                             </tbody>
                         </table>
                         <div className="text-xs text-gray-600 mt-1">
@@ -887,7 +897,7 @@
                     residentTax: true
                 };
                 
-                // 経費を除外した収入（社会保険料の計算基準）
+                // 経費を除外した収入（健康保険・厚生年金・所得税・住民税の計算基準）
                 const incomeWithoutExpense = grossPay - expenseAmount;
                 
                 // 時間給の場合：88,000円未満なら社会保険料は0
@@ -898,7 +908,7 @@
                 let pension = 0;
                 
                 if (shouldCalculateInsurance) {
-                    // 標準報酬月額を決定
+                    // 標準報酬月額を決定（経費除外後の金額で判定）
                     let standardRemuneration = 58000;
                     const monthlySalary = employee.monthlySalary || incomeWithoutExpense;
                     for (const bracket of INSURANCE_DATA.standardMonthlyRemuneration) {
@@ -922,8 +932,9 @@
                     }
                 }
 
-                // 雇用保険料計算（経費除外後の金額で計算、0.6%）
-                const employmentInsurance = Math.floor(incomeWithoutExpense * 0.006);
+                // 雇用保険料計算（総支給額で計算、0.55%）
+                // ★重要：雇用保険料は経費を含む総支給額で計算
+                const employmentInsurance = Math.floor(grossPay * 0.0055);
 
                 // 所得税計算（経費除外後の金額で計算）
                 const socialInsuranceTotal = healthInsurance + pension + employmentInsurance;
@@ -1385,6 +1396,12 @@
                                         ¥${Math.round(totals.displayNetDifference).toLocaleString()}
                                     </td>
                                 </tr>
+                                <tr style="background: #e3f2fd;">
+                                    <td style="border: 2px solid #000; padding: 8px; font-weight: bold;">納税額（差額分）</td>
+                                    <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; color: #2196F3;">
+                                        ¥${Math.round(totals.displayGrossDifference - totals.displayNetDifference).toLocaleString()}
+                                    </td>
+                                </tr>
                             </tbody>
                         </table>
                         <div style="font-size: 11px; color: #666; margin-bottom: 20px;">
@@ -1406,6 +1423,12 @@
                                     <td style="border: 2px solid #000; padding: 8px; font-weight: bold;">控除後累計差額</td>
                                     <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; font-size: 16px; color: #ff3300;">
                                         ¥${Math.round(cumulativeData.displayTotalNetDifference).toLocaleString()}
+                                    </td>
+                                </tr>
+                                <tr style="background: #e3f2fd;">
+                                    <td style="border: 2px solid #000; padding: 8px; font-weight: bold;">累計納税額（差額分）</td>
+                                    <td style="border: 2px solid #000; padding: 8px; text-align: right; font-weight: bold; font-size: 16px; color: #2196F3;">
+                                        ¥${Math.round(cumulativeData.displayTotalGrossDifference - cumulativeData.displayTotalNetDifference).toLocaleString()}
                                     </td>
                                 </tr>
                             </tbody>
@@ -1868,6 +1891,10 @@
                                                             <tr className="bg-yellow-50">
                                                                 <td className="border p-2 font-bold">控除後差額</td>
                                                                 <td className="border p-2 text-right font-bold text-orange-600">¥{Math.round(totals.displayNetDifference).toLocaleString()}</td>
+                                                            </tr>
+                                                            <tr className="bg-blue-50">
+                                                                <td className="border p-2 font-bold">納税額（差額分）</td>
+                                                                <td className="border p-2 text-right font-bold text-blue-600">¥{Math.round(totals.displayGrossDifference - totals.displayNetDifference).toLocaleString()}</td>
                                                             </tr>
                                                         </tbody>
                                                     </table>
