@@ -867,7 +867,7 @@
             };
 
             // 社会保険料・税金計算関数
-            const calculateDeductions = (employee, grossPay) => {
+            const calculateDeductions = (employee, grossPay, expenseAmount = 0) => {
                 if (!employee) return {
                     healthInsurance: 0,
                     pension: 0,
@@ -881,38 +881,58 @@
 
                 const prefecture = employee.prefecture || '東京';
                 const age = employee.age || 30;
-                const monthlySalary = employee.monthlySalary || grossPay;
+                const insuranceSwitches = employee.insuranceSwitches || {
+                    healthInsurance: true,
+                    pension: true,
+                    residentTax: true
+                };
+                
+                // 経費を除外した収入（社会保険料の計算基準）
+                const incomeWithoutExpense = grossPay - expenseAmount;
+                
+                // 時間給の場合：88,000円未満なら社会保険料は0
+                const salaryType = employee.salaryType || '時間給';
+                const shouldCalculateInsurance = salaryType === '固定給' || incomeWithoutExpense >= 88000;
 
-                // 標準報酬月額を決定
-                let standardRemuneration = 58000;
-                for (const bracket of INSURANCE_DATA.standardMonthlyRemuneration) {
-                    if (monthlySalary >= bracket.min && monthlySalary < bracket.max) {
-                        standardRemuneration = bracket.standard;
-                        break;
+                let healthInsurance = 0;
+                let pension = 0;
+                
+                if (shouldCalculateInsurance) {
+                    // 標準報酬月額を決定
+                    let standardRemuneration = 58000;
+                    const monthlySalary = employee.monthlySalary || incomeWithoutExpense;
+                    for (const bracket of INSURANCE_DATA.standardMonthlyRemuneration) {
+                        if (monthlySalary >= bracket.min && monthlySalary < bracket.max) {
+                            standardRemuneration = bracket.standard;
+                            break;
+                        }
+                    }
+
+                    // 健康保険料計算（スイッチONの場合のみ）
+                    if (insuranceSwitches.healthInsurance) {
+                        const healthRate = INSURANCE_DATA.healthInsuranceRates[prefecture] || 0.1000;
+                        const nursingRate = age >= 40 ? INSURANCE_DATA.nursingCareRate : 0;
+                        const totalHealthRate = healthRate + nursingRate;
+                        healthInsurance = Math.floor(standardRemuneration * totalHealthRate / 2);
+                    }
+
+                    // 厚生年金保険料計算（スイッチONの場合のみ）
+                    if (insuranceSwitches.pension) {
+                        pension = Math.floor(standardRemuneration * INSURANCE_DATA.pensionRate / 2);
                     }
                 }
 
-                // 健康保険料計算
-                const healthRate = INSURANCE_DATA.healthInsuranceRates[prefecture] || 0.1000;
-                const nursingRate = age >= 40 ? INSURANCE_DATA.nursingCareRate : 0;
-                const totalHealthRate = healthRate + nursingRate;
-                const healthInsurance = Math.floor(standardRemuneration * totalHealthRate / 2);
+                // 雇用保険料計算（経費除外後の金額で計算、0.6%）
+                const employmentInsurance = Math.floor(incomeWithoutExpense * 0.006);
 
-                // 厚生年金保険料計算
-                const pension = Math.floor(standardRemuneration * INSURANCE_DATA.pensionRate / 2);
-
-                // 雇用保険料計算
-                const employmentInsurance = Math.floor(grossPay * INSURANCE_DATA.employmentInsuranceRate);
-
-                // 所得税計算（簡易版：社会保険料控除後の課税所得に基づく）
+                // 所得税計算（経費除外後の金額で計算）
                 const socialInsuranceTotal = healthInsurance + pension + employmentInsurance;
-                const taxableIncome = grossPay - socialInsuranceTotal - 88000; // 88,000円は給与所得控除の最低額（月額換算）
+                const taxableIncome = incomeWithoutExpense - socialInsuranceTotal - 88000;
                 let incomeTax = 0;
                 
                 if (taxableIncome > 0) {
                     const annualTaxableIncome = taxableIncome * 12;
                     
-                    // 所得税の速算表（2024年度版）
                     if (annualTaxableIncome <= 1950000) {
                         incomeTax = Math.floor(annualTaxableIncome * 0.05 / 12);
                     } else if (annualTaxableIncome <= 3300000) {
@@ -930,9 +950,11 @@
                     }
                 }
 
-                // 住民税計算（簡易版：前年所得の10%）
-                // 実際は前年所得に基づくが、ここでは当月の所得から推定
-                const residentTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.10) : 0;
+                // 住民税計算（スイッチONの場合のみ、経費除外後の金額で計算）
+                let residentTax = 0;
+                if (insuranceSwitches.residentTax && taxableIncome > 0) {
+                    residentTax = Math.floor(taxableIncome * 0.10);
+                }
 
                 // 家賃・光熱費（従業員データから取得）
                 const rent = employee.deductions?.rent || 0;
@@ -949,7 +971,6 @@
                     rent,
                     utilities,
                     totalDeductions,
-                    standardRemuneration,
                     socialInsuranceTotal
                 };
             };
@@ -2155,6 +2176,11 @@
             const [prefecture, setPrefecture] = useState(employee?.prefecture || '東京');
             const [age, setAge] = useState(employee?.age || 30);
             const [minimumWage, setMinimumWage] = useState(employee?.minimumWage || INSURANCE_DATA.minimumWage[employee?.prefecture || '東京']);
+            const [insuranceSwitches, setInsuranceSwitches] = useState(employee?.insuranceSwitches || {
+                healthInsurance: true,
+                pension: true,
+                residentTax: true
+            });
             const [allowances, setAllowances] = useState(employee?.allowances || {
                 family: 0, sales: 0, position: 0, commuting: 0, expense: 0, housing: 0
             });
@@ -2324,6 +2350,42 @@
                         </div>
                     </div>
 
+                    <div className="bg-blue-50 p-2 rounded">
+                        <h5 className="text-sm font-bold mb-2">社会保険・税金設定</h5>
+                        <div className="text-xs text-gray-600 mb-2">
+                            ※アルバイトや国民健康保険の方は該当項目をOFFにしてください
+                        </div>
+                        <div className="space-y-1">
+                            <label className="flex items-center gap-2 cursor-pointer text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={insuranceSwitches.healthInsurance}
+                                    onChange={(e) => setInsuranceSwitches({...insuranceSwitches, healthInsurance: e.target.checked})}
+                                    className="w-3 h-3"
+                                />
+                                健康保険を適用
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={insuranceSwitches.pension}
+                                    onChange={(e) => setInsuranceSwitches({...insuranceSwitches, pension: e.target.checked})}
+                                    className="w-3 h-3"
+                                />
+                                厚生年金を適用
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={insuranceSwitches.residentTax}
+                                    onChange={(e) => setInsuranceSwitches({...insuranceSwitches, residentTax: e.target.checked})}
+                                    className="w-3 h-3"
+                                />
+                                住民税を適用
+                            </label>
+                        </div>
+                    </div>
+
                     <div className="bg-red-50 p-2 rounded">
                         <h5 className="text-sm font-bold mb-2">控除項目（手入力分）</h5>
                         <div className="grid grid-cols-2 gap-2">
@@ -2352,7 +2414,7 @@
                         <button
                             onClick={() => {
                                 if (employee?.id) {
-                                    onSave(employee.id, name, rate, transport, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage);
+                                    onSave(employee.id, name, rate, transport, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches);
                                 }
                             }}
                             className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-2"
@@ -2381,6 +2443,11 @@
             const [prefecture, setPrefecture] = useState('東京');
             const [age, setAge] = useState('30');
             const [minimumWage, setMinimumWage] = useState(INSURANCE_DATA.minimumWage['東京']);
+            const [insuranceSwitches, setInsuranceSwitches] = useState({
+                healthInsurance: true,
+                pension: true,
+                residentTax: true
+            });
             const [allowances, setAllowances] = useState({
                 family: 0, sales: 0, position: 0, commuting: 0, expense: 0, housing: 0
             });
@@ -2564,6 +2631,45 @@
                         </div>
                     </div>
 
+                    <div className="bg-blue-50 p-3 rounded">
+                        <h4 className="font-bold mb-3">社会保険・税金設定</h4>
+                        <div className="text-xs text-gray-600 mb-3">
+                            ※アルバイトや国民健康保険の方は該当項目をOFFにしてください
+                        </div>
+                        <div className="space-y-2">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={insuranceSwitches.healthInsurance}
+                                    onChange={(e) => setInsuranceSwitches({...insuranceSwitches, healthInsurance: e.target.checked})}
+                                    className="w-4 h-4"
+                                />
+                                <span className="text-sm">健康保険を適用する</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={insuranceSwitches.pension}
+                                    onChange={(e) => setInsuranceSwitches({...insuranceSwitches, pension: e.target.checked})}
+                                    className="w-4 h-4"
+                                />
+                                <span className="text-sm">厚生年金を適用する</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={insuranceSwitches.residentTax}
+                                    onChange={(e) => setInsuranceSwitches({...insuranceSwitches, residentTax: e.target.checked})}
+                                    className="w-4 h-4"
+                                />
+                                <span className="text-sm">住民税を適用する</span>
+                            </label>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-2">
+                            雇用保険と所得税は法律により自動適用されます
+                        </div>
+                    </div>
+
                     <div className="bg-red-50 p-3 rounded">
                         <h4 className="font-bold mb-3">控除項目（手入力分）</h4>
                         <div className="text-xs text-gray-600 mb-2">
@@ -2603,7 +2709,7 @@
                         <button
                             onClick={() => {
                                 if (name && rate) {
-                                    onSave(name, rate, transport || 0, salaryType, monthlySalary || 0, prefecture, age, allowances, deductions, minimumWage);
+                                    onSave(name, rate, transport || 0, salaryType, monthlySalary || 0, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches);
                                     setName('');
                                     setRate('');
                                     setTransport('');
