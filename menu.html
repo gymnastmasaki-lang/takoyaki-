@@ -7,6 +7,40 @@
   <title>粉もん屋 八 下赤塚店</title>
   
   <script>
+    // タップ音を再生する関数（POSと同じ設定）
+    function playBeep() {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 800; // 800Hzのビープ音
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    }
+    
+    // クリックイベントにビープ音を追加
+    document.addEventListener('DOMContentLoaded', function() {
+      document.addEventListener('click', function(e) {
+        // ボタン、チェックボックス、.table-btn、.menu-item-checkbox、.topping-itemをクリックしたらビープ音
+        if (e.target.closest('button') || 
+            e.target.closest('.table-btn') || 
+            e.target.closest('.menu-item-checkbox') || 
+            e.target.closest('.topping-item') ||
+            e.target.closest('.menu-item') ||
+            e.target.type === 'checkbox') {
+          playBeep();
+        }
+      });
+    });
+    
     // 🔧 デバッグモード設定（本番環境ではfalseに）
     const DEBUG_MODE = false; // ← お客様向けはfalse、開発時はtrue
     
@@ -947,7 +981,7 @@
     window.onload = async function() {
       console.log('ページ読み込み開始');
       
-      // テーブルパラメータがある場合、テーブルの存在確認（POSモードを除く）
+      // テーブルパラメータがある場合、テーブルの存在確認（POSモードと特殊テーブルを除く）
       if (tableNumber && !window.isPOSMode && tableNumber !== 'テイクアウト' && tableNumber !== '即会計' && tableNumber !== 'pos') {
         try {
           const tablesSnapshot = await getDocs(window.getStoreCollection('tables'));
@@ -1570,9 +1604,6 @@
     }
 
     async function selectItem(item) {
-      // 🔊 商品選択音
-      playBeepSound();
-      
       if (soldOutIds.has(item.id)) {
         showCustomAlert('申し訳ございません。\nこの商品は現在品切れです。');
         return;
@@ -1610,12 +1641,6 @@
         // POSモードの場合は親ウィンドウにメッセージを送信
         if (window.isPOSMode && window.parent !== window) {
           console.log('📤 POSモード: 親ウィンドウに商品を送信（トッピングなし）', cartItem);
-          
-          // 🔊 親ウィンドウに音再生を依頼
-          window.parent.postMessage({
-            type: 'playBeep'
-          }, window.location.origin);
-          
           window.parent.postMessage({
             type: 'addToCart',
             item: cartItem
@@ -1627,9 +1652,6 @@
         }
         
         // 通常モード: トッピングなしでカートに追加
-        // 🔊 レジ音を再生
-        playBeepSound();
-        
         cart.push(cartItem);
         backToMenu();
         return;
@@ -1663,9 +1685,6 @@
             `;
             
             div.onclick = () => {
-              // 🔊 トッピング選択音
-              playBeepSound();
-              
               if (set.type === 'single') {
                 // 単一選択：同じセット内の他の選択を解除
                 document.querySelectorAll(`.topping-item[data-set-index="${setIndex}"]`).forEach(item => {
@@ -1739,9 +1758,6 @@
           <span style="color: #4CAF50; font-weight: bold;">無料</span>
         `;
         standardDiv.onclick = () => {
-          // 🔊 標準トッピング選択音
-          playBeepSound();
-          
           // 標準トッピングを選択したら他のトッピングを全て解除
           document.querySelectorAll('.topping-item').forEach(item => {
             item.classList.remove('selected');
@@ -1761,9 +1777,6 @@
               <span style="color: #4CAF50; font-weight: bold;">${t.price > 0 ? '+¥' + t.price.toLocaleString() : '無料'}</span>
             `;
             div.onclick = () => {
-              // 🔊 トッピング選択音
-              playBeepSound();
-              
               // 他のトッピングを選択したら標準トッピングを解除
               document.getElementById('standard-topping').classList.remove('selected');
               
@@ -1791,9 +1804,6 @@
     }
 
     window.changeQty = function(d) {
-      // 🔊 数量変更音
-      playBeepSound();
-      
       qty = Math.max(1, qty + d);
       document.getElementById('qty').textContent = qty;
       updateSubtotal();
@@ -1803,44 +1813,6 @@
       let total = currentItem.price;
       selectedToppings.forEach(t => total += t.price || 0);
       document.getElementById('subtotal').textContent = '¥' + (total * qty).toLocaleString();
-    }
-    
-    // 🔊 レジ音を再生する関数
-    function playBeepSound() {
-      try {
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        
-        // AudioContextを再開（ブラウザの自動再生ポリシー対策）
-        if (audioContext.state === 'suspended') {
-          audioContext.resume();
-        }
-        
-        // 2回のビープ音（ピッピッ）
-        const beep = (frequency, startTime, duration) => {
-          const oscillator = audioContext.createOscillator();
-          const gainNode = audioContext.createGain();
-          
-          oscillator.connect(gainNode);
-          gainNode.connect(audioContext.destination);
-          
-          oscillator.frequency.value = frequency;
-          oscillator.type = 'sine';
-          
-          gainNode.gain.setValueAtTime(0.2, startTime);
-          gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
-          
-          oscillator.start(startTime);
-          oscillator.stop(startTime + duration);
-        };
-        
-        const now = audioContext.currentTime;
-        beep(2000, now + 0.05, 0.08);
-        beep(2000, now + 0.20, 0.08);
-        
-        console.log('🔊 レジ音再生完了');
-      } catch (e) {
-        console.error('🔇 音声再生エラー:', e);
-      }
     }
 
     window.addToCart = async function() {
@@ -1879,12 +1851,6 @@
       // POSモードの場合は親ウィンドウにメッセージを送信
       if (window.isPOSMode && window.parent !== window) {
         console.log('📤 POSモード: 親ウィンドウに商品を送信', item);
-        
-        // 🔊 親ウィンドウに音再生を依頼
-        window.parent.postMessage({
-          type: 'playBeep'
-        }, window.location.origin);
-        
         window.parent.postMessage({
           type: 'addToCart',
           item: item
@@ -1897,9 +1863,6 @@
       }
       
       // 通常モード: カートに追加
-      // 🔊 レジ音を再生
-      playBeepSound();
-      
       cart.push(item);
       
       backToMenu();
