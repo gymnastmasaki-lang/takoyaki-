@@ -29,7 +29,7 @@
     // クリックイベントにビープ音を追加
     document.addEventListener('DOMContentLoaded', function() {
       document.addEventListener('click', function(e) {
-        // ボタン、チェックボックス、.table-btn、.menu-item-checkbox、.topping-itemをクリックしたらビープ音
+        // ボタン、チェックボックス、商品、トッピングをクリックしたらビープ音
         if (e.target.closest('button') || 
             e.target.closest('.table-btn') || 
             e.target.closest('.menu-item-checkbox') || 
@@ -981,8 +981,8 @@
     window.onload = async function() {
       console.log('ページ読み込み開始');
       
-      // テーブルパラメータがある場合、テーブルの存在確認（POSモードと特殊テーブルを除く）
-      if (tableNumber && !window.isPOSMode && tableNumber !== 'テイクアウト' && tableNumber !== '即会計' && tableNumber !== 'pos') {
+      // テーブルパラメータがある場合、テーブルの存在確認
+      if (tableNumber && tableNumber !== 'テイクアウト' && tableNumber !== '即会計') {
         try {
           const tablesSnapshot = await getDocs(window.getStoreCollection('tables'));
           let tableExists = false;
@@ -1404,7 +1404,8 @@
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
         
         const menuSnapshot = await getDocs(window.getStoreCollection('menus'));
-        const isEatIn = tableNumber !== 'テイクアウト';
+        // POSモードの時は常に店内として扱う
+        const isEatIn = window.isPOSMode ? true : (tableNumber !== 'テイクアウト');
         
         console.log('メニューアイテム数:', menuSnapshot.size);
 
@@ -1467,7 +1468,8 @@
       try {
         const menuSnapshot = await getDocs(window.getStoreCollection('menus'));
         const items = [];
-        const isEatIn = tableNumber !== 'テイクアウト';
+        // POSモードの時は常に店内として扱う
+        const isEatIn = window.isPOSMode ? true : (tableNumber !== 'テイクアウト');
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
@@ -1641,6 +1643,12 @@
         // POSモードの場合は親ウィンドウにメッセージを送信
         if (window.isPOSMode && window.parent !== window) {
           console.log('📤 POSモード: 親ウィンドウに商品を送信（トッピングなし）', cartItem);
+          
+          // 🔊 親ウィンドウに音再生を依頼
+          window.parent.postMessage({
+            type: 'playBeep'
+          }, window.location.origin);
+          
           window.parent.postMessage({
             type: 'addToCart',
             item: cartItem
@@ -1652,6 +1660,9 @@
         }
         
         // 通常モード: トッピングなしでカートに追加
+        // 🔊 レジ音を再生
+        playBeepSound();
+        
         cart.push(cartItem);
         backToMenu();
         return;
@@ -1814,6 +1825,44 @@
       selectedToppings.forEach(t => total += t.price || 0);
       document.getElementById('subtotal').textContent = '¥' + (total * qty).toLocaleString();
     }
+    
+    // 🔊 レジ音を再生する関数
+    function playBeepSound() {
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // AudioContextを再開（ブラウザの自動再生ポリシー対策）
+        if (audioContext.state === 'suspended') {
+          audioContext.resume();
+        }
+        
+        // 2回のビープ音（ピッピッ）
+        const beep = (frequency, startTime, duration) => {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          oscillator.frequency.value = frequency;
+          oscillator.type = 'sine';
+          
+          gainNode.gain.setValueAtTime(0.2, startTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+          
+          oscillator.start(startTime);
+          oscillator.stop(startTime + duration);
+        };
+        
+        const now = audioContext.currentTime;
+        beep(2000, now + 0.05, 0.08);
+        beep(2000, now + 0.20, 0.08);
+        
+        console.log('🔊 レジ音再生');
+      } catch (e) {
+        console.error('🔇 音声再生エラー:', e);
+      }
+    }
 
     window.addToCart = async function() {
       if (soldOutIds.has(currentItem.id)) {
@@ -1851,6 +1900,12 @@
       // POSモードの場合は親ウィンドウにメッセージを送信
       if (window.isPOSMode && window.parent !== window) {
         console.log('📤 POSモード: 親ウィンドウに商品を送信', item);
+        
+        // 🔊 親ウィンドウに音再生を依頼
+        window.parent.postMessage({
+          type: 'playBeep'
+        }, window.location.origin);
+        
         window.parent.postMessage({
           type: 'addToCart',
           item: item
@@ -1863,6 +1918,9 @@
       }
       
       // 通常モード: カートに追加
+      // 🔊 レジ音を再生
+      playBeepSound();
+      
       cart.push(item);
       
       backToMenu();
