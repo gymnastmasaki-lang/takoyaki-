@@ -11,6 +11,7 @@
   <script src="https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/v1.2.0/StarWebPrintBuilder.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
     import { getFirestore, collection, query, where, getDocs, updateDoc, doc, Timestamp, onSnapshot, addDoc, orderBy, getDoc, setDoc, limit, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
@@ -1816,6 +1817,29 @@
         
       </div>
       
+      <!-- グラフエリア -->
+      <div id="monthlyChartsArea" style="margin-top: 30px; display: none;">
+        <h4 style="margin-bottom: 20px; color: #333; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📊 月次推移グラフ</h4>
+        
+        <!-- 売上推移グラフ -->
+        <div style="background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <h5 style="margin-bottom: 15px; color: #4CAF50;">売上推移</h5>
+          <canvas id="salesTrendChart" style="max-height: 300px;"></canvas>
+        </div>
+        
+        <!-- 人件費率推移グラフ -->
+        <div style="background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <h5 style="margin-bottom: 15px; color: #FF9800;">人件費率推移（目標35%）</h5>
+          <canvas id="laborCostRateChart" style="max-height: 300px;"></canvas>
+        </div>
+        
+        <!-- 利益率推移グラフ -->
+        <div style="background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <h5 style="margin-bottom: 15px; color: #2196F3;">利益率推移</h5>
+          <canvas id="profitRateChart" style="max-height: 300px;"></canvas>
+        </div>
+      </div>
+      
       <button class="btn btn-secondary" onclick="closeMonthlyReportModal()">閉じる</button>
     </div>
   </div>
@@ -3401,7 +3425,7 @@
     // ========== 月次レポート機能 ==========
     
     // 月次レポートモーダルを表示
-    window.showMonthlyReportModal = function() {
+    window.showMonthlyReportModal = async function() {
       // 当月の開始日と終了日を初期値として設定
       const now = new Date();
       const year = now.getFullYear();
@@ -3415,7 +3439,226 @@
       document.getElementById('reportEndDate').value = endDate;
       
       document.getElementById('monthlyReportModal').classList.remove('hidden');
+      
+      // グラフを生成
+      await generateMonthlyCharts();
     };
+    
+    // 月次推移グラフを生成
+    window.generateMonthlyCharts = async function() {
+      try {
+        console.log('📊 月次グラフ生成開始');
+        
+        // Firebase初期化を待つ
+        if (!window.firebaseReady) {
+          await new Promise(resolve => {
+            window.addEventListener('firebaseReady', resolve, { once: true });
+          });
+        }
+        
+        // 過去3ヶ月のデータを取得
+        const now = new Date();
+        const monthsData = [];
+        
+        for (let i = 2; i >= 0; i--) {
+          const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const year = targetDate.getFullYear();
+          const month = targetDate.getMonth() + 1;
+          const monthStr = String(month).padStart(2, '0');
+          const lastDay = new Date(year, month, 0).getDate();
+          
+          // その月のデータを集計
+          let totalSales = 0;
+          let totalLaborCost = 0;
+          let workDays = 0;
+          
+          // 日次売上データを取得
+          const salesSnapshot = await window.getDocs(window.getStoreCollection('dailySales'));
+          salesSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.date && data.date.startsWith(`${year}-${monthStr}`)) {
+              totalSales += data.totalSales || 0;
+            }
+          });
+          
+          // 勤怠データから人件費を計算
+          const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
+          attendanceSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.date && data.date.startsWith(`${year}-${monthStr}`)) {
+              if (data.clockIn && data.clockOut) {
+                const clockIn = new Date(`${data.date} ${data.clockIn}`);
+                const clockOut = new Date(`${data.date} ${data.clockOut}`);
+                let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+                
+                if (data.breakStart1 && data.breakEnd1) {
+                  const breakStart1 = new Date(`${data.date} ${data.breakStart1}`);
+                  const breakEnd1 = new Date(`${data.date} ${data.breakEnd1}`);
+                  workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+                }
+                if (data.breakStart2 && data.breakEnd2) {
+                  const breakStart2 = new Date(`${data.date} ${data.breakStart2}`);
+                  const breakEnd2 = new Date(`${data.date} ${data.breakEnd2}`);
+                  workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+                }
+                
+                const hourlyRate = data.hourlyRate || 1150;
+                totalLaborCost += workHours * hourlyRate;
+                workDays++;
+              }
+            }
+          });
+          
+          const laborCostRate = totalSales > 0 ? (totalLaborCost / totalSales) * 100 : 0;
+          const profitRate = totalSales > 0 ? ((totalSales - totalLaborCost) / totalSales) * 100 : 0;
+          
+          monthsData.push({
+            label: `${month}月`,
+            sales: Math.round(totalSales),
+            laborCostRate: laborCostRate.toFixed(1),
+            profitRate: profitRate.toFixed(1)
+          });
+        }
+        
+        console.log('📊 集計データ:', monthsData);
+        
+        // グラフエリアを表示
+        document.getElementById('monthlyChartsArea').style.display = 'block';
+        
+        // 既存のチャートを破棄
+        if (window.salesChart) window.salesChart.destroy();
+        if (window.laborChart) window.laborChart.destroy();
+        if (window.profitChart) window.profitChart.destroy();
+        
+        // 売上推移グラフ
+        const salesCtx = document.getElementById('salesTrendChart').getContext('2d');
+        window.salesChart = new Chart(salesCtx, {
+          type: 'line',
+          data: {
+            labels: monthsData.map(d => d.label),
+            datasets: [{
+              label: '売上（円）',
+              data: monthsData.map(d => d.sales),
+              borderColor: '#4CAF50',
+              backgroundColor: 'rgba(76, 175, 80, 0.1)',
+              tension: 0.4,
+              fill: true
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+              legend: {
+                display: true,
+                position: 'top'
+              }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  callback: function(value) {
+                    return '¥' + value.toLocaleString();
+                  }
+                }
+              }
+            }
+          }
+        });
+        
+        // 人件費率推移グラフ
+        const laborCtx = document.getElementById('laborCostRateChart').getContext('2d');
+        window.laborChart = new Chart(laborCtx, {
+          type: 'line',
+          data: {
+            labels: monthsData.map(d => d.label),
+            datasets: [
+              {
+                label: '人件費率（%）',
+                data: monthsData.map(d => d.laborCostRate),
+                borderColor: '#FF9800',
+                backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                tension: 0.4,
+                fill: true
+              },
+              {
+                label: '目標35%',
+                data: monthsData.map(() => 35),
+                borderColor: '#f44336',
+                borderDash: [5, 5],
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: false
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+              legend: {
+                display: true,
+                position: 'top'
+              }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                max: 50,
+                ticks: {
+                  callback: function(value) {
+                    return value + '%';
+                  }
+                }
+              }
+            }
+          }
+        });
+        
+        // 利益率推移グラフ
+        const profitCtx = document.getElementById('profitRateChart').getContext('2d');
+        window.profitChart = new Chart(profitCtx, {
+          type: 'line',
+          data: {
+            labels: monthsData.map(d => d.label),
+            datasets: [{
+              label: '利益率（%）',
+              data: monthsData.map(d => d.profitRate),
+              borderColor: '#2196F3',
+              backgroundColor: 'rgba(33, 150, 243, 0.1)',
+              tension: 0.4,
+              fill: true
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+              legend: {
+                display: true,
+                position: 'top'
+              }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  callback: function(value) {
+                    return value + '%';
+                  }
+                }
+              }
+            }
+          }
+        });
+        
+        console.log('✅ 月次グラフ生成完了');
+      } catch (e) {
+        console.error('❌ 月次グラフ生成エラー:', e);
+      }
+    };
+    
     // 月次レポートモーダルを閉じる
     window.closeMonthlyReportModal = function() {
       document.getElementById('monthlyReportModal').classList.add('hidden');
