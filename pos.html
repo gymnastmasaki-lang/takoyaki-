@@ -1484,24 +1484,29 @@
     <div class="main-content">
       
       <div class="section">
-        <!-- テーブル選択 -->
-        <div id="tableButtonsGrid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 10px;">
+        <!-- 固定ボタン（1行目：横幅いっぱい） -->
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px;">
           
-          <div style="background: linear-gradient(135deg, #81C784 0%, #66BB6A 100%); padding: 15px 20px; border-radius: 15px; box-shadow: 0 6px 20px rgba(0,0,0,0.25); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 80px;">
-            <label style="margin: 0; white-space: nowrap; font-size: 16px; font-weight: bold; color: white;">レシート自動発行</label>
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <label class="toggle-switch" style="margin: 0; transform: scale(1.3);">
+          <div style="background: linear-gradient(135deg, #81C784 0%, #66BB6A 100%); padding: 10px 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;">
+            <label style="margin: 0; white-space: nowrap; font-size: 13px; font-weight: bold; color: white;">レシート自動発行</label>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label class="toggle-switch" style="margin: 0;">
                 <input type="checkbox" id="autoPrintToggle" checked onchange="toggleAutoPrint()">
                 <span class="toggle-slider"></span>
               </label>
-              <span class="toggle-status on" id="autoPrintStatus" style="margin: 0; font-size: 16px; font-weight: bold; color: white;">ON</span>
+              <span class="toggle-status on" id="autoPrintStatus" style="margin: 0; font-size: 13px; font-weight: bold; color: white;">ON</span>
             </div>
           </div>
-          <div style="background: linear-gradient(135deg, #FFB74D 0%, #FFA726 100%); padding: 15px 20px; border-radius: 15px; box-shadow: 0 6px 20px rgba(0,0,0,0.25); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 80px;">
-            <div style="font-size: 16px; font-weight: bold; color: white;">手動待ち人数</div>
-            <div style="font-size: 32px; font-weight: bold; color: white;" id="manual-count">0</div>
-            <button onclick="resetWaiting()" style="padding: 8px 20px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; white-space: nowrap; box-shadow: 0 2px 10px rgba(0,0,0,0.2);">リセット</button>
+          <div style="background: linear-gradient(135deg, #FFB74D 0%, #FFA726 100%); padding: 10px 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;">
+            <div style="font-size: 13px; font-weight: bold; color: white;">手動待ち人数</div>
+            <div style="font-size: 24px; font-weight: bold; color: white;" id="manual-count">0</div>
+            <button onclick="resetWaiting()" style="padding: 6px 15px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap;">リセット</button>
           </div>
+          <!-- テイクアウトボタンがここに追加される -->
+        </div>
+        
+        <!-- テーブル選択（2行目以降：4列） -->
+        <div id="tableButtonsGrid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
           <!-- 動的テーブルボタンがここに追加されます -->
         </div>
         
@@ -9952,11 +9957,15 @@
     async function loadTableButtons() {
       try {
         const grid = document.getElementById('tableButtonsGrid');
+        const fixedGrid = grid.previousElementSibling; // 固定ボタングリッド
         
-        // 固定ボタン（レシート自動発行、手動待ち人数、即会計、テイクアウト）を除いて
         // 既存の動的テーブルボタンを削除
         const existingButtons = grid.querySelectorAll('.dynamic-table-btn');
         existingButtons.forEach(btn => btn.remove());
+        
+        // 固定グリッドからテイクアウトボタンを削除（再作成のため）
+        const existingTakeout = fixedGrid.querySelector('.takeout-btn');
+        if (existingTakeout) existingTakeout.remove();
         
         // Firebaseからテーブル一覧を取得
         const tablesSnapshot = await window.getDocs(window.getStoreCollection('tables'));
@@ -9969,25 +9978,44 @@
           });
         });
         
-        // テイクアウトを最初に、残りはアルファベット順
-        const fixedTables = ['テイクアウト'];
-        const sortedTables = [];
-        
-        // 固定テーブルを最初に追加
-        fixedTables.forEach(fixedName => {
-          const found = tables.find(t => t.name === fixedName);
-          if (found) {
-            sortedTables.push(found);
-          }
-        });
-        
-        // 残りのテーブルをアルファベット順に追加
-        const otherTables = tables.filter(t => !fixedTables.includes(t.name));
+        // テイクアウトと他のテーブルを分離
+        const takeoutTable = tables.find(t => t.name === 'テイクアウト');
+        const otherTables = tables.filter(t => t.name !== 'テイクアウト');
         otherTables.sort((a, b) => a.name.localeCompare(b.name));
-        sortedTables.push(...otherTables);
         
-        // テーブルボタンを生成
-        sortedTables.forEach(table => {
+        // テイクアウトボタンを1行目（固定グリッド）に追加
+        if (takeoutTable) {
+          const btn = document.createElement('button');
+          btn.className = 'table-btn takeout-btn';
+          btn.id = `table-${takeoutTable.name}`;
+          btn.onclick = () => selectTable(takeoutTable.name);
+          
+          const hasStaffMemo = takeoutTable.staffMemo && takeoutTable.staffMemo.trim() !== '';
+          const bgColor = hasStaffMemo 
+            ? 'linear-gradient(135deg, #FF9800 0%, #FF5722 100%)' 
+            : 'linear-gradient(135deg, #00BCD4 0%, #0097A7 100%)';
+          
+          btn.style.cssText = `background: ${bgColor}; color: white; font-size: 13px; font-weight: bold; padding: 10px 15px; border-radius: 12px; border: none; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;`;
+          
+          // メモアイコンを追加
+          const memoIcon = document.createElement('span');
+          memoIcon.textContent = '📝';
+          memoIcon.style.cssText = 'position: absolute; top: 3px; right: 3px; font-size: 14px; cursor: pointer; z-index: 10;';
+          memoIcon.onclick = (e) => {
+            e.stopPropagation();
+            showTableMemoModal(takeoutTable.id, takeoutTable.name, takeoutTable.staffMemo || '');
+          };
+          
+          const textSpan = document.createElement('span');
+          textSpan.textContent = takeoutTable.name;
+          
+          btn.appendChild(memoIcon);
+          btn.appendChild(textSpan);
+          fixedGrid.appendChild(btn);
+        }
+        
+        // 他のテーブルボタンを2行目以降（通常グリッド）に生成
+        otherTables.forEach(table => {
           const btn = document.createElement('button');
           btn.className = 'table-btn dynamic-table-btn';
           btn.id = `table-${table.name}`;
@@ -9999,7 +10027,7 @@
             ? 'linear-gradient(135deg, #FF9800 0%, #FF5722 100%)' 
             : 'linear-gradient(135deg, #00BCD4 0%, #0097A7 100%)';
           
-          btn.style.cssText = `background: ${bgColor}; color: white; font-size: 18px; font-weight: bold; padding: 20px; border-radius: 15px; border: none; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,0.25); position: relative; min-height: 80px;`;
+          btn.style.cssText = `background: ${bgColor}; color: white; font-size: 16px; font-weight: bold; padding: 15px; border-radius: 12px; border: none; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); position: relative;`;
           
           // メモアイコンを追加
           const memoIcon = document.createElement('span');
@@ -10781,6 +10809,44 @@
       }
     }
     
+    // 🔊 レジ音を再生する関数
+    function playBeepSound() {
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // AudioContextを再開（ブラウザの自動再生ポリシー対策）
+        if (audioContext.state === 'suspended') {
+          audioContext.resume();
+        }
+        
+        // 2回のビープ音（ピッピッ）
+        const beep = (frequency, startTime, duration) => {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          oscillator.frequency.value = frequency;
+          oscillator.type = 'sine';
+          
+          gainNode.gain.setValueAtTime(0.2, startTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+          
+          oscillator.start(startTime);
+          oscillator.stop(startTime + duration);
+        };
+        
+        const now = audioContext.currentTime;
+        beep(2000, now + 0.05, 0.08);
+        beep(2000, now + 0.20, 0.08);
+        
+        console.log('🔊 レジ音再生完了');
+      } catch (e) {
+        console.error('🔇 音声再生エラー:', e);
+      }
+    }
+    
     // ページ読み込み時にセッションをチェック
     window.addEventListener('DOMContentLoaded', () => {
       // ログインフォームのイベントリスナーを設定
@@ -10810,6 +10876,10 @@
           } else {
             console.error('❌ addItemFromIframe関数が見つかりません');
           }
+        } else if (event.data.type === 'playBeep') {
+          // 🔊 menu.htmlから音再生のメッセージを受信
+          console.log('🔊 レジ音再生リクエスト受信');
+          playBeepSound();
         }
       });
       
