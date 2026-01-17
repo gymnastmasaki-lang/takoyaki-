@@ -28,12 +28,17 @@
       const storeId = urlParams.get('store');
       const orderId = urlParams.get('orderId');
       const fromIndex = urlParams.get('fromIndex');
+      const mode = urlParams.get('mode'); // POSモード判定
+      
+      // POSモードフラグをグローバル変数に設定
+      window.isPOSMode = mode === 'pos';
       
       console.log('=== リダイレクトチェック ===');
       console.log('tableNumber:', tableNumber);
       console.log('storeId:', storeId);
       console.log('orderId:', orderId);
       console.log('fromIndex:', fromIndex);
+      console.log('POSモード:', window.isPOSMode);
       
       if (fromIndex) {
         const newUrl = new URL(window.location);
@@ -1588,16 +1593,32 @@
       
       // トッピングIDが空または存在しない場合は、トッピング選択をスキップしてカートに追加
       if (!item.toppingsId || item.toppingsId.trim() === '') {
-        // トッピングなしでカートに追加
-        cart.push({
+        const cartItem = {
           id: item.id,
           name: item.name,
           price: item.price,
+          taxRate: item.taxRate || 10,
           toppings: '標準トッピング',
           toppingsData: [], // 🆕 構造化データ（空配列）
           toppingPrice: 0,
           quantity: 1
-        });
+        };
+        
+        // POSモードの場合は親ウィンドウにメッセージを送信
+        if (window.isPOSMode && window.parent !== window) {
+          console.log('📤 POSモード: 親ウィンドウに商品を送信（トッピングなし）', cartItem);
+          window.parent.postMessage({
+            type: 'addToCart',
+            item: cartItem
+          }, window.location.origin);
+          
+          showCustomAlert('✅ 商品を追加しました');
+          backToMenu();
+          return;
+        }
+        
+        // 通常モード: トッピングなしでカートに追加
+        cart.push(cartItem);
         backToMenu();
         return;
       }
@@ -1782,15 +1803,33 @@
       // 表示用のテキスト（後方互換性のため残す）
       const toppingNames = selectedToppings.map(t => t.name).join(', ') || '標準トッピング';
       
-      cart.push({
+      const item = {
         id: currentItem.id,
         name: currentItem.name,
         price: currentItem.price,
+        taxRate: currentItem.taxRate || 10,
         toppings: toppingNames, // 表示用（後方互換性）
         toppingsData: toppingsData, // 🆕 構造化データ
         toppingPrice: toppingPrice,
         quantity: qty
-      });
+      };
+      
+      // POSモードの場合は親ウィンドウにメッセージを送信
+      if (window.isPOSMode && window.parent !== window) {
+        console.log('📤 POSモード: 親ウィンドウに商品を送信', item);
+        window.parent.postMessage({
+          type: 'addToCart',
+          item: item
+        }, window.location.origin);
+        
+        // 商品追加完了のアニメーションを表示
+        showCustomAlert('✅ 商品を追加しました');
+        backToMenu();
+        return;
+      }
+      
+      // 通常モード: カートに追加
+      cart.push(item);
       
       backToMenu();
     };

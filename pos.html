@@ -1540,17 +1540,24 @@
               </select>
             </div>
             
-            <div class="input-group">
-              <label>カテゴリ選択</label>
-              <select id="categoryFilter" onchange="filterMenuByCategory()">
-                <option value="all">全ての商品</option>
-              </select>
-            </div>
-            
+            <!-- menu.htmlをiframeで埋め込み -->
             <div class="input-group" style="display: flex; flex-direction: column; height: 100%;">
-              <label>商品を選択</label>
-              <div class="menu-items-list" id="menuItemsList" style="flex: 1; min-height: 400px;">
-                <div class="loading">メニュー読み込み中...</div>
+              <label>商品を選択（セルフオーダー画面）</label>
+              <iframe 
+                id="menuIframe"
+                src=""
+                style="
+                  flex: 1; 
+                  min-height: 500px; 
+                  width: 100%; 
+                  border: 2px solid #667eea; 
+                  border-radius: 8px;
+                  background: white;
+                "
+                frameborder="0"
+              ></iframe>
+              <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                ※ 商品をタップすると自動的に注文に追加されます
               </div>
             </div>
           </div>
@@ -6080,6 +6087,39 @@
     };
     
     // 手動カートの表示更新
+    // iframeから商品を追加する関数
+    window.addItemFromIframe = function(item) {
+      console.log('🛒 iframeから商品追加:', item);
+      
+      // manualCartに商品を追加
+      const cartItem = {
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        taxRate: item.taxRate || 10,
+        toppings: item.toppings || '標準トッピング',
+        toppingPrice: item.toppingPrice || 0,
+        toppingsData: item.toppingsData || [],
+        quantity: 1
+      };
+      
+      // 同じ商品が既にある場合は数量を増やす
+      const existingIndex = manualCart.findIndex(i => 
+        i.id === item.id && 
+        i.toppings === cartItem.toppings
+      );
+      
+      if (existingIndex >= 0) {
+        manualCart[existingIndex].quantity++;
+        console.log('✅ 既存商品の数量を増やしました:', manualCart[existingIndex]);
+      } else {
+        manualCart.push(cartItem);
+        console.log('✅ 新規商品を追加しました:', cartItem);
+      }
+      
+      updateManualCart();
+    };
+    
     function updateManualCart() {
       const container = document.getElementById('selectedItems');
       const submitBtn = document.getElementById('manualSubmitBtn');
@@ -10671,6 +10711,29 @@
         console.log('✅ ログインフォームのイベントリスナー登録完了');
       }
       
+      // iframeからのメッセージを受信
+      window.addEventListener('message', (event) => {
+        // セキュリティ: 同一オリジンからのメッセージのみ受け付ける
+        if (event.origin !== window.location.origin) {
+          return;
+        }
+        
+        console.log('📨 iframeからメッセージ受信:', event.data);
+        
+        if (event.data.type === 'addToCart') {
+          // menu.htmlから商品追加のメッセージを受信
+          const item = event.data.item;
+          console.log('🛒 商品をカートに追加:', item);
+          
+          // 商品追加関数を呼び出し
+          if (window.addItemFromIframe) {
+            window.addItemFromIframe(item);
+          } else {
+            console.error('❌ addItemFromIframe関数が見つかりません');
+          }
+        }
+      });
+      
       const isAuthenticated = sessionStorage.getItem('posAuthenticated');
       const savedStoreId = sessionStorage.getItem('posStoreId');
       const savedStoreName = sessionStorage.getItem('posStoreName');
@@ -10728,6 +10791,24 @@
       
       // 担当者リストを読み込む
       loadStaffList();
+      
+      // 🆕 menu.htmlのiframeに店舗IDを設定
+      updateMenuIframe();
+    }
+    
+    // menu.htmlのiframeのsrcを更新する関数
+    function updateMenuIframe() {
+      const iframe = document.getElementById('menuIframe');
+      if (iframe && window.currentStoreId) {
+        const iframeSrc = `menu.html?mode=pos&hideHeader=true&store=${window.currentStoreId}`;
+        iframe.src = iframeSrc;
+        console.log('🖼️ menu.htmlのiframeを更新:', iframeSrc);
+      } else if (iframe) {
+        // 旧システム（店舗IDなし）の場合
+        const iframeSrc = `menu.html?mode=pos&hideHeader=true`;
+        iframe.src = iframeSrc;
+        console.log('🖼️ menu.htmlのiframeを更新（店舗IDなし）:', iframeSrc);
+      }
     }
     
     // ログアウト処理（オシャレなモーダル使用）
