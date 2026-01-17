@@ -1568,7 +1568,10 @@
               <label>合計金額: <span id="manualTotal" style="color: #667eea; font-size: 20px;">¥0</span></label>
             </div>
             
-            <button class="btn btn-primary" onclick="submitManualOrder()" id="manualSubmitBtn" disabled style="margin-top: 15px;">注文を追加</button>
+            <div style="display: flex; gap: 10px; margin-top: 15px;">
+              <button class="btn btn-primary" onclick="submitManualOrder()" id="manualSubmitBtn" disabled style="flex: 1;">テーブルに追加</button>
+              <button class="btn btn-success" onclick="directPayment()" id="directPaymentBtn" disabled style="flex: 1; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">💳 即会計</button>
+            </div>
           </div>
         </div>
       </div>
@@ -6100,7 +6103,7 @@
         toppings: item.toppings || '標準トッピング',
         toppingPrice: item.toppingPrice || 0,
         toppingsData: item.toppingsData || [],
-        quantity: 1
+        quantity: item.quantity || 1  // 🆕 iframeから渡された数量を使用
       };
       
       // 同じ商品が既にある場合は数量を増やす
@@ -6110,7 +6113,7 @@
       );
       
       if (existingIndex >= 0) {
-        manualCart[existingIndex].quantity++;
+        manualCart[existingIndex].quantity += cartItem.quantity;  // 🆕 渡された数量分増やす
         console.log('✅ 既存商品の数量を増やしました:', manualCart[existingIndex]);
       } else {
         manualCart.push(cartItem);
@@ -6123,11 +6126,13 @@
     function updateManualCart() {
       const container = document.getElementById('selectedItems');
       const submitBtn = document.getElementById('manualSubmitBtn');
+      const directPaymentBtn = document.getElementById('directPaymentBtn');  // 🆕 即会計ボタン
       const manualTable = document.getElementById('manualTable');
       
       if (manualCart.length === 0) {
         container.innerHTML = '<div class="empty-state">商品を選択してください</div>';
         submitBtn.disabled = true;
+        if (directPaymentBtn) directPaymentBtn.disabled = true;  // 🆕
         document.getElementById('manualTotal').textContent = '¥0';
         return;
       }
@@ -6205,6 +6210,11 @@
       
       document.getElementById('manualTotal').textContent = `¥${total.toLocaleString()}`;
       submitBtn.disabled = manualCart.length === 0 || !manualTable.value;
+      
+      // 🆕 即会計ボタンはテーブル選択不要なので、カートに商品があれば有効
+      if (directPaymentBtn) {
+        directPaymentBtn.disabled = manualCart.length === 0;
+      }
     }
     
     // カート内アイテムを修正
@@ -6319,6 +6329,141 @@
     };
     
     // 手動注文を送信
+    window.submitManualOrder = async function() {
+      const tableNumber = document.getElementById('manualTable').value;
+      
+      if (!tableNumber || manualCart.length === 0) {
+        alert('テーブル番号と商品を選択してください');
+        return;
+      }
+      
+      try {
+        const now = new Date();
+        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        
+        const todayStart = new Date(jstNow);
+        todayStart.setHours(1, 0, 0, 0);
+        if (jstNow < todayStart) {
+          todayStart.setDate(todayStart.getDate() - 1);
+        }
+        
+        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
+        let maxOrderNumber = 618;
+        let hasActiveOrders = false;
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          
+          // 削除されていない注文があるかチェック
+          if (!data.deleted) {
+            hasActiveOrders = true;
+            
+            // 削除されていない注文のみから最大番号を取得
+            const orderDate = data.timestamp.toDate();
+            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+            
+            if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
+              maxOrderNumber = data.orderNumber;
+            }
+          }
+        });
+        
+        // 削除されていない注文が0件なら619番から開始
+        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
+        
+        console.log('注文番号生成:', {
+          hasActiveOrders,
+          maxOrderNumber,
+          nextOrderNumber: orderNumber
+        });
+        
+        let totalAmount = 0;
+        manualCart.forEach(item => {
+          totalAmount += item.price * item.quantity;
+        });
+        
+        const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
+        
+        const orderData = {
+          orderNumber: orderNumber,
+          timestamp: window.Timestamp.fromDate(now),
+          tableNumber: tableNumber,
+          items: manualCart,
+          totalAmount: totalAmount,
+          status: 'pending',
+          deleteAt: window.Timestamp.fromDate(deleteAt),
+          cancelledAt: null,
+          completedAt: null,
+          paidAt: null,
+          notifiedComplete: false,
+          notifiedCancel: false,
+          notifiedPaid: false,
+          manualEntry: true
+        };
+        
+        const docRef = await window.addDoc(window.getStoreCollection('orders'), orderData);
+        
+        await window.updateDoc(docRef, {
+          orderId: docRef.id
+        });
+        
+        manualCart = [];
+    
+    // 🆕 即会計関数（テーブル選択不要、Firebaseに保存しない）
+    window.directPayment = function() {
+      if (manualCart.length === 0) {
+        alert('商品を選択してください');
+        return;
+      }
+      
+      console.log('💳 即会計モード起動');
+      console.log('カート内容:', manualCart);
+      
+      // カートの合計金額を計算
+      let totalAmount = 0;
+      manualCart.forEach(item => {
+        const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+        totalAmount += itemTotal;
+      });
+      
+      // 一時的な注文データを作成（Firebaseには保存しない）
+      const tempOrder = {
+        orderNumber: '即会計',
+        tableNumber: '即会計',
+        items: manualCart.map(item => ({
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          taxRate: item.taxRate || 10,
+          toppings: item.toppings,
+          toppingsData: item.toppingsData,
+          toppingPrice: item.toppingPrice || 0,
+          quantity: item.quantity
+        })),
+        totalAmount: totalAmount,
+        status: 'pending',
+        manualEntry: true,
+        directPayment: true  // 即会計フラグ
+      };
+      
+      // 一時的にcurrentOrdersに追加
+      currentOrders = [tempOrder];
+      
+      console.log('一時注文データ:', tempOrder);
+      
+      // 会計モーダルを表示
+      document.getElementById('discountAmount').value = '0';
+      buildTaxRateSelectionList();
+      updatePaymentTotal();
+      document.getElementById('paymentModal').classList.remove('hidden');
+      selectedPaymentMethod = null;
+      document.querySelectorAll('.payment-method-btn').forEach(btn => {
+        btn.classList.remove('selected');
+      });
+      document.getElementById('cashInputSection').classList.add('hidden');
+      document.getElementById('completePaymentBtn').disabled = true;
+    };
+    
     window.submitManualOrder = async function() {
       const tableNumber = document.getElementById('manualTable').value;
       
@@ -7147,14 +7292,21 @@
         // 注文番号リストを取得
         const orderNumbers = currentOrders.map(o => o.orderNumber);
         
-        // 全ての注文に支払い済みフラグと担当者を設定
-        for (const order of currentOrders) {
-          await window.updateDoc(window.getStoreDoc('orders', order.id), {
-            paidAt: now,
-            notifiedPaid: true,
-            paymentMethod: selectedPaymentMethod,
-            staffName: staffName  // 担当者名を追加
-          });
+        // 🆕 即会計の場合はFirebaseへの保存をスキップ
+        const isDirectPayment = currentOrders.some(o => o.directPayment);
+        
+        if (!isDirectPayment) {
+          // 通常会計: 全ての注文に支払い済みフラグと担当者を設定
+          for (const order of currentOrders) {
+            await window.updateDoc(window.getStoreDoc('orders', order.id), {
+              paidAt: now,
+              notifiedPaid: true,
+              paymentMethod: selectedPaymentMethod,
+              staffName: staffName  // 担当者名を追加
+            });
+          }
+        } else {
+          console.log('💳 即会計モード: Firebase更新をスキップ');
         }
         
         // 商品点数をカウント & 選択された税率で集計
@@ -7322,6 +7474,14 @@
         // モーダルを閉じる
         closePaymentModal();
         
+        // 🆕 即会計の場合はmanualCartをクリア
+        if (isDirectPayment) {
+          console.log('💳 即会計完了: カートをクリア');
+          manualCart = [];
+          updateManualCart();
+          currentOrders = [];
+        }
+        
         // 自動印刷が有効なら印刷
         if (autoPrintEnabled) {
           await printReceipt();
@@ -7330,8 +7490,10 @@
           document.getElementById('receiptCompleteModal').classList.remove('hidden');
         }
         
-        // 表示をクリア
-        await loadOrders(selectedTable);
+        // 表示をクリア（通常会計の場合のみ）
+        if (!isDirectPayment) {
+          await loadOrders(selectedTable);
+        }
         
       } catch (e) {
         console.error('会計エラー:', e);
