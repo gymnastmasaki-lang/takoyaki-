@@ -1833,10 +1833,39 @@
           <canvas id="laborCostRateChart" style="max-height: 300px;"></canvas>
         </div>
         
-        <!-- 利益率推移グラフ -->
+        <!-- 粗利率推移グラフ -->
         <div style="background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-          <h5 style="margin-bottom: 15px; color: #2196F3;">利益率推移</h5>
+          <h5 style="margin-bottom: 15px; color: #2196F3;">粗利率推移（売上 - 人件費）</h5>
           <canvas id="profitRateChart" style="max-height: 300px;"></canvas>
+        </div>
+        
+        <!-- 純利益率推移グラフ -->
+        <div style="background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <h5 style="margin-bottom: 15px; color: #9C27B0;">純利益率推移（売上 - 人件費 - 支出）</h5>
+          <canvas id="netProfitRateChart" style="max-height: 300px;"></canvas>
+        </div>
+        
+        <!-- 数値表 -->
+        <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <h5 style="margin-bottom: 15px; color: #333;">📋 詳細数値</h5>
+          <table id="monthlyDataTable" style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                <th style="padding: 12px; text-align: center; border: 2px solid #555;">月</th>
+                <th style="padding: 12px; text-align: right; border: 2px solid #555;">売上</th>
+                <th style="padding: 12px; text-align: right; border: 2px solid #555;">人件費</th>
+                <th style="padding: 12px; text-align: right; border: 2px solid #555;">人件費率</th>
+                <th style="padding: 12px; text-align: right; border: 2px solid #555;">支出</th>
+                <th style="padding: 12px; text-align: right; border: 2px solid #555;">粗利</th>
+                <th style="padding: 12px; text-align: right; border: 2px solid #555;">粗利率</th>
+                <th style="padding: 12px; text-align: right; border: 2px solid #555;">純利益</th>
+                <th style="padding: 12px; text-align: right; border: 2px solid #555;">純利益率</th>
+              </tr>
+            </thead>
+            <tbody id="monthlyDataTableBody">
+              <!-- JavaScriptで動的に生成 -->
+            </tbody>
+          </table>
         </div>
       </div>
       
@@ -3470,6 +3499,7 @@
           // その月のデータを集計
           let totalSales = 0;
           let totalLaborCost = 0;
+          let totalExpense = 0;
           let workDays = 0;
           
           // 日次売上データを取得
@@ -3509,14 +3539,31 @@
             }
           });
           
+          // 支出データを集計
+          const expensesSnapshot = await window.getDocs(window.getStoreCollection('expenses'));
+          expensesSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.date && data.date.startsWith(`${year}-${monthStr}`)) {
+              totalExpense += data.total || 0;
+            }
+          });
+          
           const laborCostRate = totalSales > 0 ? (totalLaborCost / totalSales) * 100 : 0;
-          const profitRate = totalSales > 0 ? ((totalSales - totalLaborCost) / totalSales) * 100 : 0;
+          const grossProfitRate = totalSales > 0 ? ((totalSales - totalLaborCost) / totalSales) * 100 : 0;
+          const grossProfit = totalSales - totalLaborCost;
+          const netProfit = totalSales - totalLaborCost - totalExpense; // 純利益
+          const netProfitRate = totalSales > 0 ? (netProfit / totalSales) * 100 : 0;
           
           monthsData.push({
             label: `${month}月`,
             sales: Math.round(totalSales),
+            laborCost: Math.round(totalLaborCost),
+            expense: Math.round(totalExpense),
             laborCostRate: laborCostRate.toFixed(1),
-            profitRate: profitRate.toFixed(1)
+            grossProfit: Math.round(grossProfit),
+            grossProfitRate: grossProfitRate.toFixed(1),
+            netProfit: Math.round(netProfit),
+            netProfitRate: netProfitRate.toFixed(1)
           });
         }
         
@@ -3529,6 +3576,7 @@
         if (window.salesChart) window.salesChart.destroy();
         if (window.laborChart) window.laborChart.destroy();
         if (window.profitChart) window.profitChart.destroy();
+        if (window.netProfitChart) window.netProfitChart.destroy();
         
         // 売上推移グラフ
         const salesCtx = document.getElementById('salesTrendChart').getContext('2d');
@@ -3616,14 +3664,14 @@
           }
         });
         
-        // 利益率推移グラフ
+        // 粗利率推移グラフ
         const profitCtx = document.getElementById('profitRateChart').getContext('2d');
         window.profitChart = new Chart(profitCtx, {
           type: 'line',
           data: {
             labels: monthsData.map(d => d.label),
             datasets: [{
-              label: '利益率（%）',
+              label: '粗利率（%）',
               data: monthsData.map(d => d.profitRate),
               borderColor: '#2196F3',
               backgroundColor: 'rgba(33, 150, 243, 0.1)',
@@ -3651,6 +3699,69 @@
               }
             }
           }
+        });
+        
+        // 純利益率推移グラフ
+        const netProfitCtx = document.getElementById('netProfitRateChart').getContext('2d');
+        window.netProfitChart = new Chart(netProfitCtx, {
+          type: 'line',
+          data: {
+            labels: monthsData.map(d => d.label),
+            datasets: [{
+              label: '純利益率（%）',
+              data: monthsData.map(d => d.netProfitRate),
+              borderColor: '#9C27B0',
+              backgroundColor: 'rgba(156, 39, 176, 0.1)',
+              tension: 0.4,
+              fill: true
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+              legend: {
+                display: true,
+                position: 'top'
+              }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  callback: function(value) {
+                    return value + '%';
+                  }
+                }
+              }
+            }
+          }
+        });
+        
+        // 数値テーブルを生成
+        const tableBody = document.getElementById('monthlyDataTableBody');
+        tableBody.innerHTML = '';
+        
+        monthsData.forEach((data, index) => {
+          const row = document.createElement('tr');
+          row.style.background = index % 2 === 0 ? '#f8f9fa' : 'white';
+          
+          const laborRateClass = parseFloat(data.laborCostRate) > 35 ? 'color: #f44336; font-weight: bold;' : 'color: #4CAF50;';
+          const netProfitClass = parseFloat(data.netProfit) >= 0 ? 'color: #9C27B0; font-weight: bold;' : 'color: #f44336; font-weight: bold;';
+          
+          row.innerHTML = `
+            <td style="padding: 10px; text-align: center; border: 1px solid #ddd; font-weight: bold;">${data.label}</td>
+            <td style="padding: 10px; text-align: right; border: 1px solid #ddd;">¥${data.sales.toLocaleString()}</td>
+            <td style="padding: 10px; text-align: right; border: 1px solid #ddd;">¥${data.laborCost.toLocaleString()}</td>
+            <td style="padding: 10px; text-align: right; border: 1px solid #ddd; ${laborRateClass}">${data.laborCostRate}%</td>
+            <td style="padding: 10px; text-align: right; border: 1px solid #ddd;">¥${data.expense.toLocaleString()}</td>
+            <td style="padding: 10px; text-align: right; border: 1px solid #ddd; color: #2196F3; font-weight: bold;">¥${data.grossProfit.toLocaleString()}</td>
+            <td style="padding: 10px; text-align: right; border: 1px solid #ddd; color: #2196F3; font-weight: bold;">${data.grossProfitRate}%</td>
+            <td style="padding: 10px; text-align: right; border: 1px solid #ddd; ${netProfitClass}">¥${data.netProfit.toLocaleString()}</td>
+            <td style="padding: 10px; text-align: right; border: 1px solid #ddd; ${netProfitClass}">${data.netProfitRate}%</td>
+          `;
+          
+          tableBody.appendChild(row);
         });
         
         console.log('✅ 月次グラフ生成完了');
@@ -4099,6 +4210,62 @@
         
         console.log('最終売上:', totalSales, '注文数:', orderCount);
         
+        // 本日の人件費を取得
+        let todayLaborCost = 0;
+        try {
+          const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
+          attendanceSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.date === dateStr && data.clockIn && data.clockOut) {
+              const clockIn = new Date(`${dateStr} ${data.clockIn}`);
+              const clockOut = new Date(`${dateStr} ${data.clockOut}`);
+              let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+              
+              if (data.breakStart1 && data.breakEnd1) {
+                const breakStart1 = new Date(`${dateStr} ${data.breakStart1}`);
+                const breakEnd1 = new Date(`${dateStr} ${data.breakEnd1}`);
+                workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+              }
+              if (data.breakStart2 && data.breakEnd2) {
+                const breakStart2 = new Date(`${dateStr} ${data.breakStart2}`);
+                const breakEnd2 = new Date(`${dateStr} ${data.breakEnd2}`);
+                workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+              }
+              
+              const hourlyRate = data.hourlyRate || 1150;
+              todayLaborCost += workHours * hourlyRate;
+            }
+          });
+        } catch (e) {
+          console.error('人件費取得エラー:', e);
+        }
+        
+        // 本日の支出を取得
+        let todayExpense = 0;
+        try {
+          const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
+          if (expenseDoc.exists()) {
+            todayExpense = expenseDoc.data().total || 0;
+          }
+        } catch (e) {
+          console.error('支出取得エラー:', e);
+        }
+        
+        // 純利益計算
+        const grossProfit = totalSales - todayLaborCost; // 粗利（売上 - 人件費）
+        const netProfit = totalSales - todayLaborCost - todayExpense; // 純利益（売上 - 人件費 - 支出）
+        const netProfitRate = totalSales > 0 ? (netProfit / totalSales * 100).toFixed(1) : 0;
+        const laborCostRate = totalSales > 0 ? (todayLaborCost / totalSales * 100).toFixed(1) : 0;
+        const expenseRate = totalSales > 0 ? (todayExpense / totalSales * 100).toFixed(1) : 0;
+        
+        console.log('💰 本日の収益:', {
+          売上: totalSales,
+          人件費: todayLaborCost,
+          支出: todayExpense,
+          粗利: grossProfit,
+          純利益: netProfit
+        });
+        
         // 🆕 売上目標達成率を計算（選択された営業日の曜日で判定）
         const dayOfWeek = displayDate.getDay(); // 0=日曜, 6=土曜
         const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
@@ -4106,6 +4273,7 @@
         const achievementRate = Math.round((totalSales / targetSales) * 100);
         
         const rateColor = achievementRate >= 100 ? '#4CAF50' : achievementRate >= 80 ? '#FF9800' : '#f44336';
+        const netProfitColor = netProfit >= 0 ? '#4CAF50' : '#f44336';
         
         const targetSection = `
             <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white;">
@@ -4123,6 +4291,31 @@
                   ${achievementRate}%
                 </div>
                 <div style="font-size: 14px; opacity: 0.9;">達成率</div>
+              </div>
+            </div>
+            
+            <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #FF6B6B 0%, #C92A2A 100%); border-radius: 10px; color: white;">
+              <h4 style="margin: 0 0 15px 0;">本日の純利益</h4>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
+                <span>売上</span>
+                <strong>¥${totalSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
+                <span>− 人件費（${laborCostRate}%）</span>
+                <strong>¥${Math.round(todayLaborCost).toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 14px;">
+                <span>− 支出（${expenseRate}%）</span>
+                <strong>¥${Math.round(todayExpense).toLocaleString()}</strong>
+              </div>
+              <div style="border-top: 2px solid rgba(255,255,255,0.3); padding-top: 12px;">
+                <div style="text-align: center; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                  <div style="font-size: 16px; opacity: 0.9; margin-bottom: 5px;">純利益</div>
+                  <div style="font-size: 32px; font-weight: bold; color: ${netProfitColor};">
+                    ¥${Math.round(netProfit).toLocaleString()}
+                  </div>
+                  <div style="font-size: 14px; opacity: 0.9; margin-top: 5px;">純利益率: ${netProfitRate}%</div>
+                </div>
               </div>
             </div>
           `;
