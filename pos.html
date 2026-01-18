@@ -1570,9 +1570,29 @@
               <label>合計金額: <span id="manualTotal" style="color: #667eea; font-size: 20px;">¥0</span></label>
             </div>
             
+            <!-- 1行目: レシートON/OFF | 待ち人数リセット -->
             <div style="display: flex; gap: 10px; margin-top: 15px;">
+              <button class="btn" onclick="toggleAutoPrint()" style="flex: 1; background: linear-gradient(135deg, #764ba2 0%, #667eea 100%); color: white;">
+                <span id="autoPrintStatus">🖨️ レシートON</span>
+              </button>
+              <button class="btn" onclick="resetWaitingCount()" style="flex: 1; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
+                🔄 待ち人数リセット
+              </button>
+            </div>
+            
+            <!-- 2行目: 即会計 | テイクアウト -->
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+              <button class="btn btn-success" onclick="selectTable('即会計')" style="flex: 1; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white;">
+                💳 即会計
+              </button>
+              <button class="btn" onclick="selectTable('テイクアウト')" style="flex: 1; background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white;">
+                🛍️ テイクアウト
+              </button>
+            </div>
+            
+            <!-- 3行目: テーブルに追加（旧即会計は削除） -->
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
               <button class="btn btn-primary" onclick="submitManualOrder()" id="manualSubmitBtn" disabled style="flex: 1;">テーブルに追加</button>
-              <button class="btn btn-success" onclick="directPayment()" id="directPaymentBtn" disabled style="flex: 1; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">💳 即会計</button>
             </div>
           </div>
         </div>
@@ -2022,10 +2042,29 @@
     
     // 自動印刷トグル
     window.toggleAutoPrint = function() {
-      autoPrintEnabled = document.getElementById('autoPrintToggle').checked;
+      autoPrintEnabled = !autoPrintEnabled;
       const status = document.getElementById('autoPrintStatus');
-      status.textContent = autoPrintEnabled ? 'ON' : 'OFF';
-      status.className = autoPrintEnabled ? 'toggle-status on' : 'toggle-status off';
+      status.textContent = autoPrintEnabled ? '🖨️ レシートON' : '🖨️ レシートOFF';
+      console.log('レシート自動印刷:', autoPrintEnabled ? 'ON' : 'OFF');
+    };
+    
+    // 待ち人数リセット
+    window.resetWaitingCount = async function() {
+      if (!confirm('待ち人数を0にリセットしますか？')) return;
+      
+      try {
+        const waitingRef = window.getStoreDoc('settings', 'waiting');
+        await window.setDoc(waitingRef, {
+          manualCount: 0,
+          updatedAt: window.Timestamp.now()
+        }, { merge: true });
+        
+        alert('待ち人数をリセットしました');
+        console.log('✅ 待ち人数リセット完了');
+      } catch (error) {
+        console.error('❌ 待ち人数リセットエラー:', error);
+        alert('リセットに失敗しました');
+      }
     };
     
     // カテゴリを初期化
@@ -2139,8 +2178,7 @@
             ...currentSelectingItem,
             toppings: '標準トッピング',
             toppingPrice: 0,
-            quantity: 1,
-            status: 'pending'  // 初期状態
+            quantity: 1
           });
           updateManualCart();
           currentSelectingItem = null;
@@ -2149,8 +2187,8 @@
           showToppingModal(item);
         }
       } else {
-        // チェックを外した場合は何もしない
-        checkbox.checked = true;
+        manualCart = manualCart.filter(i => i.id !== itemId);
+        updateManualCart();
       }
     };
     
@@ -2391,8 +2429,7 @@
           quantity: 1,
           toppings: toppingNames,
           toppingPrice: toppingPrice,
-          toppingDetails: toppingDetails,
-          status: 'pending'  // 初期状態
+          toppingDetails: toppingDetails
         });
       }
       
@@ -6159,13 +6196,11 @@
     function updateManualCart() {
       const container = document.getElementById('selectedItems');
       const submitBtn = document.getElementById('manualSubmitBtn');
-      const directPaymentBtn = document.getElementById('directPaymentBtn');  // ✅ 即会計ボタン
       const manualTable = document.getElementById('manualTable');
       
       if (manualCart.length === 0) {
         container.innerHTML = '<div class="empty-state">商品を選択してください</div>';
         submitBtn.disabled = true;
-        if (directPaymentBtn) directPaymentBtn.disabled = true;  // ✅
         document.getElementById('manualTotal').textContent = '¥0';
         return;
       }
@@ -6220,19 +6255,11 @@
           toppingsHtml = toppingList.map(t => `<div style="font-size: 12px; color: #666; padding-left: 10px;">　${t}</div>`).join('');
         }
         
-        // ステータスバッジを表示
-        let statusBadge = '';
-        if (item.status === 'completed') {
-          statusBadge = '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">✓</span>';
-        } else if (item.status === 'cancelled') {
-          statusBadge = '<span style="background: #FF9800; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">✕</span>';
-        }
-        
         const div = document.createElement('div');
         div.className = 'selected-item-detailed';
         div.innerHTML = `
           <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-            <div style="font-weight: bold;">${item.name} ×${item.quantity}${statusBadge}</div>
+            <div style="font-weight: bold;">${item.name} ×${item.quantity}</div>
             <div>¥${itemBasePrice.toLocaleString()}</div>
           </div>
           ${toppingsHtml}
@@ -6240,12 +6267,8 @@
             <div style="display: flex; gap: 5px;">
               <input type="number" class="quantity-input" min="1" value="${item.quantity}" 
                      onchange="updateQuantity(${index}, this.value)">
-              ${!item.status || item.status === 'pending' ? `
-                <button class="complete-btn" onclick="completeManualItem(${index})" style="background: #4CAF50; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;">完了</button>
-                <button class="cancel-btn" onclick="cancelManualItem(${index})" style="background: #FF9800; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;">キャンセル</button>
-              ` : `
-                <button class="remove-btn" onclick="removeFromManualCart(${index})" style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;">削除</button>
-              `}
+              <button class="edit-btn" onclick="editCartItem(${index})">修正</button>
+              <button class="remove-btn" onclick="removeFromManualCart(${index})">削除</button>
             </div>
             <div style="font-weight: bold; color: #667eea;">¥${itemWithTopping.toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
           </div>
@@ -6256,11 +6279,6 @@
       document.getElementById('manualTotal').textContent = `¥${total.toLocaleString()}`;
       // ✅ 商品があればボタン有効（テーブル番号は後で選択可能）
       submitBtn.disabled = manualCart.length === 0;
-      
-      // ✅ 即会計ボタンはテーブル選択不要なので、カートに商品があれば有効
-      if (directPaymentBtn) {
-        directPaymentBtn.disabled = manualCart.length === 0;
-      }
     }
     
     // カート内アイテムを修正
@@ -6364,150 +6382,17 @@
       updateManualCart();
     };
     
-    // 手入力レジ: 完了ボタン
-    window.completeManualItem = function(index) {
-      if (manualCart[index]) {
-        manualCart[index].status = 'completed';
-        updateManualCart();
-        console.log('✅ 商品完了:', manualCart[index].name);
-      }
-    };
-    
-    // 手入力レジ: キャンセルボタン
-    window.cancelManualItem = function(index) {
-      if (manualCart[index]) {
-        manualCart[index].status = 'cancelled';
-        updateManualCart();
-        console.log('✕ 商品キャンセル:', manualCart[index].name);
-      }
-    };
-    
-    // カートから削除（完了/キャンセル後のみ可能）
+    // カートから削除
     window.removeFromManualCart = function(index) {
       const item = manualCart[index];
+      const checkbox = document.getElementById(`menu-${item.id}`);
+      if (checkbox) checkbox.checked = false;
       
-      if (item.status === 'completed' || item.status === 'cancelled') {
-        const checkbox = document.getElementById(`menu-${item.id}`);
-        if (checkbox) checkbox.checked = false;
-        
-        manualCart.splice(index, 1);
-        updateManualCart();
-        console.log('🗑️ 商品削除:', item.name);
-      } else {
-        alert('完了またはキャンセルしてから削除してください');
-      }
+      manualCart.splice(index, 1);
+      updateManualCart();
     };
     
     // ✅ 即会計関数（テーブル選択不要、Firebaseに保存しない）
-    window.directPayment = async function() {
-      if (manualCart.length === 0) {
-        alert('商品を選択してください');
-        return;
-      }
-      
-      // 即会計モードを有効化
-      isDirectPaymentMode = true;
-      console.log('💳 即会計モード: ON');
-      
-      try {
-        console.log('💳 即会計モード起動');
-        console.log('カート内容:', manualCart);
-        
-        // カートの合計金額を計算
-        let totalAmount = 0;
-        manualCart.forEach(item => {
-          const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-          totalAmount += itemTotal;
-        });
-        
-        // 注文番号を生成
-        const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        
-        const todayStart = new Date(jstNow);
-        todayStart.setHours(1, 0, 0, 0);
-        if (jstNow < todayStart) {
-          todayStart.setDate(todayStart.getDate() - 1);
-        }
-        
-        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
-        let maxOrderNumber = 618;
-        let hasActiveOrders = false;
-        
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          
-          if (!data.deleted) {
-            hasActiveOrders = true;
-            
-            const orderDate = data.timestamp.toDate();
-            const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-            
-            if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
-              maxOrderNumber = data.orderNumber;
-            }
-          }
-        });
-        
-        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
-        
-        console.log('注文番号生成:', {
-          hasActiveOrders,
-          maxOrderNumber,
-          nextOrderNumber: orderNumber
-        });
-        
-        const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
-        
-        // Firebaseに即会計注文を保存
-        const orderData = {
-          orderNumber: orderNumber,
-          tableNumber: '即会計',
-          items: manualCart.map(item => ({
-            id: item.id,
-            name: item.name,
-            price: item.price,
-            taxRate: item.taxRate,  // undefinedの場合もそのまま保存
-            toppings: item.toppings,
-            toppingsData: item.toppingsData,
-            toppingPrice: item.toppingPrice || 0,
-            quantity: item.quantity
-          })),
-          totalAmount: totalAmount,
-          timestamp: window.Timestamp.now(),
-          deleteAt: window.Timestamp.fromDate(deleteAt),
-          status: 'pending',
-          manualEntry: true,
-          directPayment: true  // 即会計フラグ
-        };
-        
-        const docRef = await window.addDoc(window.getStoreCollection('orders'), orderData);
-        console.log('✅ 即会計注文をFirebaseに保存:', docRef.id);
-        
-        // currentOrdersに追加
-        currentOrders = [{
-          id: docRef.id,
-          ...orderData
-        }];
-        
-        console.log('注文データ:', currentOrders[0]);
-        
-        // 会計モーダルを表示
-        document.getElementById('discountAmount').value = '0';
-        buildTaxRateSelectionList();
-        updatePaymentTotal();
-        document.getElementById('paymentModal').classList.remove('hidden');
-        selectedPaymentMethod = null;
-        document.querySelectorAll('.payment-method-btn').forEach(btn => {
-          btn.classList.remove('selected');
-        });
-        document.getElementById('cashInputSection').classList.add('hidden');
-      } catch (error) {
-        console.error('❌ 即会計エラー:', error);
-        alert('即会計の処理に失敗しました: ' + error.message);
-      }
-      document.getElementById('completePaymentBtn').disabled = true;
-    };
     
     // 手動注文を送信
     window.submitManualOrder = async function() {
