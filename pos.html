@@ -1928,23 +1928,7 @@
         // 初期化
     window.addEventListener('load', async () => {
       await initializeSystem();
-      // 手入力レジのリアルタイム監視を開始
-      monitorDirectPaymentOrders();
     });
-    
-    // 手入力レジ（即会計-一時）の注文をリアルタイム監視
-    function monitorDirectPaymentOrders() {
-      const q = window.query(
-        window.getStoreCollection('orders'),
-        window.where('tableNumber', '==', '即会計-一時'),
-        window.where('deleted', '==', false)
-      );
-      
-      window.onSnapshot(q, (snapshot) => {
-        console.log('📱 手入力レジ注文更新:', snapshot.size, '件');
-        updateManualCart();
-      });
-    }
     
     async function initializeSystem() {
       // Firebaseからメニューを取得
@@ -2149,9 +2133,9 @@
         currentSelectingItem = { ...item };
         selectedToppings = [];
         
-        // toppingsIdが空または存在しない場合は、トッピング選択をスキップして直接Firebaseに保存
+        // toppingsIdが空または存在しない場合は、トッピング選択をスキップしてFirebaseに保存
         if (!item.toppingsId || item.toppingsId.trim() === '') {
-          await addItemToDirectPayment({
+          await addItemToDirectPaymentFirebase({
             ...currentSelectingItem,
             toppings: '標準トッピング',
             toppingPrice: 0,
@@ -2163,13 +2147,13 @@
           showToppingModal(item);
         }
       } else {
-        // チェックを外した場合は何もしない（削除は削除ボタンから）
+        // チェックを外した場合は何もしない
         checkbox.checked = true;
       }
     };
     
-    // 即会計用の商品をFirebaseに追加
-    async function addItemToDirectPayment(item) {
+    // 手入力レジ用の商品をFirebaseに追加
+    async function addItemToDirectPaymentFirebase(item) {
       try {
         // 注文番号を生成
         const now = new Date();
@@ -2217,7 +2201,7 @@
           notifiedCancel: false,
           notifiedPaid: false,
           manualEntry: true,
-          directPayment: true
+          directPaymentTemp: true  // 一時保存フラグ
         };
         
         const docRef = await window.addDoc(window.getStoreCollection('orders'), orderData);
@@ -2464,7 +2448,7 @@
         manualCart[currentSelectingItem.editIndex].toppingDetails = toppingDetails;
       } else {
         // 新規アイテムを追加
-        await addItemToDirectPayment({
+        await addItemToDirectPaymentFirebase({
           ...currentSelectingItem,
           quantity: 1,
           toppings: toppingNames,
@@ -6232,7 +6216,7 @@
       updateManualCart();
     };
     
-    // 即会計用の注文リストを表示（テーブル会計と同じ仕組み）
+    // 手入力カート表示（Firebaseベース - テーブル会計と同じ仕組み）
     async function updateManualCart() {
       const container = document.getElementById('selectedItems');
       const submitBtn = document.getElementById('manualSubmitBtn');
@@ -6312,9 +6296,9 @@
             // ステータスバッジ
             let statusBadge = '';
             if (order.completedAt) {
-              statusBadge = '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">✓完了</span>';
+              statusBadge = '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">✓</span>';
             } else if (order.cancelledAt) {
-              statusBadge = '<span style="background: #FF9800; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">✕キャンセル</span>';
+              statusBadge = '<span style="background: #FF9800; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">✕</span>';
             }
             
             const div = document.createElement('div');
@@ -6327,11 +6311,11 @@
               ${toppingsHtml}
               <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 5px; border-top: 1px dashed #ddd;">
                 <div style="display: flex; gap: 5px;">
-                  ${!order.completedAt && !order.cancelledAt ? `<button class="complete-btn" onclick="completeOrder('${order.id}')" style="background: #4CAF50; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">完了</button>` : ''}
-                  ${!order.completedAt && !order.cancelledAt ? `<button class="cancel-btn" onclick="cancelOrder('${order.id}')" style="background: #FF9800; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">キャンセル</button>` : ''}
-                  ${order.completedAt || order.cancelledAt ? `<button class="delete-btn" onclick="deleteOrder('${order.id}')" style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">削除</button>` : ''}
+                  ${!order.completedAt && !order.cancelledAt ? `<button class="order-action-btn complete-btn" onclick="completeOrder('${order.id}')" style="background: #4CAF50; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;">完了</button>` : ''}
+                  ${!order.completedAt && !order.cancelledAt ? `<button class="order-action-btn cancel-btn" onclick="cancelOrder('${order.id}')" style="background: #FF9800; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;">キャンセル</button>` : ''}
+                  ${order.completedAt || order.cancelledAt ? `<button class="order-action-btn delete-btn" onclick="deleteOrderManual('${order.id}')" style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;">削除</button>` : ''}
                 </div>
-                <div style="font-weight: bold; color: #667eea;">¥${itemWithTopping.toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
+                <div style="font-weight: bold; color: #667eea;">¥${itemTotal.toLocaleString()}</div>
               </div>
             `;
             container.appendChild(div);
@@ -6346,6 +6330,12 @@
         console.error('❌ 手入力カート更新エラー:', error);
         container.innerHTML = '<div class="empty-state">エラーが発生しました</div>';
       }
+    }
+    
+    // 手入力レジ用の削除関数（テーブル会計のdeleteOrderと同じ処理）
+    window.deleteOrderManual = async function(orderId) {
+      await window.deleteOrder(orderId);
+      await updateManualCart();  // 表示を更新
     }
     
     // カート内アイテムを修正
@@ -6442,9 +6432,22 @@
       document.getElementById('toppingModal').classList.remove('hidden');
     }
     
-    // 数量更新（削除 - Firebaseベースなので不要）
+    // 数量更新
+    window.updateQuantity = function(index, value) {
+      const qty = parseInt(value) || 1;
+      manualCart[index].quantity = Math.max(1, qty);
+      updateManualCart();
+    };
     
-    // カートから削除（削除 - deleteOrder関数を使用）
+    // カートから削除
+    window.removeFromManualCart = function(index) {
+      const item = manualCart[index];
+      const checkbox = document.getElementById(`menu-${item.id}`);
+      if (checkbox) checkbox.checked = false;
+      
+      manualCart.splice(index, 1);
+      updateManualCart();
+    };
     
     // ✅ 即会計関数 - '即会計-一時'の注文を'即会計'に変更して会計処理
     window.directPayment = async function() {
@@ -6941,7 +6944,12 @@
           console.error('待ち人数更新エラー:', err);
         }
         
-        await loadOrders(selectedTable);
+        // テーブル会計または手入力レジの表示を更新
+        if (selectedTable) {
+          await loadOrders(selectedTable);
+        } else {
+          await updateManualCart();
+        }
       } catch (e) {
         console.error('完了エラー:', e);
         alert('エラーが発生しました');
@@ -6955,7 +6963,13 @@
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           cancelledAt: window.Timestamp.now()
         });
-        await loadOrders(selectedTable);
+        
+        // テーブル会計または手入力レジの表示を更新
+        if (selectedTable) {
+          await loadOrders(selectedTable);
+        } else {
+          await updateManualCart();
+        }
       } catch (e) {
         console.error('キャンセルエラー:', e);
         alert('エラーが発生しました');
@@ -7557,13 +7571,10 @@
         // モーダルを閉じる
         closePaymentModal();
         
-        // ✅ 即会計の場合はmanualCartをクリア & 注文を完了→削除
+        // ✅ 即会計の場合は注文を完了→削除
         if (isDirectPayment) {
-          console.log('💳 即会計完了: カートをクリア & 注文を完了→削除');
+          console.log('💳 即会計完了: 注文を完了→削除');
           console.log('💳 削除対象の注文数:', currentOrders.length);
-          
-          manualCart = [];
-          updateManualCart();
           
           // 即会計の注文を完了→削除
           for (const order of currentOrders) {
@@ -7633,11 +7644,11 @@
           document.getElementById('receiptCompleteModal').classList.remove('hidden');
         }
         
-        // 表示をクリア
+        // 表示を更新
         if (!isDirectPayment) {
           await loadOrders(selectedTable);
         } else {
-          // 即会計の場合は手入力カートを更新
+          // 即会計の場合は手入力レジを更新
           await updateManualCart();
           // チェックボックスもクリア
           document.querySelectorAll('#menuItemsList input[type="checkbox"]').forEach(cb => cb.checked = false);
