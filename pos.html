@@ -1503,7 +1503,7 @@
             <button onclick="resetWaiting()" style="padding: 6px 15px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap;">リセット</button>
           </div>
           <!-- 即会計ボタン -->
-          <button onclick="selectTable('即会計')" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; border: none; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); padding: 15px; font-size: 16px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+          <button onclick="quickCheckout()" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; border: none; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); padding: 15px; font-size: 16px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
             <span style="font-size: 24px;">💳</span>
             <span>即会計</span>
           </button>
@@ -6564,6 +6564,85 @@
         console.error('注文エラー:', e);
         alert('注文の追加に失敗しました: ' + e.message);
       }
+    };
+    
+    // 即会計クイックボタン - 商品がある場合は送信してから開く
+    window.quickCheckout = async function() {
+      // 手入力レジに商品がある場合
+      if (manualCart.length > 0) {
+        // 即会計テーブルに送信
+        try {
+          const now = new Date();
+          const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+          
+          const todayStart = new Date(jstNow);
+          todayStart.setHours(1, 0, 0, 0);
+          if (jstNow < todayStart) {
+            todayStart.setDate(todayStart.getDate() - 1);
+          }
+          
+          const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
+          let maxOrderNumber = 618;
+          let hasActiveOrders = false;
+          
+          ordersSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (!data.deleted) {
+              hasActiveOrders = true;
+              const orderDate = data.timestamp.toDate();
+              const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+              if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
+                maxOrderNumber = data.orderNumber;
+              }
+            }
+          });
+          
+          const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
+          const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
+          
+          const orderData = {
+            orderNumber: orderNumber,
+            tableNumber: '即会計',
+            items: manualCart.map(item => ({
+              id: item.id,
+              name: item.name,
+              price: item.price,
+              taxRate: item.taxRate,
+              toppings: item.toppings,
+              toppingsData: item.toppingsData,
+              toppingPrice: item.toppingPrice || 0,
+              toppingDetails: item.toppingDetails,
+              quantity: item.quantity
+            })),
+            totalAmount: manualCart.reduce((sum, item) => sum + (item.price + (item.toppingPrice || 0)) * item.quantity, 0),
+            timestamp: window.Timestamp.now(),
+            deleteAt: window.Timestamp.fromDate(deleteAt),
+            status: 'pending',
+            manualEntry: true
+          };
+          
+          const docRef = await window.addDoc(window.getStoreCollection('orders'), orderData);
+          await window.updateDoc(docRef, {
+            orderId: docRef.id
+          });
+          
+          console.log('✅ 即会計テーブルに注文を送信:', orderNumber);
+          
+          // 手入力レジをクリア
+          manualCart = [];
+          document.getElementById('manualTable').value = '';
+          document.querySelectorAll('#menuItemsList input[type="checkbox"]').forEach(cb => cb.checked = false);
+          updateManualCart();
+          
+        } catch (e) {
+          console.error('注文エラー:', e);
+          alert('注文の追加に失敗しました: ' + e.message);
+          return;
+        }
+      }
+      
+      // 即会計テーブルを開く
+      await selectTable('即会計');
     };
     
     // リアルタイム更新を開始
