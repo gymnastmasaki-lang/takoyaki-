@@ -8846,14 +8846,6 @@
     <div class="modal" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
       <h3>商品削除</h3>
       
-      <div style="margin: 20px 0; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
-        <div style="font-weight: bold; margin-bottom: 5px;">🔧 トッピング問題の解決</div>
-        <div style="font-size: 14px; color: #666; margin-bottom: 10px;">
-          商品編集で不要なトッピングが大量に表示される場合は、<br>
-          その商品の「トッピングクリア」ボタンをクリックしてください。
-        </div>
-      </div>
-      
       <div style="margin: 20px 0;">
         <input type="text" id="productSearchInput" placeholder="商品名で検索..." style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 15px;" oninput="filterProductList()">
       </div>
@@ -9664,52 +9656,6 @@
       document.getElementById('productDeleteModal').classList.add('hidden');
     };
     
-    // ✅ 商品のトッピングセットをクリア
-    window.clearProductToppings = async function(productId, productName, toppingCount) {
-      const confirmed = await showCustomConfirm({
-        icon: '🔧',
-        title: 'トッピングクリア',
-        message: `「${productName}」のトッピングセット（${toppingCount}個）をすべて削除しますか？\n\n削除後、必要なトッピングは編集画面で再度追加できます。`,
-        btnClass: 'modal-btn-warning',
-        confirmText: 'クリアする',
-        cancelText: 'キャンセル'
-      });
-      
-      if (!confirmed) return;
-      
-      try {
-        // 商品データを取得
-        const menuSnapshot = await window.getDocs(window.getStoreCollection('menus'));
-        let docId = null;
-        
-        menuSnapshot.forEach(doc => {
-          if (doc.data().id === productId || doc.id === productId) {
-            docId = doc.id;
-          }
-        });
-        
-        if (!docId) {
-          await showCustomAlert('❌ 商品が見つかりませんでした');
-          return;
-        }
-        
-        // トッピングセットを空配列に更新
-        await window.updateDoc(window.getStoreDoc('menus', docId), {
-          toppingSets: [],
-          toppingsId: ''
-        });
-        
-        await showCustomAlert('✅ トッピングをクリアしました\n\n必要なトッピングは「✏️ 編集」ボタンから追加できます。');
-        
-        // リストを再読み込み
-        await loadProductDeleteList();
-        
-      } catch (error) {
-        console.error('トッピングクリアエラー:', error);
-        await showCustomAlert('❌ トッピングのクリアに失敗しました\n\n' + error.message);
-      }
-    };
-    
     // 削除用の商品リストを読み込み
     let allProductsForDelete = [];
     async function loadProductDeleteList() {
@@ -9756,45 +9702,29 @@
       
       products.forEach(product => {
         const productDiv = document.createElement('div');
-        productDiv.style.cssText = 'padding: 15px; margin-bottom: 10px; background: white; border-radius: 8px; border: 1px solid #ddd;';
+        productDiv.style.cssText = 'padding: 15px; margin-bottom: 10px; background: white; border-radius: 8px; border: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center;';
         
         const infoDiv = document.createElement('div');
-        infoDiv.style.cssText = 'margin-bottom: 10px;';
-        
-        const toppingCount = product.toppingSets ? product.toppingSets.length : 0;
-        const toppingWarning = toppingCount > 5 ? `<span style="color: #f44336; font-weight: bold;"> ⚠️ トッピング${toppingCount}個</span>` : '';
-        
         infoDiv.innerHTML = `
-          <div style="font-weight: bold; font-size: 16px; margin-bottom: 5px;">${product.name}${toppingWarning}</div>
+          <div style="font-weight: bold; font-size: 16px; margin-bottom: 5px;">${product.name}</div>
           <div style="color: #666; font-size: 14px;">
             <span style="background: #E3F2FD; padding: 2px 8px; border-radius: 4px; margin-right: 10px;">${product.category}</span>
             <span style="color: #4CAF50; font-weight: bold;">¥${product.price.toLocaleString()}</span>
-            ${toppingCount > 0 ? `<span style="margin-left: 10px; color: #666;">トッピング: ${toppingCount}個</span>` : ''}
           </div>
         `;
         
-        const btnContainer = document.createElement('div');
-        btnContainer.style.cssText = 'display: flex; gap: 10px; flex-wrap: wrap;';
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = '🗑️ 削除';
+        deleteBtn.style.cssText = 'padding: 8px 20px; background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-left: 10px;';
+        deleteBtn.onclick = () => deleteProduct(product.id, product.name);
         
         const editBtn = document.createElement('button');
         editBtn.textContent = '✏️ 編集';
         editBtn.style.cssText = 'padding: 8px 20px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;';
         editBtn.onclick = () => openEditProductModal(product);
         
-        // ✅ トッピングクリアボタン（トッピングがある場合のみ表示）
-        if (toppingCount > 0) {
-          const clearToppingBtn = document.createElement('button');
-          clearToppingBtn.textContent = '🔧 トッピングクリア';
-          clearToppingBtn.style.cssText = 'padding: 8px 20px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;';
-          clearToppingBtn.onclick = () => clearProductToppings(product.id, product.name, toppingCount);
-          btnContainer.appendChild(clearToppingBtn);
-        }
-        
-        const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = '🗑️ 削除';
-        deleteBtn.style.cssText = 'padding: 8px 20px; background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;';
-        deleteBtn.onclick = () => deleteProduct(product.id, product.name);
-        
+        const btnContainer = document.createElement('div');
+        btnContainer.style.cssText = 'display: flex; gap: 10px;';
         btnContainer.appendChild(editBtn);
         btnContainer.appendChild(deleteBtn);
         
