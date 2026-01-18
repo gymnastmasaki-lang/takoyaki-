@@ -6096,12 +6096,20 @@
     window.addItemFromIframe = function(item) {
       console.log('🛒 iframeから商品追加:', item);
       
+      // 包材カテゴリの商品は税率10%に設定
+      let taxRate = item.taxRate || 10;
+      if (item.category === '包材') {
+        taxRate = 10;
+        console.log('📦 包材カテゴリ: 税率を10%に設定');
+      }
+      
       // manualCartに商品を追加
       const cartItem = {
         id: item.id,
         name: item.name,
         price: item.price,
-        taxRate: item.taxRate || 10,
+        category: item.category,  // カテゴリを保存
+        taxRate: taxRate,
         toppings: item.toppings || '標準トッピング',
         toppingPrice: item.toppingPrice || 0,
         toppingsData: item.toppingsData || [],
@@ -6931,21 +6939,35 @@
               const totalPrice = basePrice + toppingPrice;
               const itemTotal = totalPrice * qty;
               
-              // テーブル番号による税率判定
-              const tableNumber = orderData.tableNumber || '';
-              const itemName = item.name || '';
+              // 商品のtaxRateフィールドを使用（優先）
+              const itemTaxRate = item.taxRate;
               
-              // 【10%】店内テーブル: c1, c2, T-M, T-H のみ
-              if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
-                tax10Total += itemTotal;
-              }
-              // 【10%】レジ袋
-              else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
-                tax10Total += itemTotal;
-              }
-              // 【8%】即会計、テイクアウト、予約など
-              else {
-                tax8Total += itemTotal;
+              if (itemTaxRate) {
+                // 商品にtaxRateが設定されている場合はそれを使用
+                if (itemTaxRate === 8) {
+                  tax8Total += itemTotal;
+                } else if (itemTaxRate === 10) {
+                  tax10Total += itemTotal;
+                }
+                console.log(`  → ${item.name} x${qty}点 (税率: ${itemTaxRate}%)`);
+              } else {
+                // taxRateがない場合は従来の判定ロジック
+                const tableNumber = orderData.tableNumber || '';
+                const itemName = item.name || '';
+                
+                // 【10%】店内テーブル: c1, c2, T-M, T-H のみ
+                if (tableNumber.match(/^(c1|c2|T-M|T-H)$/)) {
+                  tax10Total += itemTotal;
+                }
+                // 【10%】レジ袋
+                else if (itemName.includes('レジ袋') || itemName.includes('袋')) {
+                  tax10Total += itemTotal;
+                }
+                // 【8%】即会計、テイクアウト、予約など
+                else {
+                  tax8Total += itemTotal;
+                }
+                console.log(`  → ${item.name} x${qty}点`);
               }
             });
           } else {
@@ -7448,11 +7470,27 @@
         // モーダルを閉じる
         closePaymentModal();
         
-        // ✅ 即会計の場合はmanualCartをクリア & 待ち人数を減らす
+        // ✅ 即会計の場合はmanualCartをクリア & 待ち人数を減らす & 注文を削除
         if (isDirectPayment) {
-          console.log('💳 即会計完了: カートをクリア');
+          console.log('💳 即会計完了: カートをクリア & 注文を削除');
           manualCart = [];
           updateManualCart();
+          
+          // 即会計の注文を削除（自動完了）
+          for (const order of currentOrders) {
+            if (order.id) {
+              try {
+                await window.updateDoc(window.getStoreDoc('orders', order.id), {
+                  deleted: true,
+                  deletedAt: window.Timestamp.now()
+                });
+                console.log('🗑️ 即会計注文を自動削除:', order.id);
+              } catch (err) {
+                console.error('即会計注文削除エラー:', err);
+              }
+            }
+          }
+          
           currentOrders = [];
           
           // 待ち人数を1減らす
