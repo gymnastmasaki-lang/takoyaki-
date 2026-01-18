@@ -1900,6 +1900,7 @@
   <script>
     let selectedTable = null;
     let currentOrders = [];
+    let isDirectPaymentMode = false;  // 即会計モードフラグ
     let menuItems = [];
     let manualCart = [];
     let autoPrintEnabled = true;
@@ -6366,6 +6367,10 @@
         return;
       }
       
+      // 即会計モードを有効化
+      isDirectPaymentMode = true;
+      console.log('💳 即会計モード: ON');
+      
       try {
         console.log('💳 即会計モード起動');
         console.log('カート内容:', manualCart);
@@ -7170,15 +7175,28 @@
             const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
             console.log(`  商品追加: ${item.name} x${item.quantity}, 金額:${itemTotal}`);
             
-            // 商品のtaxRateフィールドを優先的に使用
             let defaultTaxRate;
-            if (item.taxRate) {
-              defaultTaxRate = item.taxRate;
-              console.log(`  ✅ 商品のtaxRateを使用: ${defaultTaxRate}%`);
+            
+            // 即会計とテイクアウトの場合は、商品の税率よりテーブル番号を優先
+            if (order.tableNumber === '即会計' || order.tableNumber === 'テイクアウト' || order.tableNumber === '予約テーブル') {
+              // レジ袋（包材）のみ10%、それ以外は8%
+              if (item.name && (item.name.includes('レジ袋') || item.name.includes('袋') || item.category === '包材')) {
+                defaultTaxRate = 10;
+                console.log(`  📦 レジ袋/包材: 10%`);
+              } else {
+                defaultTaxRate = 8;
+                console.log(`  🥡 持ち帰り: 8%`);
+              }
             } else {
-              // taxRateがない場合はテーブル番号に基づいて決定
-              defaultTaxRate = determineDefaultTaxRate(order.tableNumber);
-              console.log(`  ℹ️ テーブル番号から税率を決定: ${defaultTaxRate}%`);
+              // テーブル注文の場合は商品のtaxRateを優先
+              if (item.taxRate) {
+                defaultTaxRate = item.taxRate;
+                console.log(`  ✅ 商品のtaxRateを使用: ${defaultTaxRate}%`);
+              } else {
+                // taxRateがない場合はテーブル番号に基づいて決定
+                defaultTaxRate = determineDefaultTaxRate(order.tableNumber);
+                console.log(`  ℹ️ テーブル番号から税率を決定: ${defaultTaxRate}%`);
+              }
             }
             
             addTaxRateItem(container, item.name, item.quantity, itemTotal, itemIndex, defaultTaxRate);
@@ -7374,8 +7392,9 @@
         // 注文番号リストを取得
         const orderNumbers = currentOrders.map(o => o.orderNumber);
         
-        // ✅ 即会計も含めて全ての注文に支払い済みフラグと担当者を設定
-        const isDirectPayment = currentOrders.some(o => o.directPayment);
+        // ✅ 即会計モードかどうかを確認（グローバル変数を使用）
+        const isDirectPayment = isDirectPaymentMode;
+        console.log('💳 即会計モード判定:', isDirectPayment);
         
         // 全ての注文に支払い済みフラグと担当者を設定
         for (const order of currentOrders) {
@@ -7639,9 +7658,18 @@
           await loadOrders(selectedTable);
         }
         
+        // 即会計モードをリセット
+        if (isDirectPayment) {
+          isDirectPaymentMode = false;
+          console.log('💳 即会計モード: OFF');
+        }
+        
       } catch (e) {
         console.error('会計エラー:', e);
         alert('会計処理に失敗しました: ' + e.message);
+        
+        // エラー時もリセット
+        isDirectPaymentMode = false;
       }
     };
     
@@ -7882,6 +7910,10 @@
     // レシート完了モーダルを閉じる
     window.closeReceiptModal = function() {
       document.getElementById('receiptCompleteModal').classList.add('hidden');
+      
+      // 即会計モードをリセット
+      isDirectPaymentMode = false;
+      
       clearSelection();
     };
     
