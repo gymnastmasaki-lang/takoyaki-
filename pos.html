@@ -6857,8 +6857,8 @@
         </div>
         <div class="order-actions">
           ${!order.paidAt && !order.cancelledAt ? `<button class="order-action-btn pay-btn" onclick="payOrderIndividual('${order.id}', ${order.totalAmount || 0})">会計</button>` : ''}
-          ${!order.completedAt && !order.cancelledAt ? `<button class="order-action-btn complete-btn" onclick="completeAndDeleteOrder('${order.id}')">完了→削除</button>` : ''}
-          ${!order.completedAt && !order.cancelledAt ? `<button class="order-action-btn cancel-btn" onclick="cancelAndDeleteOrder('${order.id}')">キャンセル→削除</button>` : ''}
+          ${!order.completedAt && !order.cancelledAt ? `<button class="order-action-btn complete-btn" onclick="completeOrder('${order.id}')">完了</button>` : ''}
+          ${!order.completedAt && !order.cancelledAt ? `<button class="order-action-btn cancel-btn" onclick="cancelOrder('${order.id}')">キャンセル</button>` : ''}
           ${order.completedAt || order.cancelledAt ? `<button class="order-action-btn delete-btn" onclick="deleteOrder('${order.id}')">削除</button>` : ''}
         </div>
       `;
@@ -6904,6 +6904,25 @@
           completedAt: window.Timestamp.now()
         });
         
+        // 待ち人数を1減らす
+        try {
+          const waitingRef = window.getStoreDoc('settings', 'waiting');
+          const waitingDoc = await window.getDoc(waitingRef);
+          
+          if (waitingDoc.exists()) {
+            const currentCount = waitingDoc.data().manualCount || 0;
+            if (currentCount > 0) {
+              await window.updateDoc(waitingRef, {
+                manualCount: currentCount - 1,
+                updatedAt: window.Timestamp.now()
+              });
+              console.log('✅ 完了: 待ち人数を減らしました:', currentCount, '→', currentCount - 1);
+            }
+          }
+        } catch (err) {
+          console.error('待ち人数更新エラー:', err);
+        }
+        
         await loadOrders(selectedTable);
       } catch (e) {
         console.error('完了エラー:', e);
@@ -6912,23 +6931,6 @@
     };
     
     // 完了→削除（一気に処理）
-    window.completeAndDeleteOrder = async function(orderId) {
-      try {
-        console.log('完了→削除: orderId =', orderId);
-        
-        // 注文を完了にする
-        await window.updateDoc(window.getStoreDoc('orders', orderId), {
-          completedAt: window.Timestamp.now()
-        });
-        
-        // 即座に削除処理を実行
-        await deleteOrder(orderId);
-      } catch (e) {
-        console.error('完了→削除エラー:', e);
-        alert('エラーが発生しました');
-      }
-    };
-    
     // 注文をキャンセルする
     window.cancelOrder = async function(orderId) {
       try {
@@ -6938,24 +6940,6 @@
         await loadOrders(selectedTable);
       } catch (e) {
         console.error('キャンセルエラー:', e);
-        alert('エラーが発生しました');
-      }
-    };
-    
-    // キャンセル→削除（一気に処理）
-    window.cancelAndDeleteOrder = async function(orderId) {
-      try {
-        console.log('キャンセル→削除: orderId =', orderId);
-        
-        // 注文をキャンセルにする
-        await window.updateDoc(window.getStoreDoc('orders', orderId), {
-          cancelledAt: window.Timestamp.now()
-        });
-        
-        // 即座に削除処理を実行
-        await deleteOrder(orderId);
-      } catch (e) {
-        console.error('キャンセル→削除エラー:', e);
         alert('エラーが発生しました');
       }
     };
@@ -7066,25 +7050,6 @@
           deletedAt: window.Timestamp.now()
         });
         console.log('updateDoc成功');
-        
-        // 待ち人数を1減らす
-        try {
-          const waitingRef = window.getStoreDoc('settings', 'waiting');
-          const waitingDoc = await window.getDoc(waitingRef);
-          
-          if (waitingDoc.exists()) {
-            const currentCount = waitingDoc.data().manualCount || 0;
-            if (currentCount > 0) {
-              await window.updateDoc(waitingRef, {
-                manualCount: currentCount - 1,
-                updatedAt: window.Timestamp.now()
-              });
-              console.log('📉 待ち人数を減らしました:', currentCount, '→', currentCount - 1);
-            }
-          }
-        } catch (err) {
-          console.error('待ち人数更新エラー:', err);
-        }
         
         console.log('loadOrders実行中...');
         await loadOrders(selectedTable);
@@ -7574,15 +7539,15 @@
         // モーダルを閉じる
         closePaymentModal();
         
-        // ✅ 即会計の場合はmanualCartをクリア & 注文を削除 & 待ち人数を減らす
+        // ✅ 即会計の場合はmanualCartをクリア & 注文を完了→削除
         if (isDirectPayment) {
-          console.log('💳 即会計完了: カートをクリア & 注文を削除');
+          console.log('💳 即会計完了: カートをクリア & 注文を完了→削除');
           console.log('💳 削除対象の注文数:', currentOrders.length);
           
           manualCart = [];
           updateManualCart();
           
-          // 即会計の注文を削除
+          // 即会計の注文を完了→削除
           for (const order of currentOrders) {
             console.log('💳 注文を確認:', {
               id: order.id,
@@ -7593,20 +7558,26 @@
             
             if (order.id) {
               try {
-                console.log('🗑️ 即会計注文を削除開始:', order.id);
+                console.log('✅ 即会計注文を完了にします:', order.id);
                 
                 const orderRef = window.getStoreDoc('orders', order.id);
                 
-                // deletedフラグを立てる
+                // 1. 完了フラグを立てる
                 await window.updateDoc(orderRef, {
-                  deleted: true,
-                  deletedAt: window.Timestamp.now(),
                   completedAt: window.Timestamp.now()
                 });
                 
-                console.log('✅ 即会計注文を削除完了:', order.id);
+                console.log('✅ 即会計注文を完了しました:', order.id);
+                
+                // 2. 削除フラグを立てる
+                await window.updateDoc(orderRef, {
+                  deleted: true,
+                  deletedAt: window.Timestamp.now()
+                });
+                
+                console.log('🗑️ 即会計注文を削除しました:', order.id);
               } catch (err) {
-                console.error('❌ 即会計注文削除エラー:', order.id, err);
+                console.error('❌ 即会計注文処理エラー:', order.id, err);
                 console.error('❌ エラー詳細:', err.message);
               }
             } else {
@@ -7615,34 +7586,6 @@
           }
           
           currentOrders = [];
-          
-          // 待ち人数を1減らす
-          try {
-            console.log('📉 待ち人数を減らす処理開始');
-            
-            const waitingRef = window.getStoreDoc('settings', 'waiting');
-            const waitingDoc = await window.getDoc(waitingRef);
-            
-            if (waitingDoc.exists()) {
-              const currentCount = waitingDoc.data().manualCount || 0;
-              console.log('📉 現在の待ち人数:', currentCount);
-              
-              if (currentCount > 0) {
-                await window.updateDoc(waitingRef, {
-                  manualCount: currentCount - 1,
-                  updatedAt: window.Timestamp.now()
-                });
-                console.log('✅ 待ち人数を減らしました:', currentCount, '→', currentCount - 1);
-              } else {
-                console.log('⚠️ 待ち人数は既に0です');
-              }
-            } else {
-              console.log('⚠️ waiting設定が存在しません');
-            }
-          } catch (err) {
-            console.error('❌ 待ち人数更新エラー:', err);
-            console.error('❌ エラー詳細:', err.message);
-          }
         }
         
         // 自動印刷が有効なら印刷
