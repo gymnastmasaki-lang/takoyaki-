@@ -6114,11 +6114,13 @@
     window.addItemFromIframe = function(item) {
       console.log('🛒 iframeから商品追加:', item);
       
-      // 包材カテゴリの商品は税率10%に設定
-      let taxRate = item.taxRate || 10;
+      // 商品のtaxRateをそのまま使用（包材以外はundefinedの可能性あり）
+      let taxRate = item.taxRate;
+      
+      // 包材カテゴリの商品は強制的に10%
       if (item.category === '包材') {
         taxRate = 10;
-        console.log('📦 包材カテゴリ: 税率を10%に設定');
+        console.log('📦 包材カテゴリ: 税率を10%に強制設定');
       }
       
       // manualCartに商品を追加
@@ -6127,7 +6129,7 @@
         name: item.name,
         price: item.price,
         category: item.category,  // カテゴリを保存
-        taxRate: taxRate,
+        taxRate: taxRate,  // undefinedの場合もそのまま（後でテーブル番号で判定）
         toppings: item.toppings || '標準トッピング',
         toppingPrice: item.toppingPrice || 0,
         toppingsData: item.toppingsData || [],
@@ -6422,7 +6424,7 @@
             id: item.id,
             name: item.name,
             price: item.price,
-            taxRate: item.taxRate || 10,
+            taxRate: item.taxRate,  // undefinedの場合もそのまま保存
             toppings: item.toppings,
             toppingsData: item.toppingsData,
             toppingPrice: item.toppingPrice || 0,
@@ -7553,32 +7555,75 @@
         // モーダルを閉じる
         closePaymentModal();
         
-        // ✅ 即会計の場合はmanualCartをクリア & 注文を完全削除
+        // ✅ 即会計の場合はmanualCartをクリア & 注文を削除 & 待ち人数を減らす
         if (isDirectPayment) {
-          console.log('💳 即会計完了: カートをクリア & 注文を完全削除');
+          console.log('💳 即会計完了: カートをクリア & 注文を削除');
+          console.log('💳 削除対象の注文数:', currentOrders.length);
+          
           manualCart = [];
           updateManualCart();
           
-          // 即会計の注文を完全削除（deleteOrder関数を使用して待ち人数も減らす）
+          // 即会計の注文を削除
           for (const order of currentOrders) {
+            console.log('💳 注文を確認:', {
+              id: order.id,
+              orderNumber: order.orderNumber,
+              tableNumber: order.tableNumber,
+              directPayment: order.directPayment
+            });
+            
             if (order.id) {
               try {
-                // 完了フラグを先に立てる
-                await window.updateDoc(window.getStoreDoc('orders', order.id), {
+                console.log('🗑️ 即会計注文を削除開始:', order.id);
+                
+                const orderRef = window.getStoreDoc('orders', order.id);
+                
+                // deletedフラグを立てる
+                await window.updateDoc(orderRef, {
+                  deleted: true,
+                  deletedAt: window.Timestamp.now(),
                   completedAt: window.Timestamp.now()
                 });
-                console.log('✅ 即会計注文を完了にしました:', order.id);
                 
-                // deleteOrder関数を呼び出して完全削除（待ち人数も減らす）
-                await window.deleteOrder(order.id);
-                console.log('🗑️ 即会計注文を完全削除しました:', order.id);
+                console.log('✅ 即会計注文を削除完了:', order.id);
               } catch (err) {
-                console.error('即会計注文削除エラー:', err);
+                console.error('❌ 即会計注文削除エラー:', order.id, err);
+                console.error('❌ エラー詳細:', err.message);
               }
+            } else {
+              console.error('❌ 注文IDが存在しません:', order);
             }
           }
           
           currentOrders = [];
+          
+          // 待ち人数を1減らす
+          try {
+            console.log('📉 待ち人数を減らす処理開始');
+            
+            const waitingRef = window.getStoreDoc('settings', 'waiting');
+            const waitingDoc = await window.getDoc(waitingRef);
+            
+            if (waitingDoc.exists()) {
+              const currentCount = waitingDoc.data().manualCount || 0;
+              console.log('📉 現在の待ち人数:', currentCount);
+              
+              if (currentCount > 0) {
+                await window.updateDoc(waitingRef, {
+                  manualCount: currentCount - 1,
+                  updatedAt: window.Timestamp.now()
+                });
+                console.log('✅ 待ち人数を減らしました:', currentCount, '→', currentCount - 1);
+              } else {
+                console.log('⚠️ 待ち人数は既に0です');
+              }
+            } else {
+              console.log('⚠️ waiting設定が存在しません');
+            }
+          } catch (err) {
+            console.error('❌ 待ち人数更新エラー:', err);
+            console.error('❌ エラー詳細:', err.message);
+          }
         }
         
         // 自動印刷が有効なら印刷
