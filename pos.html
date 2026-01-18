@@ -6832,8 +6832,8 @@
         </div>
         <div class="order-actions">
           ${!order.paidAt && !order.cancelledAt ? `<button class="order-action-btn pay-btn" onclick="payOrderIndividual('${order.id}', ${order.totalAmount || 0})">会計</button>` : ''}
-          <button class="order-action-btn complete-btn" onclick="completeOrder('${order.id}')">完了</button>
-          <button class="order-action-btn cancel-btn" onclick="cancelOrder('${order.id}')">キャンセル</button>
+          ${!order.completedAt && !order.cancelledAt ? `<button class="order-action-btn complete-btn" onclick="completeAndDeleteOrder('${order.id}')">完了→削除</button>` : ''}
+          ${!order.completedAt && !order.cancelledAt ? `<button class="order-action-btn cancel-btn" onclick="cancelAndDeleteOrder('${order.id}')">キャンセル→削除</button>` : ''}
           ${order.completedAt || order.cancelledAt ? `<button class="order-action-btn delete-btn" onclick="deleteOrder('${order.id}')">削除</button>` : ''}
         </div>
       `;
@@ -6886,6 +6886,24 @@
       }
     };
     
+    // 完了→削除（一気に処理）
+    window.completeAndDeleteOrder = async function(orderId) {
+      try {
+        console.log('完了→削除: orderId =', orderId);
+        
+        // 注文を完了にする
+        await window.updateDoc(window.getStoreDoc('orders', orderId), {
+          completedAt: window.Timestamp.now()
+        });
+        
+        // 即座に削除処理を実行
+        await deleteOrder(orderId);
+      } catch (e) {
+        console.error('完了→削除エラー:', e);
+        alert('エラーが発生しました');
+      }
+    };
+    
     // 注文をキャンセルする
     window.cancelOrder = async function(orderId) {
       try {
@@ -6895,6 +6913,24 @@
         await loadOrders(selectedTable);
       } catch (e) {
         console.error('キャンセルエラー:', e);
+        alert('エラーが発生しました');
+      }
+    };
+    
+    // キャンセル→削除（一気に処理）
+    window.cancelAndDeleteOrder = async function(orderId) {
+      try {
+        console.log('キャンセル→削除: orderId =', orderId);
+        
+        // 注文をキャンセルにする
+        await window.updateDoc(window.getStoreDoc('orders', orderId), {
+          cancelledAt: window.Timestamp.now()
+        });
+        
+        // 即座に削除処理を実行
+        await deleteOrder(orderId);
+      } catch (e) {
+        console.error('キャンセル→削除エラー:', e);
         alert('エラーが発生しました');
       }
     };
@@ -7005,6 +7041,26 @@
           deletedAt: window.Timestamp.now()
         });
         console.log('updateDoc成功');
+        
+        // 待ち人数を1減らす
+        try {
+          const waitingRef = window.getStoreDoc('settings', 'waiting');
+          const waitingDoc = await window.getDoc(waitingRef);
+          
+          if (waitingDoc.exists()) {
+            const currentCount = waitingDoc.data().manualCount || 0;
+            if (currentCount > 0) {
+              await window.updateDoc(waitingRef, {
+                manualCount: currentCount - 1,
+                updatedAt: window.Timestamp.now()
+              });
+              console.log('📉 待ち人数を減らしました:', currentCount, '→', currentCount - 1);
+            }
+          }
+        } catch (err) {
+          console.error('待ち人数更新エラー:', err);
+        }
+        
         console.log('loadOrders実行中...');
         await loadOrders(selectedTable);
         console.log('loadOrders完了');
@@ -9478,7 +9534,7 @@
         
         await window.addDoc(window.getStoreCollection('menus'), productData);
         
-        alert('商品を登録しました');
+        await showCustomAlert('✅ 商品を登録しました');
         closeProductRegistrationModal();
         
         // メニューを再読み込み
@@ -9486,7 +9542,7 @@
         
       } catch (error) {
         console.error('商品登録エラー:', error);
-        alert('商品の登録に失敗しました: ' + error.message);
+        await showCustomAlert('❌ 商品の登録に失敗しました\n\n' + error.message);
       }
     };
     
@@ -10741,7 +10797,7 @@
         // docIdを使用して更新（idではなく）
         await window.setDoc(window.getStoreDoc('menus', docId), productData);
         
-        alert('商品を更新しました');
+        await showCustomAlert('✅ 商品を更新しました');
         closeEditProductModal();
         
         // リストを再読み込み
@@ -10752,7 +10808,7 @@
         
       } catch (error) {
         console.error('商品更新エラー:', error);
-        alert('商品の更新に失敗しました: ' + error.message);
+        await showCustomAlert('❌ 商品の更新に失敗しました\n\n' + error.message);
       }
     };
     
@@ -10775,14 +10831,21 @@
     
     // 商品を削除
     async function deleteProduct(productId, productName) {
-      if (!confirm(`「${productName}」を削除しますか？\nこの操作は取り消せません。`)) {
-        return;
-      }
+      const confirmed = await showCustomConfirm({
+        icon: '🗑️',
+        title: '商品削除',
+        message: `「${productName}」を削除しますか？\n\nこの操作は取り消せません。`,
+        btnClass: 'modal-btn-danger',
+        confirmText: '削除する',
+        cancelText: 'キャンセル'
+      });
+      
+      if (!confirmed) return;
       
       try {
         await window.deleteDoc(window.getStoreDoc('menus', productId));
         
-        alert('商品を削除しました');
+        await showCustomAlert('✅ 商品を削除しました');
         
         // リストを再読み込み
         await loadProductDeleteList();
@@ -10792,7 +10855,7 @@
         
       } catch (error) {
         console.error('商品削除エラー:', error);
-        alert('商品の削除に失敗しました: ' + error.message);
+        await showCustomAlert('❌ 商品の削除に失敗しました\n\n' + error.message);
       }
     }
     
