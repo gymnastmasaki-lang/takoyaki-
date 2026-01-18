@@ -2139,7 +2139,8 @@
             ...currentSelectingItem,
             toppings: '標準トッピング',
             toppingPrice: 0,
-            quantity: 1
+            quantity: 1,
+            status: 'pending'  // 初期状態は未完了
           });
           updateManualCart();
           currentSelectingItem = null;
@@ -2390,7 +2391,8 @@
           quantity: 1,
           toppings: toppingNames,
           toppingPrice: toppingPrice,
-          toppingDetails: toppingDetails
+          toppingDetails: toppingDetails,
+          status: 'pending'  // 初期状態は未完了
         });
       }
       
@@ -6220,9 +6222,13 @@
         
         const div = document.createElement('div');
         div.className = 'selected-item-detailed';
+        
+        // 完了またはキャンセル済みかどうかで表示するボタンを変更
+        const isCompletedOrCancelled = item.status === 'completed' || item.status === 'cancelled';
+        
         div.innerHTML = `
           <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-            <div style="font-weight: bold;">${item.name} ×${item.quantity}</div>
+            <div style="font-weight: bold;">${item.name} ×${item.quantity}${item.status === 'completed' ? ' ✓' : ''}${item.status === 'cancelled' ? ' ✕' : ''}</div>
             <div>¥${itemBasePrice.toLocaleString()}</div>
           </div>
           ${toppingsHtml}
@@ -6230,8 +6236,12 @@
             <div style="display: flex; gap: 5px;">
               <input type="number" class="quantity-input" min="1" value="${item.quantity}" 
                      onchange="updateQuantity(${index}, this.value)">
-              <button class="edit-btn" onclick="editCartItem(${index})">修正</button>
-              <button class="remove-btn" onclick="removeFromManualCart(${index})">削除</button>
+              ${!isCompletedOrCancelled ? `
+                <button class="complete-btn" onclick="completeManualItem(${index})" style="background: #4CAF50; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">完了</button>
+                <button class="cancel-btn" onclick="cancelManualItem(${index})" style="background: #FF9800; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">キャンセル</button>
+              ` : `
+                <button class="remove-btn" onclick="removeFromManualCart(${index})" style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">削除</button>
+              `}
             </div>
             <div style="font-weight: bold; color: #667eea;">¥${itemWithTopping.toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
           </div>
@@ -6350,14 +6360,39 @@
       updateManualCart();
     };
     
-    // カートから削除
+    // ✅ 完了ボタン - 商品を完了状態にする（会計の必須条件ではない）
+    window.completeManualItem = function(index) {
+      if (manualCart[index]) {
+        manualCart[index].status = 'completed';
+        updateManualCart();
+        console.log('✅ 商品完了:', manualCart[index].name);
+      }
+    };
+    
+    // ✅ キャンセルボタン - 商品をキャンセル状態にする
+    window.cancelManualItem = function(index) {
+      if (manualCart[index]) {
+        manualCart[index].status = 'cancelled';
+        updateManualCart();
+        console.log('✕ 商品キャンセル:', manualCart[index].name);
+      }
+    };
+    
+    // カートから削除（完了/キャンセル後のみ可能）
     window.removeFromManualCart = function(index) {
       const item = manualCart[index];
-      const checkbox = document.getElementById(`menu-${item.id}`);
-      if (checkbox) checkbox.checked = false;
       
-      manualCart.splice(index, 1);
-      updateManualCart();
+      // 完了またはキャンセル済みの商品のみ削除可能
+      if (item.status === 'completed' || item.status === 'cancelled') {
+        const checkbox = document.getElementById(`menu-${item.id}`);
+        if (checkbox) checkbox.checked = false;
+        
+        manualCart.splice(index, 1);
+        updateManualCart();
+        console.log('🗑️ 商品削除:', item.name);
+      } else {
+        alert('完了またはキャンセルしてから削除してください');
+      }
     };
     
     // ✅ 即会計関数（テーブル選択不要、Firebaseに保存しない）
@@ -7544,7 +7579,10 @@
           console.log('💳 即会計完了: カートをクリア & 注文を完了→削除');
           console.log('💳 削除対象の注文数:', currentOrders.length);
           
+          // 会計完了後、カートを完全にクリア
           manualCart = [];
+          // チェックボックスもクリア
+          document.querySelectorAll('#menuItemsList input[type="checkbox"]').forEach(cb => cb.checked = false);
           updateManualCart();
           
           // 即会計の注文を完了→削除
