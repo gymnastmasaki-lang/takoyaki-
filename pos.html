@@ -68,10 +68,10 @@
         };
         const path = oldPathMap[collectionName] || collectionName;
         console.log('  → 旧パス:', path);
-        return collection(db, path);
+        return window.collection(window.db, path);
       }
       console.log('  → 新パス: stores/' + window.currentStoreId + '/' + collectionName);
-      return collection(db, 'stores', window.currentStoreId, collectionName);
+      return window.collection(window.db, 'stores', window.currentStoreId, collectionName);
     };
     
     // 店舗別ドキュメント参照を取得するヘルパー関数
@@ -84,10 +84,10 @@
           'employees': 'kintai_employees',
           'attendance': 'kintai_attendance'
         };
-        return doc(db, oldPathMap[collectionName] || collectionName, docId);
+        return window.doc(window.db, oldPathMap[collectionName] || collectionName, docId);
       }
       
-      return doc(db, 'stores', window.currentStoreId, collectionName, docId);
+      return window.doc(window.db, 'stores', window.currentStoreId, collectionName, docId);
     };
     
     // 初期化完了フラグ
@@ -4667,25 +4667,44 @@
     // ドロアオープン
     window.openDrawer = async function() {
       try {
+        console.log('🔓 ドロアオープン開始');
+        
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        
+        console.log('📅 日付:', dateStr);
         
         // 担当者を取得
         const staffSelect = document.getElementById('staffSelect');
         const staffName = staffSelect.value || 'レジ係';
         
+        console.log('👤 担当者:', staffName);
+        
         // dailySalesのドロアオープン数を更新
         const salesRef = window.getStoreDoc('dailySales', dateStr);
+        console.log('📄 salesRef:', salesRef);
+        
         const salesDoc = await window.getDoc(salesRef);
+        console.log('📄 salesDoc exists:', salesDoc.exists());
         
         if (salesDoc.exists()) {
           const data = salesDoc.data();
+          const currentCount = data.drawerOpenCount || 0;
+          const newCount = currentCount + 1;
+          
+          console.log('📊 現在のカウント:', currentCount);
+          console.log('📊 新しいカウント:', newCount);
+          
           await window.updateDoc(salesRef, {
-            drawerOpenCount: (data.drawerOpenCount || 0) + 1,
+            drawerOpenCount: newCount,
             updatedAt: window.Timestamp.now()
           });
+          
+          console.log('✅ drawerOpenCountを更新:', newCount);
         } else {
           // 今日の売上データがない場合は新規作成
+          console.log('📝 新規dailySalesドキュメントを作成');
+          
           await window.setDoc(salesRef, {
             date: dateStr,
             totalSales: 0,
@@ -4700,6 +4719,8 @@
             createdAt: window.Timestamp.now(),
             updatedAt: window.Timestamp.now()
           });
+          
+          console.log('✅ 新規作成 drawerOpenCount: 1');
         }
         
         // ドロア開閉ログを記録
@@ -4714,6 +4735,7 @@
         
       } catch (error) {
         console.error('❌ ドロア開エラー:', error);
+        console.error('❌ エラー詳細:', error.stack);
         alert('ドロア開に失敗しました: ' + error.message);
       }
     };
@@ -4774,6 +4796,9 @@
         
         if (salesDoc.exists()) {
           const data = salesDoc.data();
+          console.log('📊 dailySalesデータ:', data);
+          console.log('🔓 drawerOpenCount:', data.drawerOpenCount);
+          
           settlementData = {
             totalSales: data.totalSales || 0,
             customerCount: data.customerCount || 0,
@@ -4786,6 +4811,8 @@
             tax10Total: data.tax10Total || 0,
             drawerOpenCount: data.drawerOpenCount || 0
           };
+          
+          console.log('📊 settlementData:', settlementData);
         }
         
         // settlementDataをグローバルに保存（CSV生成で使用）
@@ -4882,6 +4909,8 @@
         
         // ===== ドロアオープン数 =====
         const drawerOpenCount = settlementData.drawerOpenCount || 0;
+        console.log('🔓 精算時のdrawerOpenCount:', drawerOpenCount);
+        console.log('📊 settlementData全体:', settlementData);
         
         // ===== 支出を取得 =====
         let expenseTotal = 0;
