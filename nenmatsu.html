@@ -217,16 +217,25 @@
                 return;
             }
 
-            // 店舗名とパスワード認証
-            const storedStoreName = localStorage.getItem('storeName');
-            if (!storedStoreName) {
-                showLoginScreen();
-                return;
-            }
+            // ローカルストレージから認証情報を確認
+            const storedStoreId = localStorage.getItem('nenmatsuStoreId');
+            const storedStoreName = localStorage.getItem('nenmatsuStoreName');
             
-            storeName = storedStoreName;
-            await loadEmployees();
-            render();
+            if (storedStoreId && storedStoreName) {
+                window.currentStoreId = storedStoreId;
+                window.currentStoreName = storedStoreName;
+                storeName = storedStoreName;
+                
+                try {
+                    await loadEmployees();
+                    render();
+                } catch (error) {
+                    console.error('データ読み込みエラー:', error);
+                    showLoginScreen();
+                }
+            } else {
+                showLoginScreen();
+            }
         }
 
         function showLoginScreen() {
@@ -251,29 +260,59 @@
         }
 
         window.handleLogin = async function() {
-            const storeNameValue = document.getElementById('storeNameInput').value;
+            const storeNameValue = document.getElementById('storeNameInput').value.trim();
             const passwordValue = document.getElementById('passwordInput').value;
             
+            if (!storeNameValue || !passwordValue) {
+                alert('店舗名とパスワードを入力してください');
+                return;
+            }
+            
             try {
-                const { doc, getDoc } = window.firebaseModules;
-                const storeDoc = await getDoc(doc(window.db, 'stores', storeNameValue));
+                const { collection, query, where, getDocs } = window.firebaseModules;
                 
-                if (!storeDoc.exists()) {
+                // 店舗名で検索
+                const storesRef = collection(window.db, 'stores');
+                const q = query(storesRef, where('storeName', '==', storeNameValue));
+                const querySnapshot = await getDocs(q);
+
+                if (querySnapshot.empty) {
                     alert('店舗が見つかりません');
                     return;
                 }
-                
-                const storeData = storeDoc.data();
-                if (storeData.password !== passwordValue) {
-                    alert('パスワードが間違っています');
-                    return;
+
+                let authenticated = false;
+                let storeData = null;
+                let storeDocId = null;
+
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    if (data.storePassword === passwordValue) {
+                        if (data.isActive === false) {
+                            alert('この店舗は無効化されています');
+                            return;
+                        }
+                        authenticated = true;
+                        storeData = data;
+                        storeDocId = doc.id;
+                    }
+                });
+
+                if (authenticated && storeData) {
+                    window.currentStoreId = storeDocId;
+                    window.currentStoreName = storeData.storeName;
+                    
+                    localStorage.setItem('nenmatsuStoreId', storeDocId);
+                    localStorage.setItem('nenmatsuStoreName', storeData.storeName);
+                    
+                    storeName = storeData.storeName;
+                    await loadEmployees();
+                    render();
+                } else {
+                    alert('パスワードが正しくありません');
                 }
-                
-                localStorage.setItem('storeName', storeNameValue);
-                storeName = storeNameValue;
-                await loadEmployees();
-                render();
             } catch (error) {
+                console.error('ログインエラー:', error);
                 alert('ログインに失敗しました: ' + error.message);
             }
         };
@@ -287,17 +326,76 @@
 
         async function loadYearData(employeeId, year) {
             // 年間給与データを集計
-            const { collection, query, where, getDocs } = window.firebaseModules;
+            const { collection, query, where, getDocs, orderBy } = window.firebaseModules;
             
-            // 給与データを取得（仮の実装）
-            // 実際にはkanri.htmlの給与計算データを参照する必要があります
+            const employee = employees.find(e => e.id === employeeId);
+            if (!employee) return null;
+
+            // 勤怠データを取得（1月〜12月）
+            let totalIncome = 0;
+            let totalSocialInsurance = 0;
+            let totalWithholdingTax = 0;
+            const monthlyData = [];
+
+            for (let month = 0; month < 12; month++) {
+                const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
+                
+                // 月次勤怠データを取得
+                const attendanceRef = collection(window.db, 'stores', storeName, 'attendance');
+                const q = query(attendanceRef, where('date', '>=', `${yearMonth}-01`), where('date', '<=', `${yearMonth}-31`));
+                const snapshot = await getDocs(q);
+                
+                let monthlyIncome = 0;
+                let monthlyHours = 0;
+                
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (data.employees && data.employees[employeeId]) {
+                        const empData = data.employees[employeeId];
+                        
+                        // 勤務時間を計算
+                        if (empData.clockIn && empData.clockOut) {
+                            const parseTime = (timeStr) => {
+                                const [hours, minutes] = timeStr.split(':').map(Number);
+                                return hours + minutes / 60;
+                            };
+                            
+                            const workHours = parseTime(empData.clockOut) - parseTime(empData.clockIn);
+                            monthlyHours += workHours;
+                        }
+                    }
+                });
+                
+                // 給与計算（簡易版）
+                const hourlyWage = employee.hourlyWage || 1000;
+                monthlyIncome = Math.floor(monthlyHours * hourlyWage);
+                
+                // 社会保険料（簡易計算：給与の15%）
+                const monthlyInsurance = Math.floor(monthlyIncome * 0.15);
+                
+                // 源泉徴収税（簡易計算：課税対象額の5%）
+                const taxableIncome = monthlyIncome - monthlyInsurance;
+                const monthlyTax = Math.floor(taxableIncome * 0.05);
+                
+                totalIncome += monthlyIncome;
+                totalSocialInsurance += monthlyInsurance;
+                totalWithholdingTax += monthlyTax;
+                
+                monthlyData.push({
+                    month: month + 1,
+                    income: monthlyIncome,
+                    hours: monthlyHours,
+                    insurance: monthlyInsurance,
+                    tax: monthlyTax
+                });
+            }
             
             return {
                 year: year,
-                totalIncome: 0, // 年間給与総額
-                totalSocialInsurance: 0, // 社会保険料総額
-                totalWithholdingTax: 0, // 源泉徴収税額
-                monthlyData: [] // 月別データ
+                totalIncome: totalIncome,
+                totalSocialInsurance: totalSocialInsurance,
+                totalWithholdingTax: totalWithholdingTax,
+                monthlyData: monthlyData
             };
         }
 
@@ -379,7 +477,7 @@
                         <!-- 収入情報 -->
                         <div class="mb-6">
                             <h3 class="text-lg font-bold mb-3">収入情報</h3>
-                            <div class="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                            <div class="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg mb-4">
                                 <div>
                                     <div class="text-sm text-gray-600">年間給与総額</div>
                                     <div class="text-xl font-bold">¥${calculator.getTotalIncome().toLocaleString()}</div>
@@ -397,6 +495,36 @@
                                     <div class="text-xl font-bold">¥${calculator.getSocialInsuranceDeduction().toLocaleString()}</div>
                                 </div>
                             </div>
+                            
+                            ${yearData.monthlyData && yearData.monthlyData.length > 0 ? `
+                                <details class="mt-4">
+                                    <summary class="cursor-pointer font-bold text-blue-600 hover:text-blue-800">月別データを表示</summary>
+                                    <div class="mt-3 overflow-x-auto">
+                                        <table class="w-full text-sm">
+                                            <thead class="bg-gray-100">
+                                                <tr>
+                                                    <th class="px-3 py-2 text-left">月</th>
+                                                    <th class="px-3 py-2 text-right">勤務時間</th>
+                                                    <th class="px-3 py-2 text-right">給与</th>
+                                                    <th class="px-3 py-2 text-right">社会保険</th>
+                                                    <th class="px-3 py-2 text-right">源泉徴収</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${yearData.monthlyData.map(m => `
+                                                    <tr class="border-b">
+                                                        <td class="px-3 py-2">${m.month}月</td>
+                                                        <td class="px-3 py-2 text-right">${m.hours.toFixed(1)}h</td>
+                                                        <td class="px-3 py-2 text-right">¥${m.income.toLocaleString()}</td>
+                                                        <td class="px-3 py-2 text-right">¥${m.insurance.toLocaleString()}</td>
+                                                        <td class="px-3 py-2 text-right">¥${m.tax.toLocaleString()}</td>
+                                                    </tr>
+                                                `).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </details>
+                            ` : '<p class="text-sm text-gray-500 mt-3">※ 給与データが見つかりません。勤怠データを確認してください。</p>'}
                         </div>
 
                         <!-- 控除入力フォーム -->
@@ -483,7 +611,13 @@
         };
 
         window.handleLogout = function() {
-            localStorage.removeItem('storeName');
+            localStorage.removeItem('nenmatsuStoreId');
+            localStorage.removeItem('nenmatsuStoreName');
+            window.currentStoreId = null;
+            window.currentStoreName = null;
+            storeName = '';
+            employees = [];
+            selectedEmployee = null;
             location.reload();
         };
 
