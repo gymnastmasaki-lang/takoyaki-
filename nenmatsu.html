@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>年末調整システム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @media print {
+            body * { visibility: hidden; }
+            .print-area, .print-area * { visibility: visible; }
+            .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+            .no-print { display: none !important; }
+            @page { size: A4; margin: 15mm; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="app"></div>
+
+    <!-- Firebase -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, setDoc, query, where, Timestamp, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+            authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+            projectId: "takoyaki-order-system-bacd7",
+            storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+            messagingSenderId: "104494752890",
+            appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        window.db = db;
+        window.firebaseModules = { collection, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, setDoc, query, where, Timestamp, orderBy };
+        window.FirebaseReady = true;
+    </script>
+
+    <script type="module">
+        // 年末調整計算ロジック
+        class NenmatsuCalculator {
+            constructor(yearData) {
+                this.yearData = yearData;
+                this.year = yearData.year || new Date().getFullYear();
+            }
+
+            // 給与収入合計
+            getTotalIncome() {
+                return this.yearData.totalIncome || 0;
+            }
+
+            // 給与所得控除
+            getIncomeDeduction() {
+                const income = this.getTotalIncome();
+                if (income <= 1625000) return 550000;
+                if (income <= 1800000) return income * 0.4 - 100000;
+                if (income <= 3600000) return income * 0.3 + 80000;
+                if (income <= 6600000) return income * 0.2 + 440000;
+                if (income <= 8500000) return income * 0.1 + 1100000;
+                return 1950000;
+            }
+
+            // 給与所得
+            getTaxableIncome() {
+                return this.getTotalIncome() - this.getIncomeDeduction();
+            }
+
+            // 基礎控除（2020年改正後）
+            getBasicDeduction() {
+                const income = this.getTaxableIncome();
+                if (income <= 24000000) return 480000;
+                if (income <= 24500000) return 320000;
+                if (income <= 25000000) return 160000;
+                return 0;
+            }
+
+            // 配偶者控除
+            getSpouseDeduction(spouseIncome = 0) {
+                const income = this.getTaxableIncome();
+                if (spouseIncome > 1330000 || income > 10000000) return 0;
+                
+                if (spouseIncome <= 950000) {
+                    if (income <= 9000000) return 380000;
+                    if (income <= 9500000) return 260000;
+                    if (income <= 10000000) return 130000;
+                }
+                return 0;
+            }
+
+            // 配偶者特別控除
+            getSpouseSpecialDeduction(spouseIncome = 0) {
+                const income = this.getTaxableIncome();
+                if (spouseIncome <= 950000 || spouseIncome > 2015999 || income > 10000000) return 0;
+                
+                // 所得金額に応じた控除額（簡略版）
+                if (income <= 9000000) {
+                    if (spouseIncome <= 1000000) return 380000;
+                    if (spouseIncome <= 1050000) return 360000;
+                    if (spouseIncome <= 1100000) return 310000;
+                    if (spouseIncome <= 1150000) return 260000;
+                    if (spouseIncome <= 1200000) return 210000;
+                    if (spouseIncome <= 1250000) return 160000;
+                    if (spouseIncome <= 1300000) return 110000;
+                    if (spouseIncome <= 1350000) return 60000;
+                    if (spouseIncome <= 1400000) return 30000;
+                    return 0;
+                }
+                return 0;
+            }
+
+            // 扶養控除
+            getDependentDeduction(dependents = []) {
+                let total = 0;
+                dependents.forEach(d => {
+                    if (d.age >= 16 && d.age < 19) total += 380000; // 一般
+                    else if (d.age >= 19 && d.age < 23) total += 630000; // 特定
+                    else if (d.age >= 23 && d.age < 70) total += 380000; // 一般
+                    else if (d.age >= 70) total += 480000; // 老人
+                });
+                return total;
+            }
+
+            // 生命保険料控除
+            getLifeInsuranceDeduction(data = {}) {
+                const calc = (amount) => {
+                    if (amount <= 20000) return amount;
+                    if (amount <= 40000) return amount * 0.5 + 10000;
+                    if (amount <= 80000) return amount * 0.25 + 20000;
+                    return 40000;
+                };
+                
+                const lifeIns = calc(data.lifeInsurance || 0);
+                const medicalIns = calc(data.medicalInsurance || 0);
+                const pensionIns = calc(data.pensionInsurance || 0);
+                
+                return Math.min(lifeIns + medicalIns + pensionIns, 120000);
+            }
+
+            // 地震保険料控除
+            getEarthquakeInsuranceDeduction(amount = 0) {
+                return Math.min(amount, 50000);
+            }
+
+            // 社会保険料控除
+            getSocialInsuranceDeduction() {
+                return this.yearData.totalSocialInsurance || 0;
+            }
+
+            // 小規模企業共済等掛金控除
+            getSmallBusinessDeduction(amount = 0) {
+                return amount;
+            }
+
+            // 所得控除合計
+            getTotalDeductions(deductions = {}) {
+                return this.getBasicDeduction() +
+                       this.getSpouseDeduction(deductions.spouseIncome) +
+                       this.getSpouseSpecialDeduction(deductions.spouseIncome) +
+                       this.getDependentDeduction(deductions.dependents) +
+                       this.getLifeInsuranceDeduction(deductions.lifeInsurance) +
+                       this.getEarthquakeInsuranceDeduction(deductions.earthquakeInsurance) +
+                       this.getSocialInsuranceDeduction() +
+                       this.getSmallBusinessDeduction(deductions.smallBusiness);
+            }
+
+            // 課税所得
+            getTaxableIncomeAfterDeductions(deductions = {}) {
+                return Math.max(0, this.getTaxableIncome() - this.getTotalDeductions(deductions));
+            }
+
+            // 所得税額
+            getIncomeTax(deductions = {}) {
+                const taxable = this.getTaxableIncomeAfterDeductions(deductions);
+                if (taxable <= 1950000) return taxable * 0.05;
+                if (taxable <= 3300000) return taxable * 0.1 - 97500;
+                if (taxable <= 6950000) return taxable * 0.2 - 427500;
+                if (taxable <= 9000000) return taxable * 0.23 - 636000;
+                if (taxable <= 18000000) return taxable * 0.33 - 1536000;
+                if (taxable <= 40000000) return taxable * 0.40 - 2796000;
+                return taxable * 0.45 - 4796000;
+            }
+
+            // 復興特別所得税
+            getReconstructionTax(deductions = {}) {
+                return Math.floor(this.getIncomeTax(deductions) * 0.021);
+            }
+
+            // 年調所得税額
+            getTotalTax(deductions = {}) {
+                return this.getIncomeTax(deductions) + this.getReconstructionTax(deductions);
+            }
+
+            // 年末調整還付・徴収額
+            getAdjustmentAmount(deductions = {}) {
+                const totalTax = this.getTotalTax(deductions);
+                const withheld = this.yearData.totalWithholdingTax || 0;
+                return withheld - totalTax; // 正: 還付、負: 追加徴収
+            }
+        }
+
+        // メインアプリ
+        const app = document.getElementById('app');
+        
+        let employees = [];
+        let selectedEmployee = null;
+        let yearData = {};
+        let deductions = {};
+        let storeName = '';
+        let targetYear = new Date().getFullYear();
+
+        async function init() {
+            if (!window.FirebaseReady) {
+                setTimeout(init, 100);
+                return;
+            }
+
+            // 店舗名とパスワード認証
+            const storedStoreName = localStorage.getItem('storeName');
+            if (!storedStoreName) {
+                showLoginScreen();
+                return;
+            }
+            
+            storeName = storedStoreName;
+            await loadEmployees();
+            render();
+        }
+
+        function showLoginScreen() {
+            app.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center">
+                    <div class="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+                        <h1 class="text-2xl font-bold mb-6">年末調整システム</h1>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-2">店舗名</label>
+                            <input type="text" id="storeNameInput" class="w-full px-3 py-2 border rounded-lg" />
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-2">パスワード</label>
+                            <input type="password" id="passwordInput" class="w-full px-3 py-2 border rounded-lg" />
+                        </div>
+                        <button onclick="handleLogin()" class="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600">
+                            ログイン
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.handleLogin = async function() {
+            const storeNameValue = document.getElementById('storeNameInput').value;
+            const passwordValue = document.getElementById('passwordInput').value;
+            
+            try {
+                const { doc, getDoc } = window.firebaseModules;
+                const storeDoc = await getDoc(doc(window.db, 'stores', storeNameValue));
+                
+                if (!storeDoc.exists()) {
+                    alert('店舗が見つかりません');
+                    return;
+                }
+                
+                const storeData = storeDoc.data();
+                if (storeData.password !== passwordValue) {
+                    alert('パスワードが間違っています');
+                    return;
+                }
+                
+                localStorage.setItem('storeName', storeNameValue);
+                storeName = storeNameValue;
+                await loadEmployees();
+                render();
+            } catch (error) {
+                alert('ログインに失敗しました: ' + error.message);
+            }
+        };
+
+        async function loadEmployees() {
+            const { collection, query, where, getDocs } = window.firebaseModules;
+            const q = query(collection(window.db, 'employees'), where('storeName', '==', storeName));
+            const snapshot = await getDocs(q);
+            employees = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
+        async function loadYearData(employeeId, year) {
+            // 年間給与データを集計
+            const { collection, query, where, getDocs } = window.firebaseModules;
+            
+            // 給与データを取得（仮の実装）
+            // 実際にはkanri.htmlの給与計算データを参照する必要があります
+            
+            return {
+                year: year,
+                totalIncome: 0, // 年間給与総額
+                totalSocialInsurance: 0, // 社会保険料総額
+                totalWithholdingTax: 0, // 源泉徴収税額
+                monthlyData: [] // 月別データ
+            };
+        }
+
+        function render() {
+            if (!selectedEmployee) {
+                renderEmployeeList();
+            } else {
+                renderAdjustmentForm();
+            }
+        }
+
+        function renderEmployeeList() {
+            app.innerHTML = `
+                <div class="container mx-auto px-4 py-8">
+                    <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h1 class="text-3xl font-bold">年末調整システム</h1>
+                            <div class="flex gap-4">
+                                <select id="targetYear" class="px-4 py-2 border rounded-lg" onchange="handleYearChange(this.value)">
+                                    ${[0, 1, 2].map(i => {
+                                        const y = new Date().getFullYear() - i;
+                                        return `<option value="${y}" ${y === targetYear ? 'selected' : ''}>${y}年</option>`;
+                                    }).join('')}
+                                </select>
+                                <button onclick="handleLogout()" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+                                    ログアウト
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <p class="text-gray-600">店舗: ${storeName}</p>
+                            <p class="text-gray-600">対象年: ${targetYear}年</p>
+                        </div>
+
+                        <h2 class="text-xl font-bold mb-4">従業員一覧</h2>
+                        <div class="space-y-3">
+                            ${employees.map(emp => `
+                                <div class="border rounded-lg p-4 flex justify-between items-center hover:bg-gray-50">
+                                    <div>
+                                        <div class="font-bold">${emp.name || '名前未設定'}</div>
+                                        <div class="text-sm text-gray-600">${emp.furigana || ''}</div>
+                                    </div>
+                                    <button 
+                                        onclick="selectEmployee('${emp.id}')" 
+                                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                                    >
+                                        年末調整を開始
+                                    </button>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        ${employees.length === 0 ? '<p class="text-center text-gray-500 py-8">従業員が登録されていません</p>' : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAdjustmentForm() {
+            const emp = employees.find(e => e.id === selectedEmployee);
+            const calculator = new NenmatsuCalculator(yearData);
+            
+            app.innerHTML = `
+                <div class="container mx-auto px-4 py-8">
+                    <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h1 class="text-2xl font-bold">${targetYear}年 年末調整</h1>
+                            <button onclick="backToList()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+                                ← 一覧に戻る
+                            </button>
+                        </div>
+
+                        <div class="mb-6 p-4 bg-blue-50 rounded-lg">
+                            <div class="font-bold text-lg">${emp.name || '名前未設定'}</div>
+                            <div class="text-sm text-gray-600">${emp.furigana || ''}</div>
+                        </div>
+
+                        <!-- 収入情報 -->
+                        <div class="mb-6">
+                            <h3 class="text-lg font-bold mb-3">収入情報</h3>
+                            <div class="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                                <div>
+                                    <div class="text-sm text-gray-600">年間給与総額</div>
+                                    <div class="text-xl font-bold">¥${calculator.getTotalIncome().toLocaleString()}</div>
+                                </div>
+                                <div>
+                                    <div class="text-sm text-gray-600">給与所得控除</div>
+                                    <div class="text-xl font-bold">¥${calculator.getIncomeDeduction().toLocaleString()}</div>
+                                </div>
+                                <div>
+                                    <div class="text-sm text-gray-600">給与所得</div>
+                                    <div class="text-xl font-bold">¥${calculator.getTaxableIncome().toLocaleString()}</div>
+                                </div>
+                                <div>
+                                    <div class="text-sm text-gray-600">社会保険料</div>
+                                    <div class="text-xl font-bold">¥${calculator.getSocialInsuranceDeduction().toLocaleString()}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 控除入力フォーム -->
+                        <div class="mb-6">
+                            <h3 class="text-lg font-bold mb-3">控除情報の入力</h3>
+                            <div id="deductionForm" class="space-y-4">
+                                <!-- 配偶者情報 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">配偶者情報</h4>
+                                    <div class="flex items-center gap-4">
+                                        <label class="flex items-center">
+                                            <input type="checkbox" id="hasSpouse" onchange="toggleSpouse(this.checked)" class="mr-2" />
+                                            配偶者あり
+                                        </label>
+                                        <div id="spouseIncome" class="hidden flex items-center gap-2">
+                                            <label class="text-sm">配偶者の所得:</label>
+                                            <input type="number" id="spouseIncomeAmount" value="0" class="px-3 py-1 border rounded" />
+                                            <span class="text-sm">円</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 扶養家族 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">扶養親族</h4>
+                                    <button onclick="addDependent()" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 mb-3">
+                                        + 扶養親族を追加
+                                    </button>
+                                    <div id="dependentsList"></div>
+                                </div>
+
+                                <!-- 生命保険料控除 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">生命保険料控除</h4>
+                                    <div class="grid grid-cols-3 gap-4">
+                                        <div>
+                                            <label class="text-sm">一般生命保険料</label>
+                                            <input type="number" id="lifeInsurance" value="0" class="w-full px-3 py-2 border rounded" />
+                                        </div>
+                                        <div>
+                                            <label class="text-sm">介護医療保険料</label>
+                                            <input type="number" id="medicalInsurance" value="0" class="w-full px-3 py-2 border rounded" />
+                                        </div>
+                                        <div>
+                                            <label class="text-sm">個人年金保険料</label>
+                                            <input type="number" id="pensionInsurance" value="0" class="w-full px-3 py-2 border rounded" />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 地震保険料控除 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">地震保険料控除</h4>
+                                    <input type="number" id="earthquakeInsurance" value="0" class="px-3 py-2 border rounded" />
+                                    <span class="text-sm ml-2">円</span>
+                                </div>
+
+                                <!-- 小規模企業共済等掛金控除 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">小規模企業共済等掛金控除</h4>
+                                    <input type="number" id="smallBusiness" value="0" class="px-3 py-2 border rounded" />
+                                    <span class="text-sm ml-2">円</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 計算ボタン -->
+                        <div class="flex gap-4">
+                            <button onclick="calculate()" class="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-bold">
+                                計算する
+                            </button>
+                        </div>
+
+                        <!-- 計算結果 -->
+                        <div id="result" class="hidden mt-6"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.handleYearChange = function(year) {
+            targetYear = parseInt(year);
+            render();
+        };
+
+        window.handleLogout = function() {
+            localStorage.removeItem('storeName');
+            location.reload();
+        };
+
+        window.selectEmployee = async function(employeeId) {
+            selectedEmployee = employeeId;
+            yearData = await loadYearData(employeeId, targetYear);
+            deductions = {};
+            render();
+        };
+
+        window.backToList = function() {
+            selectedEmployee = null;
+            render();
+        };
+
+        window.toggleSpouse = function(checked) {
+            document.getElementById('spouseIncome').classList.toggle('hidden', !checked);
+        };
+
+        let dependents = [];
+        window.addDependent = function() {
+            dependents.push({ age: 16 });
+            renderDependents();
+        };
+
+        window.removeDependent = function(index) {
+            dependents.splice(index, 1);
+            renderDependents();
+        };
+
+        function renderDependents() {
+            const list = document.getElementById('dependentsList');
+            list.innerHTML = dependents.map((d, i) => `
+                <div class="flex items-center gap-4 mb-2">
+                    <label class="text-sm">年齢:</label>
+                    <input type="number" value="${d.age}" onchange="dependents[${i}].age = parseInt(this.value)" class="px-3 py-1 border rounded w-20" />
+                    <button onclick="removeDependent(${i})" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600">削除</button>
+                </div>
+            `).join('');
+        }
+
+        window.calculate = function() {
+            const emp = employees.find(e => e.id === selectedEmployee);
+            
+            // 控除情報を収集
+            deductions = {
+                spouseIncome: document.getElementById('hasSpouse').checked ? 
+                    parseInt(document.getElementById('spouseIncomeAmount').value) || 0 : 0,
+                dependents: dependents,
+                lifeInsurance: {
+                    lifeInsurance: parseInt(document.getElementById('lifeInsurance').value) || 0,
+                    medicalInsurance: parseInt(document.getElementById('medicalInsurance').value) || 0,
+                    pensionInsurance: parseInt(document.getElementById('pensionInsurance').value) || 0
+                },
+                earthquakeInsurance: parseInt(document.getElementById('earthquakeInsurance').value) || 0,
+                smallBusiness: parseInt(document.getElementById('smallBusiness').value) || 0
+            };
+
+            const calculator = new NenmatsuCalculator(yearData);
+            
+            const totalDeductions = calculator.getTotalDeductions(deductions);
+            const taxableIncome = calculator.getTaxableIncomeAfterDeductions(deductions);
+            const incomeTax = calculator.getIncomeTax(deductions);
+            const reconstructionTax = calculator.getReconstructionTax(deductions);
+            const totalTax = calculator.getTotalTax(deductions);
+            const adjustment = calculator.getAdjustmentAmount(deductions);
+
+            const resultDiv = document.getElementById('result');
+            resultDiv.classList.remove('hidden');
+            resultDiv.innerHTML = `
+                <div class="p-6 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg">
+                    <h3 class="text-2xl font-bold mb-6 text-center">計算結果</h3>
+                    
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">基礎控除</div>
+                            <div class="text-xl font-bold">¥${calculator.getBasicDeduction().toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">配偶者(特別)控除</div>
+                            <div class="text-xl font-bold">¥${(calculator.getSpouseDeduction(deductions.spouseIncome) + calculator.getSpouseSpecialDeduction(deductions.spouseIncome)).toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">扶養控除</div>
+                            <div class="text-xl font-bold">¥${calculator.getDependentDeduction(deductions.dependents).toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">生命保険料控除</div>
+                            <div class="text-xl font-bold">¥${calculator.getLifeInsuranceDeduction(deductions.lifeInsurance).toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">地震保険料控除</div>
+                            <div class="text-xl font-bold">¥${calculator.getEarthquakeInsuranceDeduction(deductions.earthquakeInsurance).toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">社会保険料控除</div>
+                            <div class="text-xl font-bold">¥${calculator.getSocialInsuranceDeduction().toLocaleString()}</div>
+                        </div>
+                    </div>
+
+                    <div class="p-4 bg-white rounded-lg shadow mb-6">
+                        <div class="text-sm text-gray-600">所得控除合計</div>
+                        <div class="text-2xl font-bold text-blue-600">¥${totalDeductions.toLocaleString()}</div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-4 mb-6">
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">課税所得</div>
+                            <div class="text-xl font-bold">¥${taxableIncome.toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">所得税額</div>
+                            <div class="text-xl font-bold">¥${Math.floor(incomeTax).toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">復興特別所得税</div>
+                            <div class="text-xl font-bold">¥${reconstructionTax.toLocaleString()}</div>
+                        </div>
+                    </div>
+
+                    <div class="p-6 bg-white rounded-lg shadow-lg">
+                        <div class="text-center mb-2">
+                            <div class="text-lg text-gray-600">年末調整${adjustment >= 0 ? '還付' : '追加徴収'}額</div>
+                            <div class="text-4xl font-bold ${adjustment >= 0 ? 'text-green-600' : 'text-red-600'}">
+                                ${adjustment >= 0 ? '+' : ''}¥${Math.floor(adjustment).toLocaleString()}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 flex gap-4">
+                        <button onclick="downloadPDF()" class="flex-1 px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold">
+                            源泉徴収票をPDF出力
+                        </button>
+                        <button onclick="downloadCSV()" class="flex-1 px-6 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-bold">
+                            e-Tax用CSVダウンロード
+                        </button>
+                    </div>
+                </div>
+            `;
+        };
+
+        window.downloadPDF = function() {
+            alert('源泉徴収票PDF機能は準備中です。\n\nブラウザの印刷機能で代用できます。');
+            window.print();
+        };
+
+        window.downloadCSV = function() {
+            const emp = employees.find(e => e.id === selectedEmployee);
+            const calculator = new NenmatsuCalculator(yearData);
+            
+            const csv = [
+                ['年度', '氏名', 'フリガナ', '給与収入', '給与所得', '所得控除合計', '課税所得', '所得税額', '還付・徴収額'],
+                [
+                    targetYear,
+                    emp.name,
+                    emp.furigana,
+                    calculator.getTotalIncome(),
+                    calculator.getTaxableIncome(),
+                    calculator.getTotalDeductions(deductions),
+                    calculator.getTaxableIncomeAfterDeductions(deductions),
+                    Math.floor(calculator.getTotalTax(deductions)),
+                    Math.floor(calculator.getAdjustmentAmount(deductions))
+                ]
+            ].map(row => row.join(',')).join('\n');
+            
+            const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+            const blob = new Blob([bom, csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `年末調整_${emp.name}_${targetYear}.csv`;
+            a.click();
+        };
+
+        init();
+    </script>
+</body>
+</html>
