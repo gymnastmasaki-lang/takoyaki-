@@ -1,0 +1,1397 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>確定申告システム - 青色申告</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        @media print {
+            body * { visibility: hidden; }
+            .print-area, .print-area * { visibility: visible; }
+            .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+            .no-print { display: none !important; }
+            @page { size: A4; margin: 15mm; }
+        }
+        
+        .a4-page {
+            width: 210mm;
+            min-height: 297mm;
+            padding: 20mm;
+            background: white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            margin: 20px auto;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="app"></div>
+
+    <!-- Firebase -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, getDocs, getDoc, doc, query, where, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+            authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+            projectId: "takoyaki-order-system-bacd7",
+            storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+            messagingSenderId: "104494752890",
+            appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        window.db = db;
+        window.firebaseModules = { collection, getDocs, getDoc, doc, query, where, Timestamp };
+        window.FirebaseReady = true;
+    </script>
+
+    <script>
+        const appDiv = document.getElementById('app');
+        
+        let storeName = '';
+        let storeId = '';
+        let targetYear = new Date().getFullYear() - 1; // デフォルトは前年
+        let salesData = null;
+        let expenseData = null;
+        let salaryData = null;
+        let deductions = {};
+
+        // 確定申告計算クラス
+        class KakuteiCalculator {
+            constructor(data) {
+                this.salesData = data.salesData || {};
+                this.expenseData = data.expenseData || {};
+                this.salaryData = data.salaryData || {};
+                this.deductions = data.deductions || {};
+            }
+
+            // 売上高
+            getTotalSales() {
+                return this.salesData.totalSales || 0;
+            }
+
+            // 経費合計
+            getTotalExpenses() {
+                const expenses = this.expenseData.expenses || {};
+                return Object.values(expenses).reduce((sum, val) => sum + (val || 0), 0);
+            }
+
+            // 青色申告特別控除前の所得
+            getIncomeBeforeBlueDeduction() {
+                return this.getTotalSales() - this.getTotalExpenses();
+            }
+
+            // 青色申告特別控除
+            getBlueDeduction() {
+                // 簡易簿記: 10万円、複式簿記: 65万円
+                return this.deductions.blueType === 'simple' ? 100000 : 650000;
+            }
+
+            // 事業所得
+            getBusinessIncome() {
+                return Math.max(0, this.getIncomeBeforeBlueDeduction() - this.getBlueDeduction());
+            }
+
+            // 基礎控除
+            getBasicDeduction() {
+                const income = this.getBusinessIncome();
+                if (income <= 24000000) return 480000;
+                if (income <= 24500000) return 320000;
+                if (income <= 25000000) return 160000;
+                return 0;
+            }
+
+            // 配偶者控除
+            getSpouseDeduction() {
+                if (!this.deductions.hasSpouse) return 0;
+                const income = this.getBusinessIncome();
+                const spouseIncome = this.deductions.spouseIncome || 0;
+                
+                if (spouseIncome > 1330000 || income > 10000000) return 0;
+                if (spouseIncome <= 950000) {
+                    if (income <= 9000000) return 380000;
+                    if (income <= 9500000) return 260000;
+                    if (income <= 10000000) return 130000;
+                }
+                return 0;
+            }
+
+            // 配偶者特別控除
+            getSpouseSpecialDeduction() {
+                if (!this.deductions.hasSpouse) return 0;
+                const income = this.getBusinessIncome();
+                const spouseIncome = this.deductions.spouseIncome || 0;
+                
+                if (spouseIncome <= 950000 || spouseIncome > 2015999 || income > 10000000) return 0;
+                
+                if (income <= 9000000) {
+                    if (spouseIncome <= 1000000) return 380000;
+                    if (spouseIncome <= 1050000) return 360000;
+                    if (spouseIncome <= 1100000) return 310000;
+                    if (spouseIncome <= 1150000) return 260000;
+                    if (spouseIncome <= 1200000) return 210000;
+                    if (spouseIncome <= 1250000) return 160000;
+                    if (spouseIncome <= 1300000) return 110000;
+                    if (spouseIncome <= 1350000) return 60000;
+                    if (spouseIncome <= 1400000) return 30000;
+                }
+                return 0;
+            }
+
+            // 扶養控除
+            getDependentDeduction() {
+                const dependents = this.deductions.dependents || [];
+                let total = 0;
+                dependents.forEach(d => {
+                    if (d.age >= 16 && d.age < 19) total += 380000;
+                    else if (d.age >= 19 && d.age < 23) total += 630000;
+                    else if (d.age >= 23 && d.age < 70) total += 380000;
+                    else if (d.age >= 70) total += 480000;
+                });
+                return total;
+            }
+
+            // 社会保険料控除
+            getSocialInsuranceDeduction() {
+                return this.deductions.socialInsurance || 0;
+            }
+
+            // 生命保険料控除
+            getLifeInsuranceDeduction() {
+                const calc = (amount) => {
+                    if (amount <= 20000) return amount;
+                    if (amount <= 40000) return amount * 0.5 + 10000;
+                    if (amount <= 80000) return amount * 0.25 + 20000;
+                    return 40000;
+                };
+                
+                const life = calc(this.deductions.lifeInsurance || 0);
+                const medical = calc(this.deductions.medicalInsurance || 0);
+                const pension = calc(this.deductions.pensionInsurance || 0);
+                
+                return Math.min(life + medical + pension, 120000);
+            }
+
+            // 地震保険料控除
+            getEarthquakeDeduction() {
+                return Math.min(this.deductions.earthquakeInsurance || 0, 50000);
+            }
+
+            // 小規模企業共済等掛金控除
+            getSmallBusinessDeduction() {
+                return this.deductions.smallBusiness || 0;
+            }
+
+            // 所得控除合計
+            getTotalDeductions() {
+                return this.getBasicDeduction() +
+                       this.getSpouseDeduction() +
+                       this.getSpouseSpecialDeduction() +
+                       this.getDependentDeduction() +
+                       this.getSocialInsuranceDeduction() +
+                       this.getLifeInsuranceDeduction() +
+                       this.getEarthquakeDeduction() +
+                       this.getSmallBusinessDeduction();
+            }
+
+            // 課税所得
+            getTaxableIncome() {
+                return Math.max(0, this.getBusinessIncome() - this.getTotalDeductions());
+            }
+
+            // 所得税額
+            getIncomeTax() {
+                const taxable = this.getTaxableIncome();
+                if (taxable <= 1950000) return taxable * 0.05;
+                if (taxable <= 3300000) return taxable * 0.1 - 97500;
+                if (taxable <= 6950000) return taxable * 0.2 - 427500;
+                if (taxable <= 9000000) return taxable * 0.23 - 636000;
+                if (taxable <= 18000000) return taxable * 0.33 - 1536000;
+                if (taxable <= 40000000) return taxable * 0.40 - 2796000;
+                return taxable * 0.45 - 4796000;
+            }
+
+            // 復興特別所得税
+            getReconstructionTax() {
+                return Math.floor(this.getIncomeTax() * 0.021);
+            }
+
+            // 所得税及び復興特別所得税の額
+            getTotalTax() {
+                return Math.floor(this.getIncomeTax() + this.getReconstructionTax());
+            }
+
+            // 予定納税額（源泉徴収税額）
+            getPrepaidTax() {
+                return this.deductions.prepaidTax || 0;
+            }
+
+            // 納付税額（または還付税額）
+            getPaymentAmount() {
+                return this.getTotalTax() - this.getPrepaidTax();
+            }
+
+            // ===== 消費税計算 =====
+
+            // 課税売上高（税抜）
+            getTaxableSales8() {
+                return Math.floor(this.salesData.tax8Sales / 1.08);
+            }
+
+            getTaxableSales10() {
+                return Math.floor(this.salesData.tax10Sales / 1.10);
+            }
+
+            getTotalTaxableSales() {
+                return this.getTaxableSales8() + this.getTaxableSales10();
+            }
+
+            // 課税仕入高（税抜）
+            getTaxablePurchase8() {
+                return Math.floor(this.expenseData.tax8Expenses / 1.08);
+            }
+
+            getTaxablePurchase10() {
+                return Math.floor(this.expenseData.tax10Expenses / 1.10);
+            }
+
+            getTotalTaxablePurchase() {
+                return this.getTaxablePurchase8() + this.getTaxablePurchase10();
+            }
+
+            // 課税売上に係る消費税額
+            getSalesConsumptionTax8() {
+                return Math.floor(this.getTaxableSales8() * 0.08);
+            }
+
+            getSalesConsumptionTax10() {
+                return Math.floor(this.getTaxableSales10() * 0.10);
+            }
+
+            getTotalSalesConsumptionTax() {
+                return this.getSalesConsumptionTax8() + this.getSalesConsumptionTax10();
+            }
+
+            // 課税仕入に係る消費税額
+            getPurchaseConsumptionTax8() {
+                return Math.floor(this.getTaxablePurchase8() * 0.08);
+            }
+
+            getPurchaseConsumptionTax10() {
+                return Math.floor(this.getTaxablePurchase10() * 0.10);
+            }
+
+            getTotalPurchaseConsumptionTax() {
+                return this.getPurchaseConsumptionTax8() + this.getPurchaseConsumptionTax10();
+            }
+
+            // 控除対象仕入税額
+            getDeductiblePurchaseTax() {
+                // 一般課税
+                return this.getTotalPurchaseConsumptionTax();
+            }
+
+            // 差引税額
+            getNetConsumptionTax() {
+                return Math.max(0, this.getTotalSalesConsumptionTax() - this.getDeductiblePurchaseTax());
+            }
+
+            // 地方消費税
+            getLocalConsumptionTax() {
+                // 消費税額の22/78
+                return Math.floor(this.getNetConsumptionTax() * 22 / 78);
+            }
+
+            // 消費税と地方消費税の合計
+            getTotalConsumptionTaxPayment() {
+                return this.getNetConsumptionTax() + this.getLocalConsumptionTax();
+            }
+
+            // 中間納付税額
+            getIntermediatePayment() {
+                return this.deductions.intermediatePayment || 0;
+            }
+
+            // 差引納付税額（消費税）
+            getConsumptionTaxPaymentAmount() {
+                return this.getTotalConsumptionTaxPayment() - this.getIntermediatePayment();
+            }
+
+            // 消費税が必要かどうか（売上1000万円超）
+            needsConsumptionTaxFiling() {
+                return this.getTotalSales() > 10000000;
+            }
+        }
+
+        async function init() {
+            if (!window.FirebaseReady) {
+                setTimeout(init, 100);
+                return;
+            }
+
+            const storedStoreId = localStorage.getItem('kakuteiStoreId');
+            const storedStoreName = localStorage.getItem('kakuteiStoreName');
+            
+            if (storedStoreId && storedStoreName) {
+                storeId = storedStoreId;
+                storeName = storedStoreName;
+                render();
+            } else {
+                showLoginScreen();
+            }
+        }
+
+        function showLoginScreen() {
+            appDiv.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center">
+                    <div class="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+                        <h1 class="text-2xl font-bold mb-6 text-center">確定申告システム</h1>
+                        <p class="text-sm text-gray-600 mb-4">個人事業主向け青色申告書類作成</p>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-2">店舗名</label>
+                            <input type="text" id="storeNameInput" class="w-full px-3 py-2 border rounded-lg" />
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-2">パスワード</label>
+                            <input type="password" id="passwordInput" class="w-full px-3 py-2 border rounded-lg" />
+                        </div>
+                        <button onclick="handleLogin()" class="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600">
+                            ログイン
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.handleLogin = async function() {
+            const storeNameValue = document.getElementById('storeNameInput').value.trim();
+            const passwordValue = document.getElementById('passwordInput').value;
+            
+            if (!storeNameValue || !passwordValue) {
+                alert('店舗名とパスワードを入力してください');
+                return;
+            }
+            
+            try {
+                const { collection, query, where, getDocs } = window.firebaseModules;
+                
+                const storesRef = collection(window.db, 'stores');
+                const q = query(storesRef, where('storeName', '==', storeNameValue));
+                const querySnapshot = await getDocs(q);
+
+                if (querySnapshot.empty) {
+                    alert('店舗が見つかりません');
+                    return;
+                }
+
+                let authenticated = false;
+                let storeData = null;
+                let storeDocId = null;
+
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    if (data.storePassword === passwordValue) {
+                        if (data.isActive === false) {
+                            alert('この店舗は無効化されています');
+                            return;
+                        }
+                        authenticated = true;
+                        storeData = data;
+                        storeDocId = doc.id;
+                    }
+                });
+
+                if (authenticated && storeData) {
+                    storeId = storeDocId;
+                    storeName = storeData.storeName;
+                    
+                    localStorage.setItem('kakuteiStoreId', storeDocId);
+                    localStorage.setItem('kakuteiStoreName', storeData.storeName);
+                    
+                    render();
+                } else {
+                    alert('パスワードが正しくありません');
+                }
+            } catch (error) {
+                console.error('ログインエラー:', error);
+                alert('ログインに失敗しました: ' + error.message);
+            }
+        };
+
+        window.handleLogout = function() {
+            localStorage.removeItem('kakuteiStoreId');
+            localStorage.removeItem('kakuteiStoreName');
+            storeId = '';
+            storeName = '';
+            location.reload();
+        };
+
+        function render() {
+            if (!salesData) {
+                renderYearSelection();
+            } else {
+                renderMainScreen();
+            }
+        }
+
+        function renderYearSelection() {
+            appDiv.innerHTML = `
+                <div class="container mx-auto px-4 py-8">
+                    <div class="bg-white rounded-lg shadow-lg p-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h1 class="text-3xl font-bold">確定申告システム</h1>
+                            <button onclick="handleLogout()" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+                                ログアウト
+                            </button>
+                        </div>
+                        
+                        <div class="mb-6 p-4 bg-blue-50 rounded-lg">
+                            <p class="text-gray-600">店舗: ${storeName}</p>
+                            <p class="text-gray-600">店舗ID: ${storeId}</p>
+                        </div>
+
+                        <h2 class="text-xl font-bold mb-4">確定申告する年度を選択</h2>
+                        <div class="grid grid-cols-3 gap-4">
+                            ${[0, 1, 2].map(i => {
+                                const year = new Date().getFullYear() - 1 - i;
+                                return `
+                                    <button 
+                                        onclick="selectYear(${year})" 
+                                        class="p-6 border-2 border-blue-500 rounded-lg hover:bg-blue-50 transition"
+                                    >
+                                        <div class="text-2xl font-bold text-blue-600">${year}年</div>
+                                        <div class="text-sm text-gray-600 mt-2">
+                                            ${year === new Date().getFullYear() - 1 ? '（推奨）' : ''}
+                                        </div>
+                                    </button>
+                                `;
+                            }).join('')}
+                        </div>
+
+                        <div class="mt-6 p-4 bg-yellow-50 border-l-4 border-yellow-400">
+                            <p class="text-sm text-gray-700">
+                                💡 通常は前年（${new Date().getFullYear() - 1}年）を選択してください。<br>
+                                確定申告期間: 毎年2月16日〜3月15日
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.selectYear = async function(year) {
+            targetYear = year;
+            
+            appDiv.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center">
+                    <div class="text-center">
+                        <div class="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+                        <p class="text-xl text-gray-700">${year}年のデータを読み込んでいます...</p>
+                        <p class="text-sm text-gray-500 mt-2">売上・経費・給与データを集計中</p>
+                    </div>
+                </div>
+            `;
+            
+            try {
+                await loadYearData(year);
+                render();
+            } catch (error) {
+                console.error('データ読み込みエラー:', error);
+                alert('データの読み込みに失敗しました: ' + error.message);
+                salesData = null;
+                render();
+            }
+        };
+
+        async function loadYearData(year) {
+            console.log('📊 年間データ読み込み開始:', year);
+            
+            const { collection, getDocs, doc, getDoc } = window.firebaseModules;
+            
+            // 売上データ取得
+            const ordersRef = collection(window.db, 'stores', storeId, 'orders');
+            const ordersSnapshot = await getDocs(ordersRef);
+            
+            let totalSales = 0;
+            let tax8Sales = 0;
+            let tax10Sales = 0;
+            let tax8Amount = 0;
+            let tax10Amount = 0;
+            const monthlySales = Array(12).fill(0);
+            const monthlyTax8 = Array(12).fill(0);
+            const monthlyTax10 = Array(12).fill(0);
+            
+            ordersSnapshot.forEach(doc => {
+                const data = doc.data();
+                if (!data.paidAt) return;
+                
+                const paidDate = data.paidAt.toDate();
+                if (paidDate.getFullYear() !== year) return;
+                
+                const month = paidDate.getMonth();
+                const amount = data.totalAmount || 0;
+                
+                totalSales += amount;
+                monthlySales[month] += amount;
+                
+                // 税率別集計
+                const tax8Total = data.tax8Total || 0;
+                const tax10Total = data.tax10Total || 0;
+                
+                tax8Sales += tax8Total;
+                tax10Sales += tax10Total;
+                monthlyTax8[month] += tax8Total;
+                monthlyTax10[month] += tax10Total;
+                
+                // 消費税額を計算（内税）
+                const tax8Excluded = Math.floor(tax8Total / 1.08);
+                const tax10Excluded = Math.floor(tax10Total / 1.10);
+                tax8Amount += (tax8Total - tax8Excluded);
+                tax10Amount += (tax10Total - tax10Excluded);
+            });
+            
+            // 経費データ取得
+            const expensesRef = collection(window.db, 'stores', storeId, 'expenses');
+            const expensesSnapshot = await getDocs(expensesRef);
+            
+            const expenses = {
+                material: 0,      // 材料費
+                salary: 0,        // 給料賃金
+                rent: 0,          // 地代家賃
+                utilities: 0,     // 水道光熱費
+                communication: 0, // 通信費
+                transport: 0,     // 旅費交通費
+                entertainment: 0, // 接待交際費
+                supplies: 0,      // 消耗品費
+                other: 0          // 雑費
+            };
+            
+            let tax8Expenses = 0;
+            let tax10Expenses = 0;
+            let tax8ExpenseAmount = 0;
+            let tax10ExpenseAmount = 0;
+            
+            expensesSnapshot.forEach(doc => {
+                const data = doc.data();
+                const date = data.date;
+                
+                if (!date || !date.startsWith(year.toString())) return;
+                
+                if (data.items && Array.isArray(data.items)) {
+                    data.items.forEach(item => {
+                        const amount = item.amount || 0;
+                        const category = item.category || '';
+                        
+                        // カテゴリ別振り分け & 消費税計算
+                        if (category === '材料費' || category === '食費') {
+                            expenses.material += amount;
+                            tax8Expenses += amount;
+                            // 8%の消費税額を計算（内税）
+                            const excluded = Math.floor(amount / 1.08);
+                            tax8ExpenseAmount += (amount - excluded);
+                        } else if (category === '水光熱費') {
+                            expenses.utilities += amount;
+                            tax10Expenses += amount;
+                            const excluded = Math.floor(amount / 1.10);
+                            tax10ExpenseAmount += (amount - excluded);
+                        } else if (category === '交通費8%') {
+                            expenses.transport += amount;
+                            tax8Expenses += amount;
+                            const excluded = Math.floor(amount / 1.08);
+                            tax8ExpenseAmount += (amount - excluded);
+                        } else if (category === '交通費10%') {
+                            expenses.transport += amount;
+                            tax10Expenses += amount;
+                            const excluded = Math.floor(amount / 1.10);
+                            tax10ExpenseAmount += (amount - excluded);
+                        } else if (category === '接待交際費') {
+                            expenses.entertainment += amount;
+                            tax8Expenses += amount;
+                            const excluded = Math.floor(amount / 1.08);
+                            tax8ExpenseAmount += (amount - excluded);
+                        } else if (category === '日用品' || category === '雑費・雑品') {
+                            expenses.supplies += amount;
+                            tax10Expenses += amount;
+                            const excluded = Math.floor(amount / 1.10);
+                            tax10ExpenseAmount += (amount - excluded);
+                        } else {
+                            expenses.other += amount;
+                            tax10Expenses += amount;
+                            const excluded = Math.floor(amount / 1.10);
+                            tax10ExpenseAmount += (amount - excluded);
+                        }
+                    });
+                }
+            });
+            
+            // 給与データ取得（kanri.htmlから）
+            const empRef = collection(window.db, 'stores', storeId, 'employees');
+            const empSnapshot = await getDocs(empRef);
+            
+            const attRef = collection(window.db, 'stores', storeId, 'attendance');
+            const attSnapshot = await getDocs(attRef);
+            
+            let totalSalary = 0;
+            
+            attSnapshot.forEach(doc => {
+                const date = doc.id;
+                if (!date.startsWith(year.toString())) return;
+                
+                const data = doc.data();
+                if (data.employees) {
+                    Object.values(data.employees).forEach(emp => {
+                        if (emp.dailyWage) {
+                            totalSalary += emp.dailyWage;
+                        }
+                    });
+                }
+            });
+            
+            expenses.salary = totalSalary;
+            
+            salesData = {
+                totalSales: totalSales,
+                tax8Sales: tax8Sales,
+                tax10Sales: tax10Sales,
+                tax8Amount: Math.floor(tax8Amount),
+                tax10Amount: Math.floor(tax10Amount),
+                monthlySales: monthlySales,
+                monthlyTax8: monthlyTax8,
+                monthlyTax10: monthlyTax10
+            };
+            
+            expenseData = {
+                expenses: expenses,
+                tax8Expenses: tax8Expenses,
+                tax10Expenses: tax10Expenses,
+                tax8ExpenseAmount: Math.floor(tax8ExpenseAmount),
+                tax10ExpenseAmount: Math.floor(tax10ExpenseAmount),
+                totalExpenses: Object.values(expenses).reduce((sum, val) => sum + val, 0)
+            };
+            
+            salaryData = {
+                totalSalary: totalSalary
+            };
+            
+            console.log('✅ データ読み込み完了:', {
+                売上: totalSales,
+                売上消費税8: Math.floor(tax8Amount),
+                売上消費税10: Math.floor(tax10Amount),
+                経費: expenseData.totalExpenses,
+                経費消費税8: Math.floor(tax8ExpenseAmount),
+                経費消費税10: Math.floor(tax10ExpenseAmount),
+                給与: totalSalary
+            });
+        }
+
+        function renderMainScreen() {
+            const calc = new KakuteiCalculator({
+                salesData: salesData,
+                expenseData: expenseData,
+                salaryData: salaryData,
+                deductions: deductions
+            });
+            
+            appDiv.innerHTML = `
+                <div class="container mx-auto px-4 py-8 no-print">
+                    <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h1 class="text-3xl font-bold">${targetYear}年 確定申告</h1>
+                            <div class="flex gap-4">
+                                <button onclick="selectYear(null)" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+                                    ← 年度選択に戻る
+                                </button>
+                                <button onclick="handleLogout()" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+                                    ログアウト
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 収支サマリー -->
+                        <div class="grid grid-cols-3 gap-4 mb-6">
+                            <div class="p-4 bg-blue-50 rounded-lg">
+                                <div class="text-sm text-gray-600">年間売上高</div>
+                                <div class="text-2xl font-bold text-blue-600">¥${calc.getTotalSales().toLocaleString()}</div>
+                            </div>
+                            <div class="p-4 bg-red-50 rounded-lg">
+                                <div class="text-sm text-gray-600">年間経費</div>
+                                <div class="text-2xl font-bold text-red-600">¥${calc.getTotalExpenses().toLocaleString()}</div>
+                            </div>
+                            <div class="p-4 bg-green-50 rounded-lg">
+                                <div class="text-sm text-gray-600">青色申告前所得</div>
+                                <div class="text-2xl font-bold text-green-600">¥${calc.getIncomeBeforeBlueDeduction().toLocaleString()}</div>
+                            </div>
+                        </div>
+
+                        <!-- 控除入力 -->
+                        <div class="mb-6">
+                            <h3 class="text-xl font-bold mb-4">控除情報の入力</h3>
+                            
+                            <div id="deductionForm" class="space-y-4">
+                                <!-- 青色申告特別控除 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">青色申告特別控除</h4>
+                                    <select id="blueType" onchange="updateDeductions()" class="px-3 py-2 border rounded">
+                                        <option value="full">65万円控除（複式簿記）</option>
+                                        <option value="simple">10万円控除（簡易簿記）</option>
+                                    </select>
+                                </div>
+
+                                <!-- 配偶者情報 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">配偶者情報</h4>
+                                    <label class="flex items-center mb-2">
+                                        <input type="checkbox" id="hasSpouse" onchange="toggleSpouse()" class="mr-2" />
+                                        配偶者あり
+                                    </label>
+                                    <div id="spouseIncome" class="hidden">
+                                        <label class="text-sm">配偶者の所得:</label>
+                                        <input type="number" id="spouseIncomeAmount" value="0" class="px-3 py-2 border rounded ml-2" />
+                                        <span class="text-sm ml-2">円</span>
+                                    </div>
+                                </div>
+
+                                <!-- 扶養親族 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">扶養親族</h4>
+                                    <button onclick="addDependent()" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 mb-3">
+                                        + 扶養親族を追加
+                                    </button>
+                                    <div id="dependentsList"></div>
+                                </div>
+
+                                <!-- 社会保険料 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">社会保険料控除</h4>
+                                    <input type="number" id="socialInsurance" value="0" class="px-3 py-2 border rounded" />
+                                    <span class="text-sm ml-2">円（国民健康保険・国民年金など）</span>
+                                </div>
+
+                                <!-- 生命保険料 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">生命保険料控除</h4>
+                                    <div class="grid grid-cols-3 gap-4">
+                                        <div>
+                                            <label class="text-sm">一般生命保険</label>
+                                            <input type="number" id="lifeInsurance" value="0" class="w-full px-3 py-2 border rounded" />
+                                        </div>
+                                        <div>
+                                            <label class="text-sm">介護医療保険</label>
+                                            <input type="number" id="medicalInsurance" value="0" class="w-full px-3 py-2 border rounded" />
+                                        </div>
+                                        <div>
+                                            <label class="text-sm">個人年金保険</label>
+                                            <input type="number" id="pensionInsurance" value="0" class="w-full px-3 py-2 border rounded" />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 地震保険料 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">地震保険料控除</h4>
+                                    <input type="number" id="earthquakeInsurance" value="0" class="px-3 py-2 border rounded" />
+                                    <span class="text-sm ml-2">円</span>
+                                </div>
+
+                                <!-- 小規模企業共済等掛金 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">小規模企業共済等掛金控除</h4>
+                                    <input type="number" id="smallBusiness" value="0" class="px-3 py-2 border rounded" />
+                                    <span class="text-sm ml-2">円（iDeCoなど）</span>
+                                </div>
+
+                                <!-- 予定納税額 -->
+                                <div class="p-4 border rounded-lg">
+                                    <h4 class="font-bold mb-2">予定納税額（源泉徴収税額）</h4>
+                                    <input type="number" id="prepaidTax" value="0" class="px-3 py-2 border rounded" />
+                                    <span class="text-sm ml-2">円</span>
+                                </div>
+
+                                <!-- 消費税中間納付額 -->
+                                <div class="p-4 border rounded-lg bg-blue-50">
+                                    <h4 class="font-bold mb-2">消費税の中間納付税額</h4>
+                                    <input type="number" id="intermediatePayment" value="0" class="px-3 py-2 border rounded" />
+                                    <span class="text-sm ml-2">円（前年の消費税の中間納付分）</span>
+                                    <p class="text-xs text-gray-600 mt-2">※ 前年の消費税が48万円超の場合に中間納付が必要</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 計算ボタン -->
+                        <button onclick="calculate()" class="w-full px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-bold text-lg">
+                            計算する
+                        </button>
+
+                        <!-- 計算結果 -->
+                        <div id="result" class="hidden mt-6"></div>
+                    </div>
+                </div>
+
+                <!-- 印刷エリア -->
+                <div id="printArea" class="hidden"></div>
+            `;
+        }
+
+        window.toggleSpouse = function() {
+            const checked = document.getElementById('hasSpouse').checked;
+            document.getElementById('spouseIncome').classList.toggle('hidden', !checked);
+        };
+
+        let dependents = [];
+        window.addDependent = function() {
+            dependents.push({ age: 16 });
+            renderDependents();
+        };
+
+        window.removeDependent = function(index) {
+            dependents.splice(index, 1);
+            renderDependents();
+        };
+
+        function renderDependents() {
+            const list = document.getElementById('dependentsList');
+            list.innerHTML = dependents.map((d, i) => `
+                <div class="flex items-center gap-4 mb-2">
+                    <label class="text-sm">年齢:</label>
+                    <input type="number" value="${d.age}" onchange="dependents[${i}].age = parseInt(this.value)" class="px-3 py-2 border rounded w-20" />
+                    <button onclick="removeDependent(${i})" class="px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600">削除</button>
+                </div>
+            `).join('');
+        }
+
+        window.calculate = function() {
+            // 控除情報を収集
+            deductions = {
+                blueType: document.getElementById('blueType').value,
+                hasSpouse: document.getElementById('hasSpouse').checked,
+                spouseIncome: parseInt(document.getElementById('spouseIncomeAmount').value) || 0,
+                dependents: dependents,
+                socialInsurance: parseInt(document.getElementById('socialInsurance').value) || 0,
+                lifeInsurance: parseInt(document.getElementById('lifeInsurance').value) || 0,
+                medicalInsurance: parseInt(document.getElementById('medicalInsurance').value) || 0,
+                pensionInsurance: parseInt(document.getElementById('pensionInsurance').value) || 0,
+                earthquakeInsurance: parseInt(document.getElementById('earthquakeInsurance').value) || 0,
+                smallBusiness: parseInt(document.getElementById('smallBusiness').value) || 0,
+                prepaidTax: parseInt(document.getElementById('prepaidTax').value) || 0,
+                intermediatePayment: parseInt(document.getElementById('intermediatePayment').value) || 0
+            };
+
+            const calc = new KakuteiCalculator({
+                salesData: salesData,
+                expenseData: expenseData,
+                salaryData: salaryData,
+                deductions: deductions
+            });
+
+            const resultDiv = document.getElementById('result');
+            resultDiv.classList.remove('hidden');
+            
+            const paymentAmount = calc.getPaymentAmount();
+            const isRefund = paymentAmount < 0;
+            
+            resultDiv.innerHTML = `
+                <div class="p-6 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg">
+                    <h3 class="text-2xl font-bold mb-6 text-center">計算結果</h3>
+                    
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">売上高</div>
+                            <div class="text-xl font-bold">¥${calc.getTotalSales().toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">必要経費</div>
+                            <div class="text-xl font-bold">¥${calc.getTotalExpenses().toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">青色申告特別控除</div>
+                            <div class="text-xl font-bold">¥${calc.getBlueDeduction().toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">事業所得</div>
+                            <div class="text-xl font-bold text-blue-600">¥${calc.getBusinessIncome().toLocaleString()}</div>
+                        </div>
+                    </div>
+
+                    <div class="p-4 bg-white rounded-lg shadow mb-6">
+                        <div class="text-sm text-gray-600">所得控除合計</div>
+                        <div class="text-2xl font-bold text-blue-600">¥${calc.getTotalDeductions().toLocaleString()}</div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">課税所得</div>
+                            <div class="text-xl font-bold">¥${calc.getTaxableIncome().toLocaleString()}</div>
+                        </div>
+                        <div class="p-4 bg-white rounded-lg shadow">
+                            <div class="text-sm text-gray-600">所得税額</div>
+                            <div class="text-xl font-bold">¥${calc.getTotalTax().toLocaleString()}</div>
+                        </div>
+                    </div>
+
+                    <div class="p-6 bg-white rounded-lg shadow-lg">
+                        <div class="text-center mb-2">
+                            <div class="text-lg text-gray-600">${isRefund ? '還付される税金' : '納める税金'}</div>
+                            <div class="text-4xl font-bold ${isRefund ? 'text-green-600' : 'text-red-600'}">
+                                ${isRefund ? '+' : ''}¥${Math.abs(paymentAmount).toLocaleString()}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 grid grid-cols-2 gap-4">
+                        <button onclick="printDocuments()" class="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold">
+                            📄 申告書類を印刷
+                        </button>
+                        <button onclick="exportData()" class="px-6 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-bold">
+                            💾 データをエクスポート
+                        </button>
+                    </div>
+
+                    ${calc.needsConsumptionTaxFiling() ? `
+                        <div class="mt-6 p-6 bg-blue-50 border-2 border-blue-400 rounded-lg">
+                            <h3 class="text-xl font-bold mb-4 text-blue-800">💳 消費税申告（売上1000万円超）</h3>
+                            
+                            <div class="grid grid-cols-2 gap-4 mb-4">
+                                <div class="p-3 bg-white rounded shadow">
+                                    <div class="text-sm text-gray-600">課税売上高（税抜）</div>
+                                    <div class="text-lg font-bold">¥${calc.getTotalTaxableSales().toLocaleString()}</div>
+                                </div>
+                                <div class="p-3 bg-white rounded shadow">
+                                    <div class="text-sm text-gray-600">課税仕入高（税抜）</div>
+                                    <div class="text-lg font-bold">¥${calc.getTotalTaxablePurchase().toLocaleString()}</div>
+                                </div>
+                                <div class="p-3 bg-white rounded shadow">
+                                    <div class="text-sm text-gray-600">売上に係る消費税</div>
+                                    <div class="text-lg font-bold text-red-600">¥${calc.getTotalSalesConsumptionTax().toLocaleString()}</div>
+                                </div>
+                                <div class="p-3 bg-white rounded shadow">
+                                    <div class="text-sm text-gray-600">仕入に係る消費税</div>
+                                    <div class="text-lg font-bold text-blue-600">¥${calc.getTotalPurchaseConsumptionTax().toLocaleString()}</div>
+                                </div>
+                            </div>
+
+                            <div class="p-4 bg-white rounded shadow mb-4">
+                                <div class="text-sm text-gray-600">差引消費税額</div>
+                                <div class="text-2xl font-bold text-blue-800">¥${calc.getNetConsumptionTax().toLocaleString()}</div>
+                            </div>
+
+                            <div class="p-4 bg-white rounded shadow mb-4">
+                                <div class="text-sm text-gray-600">地方消費税額</div>
+                                <div class="text-xl font-bold">¥${calc.getLocalConsumptionTax().toLocaleString()}</div>
+                            </div>
+
+                            <div class="p-4 bg-gradient-to-r from-blue-100 to-blue-200 rounded shadow">
+                                <div class="text-center">
+                                    <div class="text-lg text-gray-700">納める消費税・地方消費税</div>
+                                    <div class="text-3xl font-bold text-blue-800">¥${calc.getConsumptionTaxPaymentAmount().toLocaleString()}</div>
+                                </div>
+                            </div>
+
+                            <p class="text-sm text-gray-600 mt-4">
+                                ℹ️ 消費税申告書は印刷ボタンで青色申告決算書・確定申告書Bと一緒に出力されます
+                            </p>
+                        </div>
+                    ` : `
+                        <div class="mt-6 p-4 bg-gray-50 border-l-4 border-gray-400 rounded">
+                            <p class="text-sm text-gray-700">
+                                ℹ️ 売上1000万円以下のため、消費税申告は不要です<br>
+                                （前々年の売上が1000万円を超えた場合、翌々年から消費税課税事業者となります）
+                            </p>
+                        </div>
+                    `}
+
+                    <div class="mt-4 p-4 bg-yellow-50 border-l-4 border-yellow-400">
+                        <p class="text-sm text-gray-700">
+                            ✅ この書類を税務署に持参してください<br>
+                            ✅ 控除証明書（生命保険・地震保険など）も必要です<br>
+                            ✅ マイナンバーカードまたは通知カードを持参してください<br>
+                            ${calc.needsConsumptionTaxFiling() ? '✅ 消費税申告書も一緒に提出してください<br>' : ''}
+                            ✅ レシート・領収書は7年間保管（提出不要）
+                        </p>
+                    </div>
+                </div>
+            `;
+        };
+
+        window.printDocuments = function() {
+            const calc = new KakuteiCalculator({
+                salesData: salesData,
+                expenseData: expenseData,
+                salaryData: salaryData,
+                deductions: deductions
+            });
+
+            const printArea = document.getElementById('printArea');
+            printArea.classList.remove('hidden');
+            
+            // 青色申告決算書
+            printArea.innerHTML = generateAoiroKessan(calc);
+            
+            // 確定申告書B
+            printArea.innerHTML += generateKakuteiB(calc);
+            
+            // 消費税申告書（売上1000万円超の場合）
+            if (calc.needsConsumptionTaxFiling()) {
+                printArea.innerHTML += generateConsumptionTaxReturn(calc);
+            }
+            
+            window.print();
+            
+            setTimeout(() => {
+                printArea.classList.add('hidden');
+            }, 1000);
+        };
+
+        function generateConsumptionTaxReturn(calc) {
+            return `
+                <div class="print-area a4-page">
+                    <h1 class="text-center text-2xl font-bold mb-4">消費税及び地方消費税の確定申告書</h1>
+                    <p class="text-center mb-6">${targetYear}年分（一般課税用）</p>
+                    
+                    <div class="mb-4">
+                        <p>住所または事業所所在地: _______________________________</p>
+                        <p>氏名: ${storeName}</p>
+                        <p>マイナンバー: ___ ____ ____</p>
+                    </div>
+
+                    <h3 class="font-bold mb-2">課税標準額等</h3>
+                    <table class="w-full border-collapse border border-black mb-6">
+                        <tr>
+                            <th class="border border-black p-2 bg-gray-100">税率</th>
+                            <th class="border border-black p-2 bg-gray-100">課税標準額（税抜）</th>
+                            <th class="border border-black p-2 bg-gray-100">消費税額</th>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2">8%</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getTaxableSales8().toLocaleString()}</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getSalesConsumptionTax8().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2">10%</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getTaxableSales10().toLocaleString()}</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getSalesConsumptionTax10().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2 font-bold">合計</td>
+                            <td class="border border-black p-2 text-right font-bold">¥${calc.getTotalTaxableSales().toLocaleString()}</td>
+                            <td class="border border-black p-2 text-right font-bold">¥${calc.getTotalSalesConsumptionTax().toLocaleString()}</td>
+                        </tr>
+                    </table>
+
+                    <h3 class="font-bold mb-2">課税仕入れに係る支払対価の額</h3>
+                    <table class="w-full border-collapse border border-black mb-6">
+                        <tr>
+                            <th class="border border-black p-2 bg-gray-100">税率</th>
+                            <th class="border border-black p-2 bg-gray-100">課税仕入高（税抜）</th>
+                            <th class="border border-black p-2 bg-gray-100">消費税額</th>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2">8%</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getTaxablePurchase8().toLocaleString()}</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getPurchaseConsumptionTax8().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2">10%</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getTaxablePurchase10().toLocaleString()}</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getPurchaseConsumptionTax10().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2 font-bold">合計</td>
+                            <td class="border border-black p-2 text-right font-bold">¥${calc.getTotalTaxablePurchase().toLocaleString()}</td>
+                            <td class="border border-black p-2 text-right font-bold">¥${calc.getTotalPurchaseConsumptionTax().toLocaleString()}</td>
+                        </tr>
+                    </table>
+
+                    <h3 class="font-bold mb-2">消費税額の計算</h3>
+                    <table class="w-full border-collapse border border-black mb-6">
+                        <tr>
+                            <td class="border border-black p-2">課税売上げに係る消費税額</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getTotalSalesConsumptionTax().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2">控除対象仕入税額</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getDeductiblePurchaseTax().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2 font-bold">差引税額</td>
+                            <td class="border border-black p-2 text-right font-bold">¥${calc.getNetConsumptionTax().toLocaleString()}</td>
+                        </tr>
+                    </table>
+
+                    <h3 class="font-bold mb-2">地方消費税額の計算</h3>
+                    <table class="w-full border-collapse border border-black mb-6">
+                        <tr>
+                            <td class="border border-black p-2">消費税額</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getNetConsumptionTax().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2">地方消費税額（消費税額 × 22/78）</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getLocalConsumptionTax().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2 font-bold">消費税及び地方消費税の額</td>
+                            <td class="border border-black p-2 text-right font-bold">¥${calc.getTotalConsumptionTaxPayment().toLocaleString()}</td>
+                        </tr>
+                    </table>
+
+                    <table class="w-full border-collapse border border-black">
+                        <tr>
+                            <td class="border border-black p-2">中間納付税額</td>
+                            <td class="border border-black p-2 text-right">¥${calc.getIntermediatePayment().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2 font-bold text-lg">差引納付すべき税額</td>
+                            <td class="border border-black p-2 text-right font-bold text-xl text-red-600">
+                                ¥${calc.getConsumptionTaxPaymentAmount().toLocaleString()}
+                            </td>
+                        </tr>
+                    </table>
+
+                    <div class="mt-6 p-4 border-2 border-gray-300 rounded">
+                        <p class="text-sm text-gray-700">
+                            【内訳】<br>
+                            ・8%対象取引: 売上 ¥${calc.getTaxableSales8().toLocaleString()} / 仕入 ¥${calc.getTaxablePurchase8().toLocaleString()}<br>
+                            ・10%対象取引: 売上 ¥${calc.getTaxableSales10().toLocaleString()} / 仕入 ¥${calc.getTaxablePurchase10().toLocaleString()}<br>
+                            <br>
+                            ※ POSシステムで税率別に自動集計されたデータを使用
+                        </p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function generateAoiroKessan(calc) {
+            const expenses = expenseData.expenses;
+            
+            return `
+                <div class="print-area a4-page">
+                    <h1 class="text-center text-2xl font-bold mb-4">所得税青色申告決算書（一般用）</h1>
+                    <p class="text-center mb-6">${targetYear}年分</p>
+                    
+                    <div class="mb-4">
+                        <p>住所または事業所所在地: _______________________________</p>
+                        <p>氏名: ${storeName}</p>
+                    </div>
+
+                    <table class="w-full border-collapse border border-black mb-6">
+                        <tr>
+                            <th class="border border-black p-2 bg-gray-100">科目</th>
+                            <th class="border border-black p-2 bg-gray-100">金額（円）</th>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2">売上（収入）金額</td>
+                            <td class="border border-black p-2 text-right">${calc.getTotalSales().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2 font-bold">売上（収入）金額 計</td>
+                            <td class="border border-black p-2 text-right font-bold">${calc.getTotalSales().toLocaleString()}</td>
+                        </tr>
+                    </table>
+
+                    <h3 class="font-bold mb-2">必要経費</h3>
+                    <table class="w-full border-collapse border border-black mb-6">
+                        <tr>
+                            <th class="border border-black p-2 bg-gray-100">科目</th>
+                            <th class="border border-black p-2 bg-gray-100">金額（円）</th>
+                        </tr>
+                        ${Object.entries({
+                            '材料費': expenses.material,
+                            '給料賃金': expenses.salary,
+                            '地代家賃': expenses.rent,
+                            '水道光熱費': expenses.utilities,
+                            '通信費': expenses.communication,
+                            '旅費交通費': expenses.transport,
+                            '接待交際費': expenses.entertainment,
+                            '消耗品費': expenses.supplies,
+                            '雑費': expenses.other
+                        }).map(([name, amount]) => `
+                            <tr>
+                                <td class="border border-black p-2">${name}</td>
+                                <td class="border border-black p-2 text-right">${amount.toLocaleString()}</td>
+                            </tr>
+                        `).join('')}
+                        <tr>
+                            <td class="border border-black p-2 font-bold">経費合計</td>
+                            <td class="border border-black p-2 text-right font-bold">${calc.getTotalExpenses().toLocaleString()}</td>
+                        </tr>
+                    </table>
+
+                    <table class="w-full border-collapse border border-black">
+                        <tr>
+                            <td class="border border-black p-2">差引金額（売上 - 経費）</td>
+                            <td class="border border-black p-2 text-right">${calc.getIncomeBeforeBlueDeduction().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2">青色申告特別控除額</td>
+                            <td class="border border-black p-2 text-right">${calc.getBlueDeduction().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2 font-bold">所得金額</td>
+                            <td class="border border-black p-2 text-right font-bold text-lg">${calc.getBusinessIncome().toLocaleString()}</td>
+                        </tr>
+                    </table>
+                </div>
+            `;
+        }
+
+        function generateKakuteiB(calc) {
+            return `
+                <div class="print-area a4-page">
+                    <h1 class="text-center text-2xl font-bold mb-4">確定申告書 B（第一表）</h1>
+                    <p class="text-center mb-6">${targetYear}年分の所得税及び復興特別所得税の確定申告書</p>
+                    
+                    <div class="mb-4">
+                        <p>住所: _______________________________</p>
+                        <p>氏名: ${storeName}</p>
+                        <p>マイナンバー: ___ ____ ____</p>
+                    </div>
+
+                    <h3 class="font-bold mb-2">収入金額等</h3>
+                    <table class="w-full border-collapse border border-black mb-6">
+                        <tr>
+                            <td class="border border-black p-2">事業（営業等）</td>
+                            <td class="border border-black p-2 text-right">${calc.getTotalSales().toLocaleString()}</td>
+                        </tr>
+                    </table>
+
+                    <h3 class="font-bold mb-2">所得金額</h3>
+                    <table class="w-full border-collapse border border-black mb-6">
+                        <tr>
+                            <td class="border border-black p-2">事業所得</td>
+                            <td class="border border-black p-2 text-right">${calc.getBusinessIncome().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2 font-bold">合計</td>
+                            <td class="border border-black p-2 text-right font-bold">${calc.getBusinessIncome().toLocaleString()}</td>
+                        </tr>
+                    </table>
+
+                    <h3 class="font-bold mb-2">所得から差し引かれる金額（所得控除）</h3>
+                    <table class="w-full border-collapse border border-black mb-6">
+                        <tr>
+                            <td class="border border-black p-2">基礎控除</td>
+                            <td class="border border-black p-2 text-right">${calc.getBasicDeduction().toLocaleString()}</td>
+                        </tr>
+                        ${calc.getSpouseDeduction() > 0 ? `
+                        <tr>
+                            <td class="border border-black p-2">配偶者控除</td>
+                            <td class="border border-black p-2 text-right">${calc.getSpouseDeduction().toLocaleString()}</td>
+                        </tr>
+                        ` : ''}
+                        ${calc.getSpouseSpecialDeduction() > 0 ? `
+                        <tr>
+                            <td class="border border-black p-2">配偶者特別控除</td>
+                            <td class="border border-black p-2 text-right">${calc.getSpouseSpecialDeduction().toLocaleString()}</td>
+                        </tr>
+                        ` : ''}
+                        ${calc.getDependentDeduction() > 0 ? `
+                        <tr>
+                            <td class="border border-black p-2">扶養控除</td>
+                            <td class="border border-black p-2 text-right">${calc.getDependentDeduction().toLocaleString()}</td>
+                        </tr>
+                        ` : ''}
+                        ${calc.getSocialInsuranceDeduction() > 0 ? `
+                        <tr>
+                            <td class="border border-black p-2">社会保険料控除</td>
+                            <td class="border border-black p-2 text-right">${calc.getSocialInsuranceDeduction().toLocaleString()}</td>
+                        </tr>
+                        ` : ''}
+                        ${calc.getLifeInsuranceDeduction() > 0 ? `
+                        <tr>
+                            <td class="border border-black p-2">生命保険料控除</td>
+                            <td class="border border-black p-2 text-right">${calc.getLifeInsuranceDeduction().toLocaleString()}</td>
+                        </tr>
+                        ` : ''}
+                        ${calc.getEarthquakeDeduction() > 0 ? `
+                        <tr>
+                            <td class="border border-black p-2">地震保険料控除</td>
+                            <td class="border border-black p-2 text-right">${calc.getEarthquakeDeduction().toLocaleString()}</td>
+                        </tr>
+                        ` : ''}
+                        ${calc.getSmallBusinessDeduction() > 0 ? `
+                        <tr>
+                            <td class="border border-black p-2">小規模企業共済等掛金控除</td>
+                            <td class="border border-black p-2 text-right">${calc.getSmallBusinessDeduction().toLocaleString()}</td>
+                        </tr>
+                        ` : ''}
+                        <tr>
+                            <td class="border border-black p-2 font-bold">所得控除合計</td>
+                            <td class="border border-black p-2 text-right font-bold">${calc.getTotalDeductions().toLocaleString()}</td>
+                        </tr>
+                    </table>
+
+                    <h3 class="font-bold mb-2">税金の計算</h3>
+                    <table class="w-full border-collapse border border-black">
+                        <tr>
+                            <td class="border border-black p-2">課税される所得金額</td>
+                            <td class="border border-black p-2 text-right">${calc.getTaxableIncome().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2">上記に対する税額</td>
+                            <td class="border border-black p-2 text-right">${calc.getTotalTax().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2">予定納税額</td>
+                            <td class="border border-black p-2 text-right">${calc.getPrepaidTax().toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-black p-2 font-bold text-lg">${calc.getPaymentAmount() >= 0 ? '納める税金' : '還付される税金'}</td>
+                            <td class="border border-black p-2 text-right font-bold text-xl ${calc.getPaymentAmount() >= 0 ? 'text-red-600' : 'text-green-600'}">
+                                ${Math.abs(calc.getPaymentAmount()).toLocaleString()}
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+            `;
+        }
+
+        window.exportData = function() {
+            const calc = new KakuteiCalculator({
+                salesData: salesData,
+                expenseData: expenseData,
+                salaryData: salaryData,
+                deductions: deductions
+            });
+
+            const data = {
+                年度: targetYear,
+                店舗名: storeName,
+                売上高: calc.getTotalSales(),
+                経費合計: calc.getTotalExpenses(),
+                青色申告特別控除: calc.getBlueDeduction(),
+                事業所得: calc.getBusinessIncome(),
+                所得控除合計: calc.getTotalDeductions(),
+                課税所得: calc.getTaxableIncome(),
+                所得税額: calc.getTotalTax(),
+                納税額または還付額: calc.getPaymentAmount()
+            };
+
+            // 消費税データを追加（売上1000万円超の場合）
+            if (calc.needsConsumptionTaxFiling()) {
+                data['消費税_課税売上高'] = calc.getTotalTaxableSales();
+                data['消費税_課税仕入高'] = calc.getTotalTaxablePurchase();
+                data['消費税_売上税額'] = calc.getTotalSalesConsumptionTax();
+                data['消費税_仕入税額'] = calc.getTotalPurchaseConsumptionTax();
+                data['消費税_差引税額'] = calc.getNetConsumptionTax();
+                data['地方消費税額'] = calc.getLocalConsumptionTax();
+                data['消費税_納付税額'] = calc.getConsumptionTaxPaymentAmount();
+            }
+
+            const csv = Object.entries(data).map(([key, value]) => `${key},${value}`).join('\n');
+            const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+            const blob = new Blob([bom, csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `確定申告データ_${storeName}_${targetYear}.csv`;
+            a.click();
+        };
+
+        init();
+    </script>
+</body>
+</html>
