@@ -318,57 +318,102 @@
         };
 
         async function loadEmployees() {
-            const { collection, query, where, getDocs } = window.firebaseModules;
-            const q = query(collection(window.db, 'employees'), where('storeName', '==', storeName));
-            const snapshot = await getDocs(q);
-            employees = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const { collection, getDocs } = window.firebaseModules;
+            
+            if (!window.currentStoreId) {
+                console.error('storeIdが設定されていません');
+                return;
+            }
+            
+            // 店舗のサブコレクションから従業員を取得
+            const empRef = collection(window.db, 'stores', window.currentStoreId, 'employees');
+            const snapshot = await getDocs(empRef);
+            
+            employees = [];
+            snapshot.forEach(doc => {
+                employees.push({ id: doc.id, ...doc.data() });
+            });
+            
+            // sortOrderでソート（sortOrderがない場合は名前順）
+            employees.sort((a, b) => {
+                if (a.sortOrder !== undefined && b.sortOrder !== undefined) {
+                    return a.sortOrder - b.sortOrder;
+                }
+                if (a.sortOrder !== undefined) return -1;
+                if (b.sortOrder !== undefined) return 1;
+                return (a.name || '').localeCompare(b.name || '');
+            });
+            
+            console.log('従業員データ読み込み完了:', employees.length + '名');
         }
 
         async function loadYearData(employeeId, year) {
             // 年間給与データを集計
-            const { collection, query, where, getDocs, orderBy } = window.firebaseModules;
+            const { collection, getDocs } = window.firebaseModules;
             
             const employee = employees.find(e => e.id === employeeId);
             if (!employee) return null;
 
-            // 勤怠データを取得（1月〜12月）
+            if (!window.currentStoreId) {
+                console.error('storeIdが設定されていません');
+                return null;
+            }
+
+            // 勤怠データを取得（店舗のサブコレクション）
             let totalIncome = 0;
             let totalSocialInsurance = 0;
             let totalWithholdingTax = 0;
             const monthlyData = [];
 
+            // 勤怠データを全取得
+            const attRef = collection(window.db, 'stores', window.currentStoreId, 'attendance');
+            const snapshot = await getDocs(attRef);
+            
+            // 月別に集計
             for (let month = 0; month < 12; month++) {
                 const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
                 
-                // 月次勤怠データを取得
-                const attendanceRef = collection(window.db, 'stores', storeName, 'attendance');
-                const q = query(attendanceRef, where('date', '>=', `${yearMonth}-01`), where('date', '<=', `${yearMonth}-31`));
-                const snapshot = await getDocs(q);
-                
-                let monthlyIncome = 0;
                 let monthlyHours = 0;
                 
                 snapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.employees && data.employees[employeeId]) {
-                        const empData = data.employees[employeeId];
+                    const date = doc.id; // ドキュメントIDが日付（yyyy-MM-dd形式）
+                    
+                    // 対象年月のデータか確認
+                    if (date.startsWith(yearMonth)) {
+                        const data = doc.data();
                         
-                        // 勤務時間を計算
-                        if (empData.clockIn && empData.clockOut) {
-                            const parseTime = (timeStr) => {
-                                const [hours, minutes] = timeStr.split(':').map(Number);
-                                return hours + minutes / 60;
-                            };
+                        // 従業員データを確認
+                        if (data.employees && data.employees[employeeId]) {
+                            const empData = data.employees[employeeId];
                             
-                            const workHours = parseTime(empData.clockOut) - parseTime(empData.clockIn);
-                            monthlyHours += workHours;
+                            // 勤務時間を計算
+                            if (empData.clockIn && empData.clockOut) {
+                                const parseTime = (timeStr) => {
+                                    const [hours, minutes] = timeStr.split(':').map(Number);
+                                    return hours + minutes / 60;
+                                };
+                                
+                                let workHours = parseTime(empData.clockOut) - parseTime(empData.clockIn);
+                                
+                                // 休憩時間を引く
+                                if (empData.breakStart1 && empData.breakEnd1) {
+                                    const breakHours = parseTime(empData.breakEnd1) - parseTime(empData.breakStart1);
+                                    workHours -= breakHours;
+                                }
+                                if (empData.breakStart2 && empData.breakEnd2) {
+                                    const breakHours = parseTime(empData.breakEnd2) - parseTime(empData.breakStart2);
+                                    workHours -= breakHours;
+                                }
+                                
+                                monthlyHours += Math.max(0, workHours);
+                            }
                         }
                     }
                 });
                 
-                // 給与計算（簡易版）
-                const hourlyWage = employee.hourlyWage || 1000;
-                monthlyIncome = Math.floor(monthlyHours * hourlyWage);
+                // 給与計算
+                const hourlyWage = employee.hourlyWage || employee.defaultHourlyWage || 1000;
+                const monthlyIncome = Math.floor(monthlyHours * hourlyWage);
                 
                 // 社会保険料（簡易計算：給与の15%）
                 const monthlyInsurance = Math.floor(monthlyIncome * 0.15);
@@ -384,11 +429,19 @@
                 monthlyData.push({
                     month: month + 1,
                     income: monthlyIncome,
-                    hours: monthlyHours,
+                    hours: Math.round(monthlyHours * 10) / 10,
                     insurance: monthlyInsurance,
                     tax: monthlyTax
                 });
             }
+            
+            console.log('年間データ集計完了:', {
+                year: year,
+                employeeId: employeeId,
+                totalIncome: totalIncome,
+                totalSocialInsurance: totalSocialInsurance,
+                totalWithholdingTax: totalWithholdingTax
+            });
             
             return {
                 year: year,
@@ -408,6 +461,8 @@
         }
 
         function renderEmployeeList() {
+            console.log('従業員一覧を表示:', employees.length + '名');
+            
             app.innerHTML = `
                 <div class="container mx-auto px-4 py-8">
                     <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
@@ -426,9 +481,11 @@
                             </div>
                         </div>
                         
-                        <div class="mb-4">
+                        <div class="mb-4 p-4 bg-blue-50 rounded-lg">
                             <p class="text-gray-600">店舗: ${storeName}</p>
+                            <p class="text-gray-600">店舗ID: ${window.currentStoreId}</p>
                             <p class="text-gray-600">対象年: ${targetYear}年</p>
+                            <p class="text-gray-600">従業員数: ${employees.length}名</p>
                         </div>
 
                         <h2 class="text-xl font-bold mb-4">従業員一覧</h2>
@@ -438,6 +495,7 @@
                                     <div>
                                         <div class="font-bold">${emp.name || '名前未設定'}</div>
                                         <div class="text-sm text-gray-600">${emp.furigana || ''}</div>
+                                        <div class="text-sm text-gray-500">時給: ¥${(emp.hourlyWage || emp.defaultHourlyWage || 1000).toLocaleString()}</div>
                                     </div>
                                     <button 
                                         onclick="selectEmployee('${emp.id}')" 
@@ -449,7 +507,12 @@
                             `).join('')}
                         </div>
                         
-                        ${employees.length === 0 ? '<p class="text-center text-gray-500 py-8">従業員が登録されていません</p>' : ''}
+                        ${employees.length === 0 ? `
+                            <div class="text-center py-8">
+                                <p class="text-gray-500 mb-4">従業員が登録されていません</p>
+                                <p class="text-sm text-gray-400">kanri.htmlで従業員を登録してください</p>
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
             `;
@@ -623,9 +686,26 @@
 
         window.selectEmployee = async function(employeeId) {
             selectedEmployee = employeeId;
-            yearData = await loadYearData(employeeId, targetYear);
-            deductions = {};
-            render();
+            
+            // ローディング表示
+            app.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center">
+                    <div class="text-center">
+                        <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+                        <p class="text-gray-700">年間データを読み込んでいます...</p>
+                    </div>
+                </div>
+            `;
+            
+            try {
+                yearData = await loadYearData(employeeId, targetYear);
+                deductions = {};
+                render();
+            } catch (error) {
+                console.error('年データ読み込みエラー:', error);
+                alert('データの読み込みに失敗しました: ' + error.message);
+                backToList();
+            }
         };
 
         window.backToList = function() {
