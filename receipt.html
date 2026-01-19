@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>レシート・領収書管理</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            .print-area { display: block !important; }
+        }
+        
+        .receipt-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .receipt-card {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .receipt-card:hover {
+            transform: scale(1.05);
+        }
+        
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        
+        .modal-content {
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="app"></div>
+    
+    <!-- 画像拡大モーダル -->
+    <div id="imageModal" class="modal-overlay hidden" onclick="closeImageModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <img id="modalImage" src="" alt="レシート画像" class="max-w-full max-h-full">
+        </div>
+    </div>
+
+    <!-- Firebase -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, getDocs, addDoc, deleteDoc, doc, query, where, orderBy, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+            authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+            projectId: "takoyaki-order-system-bacd7",
+            storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+            messagingSenderId: "104494752890",
+            appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
+        
+        window.db = db;
+        window.storage = storage;
+        window.firebaseModules = { collection, getDocs, addDoc, deleteDoc, doc, query, where, orderBy, Timestamp, ref, uploadBytes, getDownloadURL, deleteObject };
+        window.FirebaseReady = true;
+    </script>
+
+    <script>
+        const appDiv = document.getElementById('app');
+        
+        let storeName = '';
+        let storeId = '';
+        let receipts = [];
+        let filteredReceipts = [];
+        let filterYear = new Date().getFullYear();
+        let filterMonth = 0; // 0 = すべて
+        let filterCategory = '';
+
+        async function init() {
+            if (!window.FirebaseReady) {
+                setTimeout(init, 100);
+                return;
+            }
+
+            const storedStoreId = localStorage.getItem('receiptStoreId');
+            const storedStoreName = localStorage.getItem('receiptStoreName');
+            
+            if (storedStoreId && storedStoreName) {
+                storeId = storedStoreId;
+                storeName = storedStoreName;
+                await loadReceipts();
+                render();
+            } else {
+                showLoginScreen();
+            }
+        }
+
+        function showLoginScreen() {
+            appDiv.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center">
+                    <div class="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+                        <h1 class="text-2xl font-bold mb-6 text-center">レシート・領収書管理</h1>
+                        <p class="text-sm text-gray-600 mb-4">7年間デジタル保存・いつでも印刷</p>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-2">店舗名</label>
+                            <input type="text" id="storeNameInput" class="w-full px-3 py-2 border rounded-lg" />
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-2">パスワード</label>
+                            <input type="password" id="passwordInput" class="w-full px-3 py-2 border rounded-lg" />
+                        </div>
+                        <button onclick="handleLogin()" class="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600">
+                            ログイン
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.handleLogin = async function() {
+            const storeNameValue = document.getElementById('storeNameInput').value.trim();
+            const passwordValue = document.getElementById('passwordInput').value;
+            
+            if (!storeNameValue || !passwordValue) {
+                alert('店舗名とパスワードを入力してください');
+                return;
+            }
+            
+            try {
+                const { collection, query, where, getDocs } = window.firebaseModules;
+                
+                const storesRef = collection(window.db, 'stores');
+                const q = query(storesRef, where('storeName', '==', storeNameValue));
+                const querySnapshot = await getDocs(q);
+
+                if (querySnapshot.empty) {
+                    alert('店舗が見つかりません');
+                    return;
+                }
+
+                let authenticated = false;
+                let storeData = null;
+                let storeDocId = null;
+
+                querySnapshot.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    if (data.storePassword === passwordValue) {
+                        if (data.isActive === false) {
+                            alert('この店舗は無効化されています');
+                            return;
+                        }
+                        authenticated = true;
+                        storeData = data;
+                        storeDocId = docSnap.id;
+                    }
+                });
+
+                if (authenticated && storeData) {
+                    storeId = storeDocId;
+                    storeName = storeData.storeName;
+                    
+                    localStorage.setItem('receiptStoreId', storeDocId);
+                    localStorage.setItem('receiptStoreName', storeData.storeName);
+                    
+                    await loadReceipts();
+                    render();
+                } else {
+                    alert('パスワードが正しくありません');
+                }
+            } catch (error) {
+                console.error('ログインエラー:', error);
+                alert('ログインに失敗しました: ' + error.message);
+            }
+        };
+
+        window.handleLogout = function() {
+            localStorage.removeItem('receiptStoreId');
+            localStorage.removeItem('receiptStoreName');
+            storeId = '';
+            storeName = '';
+            location.reload();
+        };
+
+        async function loadReceipts() {
+            const { collection, getDocs, query, orderBy } = window.firebaseModules;
+            
+            const receiptsRef = collection(window.db, 'stores', storeId, 'receipts');
+            const q = query(receiptsRef, orderBy('date', 'desc'));
+            const snapshot = await getDocs(q);
+            
+            receipts = [];
+            snapshot.forEach(docSnap => {
+                receipts.push({
+                    id: docSnap.id,
+                    ...docSnap.data()
+                });
+            });
+            
+            applyFilters();
+        }
+
+        function applyFilters() {
+            filteredReceipts = receipts.filter(r => {
+                const date = new Date(r.date);
+                const year = date.getFullYear();
+                const month = date.getMonth() + 1;
+                
+                if (year !== filterYear) return false;
+                if (filterMonth !== 0 && month !== filterMonth) return false;
+                if (filterCategory && r.category !== filterCategory) return false;
+                
+                return true;
+            });
+        }
+
+        function render() {
+            const categories = [...new Set(receipts.map(r => r.category))].filter(Boolean);
+            
+            // 月別集計
+            const monthlyTotals = {};
+            for (let i = 1; i <= 12; i++) {
+                monthlyTotals[i] = filteredReceipts
+                    .filter(r => new Date(r.date).getMonth() + 1 === i)
+                    .reduce((sum, r) => sum + (r.amount || 0), 0);
+            }
+            
+            appDiv.innerHTML = `
+                <div class="container mx-auto px-4 py-8 no-print">
+                    <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h1 class="text-3xl font-bold">📸 レシート・領収書管理</h1>
+                            <button onclick="handleLogout()" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+                                ログアウト
+                            </button>
+                        </div>
+
+                        <div class="mb-6 p-4 bg-blue-50 rounded-lg">
+                            <p class="text-gray-700">
+                                💡 感熱紙の劣化対策：レシートをスキャンしてクラウド保存<br>
+                                📱 スマホカメラで撮影 → 自動保存 → 7年間保管 → いつでも印刷
+                            </p>
+                        </div>
+
+                        <!-- 撮影ボタン -->
+                        <div class="mb-6">
+                            <button onclick="openCameraModal()" class="w-full px-6 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 font-bold text-lg shadow-lg">
+                                📷 レシート・領収書を撮影
+                            </button>
+                        </div>
+
+                        <!-- フィルター -->
+                        <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+                            <h3 class="font-bold mb-3">絞り込み</h3>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="text-sm">年度</label>
+                                    <select id="filterYear" onchange="handleFilterChange()" class="w-full px-3 py-2 border rounded">
+                                        ${[0,1,2,3,4,5,6].map(i => {
+                                            const y = new Date().getFullYear() - i;
+                                            return `<option value="${y}" ${y === filterYear ? 'selected' : ''}>${y}年</option>`;
+                                        }).join('')}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-sm">月</label>
+                                    <select id="filterMonth" onchange="handleFilterChange()" class="w-full px-3 py-2 border rounded">
+                                        <option value="0">すべて</option>
+                                        ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => 
+                                            `<option value="${m}" ${m === filterMonth ? 'selected' : ''}>${m}月</option>`
+                                        ).join('')}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-sm">カテゴリ</label>
+                                    <select id="filterCategory" onchange="handleFilterChange()" class="w-full px-3 py-2 border rounded">
+                                        <option value="">すべて</option>
+                                        ${categories.map(c => 
+                                            `<option value="${c}" ${c === filterCategory ? 'selected' : ''}>${c}</option>`
+                                        ).join('')}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 統計 -->
+                        <div class="mb-6 p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg">
+                            <h3 class="font-bold mb-3">📊 ${filterYear}年 ${filterMonth ? filterMonth + '月' : '年間'}統計</h3>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="p-3 bg-white rounded shadow">
+                                    <div class="text-sm text-gray-600">保存件数</div>
+                                    <div class="text-2xl font-bold text-blue-600">${filteredReceipts.length}枚</div>
+                                </div>
+                                <div class="p-3 bg-white rounded shadow">
+                                    <div class="text-sm text-gray-600">合計金額</div>
+                                    <div class="text-2xl font-bold text-green-600">¥${filteredReceipts.reduce((sum, r) => sum + (r.amount || 0), 0).toLocaleString()}</div>
+                                </div>
+                            </div>
+                            
+                            ${filterMonth === 0 ? `
+                                <div class="mt-4">
+                                    <h4 class="text-sm font-bold mb-2">月別金額</h4>
+                                    <div class="grid grid-cols-6 gap-2 text-xs">
+                                        ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => `
+                                            <div class="p-2 bg-white rounded text-center">
+                                                <div class="text-gray-600">${m}月</div>
+                                                <div class="font-bold">¥${monthlyTotals[m].toLocaleString()}</div>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <!-- レシート一覧 -->
+                        <div class="mb-6">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="font-bold">レシート一覧</h3>
+                                <button onclick="printAllReceipts()" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+                                    🖨️ 一括印刷
+                                </button>
+                            </div>
+                            
+                            ${filteredReceipts.length === 0 ? `
+                                <div class="text-center py-12 text-gray-500">
+                                    <p class="text-lg mb-2">レシートがありません</p>
+                                    <p class="text-sm">「レシート・領収書を撮影」ボタンから追加してください</p>
+                                </div>
+                            ` : `
+                                <div class="receipt-grid">
+                                    ${filteredReceipts.map(receipt => `
+                                        <div class="receipt-card bg-white rounded-lg shadow-lg overflow-hidden">
+                                            <img src="${receipt.imageUrl}" alt="${receipt.description}" 
+                                                 class="w-full h-48 object-cover" 
+                                                 onclick="showImageModal('${receipt.imageUrl}')" />
+                                            <div class="p-3">
+                                                <div class="text-sm font-bold text-gray-800">${receipt.date}</div>
+                                                <div class="text-xs text-gray-600">${receipt.category || '未分類'}</div>
+                                                <div class="text-lg font-bold text-green-600">¥${(receipt.amount || 0).toLocaleString()}</div>
+                                                <div class="text-xs text-gray-500 mt-1">${receipt.description || ''}</div>
+                                                <div class="flex gap-2 mt-3">
+                                                    <button onclick="printReceipt('${receipt.id}')" class="flex-1 px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
+                                                        印刷
+                                                    </button>
+                                                    <button onclick="deleteReceipt('${receipt.id}')" class="flex-1 px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+                                                        削除
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.handleFilterChange = function() {
+            filterYear = parseInt(document.getElementById('filterYear').value);
+            filterMonth = parseInt(document.getElementById('filterMonth').value);
+            filterCategory = document.getElementById('filterCategory').value;
+            applyFilters();
+            render();
+        };
+
+        window.openCameraModal = function() {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" onclick="event.stopPropagation()">
+                    <h3 class="text-xl font-bold mb-4">レシート・領収書を撮影</h3>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">日付</label>
+                        <input type="date" id="receiptDate" value="${new Date().toISOString().split('T')[0]}" class="w-full px-3 py-2 border rounded" />
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">カテゴリ</label>
+                        <select id="receiptCategory" class="w-full px-3 py-2 border rounded">
+                            <option value="材料費">材料費</option>
+                            <option value="水光熱費">水光熱費</option>
+                            <option value="交通費">交通費</option>
+                            <option value="接待交際費">接待交際費</option>
+                            <option value="消耗品">消耗品</option>
+                            <option value="雑費">雑費</option>
+                            <option value="その他">その他</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">金額</label>
+                        <input type="number" id="receiptAmount" placeholder="1000" class="w-full px-3 py-2 border rounded" />
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">メモ</label>
+                        <input type="text" id="receiptDescription" placeholder="例: ○○スーパー、食材購入" class="w-full px-3 py-2 border rounded" />
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">画像を選択</label>
+                        <input type="file" id="receiptImage" accept="image/*" capture="environment" class="w-full px-3 py-2 border rounded" />
+                        <p class="text-xs text-gray-500 mt-1">📱 スマホの場合、カメラが自動起動します</p>
+                    </div>
+                    
+                    <div class="flex gap-3">
+                        <button onclick="this.closest('.modal-overlay').remove()" class="flex-1 px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
+                            キャンセル
+                        </button>
+                        <button onclick="uploadReceipt()" class="flex-1 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                            保存
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            modal.onclick = function(e) {
+                if (e.target === modal) modal.remove();
+            };
+            
+            document.body.appendChild(modal);
+        };
+
+        window.uploadReceipt = async function() {
+            const date = document.getElementById('receiptDate').value;
+            const category = document.getElementById('receiptCategory').value;
+            const amount = parseInt(document.getElementById('receiptAmount').value) || 0;
+            const description = document.getElementById('receiptDescription').value;
+            const fileInput = document.getElementById('receiptImage');
+            
+            if (!date) {
+                alert('日付を入力してください');
+                return;
+            }
+            
+            if (!fileInput.files[0]) {
+                alert('画像を選択してください');
+                return;
+            }
+            
+            try {
+                const file = fileInput.files[0];
+                const timestamp = Date.now();
+                const fileName = `receipts/${storeId}/${date}_${timestamp}.jpg`;
+                
+                // Firebase Storageにアップロード
+                const { ref, uploadBytes, getDownloadURL } = window.firebaseModules;
+                const storageRef = ref(window.storage, fileName);
+                
+                await uploadBytes(storageRef, file);
+                const downloadURL = await getDownloadURL(storageRef);
+                
+                // Firestoreに保存
+                const { collection, addDoc, Timestamp } = window.firebaseModules;
+                const receiptsRef = collection(window.db, 'stores', storeId, 'receipts');
+                
+                await addDoc(receiptsRef, {
+                    date: date,
+                    category: category,
+                    amount: amount,
+                    description: description,
+                    imageUrl: downloadURL,
+                    storagePath: fileName,
+                    createdAt: Timestamp.now()
+                });
+                
+                alert('レシートを保存しました！');
+                document.querySelector('.modal-overlay').remove();
+                
+                await loadReceipts();
+                render();
+                
+            } catch (error) {
+                console.error('アップロードエラー:', error);
+                alert('保存に失敗しました: ' + error.message);
+            }
+        };
+
+        window.showImageModal = function(imageUrl) {
+            const modal = document.getElementById('imageModal');
+            const img = document.getElementById('modalImage');
+            img.src = imageUrl;
+            modal.classList.remove('hidden');
+        };
+
+        window.closeImageModal = function() {
+            document.getElementById('imageModal').classList.add('hidden');
+        };
+
+        window.deleteReceipt = async function(receiptId) {
+            if (!confirm('このレシートを削除しますか？')) return;
+            
+            try {
+                const receipt = receipts.find(r => r.id === receiptId);
+                
+                // Storageから削除
+                const { ref, deleteObject } = window.firebaseModules;
+                const storageRef = ref(window.storage, receipt.storagePath);
+                await deleteObject(storageRef);
+                
+                // Firestoreから削除
+                const { doc, deleteDoc } = window.firebaseModules;
+                const receiptDoc = doc(window.db, 'stores', storeId, 'receipts', receiptId);
+                await deleteDoc(receiptDoc);
+                
+                alert('削除しました');
+                await loadReceipts();
+                render();
+                
+            } catch (error) {
+                console.error('削除エラー:', error);
+                alert('削除に失敗しました: ' + error.message);
+            }
+        };
+
+        window.printReceipt = function(receiptId) {
+            const receipt = receipts.find(r => r.id === receiptId);
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write(`
+                <html>
+                <head>
+                    <title>レシート印刷</title>
+                    <style>
+                        body { margin: 20px; font-family: sans-serif; }
+                        img { max-width: 100%; }
+                        .info { margin-bottom: 10px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="info">
+                        <strong>日付:</strong> ${receipt.date}<br>
+                        <strong>カテゴリ:</strong> ${receipt.category}<br>
+                        <strong>金額:</strong> ¥${receipt.amount.toLocaleString()}<br>
+                        <strong>メモ:</strong> ${receipt.description}
+                    </div>
+                    <img src="${receipt.imageUrl}" />
+                    <script>window.onload = () => window.print();</script>
+                </body>
+                </html>
+            `);
+        };
+
+        window.printAllReceipts = function() {
+            if (filteredReceipts.length === 0) {
+                alert('印刷するレシートがありません');
+                return;
+            }
+            
+            const printWindow = window.open('', '_blank');
+            const receiptsHtml = filteredReceipts.map(receipt => `
+                <div style="page-break-after: always; margin-bottom: 20px;">
+                    <div style="margin-bottom: 10px;">
+                        <strong>日付:</strong> ${receipt.date}<br>
+                        <strong>カテゴリ:</strong> ${receipt.category}<br>
+                        <strong>金額:</strong> ¥${receipt.amount.toLocaleString()}<br>
+                        <strong>メモ:</strong> ${receipt.description}
+                    </div>
+                    <img src="${receipt.imageUrl}" style="max-width: 100%;" />
+                </div>
+            `).join('');
+            
+            printWindow.document.write(`
+                <html>
+                <head>
+                    <title>レシート一括印刷 ${filterYear}年${filterMonth ? filterMonth + '月' : ''}</title>
+                    <style>
+                        body { margin: 20px; font-family: sans-serif; }
+                        @media print {
+                            @page { margin: 10mm; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h1>${filterYear}年${filterMonth ? filterMonth + '月' : ''} レシート・領収書</h1>
+                    <p>合計: ${filteredReceipts.length}枚 / ¥${filteredReceipts.reduce((sum, r) => sum + (r.amount || 0), 0).toLocaleString()}</p>
+                    ${receiptsHtml}
+                    <script>window.onload = () => window.print();</script>
+                </body>
+                </html>
+            `);
+        };
+
+        init();
+    </script>
+</body>
+</html>
