@@ -9360,6 +9360,28 @@
     </div>
   </div>
   
+  <!-- トッピング順序変更モーダル -->
+  <div id="toppingOrderModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+      <h3>トッピング順序変更</h3>
+      
+      <div style="margin: 20px 0;">
+        <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+          ドラッグ＆ドロップまたは↑↓ボタンでトッピングセットの表示順序を変更できます
+        </p>
+        
+        <div id="toppingOrderList" style="display: flex; flex-direction: column; gap: 10px;">
+          <!-- トッピングセットのリストがここに表示されます -->
+        </div>
+      </div>
+      
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveToppingOrder()">保存</button>
+        <button class="btn btn-secondary" style="flex: 1;" onclick="closeToppingOrderModal()">キャンセル</button>
+      </div>
+    </div>
+  </div>
+  
   <!-- 並び順変更モーダル -->
   <div id="sortOrderModal" class="modal-overlay hidden">
     <div class="modal" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
@@ -10225,8 +10247,14 @@
         editBtn.style.cssText = 'padding: 8px 20px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;';
         editBtn.onclick = () => openEditProductModal(product);
         
+        const orderBtn = document.createElement('button');
+        orderBtn.textContent = '🔢 順序';
+        orderBtn.style.cssText = 'padding: 8px 20px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;';
+        orderBtn.onclick = () => openToppingOrderForProduct(product);
+        
         const btnContainer = document.createElement('div');
         btnContainer.style.cssText = 'display: flex; gap: 10px;';
+        btnContainer.appendChild(orderBtn);
         btnContainer.appendChild(editBtn);
         btnContainer.appendChild(deleteBtn);
         
@@ -11518,6 +11546,271 @@
         await showCustomAlert('❌ 商品の削除に失敗しました\n\n' + error.message);
       }
     }
+    
+    // ========================================
+    // トッピング順序変更機能
+    // ========================================
+    
+    let toppingOrderData = [];
+    
+    // トッピング順序モーダルを表示
+    window.showToppingOrderModal = async function() {
+      document.getElementById('toppingOrderModal').classList.remove('hidden');
+      await loadToppingOrderList();
+    };
+    
+    // トッピング順序モーダルを閉じる
+    window.closeToppingOrderModal = function() {
+      document.getElementById('toppingOrderModal').classList.add('hidden');
+      
+      // モーダルタイトルを元に戻す
+      const modalTitle = document.querySelector('#toppingOrderModal h3');
+      modalTitle.textContent = 'トッピング順序変更';
+      
+      // 編集中の商品情報をクリア
+      window.currentEditingProduct = null;
+    };
+    
+    // トッピングセットリストを読み込み
+    async function loadToppingOrderList() {
+      try {
+        const container = document.getElementById('toppingOrderList');
+        container.innerHTML = '<div style="text-align: center; padding: 20px;">読み込み中...</div>';
+        
+        const toppingsSnapshot = await window.getDocs(window.getStoreCollection('toppings'));
+        toppingOrderData = [];
+        
+        toppingsSnapshot.forEach(doc => {
+          const data = doc.data();
+          toppingOrderData.push({
+            id: doc.id,
+            name: data.name,
+            order: data.order || 999,
+            ...data
+          });
+        });
+        
+        // 現在の順序でソート
+        toppingOrderData.sort((a, b) => a.order - b.order);
+        
+        displayToppingOrderList();
+        
+      } catch (error) {
+        console.error('トッピングリスト読み込みエラー:', error);
+        document.getElementById('toppingOrderList').innerHTML = '<div style="text-align: center; padding: 20px; color: red;">読み込みに失敗しました</div>';
+      }
+    }
+    
+    // トッピングセットリストを表示
+    function displayToppingOrderList() {
+      const container = document.getElementById('toppingOrderList');
+      
+      if (toppingOrderData.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">トッピングがありません</div>';
+        return;
+      }
+      
+      container.innerHTML = '';
+      
+      toppingOrderData.forEach((topping, index) => {
+        const toppingDiv = document.createElement('div');
+        toppingDiv.className = 'topping-order-item';
+        toppingDiv.draggable = true;
+        toppingDiv.dataset.index = index;
+        toppingDiv.style.cssText = `
+          background: white;
+          border: 2px solid #e0e0e0;
+          border-radius: 10px;
+          padding: 15px;
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          cursor: move;
+          transition: all 0.2s;
+        `;
+        
+        toppingDiv.innerHTML = `
+          <div style="font-size: 24px; color: #999;">☰</div>
+          <div style="flex: 1;">
+            <div style="font-weight: bold; font-size: 16px; margin-bottom: 5px;">${topping.name}</div>
+            <div style="font-size: 12px; color: #999;">順序: ${index + 1}</div>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button onclick="moveToppingUp(${index})" style="padding: 8px 12px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;" ${index === 0 ? 'disabled' : ''}>↑</button>
+            <button onclick="moveToppingDown(${index})" style="padding: 8px 12px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;" ${index === toppingOrderData.length - 1 ? 'disabled' : ''}>↓</button>
+          </div>
+        `;
+        
+        // ドラッグ&ドロップイベント
+        toppingDiv.addEventListener('dragstart', handleToppingDragStart);
+        toppingDiv.addEventListener('dragover', handleToppingDragOver);
+        toppingDiv.addEventListener('drop', handleToppingDrop);
+        toppingDiv.addEventListener('dragenter', handleToppingDragEnter);
+        toppingDiv.addEventListener('dragleave', handleToppingDragLeave);
+        toppingDiv.addEventListener('dragend', handleToppingDragEnd);
+        
+        container.appendChild(toppingDiv);
+      });
+    }
+    
+    // トッピングを上に移動
+    window.moveToppingUp = function(index) {
+      if (index === 0) return;
+      
+      const temp = toppingOrderData[index];
+      toppingOrderData[index] = toppingOrderData[index - 1];
+      toppingOrderData[index - 1] = temp;
+      
+      displayToppingOrderList();
+    };
+    
+    // トッピングを下に移動
+    window.moveToppingDown = function(index) {
+      if (index === toppingOrderData.length - 1) return;
+      
+      const temp = toppingOrderData[index];
+      toppingOrderData[index] = toppingOrderData[index + 1];
+      toppingOrderData[index + 1] = temp;
+      
+      displayToppingOrderList();
+    };
+    
+    // ドラッグ&ドロップ処理
+    let draggedToppingElement = null;
+    let draggedToppingIndex = null;
+    
+    function handleToppingDragStart(e) {
+      draggedToppingElement = e.currentTarget;
+      draggedToppingIndex = parseInt(e.currentTarget.dataset.index);
+      e.currentTarget.style.opacity = '0.5';
+    }
+    
+    function handleToppingDragOver(e) {
+      e.preventDefault();
+      return false;
+    }
+    
+    function handleToppingDragEnter(e) {
+      if (e.currentTarget.className === 'topping-order-item') {
+        e.currentTarget.style.borderColor = '#4CAF50';
+        e.currentTarget.style.backgroundColor = '#e8f5e9';
+      }
+    }
+    
+    function handleToppingDragLeave(e) {
+      if (e.currentTarget.className === 'topping-order-item') {
+        e.currentTarget.style.borderColor = '#e0e0e0';
+        e.currentTarget.style.backgroundColor = 'white';
+      }
+    }
+    
+    function handleToppingDrop(e) {
+      e.preventDefault();
+      
+      if (e.currentTarget.className === 'topping-order-item') {
+        const dropIndex = parseInt(e.currentTarget.dataset.index);
+        
+        if (draggedToppingIndex !== dropIndex) {
+          // 配列の要素を入れ替え
+          const temp = toppingOrderData[draggedToppingIndex];
+          toppingOrderData.splice(draggedToppingIndex, 1);
+          toppingOrderData.splice(dropIndex, 0, temp);
+          
+          displayToppingOrderList();
+        }
+        
+        e.currentTarget.style.borderColor = '#e0e0e0';
+        e.currentTarget.style.backgroundColor = 'white';
+      }
+      
+      return false;
+    }
+    
+    function handleToppingDragEnd(e) {
+      e.currentTarget.style.opacity = '1';
+    }
+    
+    // トッピング順序を保存
+    window.saveToppingOrder = async function() {
+      try {
+        // 商品のトッピングセット順序を保存する場合
+        if (window.currentEditingProduct) {
+          const product = window.currentEditingProduct;
+          
+          // toppingOrderDataを新しい順序で更新
+          const updatedToppingSets = toppingOrderData.map((set, index) => ({
+            name: set.name,
+            type: set.type,
+            options: set.options,
+            order: index
+          }));
+          
+          // 商品ドキュメントを更新
+          await window.updateDoc(window.getStoreDoc('menus', product.id), {
+            toppingSets: updatedToppingSets
+          });
+          
+          await showCustomAlert('✅ トッピング順序を保存しました');
+          closeToppingOrderModal();
+          
+          // モーダルタイトルを元に戻す
+          const modalTitle = document.querySelector('#toppingOrderModal h3');
+          modalTitle.textContent = 'トッピング順序変更';
+          
+          // 商品リストを再読み込み
+          await loadProductDeleteList();
+          
+          // 編集中の商品情報をクリア
+          window.currentEditingProduct = null;
+          
+        } else {
+          // グローバルなトッピング順序を保存する場合（将来の拡張用）
+          const updatePromises = toppingOrderData.map((topping, index) => {
+            return window.updateDoc(window.getStoreDoc('toppings', topping.id), {
+              order: index
+            });
+          });
+          
+          await Promise.all(updatePromises);
+          
+          await showCustomAlert('✅ トッピング順序を保存しました');
+          closeToppingOrderModal();
+        }
+        
+      } catch (error) {
+        console.error('トッピング順序保存エラー:', error);
+        await showCustomAlert('❌ トッピング順序の保存に失敗しました\n\n' + error.message);
+      }
+    };
+    
+    // 商品のトッピング順序を変更
+    window.openToppingOrderForProduct = async function(product) {
+      // 商品にトッピングセットがない場合
+      if (!product.toppingSets || product.toppingSets.length === 0) {
+        await showCustomAlert('この商品にはトッピングセットが設定されていません');
+        return;
+      }
+      
+      // トッピングセットのデータを取得
+      toppingOrderData = product.toppingSets.map((set, index) => ({
+        ...set,
+        originalIndex: index,
+        order: index
+      }));
+      
+      // モーダルのタイトルを変更
+      const modalTitle = document.querySelector('#toppingOrderModal h3');
+      modalTitle.textContent = `トッピング順序変更 - ${product.name}`;
+      
+      // リストを表示
+      displayToppingOrderList();
+      
+      // モーダルを開く
+      document.getElementById('toppingOrderModal').classList.remove('hidden');
+      
+      // 保存時に商品も一緒に更新するため、商品情報を保持
+      window.currentEditingProduct = product;
+    };
     
     // パスワード認証処理（店舗別認証 + 旧パスワード対応）
     let currentStoreId = null;
