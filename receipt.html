@@ -44,9 +44,94 @@
             max-height: 90vh;
             overflow: auto;
         }
+        
+        /* トースト通知 */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .toast {
+            background: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+        
+        .toast.success {
+            border-left: 4px solid #10b981;
+        }
+        
+        .toast.error {
+            border-left: 4px solid #ef4444;
+        }
+        
+        .toast.info {
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .toast-icon {
+            font-size: 24px;
+        }
+        
+        .toast-content {
+            flex: 1;
+        }
+        
+        .toast-title {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        
+        .toast-message {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .toast-close {
+            cursor: pointer;
+            color: #999;
+            font-size: 20px;
+            line-height: 1;
+        }
     </style>
 </head>
 <body class="bg-gray-100">
+    <!-- トースト通知コンテナ -->
+    <div id="toastContainer" class="toast-container"></div>
+    
     <div id="app"></div>
     
     <!-- 画像拡大モーダル -->
@@ -83,6 +168,64 @@
 
     <script>
         const appDiv = document.getElementById('app');
+        
+        // トースト通知を表示
+        function showToast(type, title, message, duration = 3000) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + type;
+            
+            const icons = {
+                success: '✅',
+                error: '❌',
+                info: 'ℹ️'
+            };
+            
+            toast.innerHTML = `
+                <div class="toast-icon">${icons[type]}</div>
+                <div class="toast-content">
+                    <div class="toast-title">${title}</div>
+                    <div class="toast-message">${message}</div>
+                </div>
+                <div class="toast-close" onclick="this.parentElement.remove()">×</div>
+            `;
+            
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => toast.remove(), 300);
+            }, duration);
+        }
+        
+        // 確認ダイアログ（オシャレ版）
+        function showConfirm(title, message, onConfirm) {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-2xl" onclick="event.stopPropagation()">
+                    <h3 class="text-xl font-bold mb-3">${title}</h3>
+                    <p class="text-gray-600 mb-6">${message}</p>
+                    <div class="flex gap-3">
+                        <button onclick="this.closest('.modal-overlay').remove()" class="flex-1 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+                            キャンセル
+                        </button>
+                        <button onclick="confirmAction()" class="flex-1 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+                            削除
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            modal.onclick = function() { modal.remove(); };
+            
+            window.confirmAction = function() {
+                modal.remove();
+                onConfirm();
+            };
+            
+            document.body.appendChild(modal);
+        }
         
         let storeName = '';
         let storeId = '';
@@ -138,7 +281,7 @@
             const passwordValue = document.getElementById('passwordInput').value;
             
             if (!storeNameValue || !passwordValue) {
-                alert('店舗名とパスワードを入力してください');
+                showToast('error', 'エラー', '店舗名とパスワードを入力してください');
                 return;
             }
             
@@ -150,7 +293,7 @@
                 const querySnapshot = await getDocs(q);
 
                 if (querySnapshot.empty) {
-                    alert('店舗が見つかりません');
+                    showToast('error', 'エラー', '店舗が見つかりません');
                     return;
                 }
 
@@ -162,7 +305,7 @@
                     const data = docSnap.data();
                     if (data.storePassword === passwordValue) {
                         if (data.isActive === false) {
-                            alert('この店舗は無効化されています');
+                            showToast('error', 'エラー', 'この店舗は無効化されています');
                             return;
                         }
                         authenticated = true;
@@ -181,11 +324,11 @@
                     await loadReceipts();
                     render();
                 } else {
-                    alert('パスワードが正しくありません');
+                    showToast('error', 'エラー', 'パスワードが正しくありません');
                 }
             } catch (error) {
                 console.error('ログインエラー:', error);
-                alert('ログインに失敗しました: ' + error.message);
+                showToast('error', 'エラー', 'ログインに失敗しました: ' + error.message);
             }
         };
 
@@ -447,12 +590,12 @@
             const fileInput = document.getElementById('receiptImage');
             
             if (!date) {
-                alert('日付を入力してください');
+                showToast('error', 'エラー', '日付を入力してください');
                 return;
             }
             
             if (!fileInput.files[0]) {
-                alert('画像を選択してください');
+                showToast('error', 'エラー', '画像を選択してください');
                 return;
             }
             
@@ -482,7 +625,7 @@
                     createdAt: Timestamp.now()
                 });
                 
-                alert('レシートを保存しました！');
+                showToast('success', '保存完了', 'レシートを保存しました！');
                 document.querySelector('.modal-overlay').remove();
                 
                 await loadReceipts();
@@ -490,7 +633,7 @@
                 
             } catch (error) {
                 console.error('アップロードエラー:', error);
-                alert('保存に失敗しました: ' + error.message);
+                showToast('error', '保存失敗', '保存に失敗しました: ' + error.message, 5000);
             }
         };
 
@@ -506,29 +649,29 @@
         };
 
         window.deleteReceipt = async function(receiptId) {
-            if (!confirm('このレシートを削除しますか？')) return;
-            
-            try {
-                const receipt = receipts.find(r => r.id === receiptId);
-                
-                // Storageから削除
-                const { ref, deleteObject } = window.firebaseModules;
-                const storageRef = ref(window.storage, receipt.storagePath);
-                await deleteObject(storageRef);
-                
-                // Firestoreから削除
-                const { doc, deleteDoc } = window.firebaseModules;
-                const receiptDoc = doc(window.db, 'stores', storeId, 'receipts', receiptId);
-                await deleteDoc(receiptDoc);
-                
-                alert('削除しました');
-                await loadReceipts();
-                render();
-                
-            } catch (error) {
-                console.error('削除エラー:', error);
-                alert('削除に失敗しました: ' + error.message);
-            }
+            showConfirm('レシートを削除', 'このレシートを削除してもよろしいですか？', async function() {
+                try {
+                    const receipt = receipts.find(r => r.id === receiptId);
+                    
+                    // Storageから削除
+                    const { ref, deleteObject } = window.firebaseModules;
+                    const storageRef = ref(window.storage, receipt.storagePath);
+                    await deleteObject(storageRef);
+                    
+                    // Firestoreから削除
+                    const { doc, deleteDoc } = window.firebaseModules;
+                    const receiptDoc = doc(window.db, 'stores', storeId, 'receipts', receiptId);
+                    await deleteDoc(receiptDoc);
+                    
+                    showToast('success', '削除完了', 'レシートを削除しました');
+                    await loadReceipts();
+                    render();
+                    
+                } catch (error) {
+                    console.error('削除エラー:', error);
+                    showToast('error', '削除失敗', '削除に失敗しました: ' + error.message);
+                }
+            });
         };
 
         window.printReceipt = function(receiptId) {
@@ -560,7 +703,7 @@
 
         window.printAllReceipts = function() {
             if (filteredReceipts.length === 0) {
-                alert('印刷するレシートがありません');
+                showToast('info', '印刷なし', '印刷するレシートがありません');
                 return;
             }
             
