@@ -3568,32 +3568,16 @@
           attendanceSnapshot.forEach(doc => {
             const data = doc.data();
             if (data.date && data.date.startsWith(`${year}-${monthStr}`)) {
-              // 既に計算済みの総賃金がある場合はそれを使用
-              if (data.totalWage && data.totalWage > 0) {
-                totalLaborCost += data.totalWage;
-                workDays++;
-              } else if (data.clockIn && data.clockOut) {
-                // 総賃金がない場合は計算する
+              if (data.clockIn && data.clockOut) {
+                // 割増賃金を含めて計算する
                 const clockIn = new Date(`${data.date} ${data.clockIn}`);
                 const clockOut = new Date(`${data.date} ${data.clockOut}`);
-                let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
-                
-                if (data.breakStart1 && data.breakEnd1) {
-                  const breakStart1 = new Date(`${data.date} ${data.breakStart1}`);
-                  const breakEnd1 = new Date(`${data.date} ${data.breakEnd1}`);
-                  workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
-                }
-                if (data.breakStart2 && data.breakEnd2) {
-                  const breakStart2 = new Date(`${data.date} ${data.breakStart2}`);
-                  const breakEnd2 = new Date(`${data.date} ${data.breakEnd2}`);
-                  workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
-                }
                 
                 const hourlyRate = data.hourlyRate || 1150;
+                const isHoliday = data.isHoliday || false;
                 
                 // 割増賃金の計算
                 let totalWage = 0;
-                const isHoliday = data.isHoliday || false;
                 
                 // 時間ごとに割増率を計算
                 let currentTime = new Date(clockIn);
@@ -3990,85 +3974,68 @@
           const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
           attendanceSnapshot.forEach(doc => {
             const attData = doc.data();
-            if (attData.date === dateStr) {
-              // 既に計算済みの総賃金がある場合はそれを使用
-              if (attData.totalWage && attData.totalWage > 0) {
-                totalLaborCost += attData.totalWage;
-              } else if (attData.clockIn && attData.clockOut) {
-                // 総賃金がない場合は計算する
-                const clockIn = new Date(`${dateStr} ${attData.clockIn}`);
-                const clockOut = new Date(`${dateStr} ${attData.clockOut}`);
-                let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+            if (attData.date === dateStr && attData.clockIn && attData.clockOut) {
+              // 割増賃金を含めて計算する
+              const clockIn = new Date(`${dateStr} ${attData.clockIn}`);
+              const clockOut = new Date(`${dateStr} ${attData.clockOut}`);
+              
+              const hourlyRate = attData.hourlyRate || 1150;
+              const isHoliday = attData.isHoliday || false;
+              
+              // 割増賃金の計算
+              let totalWage = 0;
+              
+              // 時間ごとに割増率を計算
+              let currentTime = new Date(clockIn);
+              const endTime = new Date(clockOut);
+              
+              while (currentTime < endTime) {
+                const nextHour = new Date(currentTime.getTime() + 60 * 60 * 1000);
+                const segmentEnd = nextHour > endTime ? endTime : nextHour;
                 
+                // 休憩時間を除外
+                let isBreak = false;
                 if (attData.breakStart1 && attData.breakEnd1) {
                   const breakStart1 = new Date(`${dateStr} ${attData.breakStart1}`);
                   const breakEnd1 = new Date(`${dateStr} ${attData.breakEnd1}`);
-                  workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+                  if (currentTime >= breakStart1 && currentTime < breakEnd1) {
+                    isBreak = true;
+                  }
                 }
                 if (attData.breakStart2 && attData.breakEnd2) {
                   const breakStart2 = new Date(`${dateStr} ${attData.breakStart2}`);
                   const breakEnd2 = new Date(`${dateStr} ${attData.breakEnd2}`);
-                  workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+                  if (currentTime >= breakStart2 && currentTime < breakEnd2) {
+                    isBreak = true;
+                  }
                 }
                 
-                const hourlyRate = attData.hourlyRate || 1150;
-                
-                // 割増賃金の計算
-                let totalWage = 0;
-                const isHoliday = attData.isHoliday || false;
-                
-                // 時間ごとに割増率を計算
-                let currentTime = new Date(clockIn);
-                const endTime = new Date(clockOut);
-                
-                while (currentTime < endTime) {
-                  const nextHour = new Date(currentTime.getTime() + 60 * 60 * 1000);
-                  const segmentEnd = nextHour > endTime ? endTime : nextHour;
+                if (!isBreak) {
+                  const segmentHours = (segmentEnd - currentTime) / (1000 * 60 * 60);
+                  const hour = currentTime.getHours();
                   
-                  // 休憩時間を除外
-                  let isBreak = false;
-                  if (attData.breakStart1 && attData.breakEnd1) {
-                    const breakStart1 = new Date(`${dateStr} ${attData.breakStart1}`);
-                    const breakEnd1 = new Date(`${dateStr} ${attData.breakEnd1}`);
-                    if (currentTime >= breakStart1 && currentTime < breakEnd1) {
-                      isBreak = true;
+                  let rate = 1.0;
+                  if (isHoliday) {
+                    // 休日出勤: 基本35%増
+                    rate = 1.35;
+                    // 22時～5時は深夜割増25%を追加（合計60%増）
+                    if (hour >= 22 || hour < 5) {
+                      rate = 1.60;
                     }
-                  }
-                  if (attData.breakStart2 && attData.breakEnd2) {
-                    const breakStart2 = new Date(`${dateStr} ${attData.breakStart2}`);
-                    const breakEnd2 = new Date(`${dateStr} ${attData.breakEnd2}`);
-                    if (currentTime >= breakStart2 && currentTime < breakEnd2) {
-                      isBreak = true;
+                  } else {
+                    // 平日: 22時～5時は深夜割増25%
+                    if (hour >= 22 || hour < 5) {
+                      rate = 1.25;
                     }
                   }
                   
-                  if (!isBreak) {
-                    const segmentHours = (segmentEnd - currentTime) / (1000 * 60 * 60);
-                    const hour = currentTime.getHours();
-                    
-                    let rate = 1.0;
-                    if (isHoliday) {
-                      // 休日出勤: 基本35%増
-                      rate = 1.35;
-                      // 22時～5時は深夜割増25%を追加（合計60%増）
-                      if (hour >= 22 || hour < 5) {
-                        rate = 1.60;
-                      }
-                    } else {
-                      // 平日: 22時～5時は深夜割増25%
-                      if (hour >= 22 || hour < 5) {
-                        rate = 1.25;
-                      }
-                    }
-                    
-                    totalWage += segmentHours * hourlyRate * rate;
-                  }
-                  
-                  currentTime = segmentEnd;
+                  totalWage += segmentHours * hourlyRate * rate;
                 }
                 
-                totalLaborCost += totalWage;
+                currentTime = segmentEnd;
               }
+              
+              totalLaborCost += totalWage;
             }
           });
         }
@@ -4389,85 +4356,68 @@
           const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
           attendanceSnapshot.forEach(doc => {
             const data = doc.data();
-            if (data.date === dateStr) {
-              // 既に計算済みの総賃金がある場合はそれを使用
-              if (data.totalWage && data.totalWage > 0) {
-                todayLaborCost += data.totalWage;
-              } else if (data.clockIn && data.clockOut) {
-                // 総賃金がない場合は計算する
-                const clockIn = new Date(`${dateStr} ${data.clockIn}`);
-                const clockOut = new Date(`${dateStr} ${data.clockOut}`);
-                let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+            if (data.date === dateStr && data.clockIn && data.clockOut) {
+              // 割増賃金を含めて計算する
+              const clockIn = new Date(`${dateStr} ${data.clockIn}`);
+              const clockOut = new Date(`${dateStr} ${data.clockOut}`);
+              
+              const hourlyRate = data.hourlyRate || 1150;
+              const isHoliday = data.isHoliday || false;
+              
+              // 割増賃金の計算
+              let totalWage = 0;
+              
+              // 時間ごとに割増率を計算
+              let currentTime = new Date(clockIn);
+              const endTime = new Date(clockOut);
+              
+              while (currentTime < endTime) {
+                const nextHour = new Date(currentTime.getTime() + 60 * 60 * 1000);
+                const segmentEnd = nextHour > endTime ? endTime : nextHour;
                 
+                // 休憩時間を除外
+                let isBreak = false;
                 if (data.breakStart1 && data.breakEnd1) {
                   const breakStart1 = new Date(`${dateStr} ${data.breakStart1}`);
                   const breakEnd1 = new Date(`${dateStr} ${data.breakEnd1}`);
-                  workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+                  if (currentTime >= breakStart1 && currentTime < breakEnd1) {
+                    isBreak = true;
+                  }
                 }
                 if (data.breakStart2 && data.breakEnd2) {
                   const breakStart2 = new Date(`${dateStr} ${data.breakStart2}`);
                   const breakEnd2 = new Date(`${dateStr} ${data.breakEnd2}`);
-                  workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+                  if (currentTime >= breakStart2 && currentTime < breakEnd2) {
+                    isBreak = true;
+                  }
                 }
                 
-                const hourlyRate = data.hourlyRate || 1150;
-                
-                // 割増賃金の計算
-                let totalWage = 0;
-                const isHoliday = data.isHoliday || false;
-                
-                // 時間ごとに割増率を計算
-                let currentTime = new Date(clockIn);
-                const endTime = new Date(clockOut);
-                
-                while (currentTime < endTime) {
-                  const nextHour = new Date(currentTime.getTime() + 60 * 60 * 1000);
-                  const segmentEnd = nextHour > endTime ? endTime : nextHour;
+                if (!isBreak) {
+                  const segmentHours = (segmentEnd - currentTime) / (1000 * 60 * 60);
+                  const hour = currentTime.getHours();
                   
-                  // 休憩時間を除外
-                  let isBreak = false;
-                  if (data.breakStart1 && data.breakEnd1) {
-                    const breakStart1 = new Date(`${dateStr} ${data.breakStart1}`);
-                    const breakEnd1 = new Date(`${dateStr} ${data.breakEnd1}`);
-                    if (currentTime >= breakStart1 && currentTime < breakEnd1) {
-                      isBreak = true;
+                  let rate = 1.0;
+                  if (isHoliday) {
+                    // 休日出勤: 基本35%増
+                    rate = 1.35;
+                    // 22時～5時は深夜割増25%を追加（合計60%増）
+                    if (hour >= 22 || hour < 5) {
+                      rate = 1.60;
                     }
-                  }
-                  if (data.breakStart2 && data.breakEnd2) {
-                    const breakStart2 = new Date(`${dateStr} ${data.breakStart2}`);
-                    const breakEnd2 = new Date(`${dateStr} ${data.breakEnd2}`);
-                    if (currentTime >= breakStart2 && currentTime < breakEnd2) {
-                      isBreak = true;
+                  } else {
+                    // 平日: 22時～5時は深夜割増25%
+                    if (hour >= 22 || hour < 5) {
+                      rate = 1.25;
                     }
                   }
                   
-                  if (!isBreak) {
-                    const segmentHours = (segmentEnd - currentTime) / (1000 * 60 * 60);
-                    const hour = currentTime.getHours();
-                    
-                    let rate = 1.0;
-                    if (isHoliday) {
-                      // 休日出勤: 基本35%増
-                      rate = 1.35;
-                      // 22時～5時は深夜割増25%を追加（合計60%増）
-                      if (hour >= 22 || hour < 5) {
-                        rate = 1.60;
-                      }
-                    } else {
-                      // 平日: 22時～5時は深夜割増25%
-                      if (hour >= 22 || hour < 5) {
-                        rate = 1.25;
-                      }
-                    }
-                    
-                    totalWage += segmentHours * hourlyRate * rate;
-                  }
-                  
-                  currentTime = segmentEnd;
+                  totalWage += segmentHours * hourlyRate * rate;
                 }
                 
-                todayLaborCost += totalWage;
+                currentTime = segmentEnd;
               }
+              
+              todayLaborCost += totalWage;
             }
           });
         } catch (e) {
@@ -4808,32 +4758,16 @@
           
           // 期間内のデータのみ
           if (dateStr && dateStr >= startDateStr && dateStr <= endDateStr) {
-            // 既に計算済みの総賃金がある場合はそれを使用
-            if (data.totalWage && data.totalWage > 0) {
-              laborCost += data.totalWage;
-            } else if (data.clockIn && data.clockOut) {
-              // 総賃金がない場合は計算する
+            if (data.clockIn && data.clockOut) {
+              // 割増賃金を含めて計算する
               const clockIn = new Date(`${dateStr} ${data.clockIn}`);
               const clockOut = new Date(`${dateStr} ${data.clockOut}`);
-              let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
-              
-              // 休憩時間を引く
-              if (data.breakStart1 && data.breakEnd1) {
-                const breakStart1 = new Date(`${dateStr} ${data.breakStart1}`);
-                const breakEnd1 = new Date(`${dateStr} ${data.breakEnd1}`);
-                workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
-              }
-              if (data.breakStart2 && data.breakEnd2) {
-                const breakStart2 = new Date(`${dateStr} ${data.breakStart2}`);
-                const breakEnd2 = new Date(`${dateStr} ${data.breakEnd2}`);
-                workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
-              }
               
               const hourlyRate = data.hourlyRate || 1150;
+              const isHoliday = data.isHoliday || false;
               
               // 割増賃金の計算
               let totalWage = 0;
-              const isHoliday = data.isHoliday || false;
               
               // 時間ごとに割増率を計算
               let currentTime = new Date(clockIn);
@@ -5186,86 +5120,68 @@
           const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
           attendanceSnapshot.forEach(docData => {
             const data = docData.data();
-            if (data.date === dateStr) {
-              // 既に計算済みの総賃金がある場合はそれを使用
-              if (data.totalWage && data.totalWage > 0) {
-                laborCost += data.totalWage;
-              } else if (data.clockIn && data.clockOut) {
-                // 総賃金がない場合は計算する
-                const clockIn = new Date(`${dateStr} ${data.clockIn}`);
-                const clockOut = new Date(`${dateStr} ${data.clockOut}`);
-                let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+            if (data.date === dateStr && data.clockIn && data.clockOut) {
+              // 割増賃金を含めて計算する
+              const clockIn = new Date(`${dateStr} ${data.clockIn}`);
+              const clockOut = new Date(`${dateStr} ${data.clockOut}`);
+              
+              const hourlyRate = data.hourlyRate || 1150;
+              const isHoliday = data.isHoliday || false;
+              
+              // 割増賃金の計算
+              let totalWage = 0;
+              
+              // 時間ごとに割増率を計算
+              let currentTime = new Date(clockIn);
+              const endTime = new Date(clockOut);
+              
+              while (currentTime < endTime) {
+                const nextHour = new Date(currentTime.getTime() + 60 * 60 * 1000);
+                const segmentEnd = nextHour > endTime ? endTime : nextHour;
                 
-                // 休憩時間を引く
+                // 休憩時間を除外
+                let isBreak = false;
                 if (data.breakStart1 && data.breakEnd1) {
                   const breakStart1 = new Date(`${dateStr} ${data.breakStart1}`);
                   const breakEnd1 = new Date(`${dateStr} ${data.breakEnd1}`);
-                  workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+                  if (currentTime >= breakStart1 && currentTime < breakEnd1) {
+                    isBreak = true;
+                  }
                 }
                 if (data.breakStart2 && data.breakEnd2) {
                   const breakStart2 = new Date(`${dateStr} ${data.breakStart2}`);
                   const breakEnd2 = new Date(`${dateStr} ${data.breakEnd2}`);
-                  workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+                  if (currentTime >= breakStart2 && currentTime < breakEnd2) {
+                    isBreak = true;
+                  }
                 }
                 
-                const hourlyRate = data.hourlyRate || 1150;
-                
-                // 割増賃金の計算
-                let totalWage = 0;
-                const isHoliday = data.isHoliday || false;
-                
-                // 時間ごとに割増率を計算
-                let currentTime = new Date(clockIn);
-                const endTime = new Date(clockOut);
-                
-                while (currentTime < endTime) {
-                  const nextHour = new Date(currentTime.getTime() + 60 * 60 * 1000);
-                  const segmentEnd = nextHour > endTime ? endTime : nextHour;
+                if (!isBreak) {
+                  const segmentHours = (segmentEnd - currentTime) / (1000 * 60 * 60);
+                  const hour = currentTime.getHours();
                   
-                  // 休憩時間を除外
-                  let isBreak = false;
-                  if (data.breakStart1 && data.breakEnd1) {
-                    const breakStart1 = new Date(`${dateStr} ${data.breakStart1}`);
-                    const breakEnd1 = new Date(`${dateStr} ${data.breakEnd1}`);
-                    if (currentTime >= breakStart1 && currentTime < breakEnd1) {
-                      isBreak = true;
+                  let rate = 1.0;
+                  if (isHoliday) {
+                    // 休日出勤: 基本35%増
+                    rate = 1.35;
+                    // 22時～5時は深夜割増25%を追加（合計60%増）
+                    if (hour >= 22 || hour < 5) {
+                      rate = 1.60;
                     }
-                  }
-                  if (data.breakStart2 && data.breakEnd2) {
-                    const breakStart2 = new Date(`${dateStr} ${data.breakStart2}`);
-                    const breakEnd2 = new Date(`${dateStr} ${data.breakEnd2}`);
-                    if (currentTime >= breakStart2 && currentTime < breakEnd2) {
-                      isBreak = true;
+                  } else {
+                    // 平日: 22時～5時は深夜割増25%
+                    if (hour >= 22 || hour < 5) {
+                      rate = 1.25;
                     }
                   }
                   
-                  if (!isBreak) {
-                    const segmentHours = (segmentEnd - currentTime) / (1000 * 60 * 60);
-                    const hour = currentTime.getHours();
-                    
-                    let rate = 1.0;
-                    if (isHoliday) {
-                      // 休日出勤: 基本35%増
-                      rate = 1.35;
-                      // 22時～5時は深夜割増25%を追加（合計60%増）
-                      if (hour >= 22 || hour < 5) {
-                        rate = 1.60;
-                      }
-                    } else {
-                      // 平日: 22時～5時は深夜割増25%
-                      if (hour >= 22 || hour < 5) {
-                        rate = 1.25;
-                      }
-                    }
-                    
-                    totalWage += segmentHours * hourlyRate * rate;
-                  }
-                  
-                  currentTime = segmentEnd;
+                  totalWage += segmentHours * hourlyRate * rate;
                 }
                 
-                laborCost += totalWage;
+                currentTime = segmentEnd;
               }
+              
+              laborCost += totalWage;
             }
           });
           console.log('👷 人件費:', laborCost);
@@ -6250,85 +6166,68 @@
               const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
               attendanceSnapshot.forEach(docData => {
                 const attData = docData.data();
-                if (attData.date === dateStr) {
-                  // 既に計算済みの総賃金がある場合はそれを使用
-                  if (attData.totalWage && attData.totalWage > 0) {
-                    laborCost += attData.totalWage;
-                  } else if (attData.clockIn && attData.clockOut) {
-                    // 総賃金がない場合は計算する
-                    const clockIn = new Date(`${dateStr} ${attData.clockIn}`);
-                    const clockOut = new Date(`${dateStr} ${attData.clockOut}`);
-                    let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+                if (attData.date === dateStr && attData.clockIn && attData.clockOut) {
+                  // 割増賃金を含めて計算する
+                  const clockIn = new Date(`${dateStr} ${attData.clockIn}`);
+                  const clockOut = new Date(`${dateStr} ${attData.clockOut}`);
+                  
+                  const hourlyRate = attData.hourlyRate || 1150;
+                  const isHoliday = attData.isHoliday || false;
+                  
+                  // 割増賃金の計算
+                  let totalWage = 0;
+                  
+                  // 時間ごとに割増率を計算
+                  let currentTime = new Date(clockIn);
+                  const endTime = new Date(clockOut);
+                  
+                  while (currentTime < endTime) {
+                    const nextHour = new Date(currentTime.getTime() + 60 * 60 * 1000);
+                    const segmentEnd = nextHour > endTime ? endTime : nextHour;
                     
+                    // 休憩時間を除外
+                    let isBreak = false;
                     if (attData.breakStart1 && attData.breakEnd1) {
                       const breakStart1 = new Date(`${dateStr} ${attData.breakStart1}`);
                       const breakEnd1 = new Date(`${dateStr} ${attData.breakEnd1}`);
-                      workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+                      if (currentTime >= breakStart1 && currentTime < breakEnd1) {
+                        isBreak = true;
+                      }
                     }
                     if (attData.breakStart2 && attData.breakEnd2) {
                       const breakStart2 = new Date(`${dateStr} ${attData.breakStart2}`);
                       const breakEnd2 = new Date(`${dateStr} ${attData.breakEnd2}`);
-                      workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+                      if (currentTime >= breakStart2 && currentTime < breakEnd2) {
+                        isBreak = true;
+                      }
                     }
                     
-                    const hourlyRate = attData.hourlyRate || 1150;
-                    
-                    // 割増賃金の計算
-                    let totalWage = 0;
-                    const isHoliday = attData.isHoliday || false;
-                    
-                    // 時間ごとに割増率を計算
-                    let currentTime = new Date(clockIn);
-                    const endTime = new Date(clockOut);
-                    
-                    while (currentTime < endTime) {
-                      const nextHour = new Date(currentTime.getTime() + 60 * 60 * 1000);
-                      const segmentEnd = nextHour > endTime ? endTime : nextHour;
+                    if (!isBreak) {
+                      const segmentHours = (segmentEnd - currentTime) / (1000 * 60 * 60);
+                      const hour = currentTime.getHours();
                       
-                      // 休憩時間を除外
-                      let isBreak = false;
-                      if (attData.breakStart1 && attData.breakEnd1) {
-                        const breakStart1 = new Date(`${dateStr} ${attData.breakStart1}`);
-                        const breakEnd1 = new Date(`${dateStr} ${attData.breakEnd1}`);
-                        if (currentTime >= breakStart1 && currentTime < breakEnd1) {
-                          isBreak = true;
+                      let rate = 1.0;
+                      if (isHoliday) {
+                        // 休日出勤: 基本35%増
+                        rate = 1.35;
+                        // 22時～5時は深夜割増25%を追加（合計60%増）
+                        if (hour >= 22 || hour < 5) {
+                          rate = 1.60;
                         }
-                      }
-                      if (attData.breakStart2 && attData.breakEnd2) {
-                        const breakStart2 = new Date(`${dateStr} ${attData.breakStart2}`);
-                        const breakEnd2 = new Date(`${dateStr} ${attData.breakEnd2}`);
-                        if (currentTime >= breakStart2 && currentTime < breakEnd2) {
-                          isBreak = true;
+                      } else {
+                        // 平日: 22時～5時は深夜割増25%
+                        if (hour >= 22 || hour < 5) {
+                          rate = 1.25;
                         }
                       }
                       
-                      if (!isBreak) {
-                        const segmentHours = (segmentEnd - currentTime) / (1000 * 60 * 60);
-                        const hour = currentTime.getHours();
-                        
-                        let rate = 1.0;
-                        if (isHoliday) {
-                          // 休日出勤: 基本35%増
-                          rate = 1.35;
-                          // 22時～5時は深夜割増25%を追加（合計60%増）
-                          if (hour >= 22 || hour < 5) {
-                            rate = 1.60;
-                          }
-                        } else {
-                          // 平日: 22時～5時は深夜割増25%
-                          if (hour >= 22 || hour < 5) {
-                            rate = 1.25;
-                          }
-                        }
-                        
-                        totalWage += segmentHours * hourlyRate * rate;
-                      }
-                      
-                      currentTime = segmentEnd;
+                      totalWage += segmentHours * hourlyRate * rate;
                     }
                     
-                    laborCost += totalWage;
+                    currentTime = segmentEnd;
                   }
+                  
+                  laborCost += totalWage;
                 }
               });
             } catch (e) {
