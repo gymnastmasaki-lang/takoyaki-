@@ -1028,6 +1028,77 @@
 
     // LocalStorageから注文情報を復元
     function restoreOrderFromStorage() {
+      // まずURLパラメータをチェック
+      const urlOrderNumber = urlParams.get('orderNumber');
+      const urlPage = urlParams.get('page');
+      
+      if (urlOrderNumber && urlPage === 'complete') {
+        console.log('📌 URLパラメータから注文番号を復元:', urlOrderNumber);
+        
+        // LocalStorageから該当する注文を検索
+        const orderKey = `order_${tableNumber}_${urlOrderNumber}`;
+        const savedOrder = localStorage.getItem(orderKey);
+        
+        if (savedOrder) {
+          try {
+            const orderData = JSON.parse(savedOrder);
+            console.log('📦 注文情報を復元:', orderData);
+            
+            // 注文情報を画面に表示
+            document.getElementById('order-num').textContent = orderData.orderNumber;
+            document.getElementById('waiting').textContent = orderData.myPosition || '確認中';
+            document.getElementById('order-total').textContent = '¥' + orderData.totalAmount.toLocaleString();
+            document.getElementById('eat-style').textContent = orderData.tableNumber;
+            
+            const list = document.getElementById('order-items');
+            list.innerHTML = '';
+            orderData.items.forEach(item => {
+              const subtotal = (item.price + item.toppingPrice) * item.quantity;
+              const div = document.createElement('div');
+              div.className = 'cart-item';
+              div.innerHTML = `
+                <div class="cart-item-header">
+                  <div class="cart-item-name">${item.name}</div>
+                  <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
+                </div>
+                <div class="cart-item-details">トッピング: ${item.toppings}</div>
+                <div class="cart-item-details">単価: ¥${(item.price + item.toppingPrice).toLocaleString()} × ${item.quantity}</div>
+              `;
+              list.appendChild(div);
+            });
+            
+            // レジ袋情報を表示
+            if (orderData.bagNeeded && orderData.bagQuantity > 0) {
+              const bagDiv = document.createElement('div');
+              bagDiv.className = 'cart-item';
+              bagDiv.innerHTML = `
+                <div class="cart-item-header">
+                  <div class="cart-item-name">🛍️ レジ袋</div>
+                  <div class="cart-item-price">¥${orderData.bagPrice || (orderData.bagQuantity * 3)}</div>
+                </div>
+                <div class="cart-item-details">数量: ${orderData.bagQuantity}枚</div>
+              `;
+              list.appendChild(bagDiv);
+            }
+            
+            currentOrderId = orderData.orderId;
+            
+            // 注文ステータスの監視を再開
+            if (currentOrderId) {
+              watchOrderStatus(currentOrderId);
+            }
+            
+            // 完了ページを表示
+            showPage('page-complete');
+            
+            return true;
+          } catch (e) {
+            console.error('❌ 注文情報の復元エラー:', e);
+          }
+        }
+      }
+      
+      // URLパラメータがない場合は従来通り（後方互換性）
       const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
       if (savedOrder) {
         try {
@@ -2546,6 +2617,12 @@
         bagNeeded = false;
         showPage('page-complete');
         
+        // URLに注文番号を追加（リロード対応）
+        const url = new URL(window.location.href);
+        url.searchParams.set('orderNumber', orderNumber);
+        url.searchParams.set('page', 'complete');
+        window.history.pushState({}, '', url);
+        
         console.log('✅ 注文送信成功');
         
       } catch (e) {
@@ -2638,6 +2715,12 @@
           cart = [];
           bagQuantity = 0;
           bagNeeded = false;
+          
+          // URLパラメータをクリア
+          const url = new URL(window.location.href);
+          url.searchParams.delete('orderNumber');
+          url.searchParams.delete('page');
+          window.history.pushState({}, '', url);
           
           document.getElementById('page-menu').classList.remove('hidden');
           document.getElementById('page-topping').classList.add('hidden');
