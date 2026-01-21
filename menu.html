@@ -1898,7 +1898,13 @@
       const toppingNames = selectedToppings.map(t => t.name).join(', ') || '標準トッピング';
       
       // カテゴリが「包材」の場合は税率を10%に強制設定
-      const effectiveTaxRate = currentItem.category === '包材' ? 10 : (currentItem.taxRate || 10);
+      // それ以外はデータベースの設定をそのまま使用
+      let effectiveTaxRate;
+      if (currentItem.category === '包材') {
+        effectiveTaxRate = 10;
+      } else {
+        effectiveTaxRate = currentItem.taxRate; // データベースの設定を使用（未設定の場合はundefined）
+      }
       
       const item = {
         id: currentItem.id,
@@ -2229,10 +2235,16 @@
           const subtotal = (item.price + item.toppingPrice) * item.quantity;
           totalAmount += subtotal;
           
-          // 商品のtaxRateプロパティを使用（包材は強制的に10%に設定済み）
-          // taxRateが未設定の場合は、テイクアウトは8%、イートインは10%
-          const isTakeout = (tableNumber === 'テイクアウト');
-          const itemTaxRate = item.taxRate || (isTakeout ? 8 : 10);
+          // 税率の判定:
+          // 1. 包材カテゴリは強制的に10%（カート追加時に設定済み）
+          // 2. 商品にtaxRateが設定されていればそれを使用
+          // 3. 未設定の場合は、テイクアウトは8%、イートインは10%
+          let itemTaxRate;
+          if (item.taxRate !== undefined && item.taxRate !== null) {
+            itemTaxRate = item.taxRate;
+          } else {
+            itemTaxRate = isTakeout ? 8 : 10;
+          }
           
           if (itemTaxRate === 8) {
             tax8Total += subtotal;
