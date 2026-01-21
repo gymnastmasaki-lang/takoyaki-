@@ -919,16 +919,10 @@
             // レシート設定を保存
             const saveReceiptSettings = async () => {
                 try {
-                    // Firebaseモジュールの準備を待つ
-                    while (!window.FirebaseReady || !window.db) {
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                    }
-                    
                     const { doc, setDoc, Timestamp } = window.firebaseModules;
                     
                     console.log('━━━━━━━━━━━━━━━━━━━━━━');
                     console.log('🧾 レシート設定を保存中...');
-                    console.log('   認証状態:', isAdminAuthenticated);
                     console.log('   店舗ID:', window.currentStoreId);
                     
                     const settingsData = {
@@ -936,34 +930,42 @@
                         updatedAt: Timestamp.now()
                     };
                     
-                    // 認証済みで店舗IDがある場合
-                    if (isAdminAuthenticated && window.currentStoreId) {
+                    if (window.currentStoreId) {
+                        // 店舗IDがある場合：店舗別パスに保存
                         settingsData.storeId = window.currentStoreId;
                         
                         const settingsRef = doc(window.db, 'stores', window.currentStoreId, 'settings', 'receipt');
                         await setDoc(settingsRef, settingsData);
                         console.log('   ✅ 保存パス: stores/' + window.currentStoreId + '/settings/receipt');
                         
+                        // グローバル設定としても保存
                         const globalRef = doc(window.db, 'receipt_settings', window.currentStoreId);
                         await setDoc(globalRef, settingsData);
                         console.log('   ✅ グローバル保存: receipt_settings/' + window.currentStoreId);
                         
+                        console.log('━━━━━━━━━━━━━━━━━━━━━━');
+                        console.log('📌 menu.htmlで使用するURL:');
+                        console.log('   menu.html?store=' + window.currentStoreId + '&table=テーブル名');
+                        console.log('━━━━━━━━━━━━━━━━━━━━━━');
+                        
                         showCustomAlertFunc('✅ レシート設定を保存しました', '保存完了', '✅');
                     } else {
-                        // 認証なし or 店舗IDなし（下赤塚店）：固定パスに保存
+                        // 店舗IDがない場合（下赤塚店）：固定パスに保存
                         settingsData.storeId = 'shimoakatsuka';
                         
                         const shimoakatsukaRef = doc(window.db, 'receipt_settings', 'shimoakatsuka');
                         await setDoc(shimoakatsukaRef, settingsData);
                         console.log('   ✅ 下赤塚店として保存: receipt_settings/shimoakatsuka');
-                        console.log('   保存データ:', settingsData);
+                        
+                        console.log('━━━━━━━━━━━━━━━━━━━━━━');
+                        console.log('📌 menu.htmlで使用するURL:');
+                        console.log('   menu.html （パラメータなし）');
+                        console.log('━━━━━━━━━━━━━━━━━━━━━━');
                         
                         showCustomAlertFunc('✅ レシート設定を保存しました\n\n下赤塚店のデフォルト設定として保存されました', '保存完了', '✅');
                     }
-                    
-                    console.log('━━━━━━━━━━━━━━━━━━━━━━');
                 } catch (error) {
-                    console.error('❌ レシート設定保存エラー:', error);
+                    console.error('レシート設定保存エラー:', error);
                     showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
                 }
             };
@@ -1944,108 +1946,6 @@
                                         {isLoading ? 'ログイン中...' : 'ログイン'}
                                     </button>
                                 </form>
-                                
-                                <div className="mt-6 text-center">
-                                    <button
-                                        onClick={() => setShowReceiptSettings(true)}
-                                        className="text-blue-600 hover:text-blue-800 text-sm underline"
-                                    >
-                                        🧾 レシート設定のみ編集（ログイン不要）
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            {/* レシート設定モーダル（ログイン前でも表示） */}
-                            {showReceiptSettings && !isAdminAuthenticated && (
-                                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                                    <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                                        <h2 className="text-2xl font-bold mb-4">🧾 レシート/領収書設定</h2>
-                                        <p className="text-sm text-gray-600 mb-4">※下赤塚店のレシート設定を編集します</p>
-                                        
-                                        <div className="space-y-4">
-                                            <div>
-                                                <label className="block text-sm font-medium mb-2">店舗名</label>
-                                                <input
-                                                    type="text"
-                                                    value={receiptSettings.storeName}
-                                                    onChange={(e) => setReceiptSettings({...receiptSettings, storeName: e.target.value})}
-                                                    className="w-full p-2 border rounded"
-                                                    placeholder="例: 粉もん屋 八"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-medium mb-2">支店名</label>
-                                                <input
-                                                    type="text"
-                                                    value={receiptSettings.branchName}
-                                                    onChange={(e) => setReceiptSettings({...receiptSettings, branchName: e.target.value})}
-                                                    className="w-full p-2 border rounded"
-                                                    placeholder="例: 下赤塚店"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-medium mb-2">住所</label>
-                                                <input
-                                                    type="text"
-                                                    value={receiptSettings.address}
-                                                    onChange={(e) => setReceiptSettings({...receiptSettings, address: e.target.value})}
-                                                    className="w-full p-2 border rounded"
-                                                    placeholder="例: 東京都板橋区赤塚2-2-4"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-medium mb-2">電話番号</label>
-                                                <input
-                                                    type="text"
-                                                    value={receiptSettings.phone}
-                                                    onChange={(e) => setReceiptSettings({...receiptSettings, phone: e.target.value})}
-                                                    className="w-full p-2 border rounded"
-                                                    placeholder="例: 03-6904-2888"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-medium mb-2">レシート下部メッセージ</label>
-                                                <textarea
-                                                    value={receiptSettings.message}
-                                                    onChange={(e) => setReceiptSettings({...receiptSettings, message: e.target.value})}
-                                                    className="w-full p-2 border rounded"
-                                                    rows="4"
-                                                    placeholder="例: ご来店ありがとうございました&#10;アルバイト募集&#10;時給1200円〜&#10;詳しくはスタッフまで"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-medium mb-2">電子印鑑（領収書用）</label>
-                                                <input
-                                                    type="file"
-                                                    accept="image/*"
-                                                    onChange={handleStampUpload}
-                                                    className="w-full p-2 border rounded"
-                                                />
-                                                {receiptSettings.stampImage && (
-                                                    <div className="mt-2">
-                                                        <img src={receiptSettings.stampImage} alt="印鑑プレビュー" className="w-20 h-20 object-contain border" />
-                                                    </div>
-                                                )}
-                                                <p className="text-xs text-gray-500 mt-1">※PNG形式推奨。透過背景が使用できます。</p>
-                                            </div>
-                                            <div className="flex gap-2 justify-end pt-4 border-t">
-                                                <button
-                                                    onClick={() => setShowReceiptSettings(false)}
-                                                    className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-                                                >
-                                                    閉じる
-                                                </button>
-                                                <button
-                                                    onClick={saveReceiptSettings}
-                                                    className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
-                                                >
-                                                    保存
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
                             </div>
                         </div>
                     </div>
