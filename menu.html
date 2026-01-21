@@ -921,135 +921,84 @@
 
     // LocalStorageから注文情報を復元
     function restoreOrderFromStorage() {
-      // まずURLパラメータをチェック
-      const urlOrderNumber = urlParams.get('orderNumber');
-      const urlPage = urlParams.get('page');
-      
-      if (urlOrderNumber && urlPage === 'complete') {
-        console.log('📌 URLパラメータから注文番号を復元:', urlOrderNumber);
-        
-        // LocalStorageから該当する注文を検索
-        const orderKey = `order_${tableNumber}_${urlOrderNumber}`;
-        const savedOrder = localStorage.getItem(orderKey);
-        
-        if (savedOrder) {
-          try {
-            const orderData = JSON.parse(savedOrder);
-            console.log('📦 注文情報を復元:', orderData);
-            
-            // 注文情報を画面に表示
-            document.getElementById('order-num').textContent = orderData.orderNumber;
-            document.getElementById('waiting').textContent = orderData.myPosition || '確認中';
-            document.getElementById('order-total').textContent = '¥' + orderData.totalAmount.toLocaleString();
-            document.getElementById('eat-style').textContent = orderData.tableNumber;
-            
-            const list = document.getElementById('order-items');
-            list.innerHTML = '';
-            orderData.items.forEach(item => {
-              const subtotal = (item.price + item.toppingPrice) * item.quantity;
-              const div = document.createElement('div');
-              div.className = 'cart-item';
-              div.innerHTML = `
-                <div class="cart-item-header">
-                  <div class="cart-item-name">${item.name}</div>
-                  <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
-                </div>
-                <div class="cart-item-details">数量: ${item.quantity}個</div>
-                <div class="cart-item-details" style="color: #4CAF50;">トッピング: ${item.toppings}</div>
-              `;
-              list.appendChild(div);
-            });
-            
-            if (orderData.bagNeeded && orderData.bagQuantity > 0) {
-              const bagDiv = document.createElement('div');
-              bagDiv.className = 'cart-item';
-              bagDiv.innerHTML = `
-                <div class="cart-item-header">
-                  <div class="cart-item-name">🛍️ レジ袋</div>
-                  <div class="cart-item-price">¥${orderData.bagPrice.toLocaleString()}</div>
-                </div>
-                <div class="cart-item-details">数量: ${orderData.bagQuantity}枚</div>
-              `;
-              list.appendChild(bagDiv);
-            }
-            
-            currentOrderId = orderData.orderId;
-            
-            // 注文ステータスの監視を再開
-            if (currentOrderId) {
-              watchOrderStatus(currentOrderId);
-            }
-            
-            // 完了ページを表示
-            document.getElementById('page-menu').classList.add('hidden');
-            document.getElementById('page-topping').classList.add('hidden');
-            document.getElementById('page-cart').classList.add('hidden');
-            document.getElementById('page-complete').classList.remove('hidden');
-            
-            return true;
-          } catch (e) {
-            console.error('❌ 注文情報の復元エラー:', e);
+      const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
+      if (savedOrder) {
+        try {
+          const orderData = JSON.parse(savedOrder);
+          console.log('📦 注文情報を復元:', orderData);
+          
+          // 注文情報を画面に表示
+          document.getElementById('order-num').textContent = orderData.orderNumber;
+          document.getElementById('waiting').textContent = orderData.myPosition;
+          document.getElementById('order-total').textContent = '¥' + orderData.totalAmount.toLocaleString();
+          document.getElementById('eat-style').textContent = orderData.tableNumber;
+          
+          const list = document.getElementById('order-items');
+          list.innerHTML = '';
+          orderData.items.forEach(item => {
+            const subtotal = (item.price + item.toppingPrice) * item.quantity;
+            const div = document.createElement('div');
+            div.className = 'cart-item';
+            div.innerHTML = `
+              <div class="cart-item-header">
+                <div class="cart-item-name">${item.name}</div>
+                <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
+              </div>
+              <div class="cart-item-details">数量: ${item.quantity}個</div>
+              <div class="cart-item-details" style="color: #4CAF50;">トッピング: ${item.toppings}</div>
+            `;
+            list.appendChild(div);
+          });
+          
+          if (orderData.bagNeeded && orderData.bagQuantity > 0) {
+            const bagDiv = document.createElement('div');
+            bagDiv.className = 'cart-item';
+            bagDiv.innerHTML = `
+              <div class="cart-item-header">
+                <div class="cart-item-name">🛍️ レジ袋</div>
+                <div class="cart-item-price">¥${orderData.bagPrice.toLocaleString()}</div>
+              </div>
+              <div class="cart-item-details">数量: ${orderData.bagQuantity}枚</div>
+            `;
+            list.appendChild(bagDiv);
           }
+          
+          currentOrderId = orderData.orderId;
+          
+          // 注文ステータスの監視を再開
+          if (currentOrderId) {
+            watchOrderStatus(currentOrderId);
+          }
+          
+          // 完了ページを表示
+          document.getElementById('page-menu').classList.add('hidden');
+          document.getElementById('page-topping').classList.add('hidden');
+          document.getElementById('page-cart').classList.add('hidden');
+          document.getElementById('page-complete').classList.remove('hidden');
+          
+          return true;
+        } catch (e) {
+          console.error('❌ 注文情報の復元エラー:', e);
+          localStorage.removeItem('currentOrder_' + tableNumber);
         }
       }
-      
       return false;
     }
 
-    // 注文情報をLocalStorageに保存（注文番号ごと）
+    // 注文情報をLocalStorageに保存
     function saveOrderToStorage(orderData) {
       try {
-        const key = `order_${tableNumber}_${orderData.orderNumber}`;
-        localStorage.setItem(key, JSON.stringify(orderData));
-        console.log('💾 注文情報を保存しました:', key, orderData);
+        localStorage.setItem('currentOrder_' + tableNumber, JSON.stringify(orderData));
+        console.log('💾 注文情報を保存しました:', orderData);
       } catch (e) {
         console.error('❌ 注文情報の保存エラー:', e);
       }
     }
 
-    // テーブルの全注文を取得
-    function getAllOrdersForTable() {
-      const orders = [];
-      const prefix = `order_${tableNumber}_`;
-      
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith(prefix)) {
-          try {
-            const orderData = JSON.parse(localStorage.getItem(key));
-            orders.push(orderData);
-          } catch (e) {
-            console.error('❌ 注文データ読み込みエラー:', key, e);
-          }
-        }
-      }
-      
-      // 注文番号順にソート
-      orders.sort((a, b) => a.orderNumber - b.orderNumber);
-      console.log('📦 テーブルの全注文:', orders);
-      return orders;
-    }
-
-    // テーブルの全注文をクリア（会計完了時）
-    function clearAllOrdersForTable() {
-      const prefix = `order_${tableNumber}_`;
-      const keysToRemove = [];
-      
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith(prefix)) {
-          keysToRemove.push(key);
-        }
-      }
-      
-      keysToRemove.forEach(key => localStorage.removeItem(key));
-      console.log('🗑️ 全注文情報をクリアしました:', keysToRemove.length + '件');
-    }
-
-    // 注文完了時にLocalStorageをクリア（後方互換性のため残す）
+    // 注文完了時にLocalStorageをクリア
     function clearOrderFromStorage() {
-      // 全注文をクリア
-      clearAllOrdersForTable();
+      localStorage.removeItem('currentOrder_' + tableNumber);
+      console.log('🗑️ 注文情報をクリアしました');
     }
 
     window.onload = async function() {
@@ -1948,18 +1897,12 @@
       // 表示用のテキスト（後方互換性のため残す）
       const toppingNames = selectedToppings.map(t => t.name).join(', ') || '標準トッピング';
       
-      // 包材カテゴリは常に消費税10%
-      let itemTaxRate = currentItem.taxRate || 10;
-      if (currentItem.category === '包材') {
-        itemTaxRate = 10;
-      }
-      
       const item = {
         id: currentItem.id,
         name: currentItem.name,
         price: currentItem.price,
         category: currentItem.category,  // カテゴリを追加
-        taxRate: itemTaxRate,
+        taxRate: currentItem.taxRate || 10,
         toppings: toppingNames, // 表示用（後方互換性）
         toppingsData: toppingsData, // 🆕 構造化データ
         toppingPrice: toppingPrice,
@@ -2283,14 +2226,8 @@
           const subtotal = (item.price + item.toppingPrice) * item.quantity;
           totalAmount += subtotal;
           
-          // 包材カテゴリは常に10%
-          let effectiveTaxRate = item.taxRate || 10;
-          if (item.category === '包材') {
-            effectiveTaxRate = 10;
-          }
-          
-          // テイクアウトは8%、イートインは10%（ただし包材は常に10%）
-          if (isTakeout && effectiveTaxRate === 8) {
+          // テイクアウトは8%、イートインは10%
+          if (isTakeout) {
             tax8Total += subtotal;
           } else {
             tax10Total += subtotal;
@@ -2438,12 +2375,6 @@
         bagNeeded = false;
         showPage('page-complete');
         
-        // URLに注文番号を追加（リロード対応）
-        const url = new URL(window.location.href);
-        url.searchParams.set('orderNumber', orderNumber);
-        url.searchParams.set('page', 'complete');
-        window.history.pushState({}, '', url);
-        
         console.log('✅ 注文送信成功');
         
       } catch (e) {
@@ -2527,21 +2458,15 @@
     window.startNewOrder = function() {
       showCustomConfirm(
         '新しい注文を開始しますか？',
-        '追加で注文できます。',
+        '現在の注文情報は保存されたままです。',
         () => {
           // OKが押された場合
-          // データは削除しない（追加注文のため）
+          clearOrderFromStorage();
           currentOrderId = null;
           
           cart = [];
           bagQuantity = 0;
           bagNeeded = false;
-          
-          // URLパラメータをクリア（メニューに戻る）
-          const url = new URL(window.location.href);
-          url.searchParams.delete('orderNumber');
-          url.searchParams.delete('page');
-          window.history.pushState({}, '', url);
           
           document.getElementById('page-menu').classList.remove('hidden');
           document.getElementById('page-topping').classList.add('hidden');
@@ -2549,13 +2474,17 @@
           document.getElementById('page-complete').classList.add('hidden');
           
           updateCartButton();
-          showCustomAlert('追加注文できます！');
+          showCustomAlert('新しい注文を開始します！');
         }
       );
     };
     
     // レシート表示
     window.showReceipt = function() {
+      const orderNum = document.getElementById('order-num').textContent;
+      const orderTotal = document.getElementById('order-total').textContent;
+      const eatStyle = document.getElementById('eat-style').textContent;
+      
       const now = new Date();
       const dateStr = now.getFullYear() + '/' + 
                       String(now.getMonth() + 1).padStart(2, '0') + '/' + 
@@ -2563,30 +2492,19 @@
                       String(now.getHours()).padStart(2, '0') + ':' + 
                       String(now.getMinutes()).padStart(2, '0');
       
-      // テーブルの全注文を取得
-      const allOrders = getAllOrdersForTable();
-      
-      if (allOrders.length === 0) {
-        alert('注文情報が見つかりません');
-        return;
-      }
-      
-      // 全注文を合算
+      // LocalStorageから注文情報を取得
+      const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
       let itemsHtml = '';
       let tax8Total = 0;
       let tax10Total = 0;
-      let totalAmount = 0;
-      let allOrderNumbers = [];
       
-      allOrders.forEach(orderData => {
-        allOrderNumbers.push('#' + orderData.orderNumber);
+      if (savedOrder) {
+        const orderData = JSON.parse(savedOrder);
         
-        // 税率合計を加算
-        tax8Total += orderData.tax8Total || 0;
-        tax10Total += orderData.tax10Total || 0;
-        totalAmount += orderData.totalAmount || 0;
+        // LocalStorageに保存された税率情報を使用
+        tax8Total = orderData.tax8Total || 0;
+        tax10Total = orderData.tax10Total || 0;
         
-        // 商品を追加
         orderData.items.forEach(item => {
           const subtotal = (item.price + item.toppingPrice) * item.quantity;
           itemsHtml += `
@@ -2601,20 +2519,18 @@
           `;
         });
         
-        // レジ袋を追加
         if (orderData.bagNeeded && orderData.bagQuantity > 0) {
-          const bagTotal = orderData.bagPrice || (orderData.bagQuantity * 3);
           itemsHtml += `
             <div style="display: flex; justify-content: space-between; margin: 8px 0; padding: 8px 0; border-bottom: 1px dashed #ddd;">
               <div style="flex: 1;">
                 <div style="font-weight: bold;">🛍️ レジ袋</div>
                 <div style="font-size: 12px; color: #666;">単価: ¥3 × ${orderData.bagQuantity}</div>
               </div>
-              <div style="font-weight: bold; white-space: nowrap;">¥${bagTotal.toLocaleString()}</div>
+              <div style="font-weight: bold; white-space: nowrap;">¥${orderData.bagPrice.toLocaleString()}</div>
             </div>
           `;
         }
-      });
+      }
       
       // 消費税計算（内税）
       const tax8Excluded = Math.floor(tax8Total / 1.08);
@@ -2637,11 +2553,11 @@
             </div>
             <div style="display: flex; justify-content: space-between; margin: 5px 0;">
               <span>注文番号:</span>
-              <span style="font-weight: bold; font-size: 18px;">${allOrderNumbers.join(', ')}</span>
+              <span style="font-weight: bold; font-size: 18px;">#${orderNum}</span>
             </div>
             <div style="display: flex; justify-content: space-between; margin: 5px 0;">
               <span>利用形態:</span>
-              <span>${tableNumber}</span>
+              <span>${eatStyle}</span>
             </div>
           </div>
           
@@ -2667,7 +2583,7 @@
           </div>
           
           <div style="text-align: right; font-size: 24px; font-weight: bold; margin: 20px 0;">
-            合計: ¥${totalAmount.toLocaleString()}
+            合計: ${orderTotal}
           </div>
           
           <div style="border-top: 2px solid #000; padding-top: 15px; margin-top: 20px; font-size: 12px;">
@@ -2724,31 +2640,27 @@
     
     // 領収書表示
     window.showInvoice = function() {
+      const orderNum = document.getElementById('order-num').textContent;
+      const orderTotal = document.getElementById('order-total').textContent;
+      const eatStyle = document.getElementById('eat-style').textContent;
+      
       const now = new Date();
       const dateStr = now.getFullYear() + '年' + 
                       String(now.getMonth() + 1).padStart(2, '0') + '月' + 
                       String(now.getDate()).padStart(2, '0') + '日';
       
-      // テーブルの全注文を取得
-      const allOrders = getAllOrdersForTable();
-      
-      if (allOrders.length === 0) {
-        alert('注文情報が見つかりません');
-        return;
-      }
-      
-      // 全注文を合算
+      // LocalStorageから注文情報を取得して消費税を計算
+      const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
       let tax8Total = 0;
       let tax10Total = 0;
-      let totalAmount = 0;
-      let allOrderNumbers = [];
       
-      allOrders.forEach(orderData => {
-        allOrderNumbers.push('#' + orderData.orderNumber);
-        tax8Total += orderData.tax8Total || 0;
-        tax10Total += orderData.tax10Total || 0;
-        totalAmount += orderData.totalAmount || 0;
-      });
+      if (savedOrder) {
+        const orderData = JSON.parse(savedOrder);
+        
+        // LocalStorageに保存された税率情報を使用
+        tax8Total = orderData.tax8Total || 0;
+        tax10Total = orderData.tax10Total || 0;
+      }
       
       // 消費税計算（内税）
       const tax8Excluded = Math.floor(tax8Total / 1.08);
@@ -2775,7 +2687,7 @@
             <div style="font-size: 16px; margin-bottom: 10px;">下記の通り領収いたしました</div>
             <div style="border: 2px solid #000; padding: 20px; margin: 20px 0;">
               <div style="font-size: 14px; margin-bottom: 5px;">金額</div>
-              <div style="font-size: 36px; font-weight: bold;">¥${totalAmount.toLocaleString()}</div>
+              <div style="font-size: 36px; font-weight: bold;">${orderTotal}</div>
               <div style="font-size: 14px; margin-top: 10px; color: #666;">（内消費税 ¥${totalTax.toLocaleString()}）</div>
             </div>
           </div>
@@ -2787,11 +2699,11 @@
             </div>
             <div style="margin: 10px 0;">
               <span style="display: inline-block; width: 100px;">利用形態</span>
-              <span>${tableNumber}</span>
+              <span>${eatStyle}</span>
             </div>
             <div style="margin: 10px 0;">
               <span style="display: inline-block; width: 100px;">注文番号</span>
-              <span>${allOrderNumbers.join(', ')}</span>
+              <span>#${orderNum}</span>
             </div>
           </div>
           
