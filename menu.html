@@ -1004,6 +1004,9 @@
     window.onload = async function() {
       console.log('ページ読み込み開始');
       
+      // まず注文情報の復元を試みる（営業時間外でも注文番号画面は表示）
+      const hasStoredOrder = localStorage.getItem('currentOrder_' + tableNumber);
+      
       // テーブルパラメータがある場合、テーブルの存在確認
       if (tableNumber && tableNumber !== 'テイクアウト' && tableNumber !== '即会計') {
         try {
@@ -1020,7 +1023,25 @@
           });
           
           if (!tableExists) {
-            // テーブルが存在しない場合
+            // 保存された注文がある場合は、それを表示（テーブルが削除されていても）
+            if (hasStoredOrder) {
+              console.log('⚠️ テーブルは削除されていますが、保存された注文を表示します');
+              // 初期化を実行してから注文を復元
+              try {
+                await loadAllData();
+                await updateTopWaitingCount();
+                watchSoldOutItems();
+                const restored = restoreOrderFromStorage();
+                if (restored) {
+                  console.log('✅ 保存された注文を復元しました（テーブル削除済み）');
+                  return;
+                }
+              } catch (e) {
+                console.error('注文復元エラー:', e);
+              }
+            }
+            
+            // 保存された注文もない場合はエラー画面を表示
             document.body.innerHTML = `
               <div style="
                 display: flex;
@@ -1102,6 +1123,26 @@
       
       if (isClosed) {
         console.log('営業時間外');
+        
+        // 保存された注文がある場合は、それを表示（営業時間外でも）
+        if (hasStoredOrder) {
+          console.log('⚠️ 営業時間外ですが、保存された注文を表示します');
+          // 初期化を実行してから注文を復元
+          try {
+            await loadAllData();
+            await updateTopWaitingCount();
+            watchSoldOutItems();
+            const restored = restoreOrderFromStorage();
+            if (restored) {
+              console.log('✅ 保存された注文を復元しました（営業時間外）');
+              return;
+            }
+          } catch (e) {
+            console.error('注文復元エラー:', e);
+          }
+        }
+        
+        // 保存された注文もない場合は営業時間外画面を表示
         // すべてのページを非表示
         document.getElementById('page-menu').style.display = 'none';
         document.getElementById('page-topping').style.display = 'none';
@@ -1176,8 +1217,14 @@
       
       orderStatusUnsubscribe = onSnapshot(orderRef, async (docSnap) => {
         if (!docSnap.exists()) {
-          console.log('注文が削除されました（物理削除）');
+          console.log('⚠️ 注文が削除されました（物理削除）');
           clearOrderFromStorage();
+          currentOrderId = null;
+          // メニュー画面に戻る
+          showCustomAlert('注文が削除されました\n\nメニュー画面に戻ります', () => {
+            showPage('page-menu');
+            window.location.reload(); // ページをリロードして初期状態に戻す
+          });
           return;
         }
         
@@ -1185,8 +1232,14 @@
         
         // deletedフラグが立っている場合も削除として扱う
         if (data.deleted) {
-          console.log('注文が削除されました（論理削除）');
+          console.log('⚠️ 注文が削除されました（論理削除）');
           clearOrderFromStorage();
+          currentOrderId = null;
+          // メニュー画面に戻る
+          showCustomAlert('注文が削除されました\n\nメニュー画面に戻ります', () => {
+            showPage('page-menu');
+            window.location.reload(); // ページをリロードして初期状態に戻す
+          });
           return;
         }
         
@@ -2960,7 +3013,7 @@
       document.body.appendChild(overlay);
     }
     
-    function showCustomAlert(message) {
+    function showCustomAlert(message, callback) {
       const overlay = document.createElement('div');
       overlay.style.cssText = `
         position: fixed;
@@ -3006,7 +3059,10 @@
         font-weight: bold;
         cursor: pointer;
       `;
-      button.onclick = () => overlay.remove();
+      button.onclick = () => {
+        overlay.remove();
+        if (callback) callback();
+      };
       
       dialog.appendChild(text);
       dialog.appendChild(button);
