@@ -200,6 +200,20 @@
             });
             const [showReceiptSettings, setShowReceiptSettings] = useState(false);
             
+            // メニューカスタマイズ設定用のstate
+            const [menuSettings, setMenuSettings] = useState({
+                showMemoField: true, // 備考・メモ欄を表示
+                showNameField: false, // 名前入力欄を表示
+                showPostalCodeField: false, // 郵便番号入力欄を表示
+                showAddressField: false, // 住所入力欄を表示
+                nameRequired: false, // 名前を必須にする
+                postalCodeRequired: false, // 郵便番号を必須にする
+                addressRequired: false, // 住所を必須にする
+                statusMessage: 'この番号でお呼びしますので\n商品を受け取るまで\nこの画面を閉じないでください', // ステータス部分の案内文
+                warningMessage: '⚠️ 重要なお知らせ\n\n• 席を外す際には先に\nお会計を済ませてください\n\n• 番号をお呼びしても未会計のまま席を外されますと注文キャンセルとなる場合があります' // 警告メッセージ
+            });
+            const [showMenuSettings, setShowMenuSettings] = useState(false);
+            
             // カスタムアラート用の状態
             const [showCustomAlert, setShowCustomAlert] = useState(false);
             const [alertMessage, setAlertMessage] = useState('');
@@ -344,6 +358,9 @@
                     
                     // レシート設定を読み込み
                     await loadReceiptSettings();
+                    
+                    // メニュー設定を読み込み
+                    await loadMenuSettings();
                     
                 } catch (err) {
                     console.error('データ読み込みエラー:', err);
@@ -959,6 +976,52 @@
                     }
                 } catch (error) {
                     console.error('❌ レシート設定読み込みエラー:', error);
+                }
+            };
+
+            // メニュー設定を保存
+            const saveMenuSettings = async () => {
+                try {
+                    // Firebaseモジュールの準備を待つ
+                    while (!window.FirebaseReady || !window.db) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                    
+                    const { doc, setDoc, Timestamp } = window.firebaseModules;
+                    
+                    const settingsData = {
+                        ...menuSettings,
+                        updatedAt: Timestamp.now(),
+                        storeId: 'shimoakatsuka'
+                    };
+                    
+                    // 下赤塚店の固定パスに保存
+                    const menuSettingsRef = doc(window.db, 'menu_settings', 'shimoakatsuka');
+                    await setDoc(menuSettingsRef, settingsData);
+                    
+                    console.log('✅ メニュー設定を保存しました:', settingsData);
+                    showCustomAlertFunc('✅ メニュー設定を保存しました', '保存完了', '✅');
+                } catch (error) {
+                    console.error('❌ メニュー設定保存エラー:', error);
+                    showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
+                }
+            };
+
+            // メニュー設定を読み込み
+            const loadMenuSettings = async () => {
+                try {
+                    const { doc, getDoc } = window.firebaseModules;
+                    
+                    // 下赤塚店の固定パスから読み込み
+                    const menuSettingsRef = doc(window.db, 'menu_settings', 'shimoakatsuka');
+                    const menuSettingsDoc = await getDoc(menuSettingsRef);
+                    
+                    if (menuSettingsDoc.exists()) {
+                        setMenuSettings(menuSettingsDoc.data());
+                        console.log('✅ メニュー設定を読み込みました');
+                    }
+                } catch (error) {
+                    console.error('❌ メニュー設定読み込みエラー:', error);
                 }
             };
 
@@ -2086,6 +2149,186 @@
                                     <div className="flex gap-2">
                                         <button
                                             onClick={saveReceiptSettings}
+                                            className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
+                                        >
+                                            保存
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* メニューカスタマイズ設定 */}
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                    🍽️ メニューカスタマイズ設定
+                                </h2>
+                                <button
+                                    onClick={() => setShowMenuSettings(!showMenuSettings)}
+                                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                                >
+                                    {showMenuSettings ? '閉じる' : '設定を開く'}
+                                </button>
+                            </div>
+
+                            {showMenuSettings && (
+                                <div className="space-y-4 border-t pt-4">
+                                    <div className="bg-blue-50 p-4 rounded-lg">
+                                        <p className="text-sm text-gray-700 mb-2">
+                                            💡 お客様向けメニュー画面（menu.html）の表示設定を変更できます
+                                        </p>
+                                        <p className="text-sm text-gray-700">
+                                            🛒 通信販売モードとして使用する場合は、名前・郵便番号・住所欄を有効にしてください
+                                        </p>
+                                    </div>
+
+                                    {/* 入力欄の表示設定 */}
+                                    <div className="border-l-4 border-blue-500 pl-4">
+                                        <h3 className="text-lg font-bold mb-3">📋 入力欄の表示設定</h3>
+                                        
+                                        {/* 備考・メモ欄 */}
+                                        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg mb-3">
+                                            <div>
+                                                <label className="block text-md font-medium mb-1">📝 備考・メモ欄</label>
+                                                <p className="text-sm text-gray-600">お客様がメモを入力できます</p>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={menuSettings.showMemoField}
+                                                    onChange={(e) => setMenuSettings({...menuSettings, showMemoField: e.target.checked})}
+                                                    className="sr-only peer"
+                                                />
+                                                <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+                                            </label>
+                                        </div>
+
+                                        {/* 名前欄 */}
+                                        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg mb-3">
+                                            <div className="flex-1">
+                                                <label className="block text-md font-medium mb-1">👤 お名前入力欄</label>
+                                                <p className="text-sm text-gray-600">通信販売等で名前が必要な場合に使用</p>
+                                                {menuSettings.showNameField && (
+                                                    <div className="mt-2">
+                                                        <label className="inline-flex items-center text-sm">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={menuSettings.nameRequired}
+                                                                onChange={(e) => setMenuSettings({...menuSettings, nameRequired: e.target.checked})}
+                                                                className="mr-2"
+                                                            />
+                                                            <span className="text-red-600 font-medium">必須項目にする</span>
+                                                        </label>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer ml-4">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={menuSettings.showNameField}
+                                                    onChange={(e) => setMenuSettings({...menuSettings, showNameField: e.target.checked, nameRequired: e.target.checked ? menuSettings.nameRequired : false})}
+                                                    className="sr-only peer"
+                                                />
+                                                <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+                                            </label>
+                                        </div>
+
+                                        {/* 郵便番号欄 */}
+                                        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg mb-3">
+                                            <div className="flex-1">
+                                                <label className="block text-md font-medium mb-1">📮 郵便番号入力欄</label>
+                                                <p className="text-sm text-gray-600">配送先の郵便番号を入力</p>
+                                                {menuSettings.showPostalCodeField && (
+                                                    <div className="mt-2">
+                                                        <label className="inline-flex items-center text-sm">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={menuSettings.postalCodeRequired}
+                                                                onChange={(e) => setMenuSettings({...menuSettings, postalCodeRequired: e.target.checked})}
+                                                                className="mr-2"
+                                                            />
+                                                            <span className="text-red-600 font-medium">必須項目にする</span>
+                                                        </label>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer ml-4">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={menuSettings.showPostalCodeField}
+                                                    onChange={(e) => setMenuSettings({...menuSettings, showPostalCodeField: e.target.checked, postalCodeRequired: e.target.checked ? menuSettings.postalCodeRequired : false})}
+                                                    className="sr-only peer"
+                                                />
+                                                <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+                                            </label>
+                                        </div>
+
+                                        {/* 住所欄 */}
+                                        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg mb-3">
+                                            <div className="flex-1">
+                                                <label className="block text-md font-medium mb-1">🏠 住所入力欄</label>
+                                                <p className="text-sm text-gray-600">配送先の住所を入力</p>
+                                                {menuSettings.showAddressField && (
+                                                    <div className="mt-2">
+                                                        <label className="inline-flex items-center text-sm">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={menuSettings.addressRequired}
+                                                                onChange={(e) => setMenuSettings({...menuSettings, addressRequired: e.target.checked})}
+                                                                className="mr-2"
+                                                            />
+                                                            <span className="text-red-600 font-medium">必須項目にする</span>
+                                                        </label>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer ml-4">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={menuSettings.showAddressField}
+                                                    onChange={(e) => setMenuSettings({...menuSettings, showAddressField: e.target.checked, addressRequired: e.target.checked ? menuSettings.addressRequired : false})}
+                                                    className="sr-only peer"
+                                                />
+                                                <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    {/* メッセージのカスタマイズ */}
+                                    <div className="border-l-4 border-green-500 pl-4 mt-6">
+                                        <h3 className="text-lg font-bold mb-3">💬 表示メッセージのカスタマイズ</h3>
+                                        
+                                        {/* ステータスメッセージ */}
+                                        <div className="mb-4">
+                                            <label className="block text-md font-medium mb-2">📢 注文番号画面の案内文</label>
+                                            <p className="text-sm text-gray-600 mb-2">注文番号の下に表示される案内文（空欄で非表示）</p>
+                                            <textarea
+                                                value={menuSettings.statusMessage || ''}
+                                                onChange={(e) => setMenuSettings({...menuSettings, statusMessage: e.target.value})}
+                                                rows="3"
+                                                className="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                                                placeholder="例: この番号でお呼びしますので\n商品を受け取るまで\nこの画面を閉じないでください"
+                                            />
+                                        </div>
+
+                                        {/* 警告メッセージ */}
+                                        <div className="mb-4">
+                                            <label className="block text-md font-medium mb-2">⚠️ 重要なお知らせ（警告文）</label>
+                                            <p className="text-sm text-gray-600 mb-2">注文番号画面の下部に表示される警告文（空欄で非表示）</p>
+                                            <textarea
+                                                value={menuSettings.warningMessage || ''}
+                                                onChange={(e) => setMenuSettings({...menuSettings, warningMessage: e.target.value})}
+                                                rows="5"
+                                                className="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                                                placeholder="例: ⚠️ 重要なお知らせ\n\n• 席を外す際には先に\nお会計を済ませてください"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={saveMenuSettings}
                                             className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
                                         >
                                             保存

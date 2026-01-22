@@ -644,9 +644,33 @@
       </div>
       
       <!-- お客様メモ -->
-      <div id="memo-section" style="background: white; padding: 15px; border-radius: 15px; margin: 15px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+      <div id="memo-section" style="background: white; padding: 15px; border-radius: 15px; margin: 15px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none;">
         <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;">📝 備考・メモ（任意）</div>
         <textarea id="customer-memo" rows="3" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; resize: vertical;"></textarea>
+      </div>
+      
+      <!-- お名前入力欄 -->
+      <div id="name-section" style="background: white; padding: 15px; border-radius: 15px; margin: 15px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none;">
+        <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;">
+          👤 お名前<span id="name-required-mark" style="color: #f44336; margin-left: 5px; display: none;">*</span>
+        </div>
+        <input type="text" id="customer-name" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;" placeholder="山田 太郎">
+      </div>
+      
+      <!-- 郵便番号入力欄 -->
+      <div id="postal-code-section" style="background: white; padding: 15px; border-radius: 15px; margin: 15px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none;">
+        <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;">
+          📮 郵便番号<span id="postal-code-required-mark" style="color: #f44336; margin-left: 5px; display: none;">*</span>
+        </div>
+        <input type="text" id="customer-postal-code" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;" placeholder="123-4567">
+      </div>
+      
+      <!-- 住所入力欄 -->
+      <div id="address-section" style="background: white; padding: 15px; border-radius: 15px; margin: 15px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none;">
+        <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;">
+          🏠 住所<span id="address-required-mark" style="color: #f44336; margin-left: 5px; display: none;">*</span>
+        </div>
+        <textarea id="customer-address" rows="2" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; resize: vertical;" placeholder="東京都○○区○○町1-2-3"></textarea>
       </div>
       
       <div class="price-display">
@@ -691,16 +715,12 @@
           <div style="font-size: 28px; font-weight: bold; color: #ff6b9d;" id="eat-style">-</div>
         </div>
         
-        <div class="warning-box">
-          この番号でお呼びしますので<br>
-          商品を受け取るまで<br>
-          この画面を閉じないでください
+        <div id="status-message" class="warning-box" style="display: none;">
+          <!-- ステータスメッセージがここに表示されます -->
         </div>
         
-        <div class="warning-box" style="background: #ffebee; border-color: #ef5350; color: #c62828;">
-          <strong>⚠️ 重要なお知らせ</strong><br><br>
-          • 席を外す際には先に<br>お会計を済ませてください<br><br>
-          • 番号をお呼びしても未会計のまま席を外されますと注文キャンセルとなる場合があります
+        <div id="warning-message" class="warning-box" style="background: #ffebee; border-color: #ef5350; color: #c62828; display: none;">
+          <!-- 警告メッセージがここに表示されます -->
         </div>
         
         <h2 style="color: #000; font-size: 20px; text-shadow: 2px 2px 4px rgba(0,0,0,0.1); margin: 20px 0;">✅ ご注文ありがとうございます</h2>
@@ -911,6 +931,19 @@
     let bagNeeded = false;
     const BAG_PRICE = 3;
     
+    // メニュー設定
+    let menuSettings = {
+      showMemoField: true, // デフォルトは表示
+      showNameField: false,
+      showPostalCodeField: false,
+      showAddressField: false,
+      nameRequired: false,
+      postalCodeRequired: false,
+      addressRequired: false,
+      statusMessage: 'この番号でお呼びしますので\n商品を受け取るまで\nこの画面を閉じないでください',
+      warningMessage: '⚠️ 重要なお知らせ\n\n• 席を外す際には先に\nお会計を済ませてください\n\n• 番号をお呼びしても未会計のまま席を外されますと注文キャンセルとなる場合があります'
+    };
+    
     // 二重送信防止用フラグ
     let isOrderProcessing = false;
     let lastOrderTimestamp = 0;
@@ -998,6 +1031,76 @@
     function clearOrderFromStorage() {
       localStorage.removeItem('currentOrder_' + tableNumber);
       console.log('🗑️ 注文情報をクリアしました');
+    }
+
+    // メニュー設定を読み込み
+    async function loadMenuSettings() {
+      try {
+        const menuSettingsRef = doc(db, 'menu_settings', 'shimoakatsuka');
+        const menuSettingsDoc = await getDoc(menuSettingsRef);
+        
+        if (menuSettingsDoc.exists()) {
+          menuSettings = menuSettingsDoc.data();
+          console.log('✅ メニュー設定を読み込みました:', menuSettings);
+          
+          // メモ欄の表示/非表示
+          const memoSection = document.getElementById('memo-section');
+          if (memoSection) {
+            memoSection.style.display = menuSettings.showMemoField ? 'block' : 'none';
+          }
+          
+          // 名前欄の表示/非表示
+          const nameSection = document.getElementById('name-section');
+          const nameRequiredMark = document.getElementById('name-required-mark');
+          if (nameSection) {
+            nameSection.style.display = menuSettings.showNameField ? 'block' : 'none';
+            if (nameRequiredMark) {
+              nameRequiredMark.style.display = menuSettings.nameRequired ? 'inline' : 'none';
+            }
+          }
+          
+          // 郵便番号欄の表示/非表示
+          const postalCodeSection = document.getElementById('postal-code-section');
+          const postalCodeRequiredMark = document.getElementById('postal-code-required-mark');
+          if (postalCodeSection) {
+            postalCodeSection.style.display = menuSettings.showPostalCodeField ? 'block' : 'none';
+            if (postalCodeRequiredMark) {
+              postalCodeRequiredMark.style.display = menuSettings.postalCodeRequired ? 'inline' : 'none';
+            }
+          }
+          
+          // 住所欄の表示/非表示
+          const addressSection = document.getElementById('address-section');
+          const addressRequiredMark = document.getElementById('address-required-mark');
+          if (addressSection) {
+            addressSection.style.display = menuSettings.showAddressField ? 'block' : 'none';
+            if (addressRequiredMark) {
+              addressRequiredMark.style.display = menuSettings.addressRequired ? 'inline' : 'none';
+            }
+          }
+          
+          // ステータスメッセージの設定
+          const statusMessageElement = document.getElementById('status-message');
+          if (statusMessageElement && menuSettings.statusMessage && menuSettings.statusMessage.trim()) {
+            statusMessageElement.innerHTML = menuSettings.statusMessage.replace(/\n/g, '<br>');
+            statusMessageElement.style.display = 'block';
+          } else if (statusMessageElement) {
+            statusMessageElement.style.display = 'none';
+          }
+          
+          // 警告メッセージの設定
+          const warningMessageElement = document.getElementById('warning-message');
+          if (warningMessageElement && menuSettings.warningMessage && menuSettings.warningMessage.trim()) {
+            warningMessageElement.innerHTML = menuSettings.warningMessage.replace(/\n/g, '<br>');
+            warningMessageElement.style.display = 'block';
+          } else if (warningMessageElement) {
+            warningMessageElement.style.display = 'none';
+          }
+        }
+      } catch (error) {
+        console.error('❌ メニュー設定読み込みエラー:', error);
+        // エラーの場合はデフォルトで表示
+      }
     }
 
     window.onload = async function() {
@@ -1181,6 +1284,7 @@
       
       try {
         await loadAllData();
+        await loadMenuSettings(); // メニュー設定を読み込み
         await updateTopWaitingCount();
         setInterval(updateTopWaitingCount, 20000); // 🚀 10秒→20秒に軽量化
         watchSoldOutItems();
@@ -2198,6 +2302,34 @@
         return;
       }
       
+      // ========== 必須項目のバリデーション ==========
+      // 名前の必須チェック
+      if (menuSettings.showNameField && menuSettings.nameRequired) {
+        const customerName = document.getElementById('customer-name')?.value.trim();
+        if (!customerName) {
+          showCustomAlert('お名前を入力してください');
+          return;
+        }
+      }
+      
+      // 郵便番号の必須チェック
+      if (menuSettings.showPostalCodeField && menuSettings.postalCodeRequired) {
+        const customerPostalCode = document.getElementById('customer-postal-code')?.value.trim();
+        if (!customerPostalCode) {
+          showCustomAlert('郵便番号を入力してください');
+          return;
+        }
+      }
+      
+      // 住所の必須チェック
+      if (menuSettings.showAddressField && menuSettings.addressRequired) {
+        const customerAddress = document.getElementById('customer-address')?.value.trim();
+        if (!customerAddress) {
+          showCustomAlert('住所を入力してください');
+          return;
+        }
+      }
+      
       // 処理中フラグをON
       isOrderProcessing = true;
       lastOrderTimestamp = now;
@@ -2309,8 +2441,11 @@
         
         const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
         
-        // お客様メモを取得
+        // お客様情報を取得
         const customerMemo = document.getElementById('customer-memo') ? document.getElementById('customer-memo').value.trim() : '';
+        const customerName = document.getElementById('customer-name') ? document.getElementById('customer-name').value.trim() : '';
+        const customerPostalCode = document.getElementById('customer-postal-code') ? document.getElementById('customer-postal-code').value.trim() : '';
+        const customerAddress = document.getElementById('customer-address') ? document.getElementById('customer-address').value.trim() : '';
         
         const orderData = {
           orderNumber: orderNumber,
@@ -2323,7 +2458,10 @@
           bagPrice: bagTotal,
           tax8Total: tax8Total,
           tax10Total: tax10Total,
-          customerMemo: customerMemo, // お客様メモを追加
+          customerMemo: customerMemo, // お客様メモ
+          customerName: customerName, // お客様名前
+          customerPostalCode: customerPostalCode, // 郵便番号
+          customerAddress: customerAddress, // 住所
           status: 'pending',
           deleteAt: Timestamp.fromDate(deleteAt),
           cancelledAt: null,
