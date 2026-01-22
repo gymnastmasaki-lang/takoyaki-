@@ -673,22 +673,6 @@
         <textarea id="customer-address" rows="2" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; resize: vertical;" placeholder="東京都○○区○○町1-2-3"></textarea>
       </div>
       
-      <!-- メールアドレス入力欄 -->
-      <div id="email-section" style="background: white; padding: 15px; border-radius: 15px; margin: 15px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none;">
-        <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;">
-          📧 メールアドレス<span id="email-required-mark" style="color: #f44336; margin-left: 5px; display: none;">*</span>
-        </div>
-        <input type="email" id="customer-email" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;" placeholder="example@email.com">
-      </div>
-      
-      <!-- 電話番号入力欄 -->
-      <div id="phone-section" style="background: white; padding: 15px; border-radius: 15px; margin: 15px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none;">
-        <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;">
-          電話番号<span id="phone-required-mark" style="color: #f44336; margin-left: 5px; display: none;">*</span>
-        </div>
-        <input type="tel" id="customer-phone" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;" placeholder="090-1234-5678">
-      </div>
-      
       <div class="price-display">
         <div class="price-label">合計金額</div>
         <div class="price-amount" id="cart-total">¥0</div>
@@ -809,8 +793,7 @@
       console.log('   window.currentStoreId:', window.currentStoreId);
       console.log('   typeof:', typeof window.currentStoreId);
       
-      // 下赤塚店（shimoakatsuka）または未設定の場合は旧パスを使用
-      if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null || window.currentStoreId === 'shimoakatsuka') {
+      if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
         const oldPathMap = {
           "menus": "menu",
           "employees": "kintai_employees",
@@ -826,8 +809,7 @@
 
     // 店舗別ドキュメント参照を取得
     window.getStoreDoc = function(collectionName, docId) {
-      // 下赤塚店（shimoakatsuka）または未設定の場合は旧パスを使用
-      if (!window.currentStoreId || window.currentStoreId === 'shimoakatsuka') {
+      if (!window.currentStoreId) {
         const oldPathMap = {
           "menus": "menu",
           "employees": "kintai_employees",
@@ -857,15 +839,15 @@
       console.log('   設定された店舗ID:', currentStoreId);
       console.log('   window.currentStoreId:', window.currentStoreId);
     } else if (storeIdParam === 'shimoakatsuka') {
-      // 下赤塚店（URLパラメータ指定）
-      currentStoreId = 'shimoakatsuka';
+      // 下赤塚店（旧システム）
+      currentStoreId = null;
       window.currentStoreId = currentStoreId;
       currentStoreName = '下赤塚';
       console.log('✅ 下赤塚店モード（URLパラメータ指定）');
       console.log('   window.currentStoreId:', window.currentStoreId);
     } else {
       // パラメータなし = 下赤塚店（後方互換性）
-      currentStoreId = 'shimoakatsuka';
+      currentStoreId = null;
       window.currentStoreId = currentStoreId;
       currentStoreName = '下赤塚';
       console.log('✅ 下赤塚店モード（デフォルト）');
@@ -951,19 +933,15 @@
     
     // メニュー設定
     let menuSettings = {
-      showMemoField: false, // デフォルトは非表示
+      showMemoField: true, // デフォルトは表示
       showNameField: false,
       showPostalCodeField: false,
       showAddressField: false,
-      showEmailField: false, // メールアドレス欄
-      showPhoneField: false, // 電話番号欄
       nameRequired: false,
       postalCodeRequired: false,
       addressRequired: false,
-      emailRequired: false, // メールアドレスを必須にする
-      phoneRequired: false, // 電話番号を必須にする
-      statusMessage: '',
-      warningMessage: ''
+      statusMessage: 'この番号でお呼びしますので\n商品を受け取るまで\nこの画面を閉じないでください',
+      warningMessage: '⚠️ 重要なお知らせ\n\n• 席を外す際には先に\nお会計を済ませてください\n\n• 番号をお呼びしても未会計のまま席を外されますと注文キャンセルとなる場合があります'
     };
     
     // 二重送信防止用フラグ
@@ -1058,153 +1036,70 @@
     // メニュー設定を読み込み
     async function loadMenuSettings() {
       try {
-        // 店舗IDを決定（storeパラメータがない場合は'shimoakatsuka'）
-        const storeId = currentStoreId || 'shimoakatsuka';
-        console.log('🍽️ メニュー設定を読み込み中... 店舗ID:', storeId);
-        
-        const menuSettingsRef = doc(db, 'menu_settings', storeId);
+        const menuSettingsRef = doc(db, 'menu_settings', 'shimoakatsuka');
         const menuSettingsDoc = await getDoc(menuSettingsRef);
         
         if (menuSettingsDoc.exists()) {
           menuSettings = menuSettingsDoc.data();
           console.log('✅ メニュー設定を読み込みました:', menuSettings);
-        } else {
-          console.log('⚠️ メニュー設定が見つかりません。デフォルト設定を使用します。');
           
-          // 下赤塚店の場合はデフォルトで表示
-          if (storeId === 'shimoakatsuka') {
-            menuSettings = {
-              showMemoField: true,
-              showNameField: false,
-              showPostalCodeField: false,
-              showAddressField: false,
-              showEmailField: false,
-              showPhoneField: false,
-              nameRequired: false,
-              postalCodeRequired: false,
-              addressRequired: false,
-              emailRequired: false,
-              phoneRequired: false,
-              statusMessage: 'この番号でお呼びしますので\n商品を受け取るまで\nこの画面を閉じないでください',
-              warningMessage: '⚠️ 重要なお知らせ\n\n• 席を外す際には先に\nお会計を済ませてください\n\n• 番号をお呼びしても未会計のまま席を外されますと注文キャンセルとなる場合があります'
-            };
-            console.log('✅ 下赤塚店のデフォルト設定を適用しました');
+          // メモ欄の表示/非表示
+          const memoSection = document.getElementById('memo-section');
+          if (memoSection) {
+            memoSection.style.display = menuSettings.showMemoField ? 'block' : 'none';
           }
-        }
-        
-        // メモ欄の表示/非表示
-        const memoSection = document.getElementById('memo-section');
-        if (memoSection) {
-          memoSection.style.display = menuSettings.showMemoField ? 'block' : 'none';
-        }
-        
-        // 名前欄の表示/非表示
-        const nameSection = document.getElementById('name-section');
-        const nameRequiredMark = document.getElementById('name-required-mark');
-        if (nameSection) {
-          nameSection.style.display = menuSettings.showNameField ? 'block' : 'none';
-          if (nameRequiredMark) {
-            nameRequiredMark.style.display = menuSettings.nameRequired ? 'inline' : 'none';
+          
+          // 名前欄の表示/非表示
+          const nameSection = document.getElementById('name-section');
+          const nameRequiredMark = document.getElementById('name-required-mark');
+          if (nameSection) {
+            nameSection.style.display = menuSettings.showNameField ? 'block' : 'none';
+            if (nameRequiredMark) {
+              nameRequiredMark.style.display = menuSettings.nameRequired ? 'inline' : 'none';
+            }
           }
-        }
-        
-        // 郵便番号欄の表示/非表示
-        const postalCodeSection = document.getElementById('postal-code-section');
-        const postalCodeRequiredMark = document.getElementById('postal-code-required-mark');
-        if (postalCodeSection) {
-          postalCodeSection.style.display = menuSettings.showPostalCodeField ? 'block' : 'none';
-          if (postalCodeRequiredMark) {
-            postalCodeRequiredMark.style.display = menuSettings.postalCodeRequired ? 'inline' : 'none';
+          
+          // 郵便番号欄の表示/非表示
+          const postalCodeSection = document.getElementById('postal-code-section');
+          const postalCodeRequiredMark = document.getElementById('postal-code-required-mark');
+          if (postalCodeSection) {
+            postalCodeSection.style.display = menuSettings.showPostalCodeField ? 'block' : 'none';
+            if (postalCodeRequiredMark) {
+              postalCodeRequiredMark.style.display = menuSettings.postalCodeRequired ? 'inline' : 'none';
+            }
           }
-        }
-        
-        // 住所欄の表示/非表示
-        const addressSection = document.getElementById('address-section');
-        const addressRequiredMark = document.getElementById('address-required-mark');
-        if (addressSection) {
-          addressSection.style.display = menuSettings.showAddressField ? 'block' : 'none';
-          if (addressRequiredMark) {
-            addressRequiredMark.style.display = menuSettings.addressRequired ? 'inline' : 'none';
+          
+          // 住所欄の表示/非表示
+          const addressSection = document.getElementById('address-section');
+          const addressRequiredMark = document.getElementById('address-required-mark');
+          if (addressSection) {
+            addressSection.style.display = menuSettings.showAddressField ? 'block' : 'none';
+            if (addressRequiredMark) {
+              addressRequiredMark.style.display = menuSettings.addressRequired ? 'inline' : 'none';
+            }
           }
-        }
-        
-        // メールアドレス欄の表示/非表示
-        const emailSection = document.getElementById('email-section');
-        const emailRequiredMark = document.getElementById('email-required-mark');
-        if (emailSection) {
-          emailSection.style.display = menuSettings.showEmailField ? 'block' : 'none';
-          if (emailRequiredMark) {
-            emailRequiredMark.style.display = menuSettings.emailRequired ? 'inline' : 'none';
+          
+          // ステータスメッセージの設定
+          const statusMessageElement = document.getElementById('status-message');
+          if (statusMessageElement && menuSettings.statusMessage && menuSettings.statusMessage.trim()) {
+            statusMessageElement.innerHTML = menuSettings.statusMessage.replace(/\n/g, '<br>');
+            statusMessageElement.style.display = 'block';
+          } else if (statusMessageElement) {
+            statusMessageElement.style.display = 'none';
           }
-        }
-        
-        // 電話番号欄の表示/非表示
-        const phoneSection = document.getElementById('phone-section');
-        const phoneRequiredMark = document.getElementById('phone-required-mark');
-        if (phoneSection) {
-          phoneSection.style.display = menuSettings.showPhoneField ? 'block' : 'none';
-          if (phoneRequiredMark) {
-            phoneRequiredMark.style.display = menuSettings.phoneRequired ? 'inline' : 'none';
+          
+          // 警告メッセージの設定
+          const warningMessageElement = document.getElementById('warning-message');
+          if (warningMessageElement && menuSettings.warningMessage && menuSettings.warningMessage.trim()) {
+            warningMessageElement.innerHTML = menuSettings.warningMessage.replace(/\n/g, '<br>');
+            warningMessageElement.style.display = 'block';
+          } else if (warningMessageElement) {
+            warningMessageElement.style.display = 'none';
           }
-        }
-        
-        // ステータスメッセージの設定
-        const statusMessageElement = document.getElementById('status-message');
-        if (statusMessageElement && menuSettings.statusMessage && menuSettings.statusMessage.trim()) {
-          statusMessageElement.innerHTML = menuSettings.statusMessage.replace(/\n/g, '<br>');
-          statusMessageElement.style.display = 'block';
-        } else if (statusMessageElement) {
-          statusMessageElement.style.display = 'none';
-        }
-        
-        // 警告メッセージの設定
-        const warningMessageElement = document.getElementById('warning-message');
-        if (warningMessageElement && menuSettings.warningMessage && menuSettings.warningMessage.trim()) {
-          warningMessageElement.innerHTML = menuSettings.warningMessage.replace(/\n/g, '<br>');
-          warningMessageElement.style.display = 'block';
-        } else if (warningMessageElement) {
-          warningMessageElement.style.display = 'none';
         }
       } catch (error) {
         console.error('❌ メニュー設定読み込みエラー:', error);
-        // エラーの場合は下赤塚店のデフォルトを使用
-        const storeId = currentStoreId || 'shimoakatsuka';
-        if (storeId === 'shimoakatsuka') {
-          menuSettings = {
-            showMemoField: true,
-            showNameField: false,
-            showPostalCodeField: false,
-            showAddressField: false,
-            showEmailField: false,
-            showPhoneField: false,
-            nameRequired: false,
-            postalCodeRequired: false,
-            addressRequired: false,
-            emailRequired: false,
-            phoneRequired: false,
-            statusMessage: 'この番号でお呼びしますので\n商品を受け取るまで\nこの画面を閉じないでください',
-            warningMessage: '⚠️ 重要なお知らせ\n\n• 席を外す際には先に\nお会計を済ませてください\n\n• 番号をお呼びしても未会計のまま席を外されますと注文キャンセルとなる場合があります'
-          };
-          
-          // メモ欄を表示
-          const memoSection = document.getElementById('memo-section');
-          if (memoSection) {
-            memoSection.style.display = 'block';
-          }
-          
-          // メッセージを表示
-          const statusMessageElement = document.getElementById('status-message');
-          if (statusMessageElement) {
-            statusMessageElement.innerHTML = menuSettings.statusMessage.replace(/\n/g, '<br>');
-            statusMessageElement.style.display = 'block';
-          }
-          
-          const warningMessageElement = document.getElementById('warning-message');
-          if (warningMessageElement) {
-            warningMessageElement.innerHTML = menuSettings.warningMessage.replace(/\n/g, '<br>');
-            warningMessageElement.style.display = 'block';
-          }
-        }
+        // エラーの場合はデフォルトで表示
       }
     }
 
@@ -2435,30 +2330,6 @@
         }
       }
       
-      // メールアドレスの必須チェック
-      if (menuSettings.showEmailField && menuSettings.emailRequired) {
-        const customerEmail = document.getElementById('customer-email')?.value.trim();
-        if (!customerEmail) {
-          showCustomAlert('メールアドレスを入力してください');
-          return;
-        }
-        // 簡易的なメールアドレス形式チェック
-        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailPattern.test(customerEmail)) {
-          showCustomAlert('正しいメールアドレスを入力してください');
-          return;
-        }
-      }
-      
-      // 電話番号の必須チェック
-      if (menuSettings.showPhoneField && menuSettings.phoneRequired) {
-        const customerPhone = document.getElementById('customer-phone')?.value.trim();
-        if (!customerPhone) {
-          showCustomAlert('電話番号を入力してください');
-          return;
-        }
-      }
-      
       // 処理中フラグをON
       isOrderProcessing = true;
       lastOrderTimestamp = now;
@@ -2575,8 +2446,6 @@
         const customerName = document.getElementById('customer-name') ? document.getElementById('customer-name').value.trim() : '';
         const customerPostalCode = document.getElementById('customer-postal-code') ? document.getElementById('customer-postal-code').value.trim() : '';
         const customerAddress = document.getElementById('customer-address') ? document.getElementById('customer-address').value.trim() : '';
-        const customerEmail = document.getElementById('customer-email') ? document.getElementById('customer-email').value.trim() : '';
-        const customerPhone = document.getElementById('customer-phone') ? document.getElementById('customer-phone').value.trim() : '';
         
         const orderData = {
           orderNumber: orderNumber,
@@ -2593,8 +2462,6 @@
           customerName: customerName, // お客様名前
           customerPostalCode: customerPostalCode, // 郵便番号
           customerAddress: customerAddress, // 住所
-          customerEmail: customerEmail, // メールアドレス
-          customerPhone: customerPhone, // 電話番号
           status: 'pending',
           deleteAt: Timestamp.fromDate(deleteAt),
           cancelledAt: null,
