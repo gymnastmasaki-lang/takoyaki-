@@ -8255,18 +8255,20 @@
         builder.createTextElement({data: address + '\n'});
         builder.createTextElement({data: 'TEL: ' + phone + '\n'});
         
-        // 🆕 印鑑画像を印刷（設定されている場合）
-        if (window.receiptSettings.stampImage) {
+        // 🆕 印鑑画像を印刷（事前変換したCanvasを使用）
+        if (window.receiptSettings.stampCanvas) {
           try {
             console.log('🖼️ 印鑑画像を印刷します');
             builder.createAlignmentElement({position: 'right'});
             builder.createBitImageElement({
-              context: window.receiptSettings.stampImage,
-              width: 100,
-              bothScale: true,
-              alignment: 'Right'
+              context: window.receiptSettings.stampCanvas,
+              x: 0,
+              y: 0,
+              width: window.receiptSettings.stampCanvas.canvas.width,
+              height: window.receiptSettings.stampCanvas.canvas.height
             });
             builder.createFeedElement({line: 1});
+            console.log('✅ 印鑑画像を追加しました');
           } catch (error) {
             console.error('❌ 印鑑画像印刷エラー:', error);
           }
@@ -8445,18 +8447,20 @@
         builder.createTextElement({data: address + '\n'});
         builder.createTextElement({data: 'TEL: ' + phone + '\n\n'});
         
-        // 🆕 印鑑画像を印刷（設定されている場合）
-        if (window.receiptSettings.stampImage) {
+        // 🆕 印鑑画像を印刷（事前変換したCanvasを使用）
+        if (window.receiptSettings.stampCanvas) {
           try {
             console.log('🖼️ 印鑑画像を印刷します（領収書）');
             builder.createAlignmentElement({position: 'right'});
             builder.createBitImageElement({
-              context: window.receiptSettings.stampImage,
-              width: 100,
-              bothScale: true,
-              alignment: 'Right'
+              context: window.receiptSettings.stampCanvas,
+              x: 0,
+              y: 0,
+              width: window.receiptSettings.stampCanvas.canvas.width,
+              height: window.receiptSettings.stampCanvas.canvas.height
             });
             builder.createFeedElement({line: 1});
+            console.log('✅ 印鑑画像を追加しました（領収書）');
           } catch (error) {
             console.error('❌ 印鑑画像印刷エラー:', error);
           }
@@ -12311,11 +12315,38 @@
             phone: settings.phone || '03-XXXX-XXXX',
             postalCode: settings.postalCode || '',
             message: settings.message || '',
-            stampImage: settings.stampImage || ''  // 🆕 印鑑画像を追加
+            stampImage: settings.stampImage || '',  // Base64画像データ
+            stampCanvas: null  // 🆕 Canvas context（印刷用）
           };
           console.log('✅ レシート設定を読み込みました:', window.receiptSettings);
+          
+          // 🆕 印鑑画像をCanvasに変換
           if (settings.stampImage) {
-            console.log('   印鑑画像: あり');
+            console.log('   印鑑画像: あり - Canvasに変換中...');
+            try {
+              const img = new Image();
+              img.src = settings.stampImage;
+              
+              await new Promise((resolve, reject) => {
+                img.onload = () => {
+                  const canvas = document.createElement('canvas');
+                  canvas.width = img.width;
+                  canvas.height = img.height;
+                  const ctx = canvas.getContext('2d');
+                  ctx.drawImage(img, 0, 0);
+                  
+                  window.receiptSettings.stampCanvas = ctx;
+                  console.log('   ✅ 印鑑画像をCanvasに変換しました (', img.width, 'x', img.height, ')');
+                  resolve();
+                };
+                img.onerror = (error) => {
+                  console.error('   ❌ 印鑑画像の変換に失敗:', error);
+                  resolve();  // エラーでも続行
+                };
+              });
+            } catch (error) {
+              console.error('   ❌ 印鑑画像の変換エラー:', error);
+            }
           }
         } else {
           console.log('⚠️ レシート設定が見つかりません。デフォルト設定を使用します。');
