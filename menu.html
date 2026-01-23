@@ -1058,26 +1058,18 @@
     // メニュー設定を読み込み
     async function loadMenuSettings() {
       try {
-        // 店舗IDを決定（storeパラメータがない場合は'shimoakatsuka'）
-        const storeId = currentStoreId || 'shimoakatsuka';
+        // 店舗IDを決定
+        const storeId = currentStoreId;
         console.log('🍽️ メニュー設定を読み込み中... 店舗ID:', storeId);
         
-        const menuSettingsRef = doc(db, 'menu_settings', storeId);
-        const menuSettingsDoc = await getDoc(menuSettingsRef);
-        
-        if (menuSettingsDoc.exists()) {
-          menuSettings = menuSettingsDoc.data();
-          console.log('✅ メニュー設定を読み込みました:', menuSettings);
-        } else {
-          console.log('⚠️ メニュー設定が見つかりません。デフォルト設定を使用します。');
-          
-          // 下赤塚店の場合はデフォルトで表示
-          if (storeId === 'shimoakatsuka') {
-            menuSettings = {
-              showMemoField: true,
-              showNameField: false,
-              showPostalCodeField: false,
-              showAddressField: false,
+        // storeIdがnullまたは空の場合はデフォルト設定を使用
+        if (!storeId || storeId === '') {
+          console.log('⚠️ 店舗IDがnull - デフォルト設定を使用します');
+          menuSettings = {
+            showMemoField: true,
+            showNameField: false,
+            showPostalCodeField: false,
+            showAddressField: false,
               showEmailField: false,
               showPhoneField: false,
               nameRequired: false,
@@ -1089,6 +1081,17 @@
               warningMessage: '⚠️ 重要なお知らせ\n\n• 席を外す際には先に\nお会計を済ませてください\n\n• 番号をお呼びしても未会計のまま席を外されますと注文キャンセルとなる場合があります'
             };
             console.log('✅ 下赤塚店のデフォルト設定を適用しました');
+          } else {
+            // storeIdがある場合は stores/{storeId}/menu_settings/default から読み込み
+            const menuSettingsRef = doc(db, 'stores', storeId, 'menu_settings', 'default');
+            const menuSettingsDoc = await getDoc(menuSettingsRef);
+            
+            if (menuSettingsDoc.exists()) {
+              menuSettings = menuSettingsDoc.data();
+              console.log('✅ メニュー設定を読み込みました:', menuSettings);
+            } else {
+              console.log('⚠️ メニュー設定が見つかりません。デフォルト設定を使用します。');
+            }
           }
         }
         
@@ -2840,7 +2843,7 @@
       console.log('  window.currentStoreId:', window.currentStoreId);
       console.log('========================================');
       
-      // デフォルト店舗情報（下赤塚店）
+      // デフォルト店舗情報（下赤塚店） - Firestoreから読み込めない場合のフォールバック
       let storeInfo = {
         storeName: '粉もん屋 八 下赤塚店',
         postalCode: '175-0092',
@@ -2852,14 +2855,19 @@
       
       console.log('📋 デフォルト設定:', storeInfo);
       
-      // storeIdがnullまたは空文字の場合は下赤塚店（デフォルト）
-      if (storeId && storeId !== '') {
-        try {
-          console.log('🔍 Firestoreから設定を読み込み中...');
-          console.log('  パス: receipt_settings/' + storeId);
-          
-          // receipt_settingsから読み込み
-        const receiptSettingsRef = doc(db, 'receipt_settings', storeId);
+      // 常にFirestoreから読み込みを試みる
+      try {
+        // nullの場合は旧パス（receipt_settings/shimoakatsuka）
+        let receiptSettingsRef;
+        if (!storeId || storeId === '') {
+          receiptSettingsRef = doc(db, 'receipt_settings', 'shimoakatsuka');
+          console.log('🔍 旧パスから設定を読み込み中: receipt_settings/shimoakatsuka');
+        } else {
+          receiptSettingsRef = doc(db, 'stores', storeId, 'receipt_settings', 'default');
+          console.log('🔍 新パスから設定を読み込み中: stores/' + storeId + '/receipt_settings/default');
+        }
+        
+        // Firestoreから読み込み
         const receiptSettingsDoc = await getDoc(receiptSettingsRef);
         
         console.log('  ドキュメント存在:', receiptSettingsDoc.exists());
@@ -2888,39 +2896,15 @@
           };
           console.log('✅ レシート設定を読み込みました:', storeInfo);
         } else {
-          console.log('⚠️ receipt_settingsにドキュメントなし、menu_settingsを確認...');
-          
-          // receipt_settingsがない場合はmenu_settingsのreceiptCustomizationを試す
-          const menuSettingsRef = doc(db, 'menu_settings', storeId);
-          const menuSettingsDoc = await getDoc(menuSettingsRef);
-          
-          console.log('  menu_settings存在:', menuSettingsDoc.exists());
-          
-          if (menuSettingsDoc.exists()) {
-            const settings = menuSettingsDoc.data();
-            console.log('  menu_settings内容:', settings);
-            
-            if (settings.receiptCustomization) {
-              storeInfo = {
-                storeName: settings.receiptCustomization.storeName || storeInfo.storeName,
-                postalCode: settings.receiptCustomization.postalCode || storeInfo.postalCode,
-                address: settings.receiptCustomization.address || storeInfo.address,
-                phone: settings.receiptCustomization.phone || storeInfo.phone
-                };
-                console.log('✅ レシート設定をmenu_settingsから読み込みました:', storeInfo);
-              }
-            }
-          }
-        } catch (error) {
-          console.error('========================================');
-          console.error('❌ レシート設定読み込みエラー:', error);
-          console.error('  エラー詳細:', error.message);
-          console.error('  スタック:', error.stack);
-          console.error('========================================');
-          console.log('⚠️ デフォルトレシート設定を使用:', storeInfo);
+          console.log('⚠️ レシート設定が存在しません。デフォルト設定を使用します。');
         }
-      } else {
-        console.log('✅ 下赤塚店 - デフォルト設定を使用（Firestore読み込みスキップ）');
+      } catch (error) {
+        console.error('========================================');
+        console.error('❌ レシート設定読み込みエラー:', error);
+        console.error('  エラー詳細:', error.message);
+        console.error('  スタック:', error.stack);
+        console.error('========================================');
+        console.log('⚠️ デフォルトレシート設定を使用:', storeInfo);
       }
       
       console.log('========================================');
@@ -2977,7 +2961,7 @@
       const receiptHtml = `
         <div style="font-family: 'Courier New', monospace; text-align: center;">
           <div style="border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 15px;">
-            <h2 style="margin: 0; font-size: 24px;"></h2>
+            <h2 style="margin: 0; font-size: 24px;">粉もん屋 八</h2>
             <div style="font-size: 14px; margin-top: 5px;">${storeInfo.storeName}</div>
           </div>
           
@@ -3087,7 +3071,7 @@
       // 店舗IDを決定
       const storeId = window.currentStoreId;
       
-      // デフォルト店舗情報（下赤塚店）
+      // デフォルト店舗情報（下赤塚店） - Firestoreから読み込めない場合のフォールバック
       let storeInfo = {
         storeName: '粉もん屋 八 下赤塚店',
         postalCode: '175-0092',
@@ -3097,18 +3081,25 @@
         stampImage: ''
       };
       
-      // storeIdがnullまたは空文字の場合は下赤塚店（デフォルト）
-      if (storeId && storeId !== '') {
-        try {
-          // receipt_settingsから読み込み
-          const receiptSettingsRef = doc(db, 'receipt_settings', storeId);
-          const receiptSettingsDoc = await getDoc(receiptSettingsRef);
+      // 常にFirestoreから読み込みを試みる
+      try {
+        // nullの場合は旧パス（receipt_settings/shimoakatsuka）
+        let receiptSettingsRef;
+        if (!storeId || storeId === '') {
+          receiptSettingsRef = doc(db, 'receipt_settings', 'shimoakatsuka');
+          console.log('🔍 旧パスから領収書設定を読み込み中: receipt_settings/shimoakatsuka');
+        } else {
+          receiptSettingsRef = doc(db, 'stores', storeId, 'receipt_settings', 'default');
+          console.log('🔍 新パスから領収書設定を読み込み中: stores/' + storeId + '/receipt_settings/default');
+        }
+        
+        const receiptSettingsDoc = await getDoc(receiptSettingsRef);
+        
+        if (receiptSettingsDoc.exists()) {
+          const settings = receiptSettingsDoc.data();
           
-          if (receiptSettingsDoc.exists()) {
-            const settings = receiptSettingsDoc.data();
-            
-            // storeNameとbranchNameを組み合わせる
-            let fullStoreName = storeInfo.storeName; // デフォルト
+          // storeNameとbranchNameを組み合わせる
+          let fullStoreName = storeInfo.storeName; // デフォルト
           if (settings.storeName && settings.branchName) {
             fullStoreName = settings.storeName + ' ' + settings.branchName;
           } else if (settings.branchName) {
@@ -3127,30 +3118,12 @@
           };
           console.log('✅ 領収書設定を読み込みました:', storeInfo);
         } else {
-          // receipt_settingsがない場合はmenu_settingsのreceiptCustomizationを試す
-          const menuSettingsRef = doc(db, 'menu_settings', storeId);
-          const menuSettingsDoc = await getDoc(menuSettingsRef);
-          
-          if (menuSettingsDoc.exists()) {
-            const settings = menuSettingsDoc.data();
-            if (settings.receiptCustomization) {
-              storeInfo = {
-                storeName: settings.receiptCustomization.storeName || storeInfo.storeName,
-                postalCode: settings.receiptCustomization.postalCode || storeInfo.postalCode,
-                address: settings.receiptCustomization.address || storeInfo.address,
-                phone: settings.receiptCustomization.phone || storeInfo.phone
-              };
-              console.log('✅ 領収書設定をmenu_settingsから読み込みました:', storeInfo);
-            }
-          }
+          console.log('⚠️ 領収書設定が存在しません。デフォルト設定を使用します。');
         }
       } catch (error) {
         console.error('領収書設定読み込みエラー:', error);
         console.log('⚠️ デフォルト領収書設定を使用:', storeInfo);
       }
-    } else {
-      console.log('✅ 下赤塚店 - デフォルト設定を使用（Firestore読み込みスキップ）');
-    }
       
       // LocalStorageから注文情報を取得して消費税を計算
       const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
