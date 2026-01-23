@@ -371,60 +371,104 @@
 
                     const { collection, getDocs } = window.firebaseModules;
                     
-                    // 店舗IDがない場合はエラー
-                    if (!window.currentStoreId) {
-                        setError('店舗情報が見つかりません。再度ログインしてください。');
-                        return;
-                    }
-                    
-                    // 店舗別の従業員データを取得
-                    const empRef = collection(window.db, 'stores', window.currentStoreId, 'employees');
-                    const empSnapshot = await getDocs(empRef);
-                    const empList = [];
-                    empSnapshot.forEach(doc => {
-                        empList.push({ id: doc.id, ...doc.data() });
-                    });
-                    
-                    // sortOrderでソート（sortOrderがない場合は名前順）
-                    empList.sort((a, b) => {
-                        if (a.sortOrder !== undefined && b.sortOrder !== undefined) {
-                            return a.sortOrder - b.sortOrder;
-                        }
-                        if (a.sortOrder !== undefined) return -1;
-                        if (b.sortOrder !== undefined) return 1;
-                        return (a.name || '').localeCompare(b.name || '');
-                    });
-                    
-                    setEmployees(empList);
-                    
-                    // 店舗別の勤怠データを取得（新形式：日付ごとのドキュメントに従業員データを格納）
-                    const attRef = collection(window.db, 'stores', window.currentStoreId, 'attendance');
-                    const attSnapshot = await getDocs(attRef);
-                    const attData = {};
-                    
-                    attSnapshot.forEach(doc => {
-                        const dateKey = doc.id; // YYYY-MM-DD
-                        const dateData = doc.data();
+                    // 🔧 修正: 下赤塚店（storeId=null）の場合は旧パスを使用
+                    if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+                        console.log('📍 下赤塚店（旧システム）のデータを読み込みます');
                         
-                        // 日付が現在の月のものか確認
-                        const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
-                        if (dateMatch) {
-                            const year = parseInt(dateMatch[1]);
-                            const month = parseInt(dateMatch[2]) - 1;
-                            
-                            if (year === currentYear && month === currentMonth) {
-                                // 各従業員のデータを展開
-                                Object.keys(dateData).forEach(employeeId => {
-                                    if (!attData[employeeId]) {
-                                        attData[employeeId] = {};
-                                    }
-                                    attData[employeeId][dateKey] = dateData[employeeId];
-                                });
+                        // 旧パスから従業員データを取得
+                        const empRef = collection(window.db, 'kintai_employees');
+                        const empSnapshot = await getDocs(empRef);
+                        const empList = [];
+                        empSnapshot.forEach(doc => {
+                            empList.push({ id: doc.id, ...doc.data() });
+                        });
+                        
+                        empList.sort((a, b) => {
+                            if (a.sortOrder !== undefined && b.sortOrder !== undefined) {
+                                return a.sortOrder - b.sortOrder;
                             }
-                        }
-                    });
-                    
-                    setAttendanceData(attData);
+                            if (a.sortOrder !== undefined) return -1;
+                            if (b.sortOrder !== undefined) return 1;
+                            return (a.name || '').localeCompare(b.name || '');
+                        });
+                        
+                        setEmployees(empList);
+                        
+                        // 旧パスから勤怠データを取得
+                        const attRef = collection(window.db, 'kintai_attendance');
+                        const attSnapshot = await getDocs(attRef);
+                        const attData = {};
+                        
+                        attSnapshot.forEach(doc => {
+                            const dateKey = doc.id;
+                            const dateData = doc.data();
+                            
+                            const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
+                            if (dateMatch) {
+                                const year = parseInt(dateMatch[1]);
+                                const month = parseInt(dateMatch[2]) - 1;
+                                
+                                if (year === currentYear && month === currentMonth) {
+                                    Object.keys(dateData).forEach(employeeId => {
+                                        if (!attData[employeeId]) {
+                                            attData[employeeId] = {};
+                                        }
+                                        attData[employeeId][dateKey] = dateData[employeeId];
+                                    });
+                                }
+                            }
+                        });
+                        
+                        setAttendanceData(attData);
+                        
+                    } else {
+                        // 新パス: 店舗別データを取得
+                        console.log('📍 店舗別データを読み込みます: stores/' + window.currentStoreId);
+                        
+                        const empRef = collection(window.db, 'stores', window.currentStoreId, 'employees');
+                        const empSnapshot = await getDocs(empRef);
+                        const empList = [];
+                        empSnapshot.forEach(doc => {
+                            empList.push({ id: doc.id, ...doc.data() });
+                        });
+                        
+                        empList.sort((a, b) => {
+                            if (a.sortOrder !== undefined && b.sortOrder !== undefined) {
+                                return a.sortOrder - b.sortOrder;
+                            }
+                            if (a.sortOrder !== undefined) return -1;
+                            if (b.sortOrder !== undefined) return 1;
+                            return (a.name || '').localeCompare(b.name || '');
+                        });
+                        
+                        setEmployees(empList);
+                        
+                        const attRef = collection(window.db, 'stores', window.currentStoreId, 'attendance');
+                        const attSnapshot = await getDocs(attRef);
+                        const attData = {};
+                        
+                        attSnapshot.forEach(doc => {
+                            const dateKey = doc.id;
+                            const dateData = doc.data();
+                            
+                            const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
+                            if (dateMatch) {
+                                const year = parseInt(dateMatch[1]);
+                                const month = parseInt(dateMatch[2]) - 1;
+                                
+                                if (year === currentYear && month === currentMonth) {
+                                    Object.keys(dateData).forEach(employeeId => {
+                                        if (!attData[employeeId]) {
+                                            attData[employeeId] = {};
+                                        }
+                                        attData[employeeId][dateKey] = dateData[employeeId];
+                                    });
+                                }
+                            }
+                        });
+                        
+                        setAttendanceData(attData);
+                    }
                     
                     // レシート設定を読み込み
                     await loadReceiptSettings();
@@ -1164,17 +1208,16 @@
                     console.log('📖 メニュー設定読み込み開始');
                     console.log('   window.currentStoreId:', window.currentStoreId);
                     
-                    if (!window.currentStoreId) {
-                        console.log('⚠️ 店舗IDがまだ設定されていません');
-                        return;
-                    }
-                    
                     const { doc, getDoc } = window.firebaseModules;
                     
-                    console.log('📖 読み込みパス: stores/' + window.currentStoreId + '/menu_settings/default');
+                    // 🔧 修正: ドキュメントIDは常に'default'を使用
+                    const docId = 'default';
+                    const menuSettingsRef = window.getStoreDoc('menu_settings', docId);
                     
-                    // stores/{storeId}/menu_settings/default から読み込み
-                    const menuSettingsRef = doc(window.db, 'stores', window.currentStoreId, 'menu_settings', 'default');
+                    console.log('📖 読み込みパス:', window.currentStoreId ? 
+                        'stores/' + window.currentStoreId + '/menu_settings/default' : 
+                        'menu_settings/shimoakatsuka');
+                    
                     const menuSettingsDoc = await getDoc(menuSettingsRef);
                     
                     console.log('📖 ドキュメント存在:', menuSettingsDoc.exists());
