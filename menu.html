@@ -966,6 +966,13 @@
       warningMessage: ''
     };
     
+    // アラート設定（デフォルト値）
+    let alertSettings = {
+      completeMessage: '商品が出来上がりました！\n\n注文番号 #{orderNumber}\n\n画面の注文番号を店員にお見せください',
+      cancelMessage: '注文がキャンセルされました\n\n注文番号 #{orderNumber}\n\n番号をお呼びしましたがご不在でしたので\n注文をキャンセルさせて頂きました',
+      paidMessage: 'お会計が完了しました\n\n商品が出来上がりましたらお呼びしますので、しばらくお待ちください'
+    };
+    
     // 二重送信防止用フラグ
     let isOrderProcessing = false;
     let lastOrderTimestamp = 0;
@@ -1211,6 +1218,27 @@
       }
     }
 
+    // アラート設定を読み込み
+    async function loadAlertSettings() {
+      try {
+        console.log('🔔 アラート設定を読み込み中... 店舗ID:', currentStoreId);
+        
+        const alertSettingsRef = currentStoreId ? 
+          doc(db, 'stores', currentStoreId, 'alert_settings', 'default') : 
+          doc(db, 'alert_settings', 'shimoakatsuka');
+        const alertSettingsDoc = await getDoc(alertSettingsRef);
+        
+        if (alertSettingsDoc.exists()) {
+          alertSettings = alertSettingsDoc.data();
+          console.log('✅ アラート設定を読み込みました:', alertSettings);
+        } else {
+          console.log('⚠️ アラート設定が見つかりません。デフォルト設定を使用します。');
+        }
+      } catch (error) {
+        console.error('❌ アラート設定読み込みエラー:', error);
+      }
+    }
+
     window.onload = async function() {
       console.log('ページ読み込み開始');
       
@@ -1393,6 +1421,7 @@
       try {
         await loadAllData();
         await loadMenuSettings(); // メニュー設定を読み込み
+        await loadAlertSettings(); // アラート設定を読み込み
         await updateTopWaitingCount();
         setInterval(updateTopWaitingCount, 20000); // 🚀 10秒→20秒に軽量化
         watchSoldOutItems();
@@ -1452,23 +1481,25 @@
         
         // ステータスが変更されたらアラートを表示
         if (data.completedAt && !data.notifiedComplete) {
-          // アラートを表示
-          showCustomAlert('商品が出来上がりました！\n\n注文番号 #' + data.orderNumber + '\n\n画面の注文番号を店員にお見せください');
+          // アラートを表示（#{orderNumber}を実際の注文番号に置換）
+          const message = alertSettings.completeMessage.replace(/#{orderNumber}/g, data.orderNumber);
+          showCustomAlert(message);
           
           // 通知済みフラグを立てる（次回の監視で再度通知しないように）
           updateDoc(orderRef, { notifiedComplete: true }).catch(e => console.error(e));
         }
         
         if (data.cancelledAt && !data.notifiedCancel) {
-          // アラートを表示
-          showCustomAlert('注文がキャンセルされました\n\n注文番号 #' + data.orderNumber + '\n\n番号をお呼びしましたがご不在でしたので\n注文をキャンセルさせて頂きました');
+          // アラートを表示（#{orderNumber}を実際の注文番号に置換）
+          const message = alertSettings.cancelMessage.replace(/#{orderNumber}/g, data.orderNumber);
+          showCustomAlert(message);
           
           updateDoc(orderRef, { notifiedCancel: true }).catch(e => console.error(e));
         }
         
         if (data.paidAt && !data.notifiedPaid) {
           // アラートを表示
-          showCustomAlert('お会計が完了しました\n\n商品が出来上がりましたらお呼びしますので、しばらくお待ちください');
+          showCustomAlert(alertSettings.paidMessage);
           
           updateDoc(orderRef, { notifiedPaid: true }).catch(e => console.error(e));
         }
