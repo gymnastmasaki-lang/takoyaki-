@@ -8223,11 +8223,22 @@
         // レシート作成
         builder.createAlignmentElement({position: 'center'});
         builder.createTextElement({emphasis: true, width: 2, height: 2});
-        builder.createTextElement({data: '粉もん屋 八\n'});
+        
+        // 🔧 修正: レシート設定から店舗名を取得
+        const storeName = window.receiptSettings.storeName || '粉もん屋 八';
+        builder.createTextElement({data: storeName + '\n'});
+        
         builder.createTextElement({emphasis: false, width: 1, height: 1});
-        builder.createTextElement({data: '下赤塚店\n'});
-        builder.createTextElement({data: '東京都板橋区赤塚新町\n'});
-        builder.createTextElement({data: 'TEL: 03-XXXX-XXXX\n'});
+        
+        // 🔧 修正: レシート設定から支店名を取得
+        const branchName = window.receiptSettings.branchName || '下赤塚店';
+        builder.createTextElement({data: branchName + '\n'});
+        
+        // 🔧 修正: レシート設定から住所と電話番号を取得
+        const address = window.receiptSettings.address || '東京都板橋区赤塚新町';
+        const phone = window.receiptSettings.phone || '03-XXXX-XXXX';
+        builder.createTextElement({data: address + '\n'});
+        builder.createTextElement({data: 'TEL: ' + phone + '\n'});
         builder.createRuledLineElement({thickness: 'thin'});
         
         builder.createAlignmentElement({position: 'left'});
@@ -8390,9 +8401,16 @@
         
         builder.createRuledLineElement({thickness: 'thin'});
         builder.createAlignmentElement({position: 'right'});
-        builder.createTextElement({data: '粉もん屋 八 下赤塚店\n'});
-        builder.createTextElement({data: '東京都板橋区赤塚新町\n'});
-        builder.createTextElement({data: 'TEL: 03-XXXX-XXXX\n\n'});
+        
+        // 🔧 修正: レシート設定から店舗情報を取得
+        const storeName = window.receiptSettings.storeName || '粉もん屋 八';
+        const branchName = window.receiptSettings.branchName || '下赤塚店';
+        const address = window.receiptSettings.address || '東京都板橋区赤塚新町';
+        const phone = window.receiptSettings.phone || '03-XXXX-XXXX';
+        
+        builder.createTextElement({data: storeName + ' ' + branchName + '\n'});
+        builder.createTextElement({data: address + '\n'});
+        builder.createTextElement({data: 'TEL: ' + phone + '\n\n'});
         
         // 印鑑欄を作成（テキストで◯を描画）
         builder.createAlignmentElement({position: 'right'});
@@ -12202,8 +12220,55 @@
       // 担当者リストを読み込む
       loadStaffList();
       
+      // 🆕 レシート設定を読み込む
+      loadReceiptSettings();
+      
       // 🆕 menu.htmlのiframeに店舗IDを設定
       updateMenuIframe();
+    }
+    
+    // 🆕 レシート設定をグローバル変数で保持
+    window.receiptSettings = {
+      storeName: '粉もん屋 八',
+      branchName: '下赤塚店',
+      address: '東京都板橋区赤塚新町',
+      phone: '03-XXXX-XXXX'
+    };
+    
+    // 🆕 レシート設定を読み込む関数
+    async function loadReceiptSettings() {
+      try {
+        console.log('📄 レシート設定を読み込み中...');
+        
+        // 下赤塚店（currentStoreId = null）の場合は旧パス、それ以外は新パス
+        let receiptSettingsRef;
+        if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+          receiptSettingsRef = window.doc(window.db, 'receipt_settings', 'shimoakatsuka');
+          console.log('  → 旧パス: receipt_settings/shimoakatsuka');
+        } else {
+          receiptSettingsRef = window.doc(window.db, 'stores', window.currentStoreId, 'receipt_settings', 'default');
+          console.log('  → 新パス: stores/' + window.currentStoreId + '/receipt_settings/default');
+        }
+        
+        const receiptSettingsDoc = await window.getDoc(receiptSettingsRef);
+        
+        if (receiptSettingsDoc.exists()) {
+          const settings = receiptSettingsDoc.data();
+          window.receiptSettings = {
+            storeName: settings.storeName || '粉もん屋 八',
+            branchName: settings.branchName || '下赤塚店',
+            address: settings.address || '東京都板橋区赤塚新町',
+            phone: settings.phone || '03-XXXX-XXXX',
+            postalCode: settings.postalCode || '',
+            message: settings.message || ''
+          };
+          console.log('✅ レシート設定を読み込みました:', window.receiptSettings);
+        } else {
+          console.log('⚠️ レシート設定が見つかりません。デフォルト設定を使用します。');
+        }
+      } catch (error) {
+        console.error('❌ レシート設定読み込みエラー:', error);
+      }
     }
     
     // menu.htmlのiframeのsrcを更新する関数
