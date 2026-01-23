@@ -1611,33 +1611,65 @@
                 try {
                     const { doc, getDoc, setDoc, updateDoc, Timestamp } = window.firebaseModules;
                     
-                    if (!window.currentStoreId) {
-                        throw new Error('店舗情報が見つかりません');
+                    // 🔧 修正: 下赤塚店の場合は旧パスを使用
+                    let docRef;
+                    if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+                        console.log('📍 下赤塚店: 旧パスで勤怠を保存 (kintai_attendance)');
+                        // ドキュメントID: {employeeId}_{dateKey}
+                        docRef = doc(window.db, 'kintai_attendance', `${employeeId}_${dateKey}`);
+                    } else {
+                        console.log('📍 新パスで勤怠を保存: stores/' + window.currentStoreId + '/attendance');
+                        docRef = doc(window.db, 'stores', window.currentStoreId, 'attendance', dateKey);
                     }
                     
-                    // 店舗別のattendanceコレクションを使用
-                    const docRef = doc(window.db, 'stores', window.currentStoreId, 'attendance', dateKey);
                     const docSnap = await getDoc(docRef);
                     
                     const employee = employees.find(e => e.id === employeeId);
                     
-                    let currentData = {};
-                    if (docSnap.exists()) {
-                        currentData = docSnap.data();
-                    }
+                    let employeeData;
                     
-                    // 従業員ごとのデータを取得または初期化
-                    let employeeData = currentData[employeeId] || {
-                        clockIn: null,
-                        breakStart1: null,
-                        breakEnd1: null,
-                        breakStart2: null,
-                        breakEnd2: null,
-                        clockOut: null,
-                        isHoliday: false,
-                        hourlyRate: employee?.hourlyRate || 0,
-                        editHistory: []
-                    };
+                    // 🔧 修正: 旧パスと新パスでデータ構造が異なる
+                    if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+                        // 旧パス: ドキュメント自体が1人の従業員のデータ
+                        if (docSnap.exists()) {
+                            employeeData = docSnap.data();
+                        } else {
+                            employeeData = {
+                                employeeId: employeeId,
+                                employeeName: employee?.name || '',
+                                date: dateKey,
+                                clockIn: null,
+                                breakStart1: null,
+                                breakEnd1: null,
+                                breakStart2: null,
+                                breakEnd2: null,
+                                clockOut: null,
+                                isHoliday: false,
+                                hourlyRate: employee?.hourlyRate || 0,
+                                editHistory: [],
+                                createdAt: Timestamp.now(),
+                                updatedAt: Timestamp.now()
+                            };
+                        }
+                    } else {
+                        // 新パス: 日付ドキュメント内に複数従業員のデータ
+                        let currentData = {};
+                        if (docSnap.exists()) {
+                            currentData = docSnap.data();
+                        }
+                        
+                        employeeData = currentData[employeeId] || {
+                            clockIn: null,
+                            breakStart1: null,
+                            breakEnd1: null,
+                            breakStart2: null,
+                            breakEnd2: null,
+                            clockOut: null,
+                            isHoliday: false,
+                            hourlyRate: employee?.hourlyRate || 0,
+                            editHistory: []
+                        };
+                    }
                     
                     const oldValue = employeeData[field];
                     employeeData[field] = editingValue || null;
@@ -1659,10 +1691,17 @@
                         editor: '管理者'
                     });
                     
-                    // データを更新
-                    currentData[employeeId] = employeeData;
-                    
-                    await setDoc(docRef, currentData, { merge: true });
+                    // 🔧 修正: 保存処理も旧パスと新パスで分岐
+                    if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+                        // 旧パス: ドキュメント全体を保存
+                        employeeData.updatedAt = Timestamp.now();
+                        await setDoc(docRef, employeeData);
+                    } else {
+                        // 新パス: 日付ドキュメント内の従業員データを更新
+                        let currentData = docSnap.exists() ? docSnap.data() : {};
+                        currentData[employeeId] = employeeData;
+                        await setDoc(docRef, currentData, { merge: true });
+                    }
                     await loadAllData();
                     
                     showCustomAlertFunc('時刻を保存しました', '✅ 保存完了', '✅');
