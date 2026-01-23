@@ -73,6 +73,45 @@
         
         console.log('🔧 kanri.html初期化: window.currentStoreId =', window.currentStoreId);
         
+        // ヘルパー関数: 店舗別コレクション参照を取得（pos.htmlと同じ）
+        window.getStoreCollection = function(collectionName) {
+            console.log('🔍 KANRI getStoreCollection:', collectionName, 'currentStoreId:', window.currentStoreId, 'type:', typeof window.currentStoreId);
+            if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
+                console.warn('店舗IDが未設定のため、旧データパスを使用します');
+                // 旧データパスのマッピング
+                const oldPathMap = {
+                    'receipt_settings': 'receipt_settings',
+                    'menu_settings': 'menu_settings',
+                    'employees': 'kintai_employees',
+                    'attendance': 'kintai_attendance'
+                };
+                const path = oldPathMap[collectionName] || collectionName;
+                console.log('  → 旧パス:', path);
+                return window.firebaseModules.collection(window.db, path);
+            }
+            console.log('  → 新パス: stores/' + window.currentStoreId + '/' + collectionName);
+            return window.firebaseModules.collection(window.db, 'stores', window.currentStoreId, collectionName);
+        };
+        
+        // ヘルパー関数: 店舗別ドキュメント参照を取得（pos.htmlと同じ）
+        window.getStoreDoc = function(collectionName, docId) {
+            if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
+                console.warn('店舗IDが未設定のため、旧データパスを使用します');
+                // 旧データパスのマッピング
+                const oldPathMap = {
+                    'receipt_settings': 'receipt_settings',
+                    'menu_settings': 'menu_settings',
+                    'employees': 'kintai_employees',
+                    'attendance': 'kintai_attendance'
+                };
+                const path = oldPathMap[collectionName] || collectionName;
+                console.log('  → 旧パス:', path + '/' + docId);
+                return window.firebaseModules.doc(window.db, path, docId);
+            }
+            console.log('  → 新パス: stores/' + window.currentStoreId + '/' + collectionName + '/' + docId);
+            return window.firebaseModules.doc(window.db, 'stores', window.currentStoreId, collectionName, docId);
+        };
+        
         const { useState, useEffect } = React;
 
         // Icons
@@ -294,8 +333,8 @@
             useEffect(() => {
                 // CRITICAL: 古い値を強制削除
                 const storedStoreId = sessionStorage.getItem('kanriStoreId');
-                if (storedStoreId === 'null') {
-                    console.warn('⚠️ 古い値 "null" を削除します');
+                if (storedStoreId === 'shimoarekasuka') {
+                    console.warn('⚠️ 古い値 "shimoarekasuka" を削除します');
                     sessionStorage.removeItem('kanriStoreId');
                     sessionStorage.removeItem('kanriStoreName');
                     window.currentStoreId = null;
@@ -999,26 +1038,20 @@
                     
                     console.log('✅ Firebase準備完了');
                     
-                    // 下赤塚店（null）の場合は保存しない（デフォルト設定を使用）
-                    if (!window.currentStoreId || window.currentStoreId === 'null') {
-                        console.log('⚠️ 下赤塚店はデフォルト設定を使用します。保存は不要です。');
-                        showCustomAlertFunc('⚠️ 下赤塚店はデフォルト設定を使用します', '情報', 'ℹ️');
-                        return;
-                    }
-                    
-                    const { doc, setDoc, Timestamp } = window.firebaseModules;
+                    const { setDoc, Timestamp } = window.firebaseModules;
                     
                     const settingsData = {
                         ...receiptSettings,
-                        updatedAt: Timestamp.now(),
-                        storeId: window.currentStoreId
+                        updatedAt: Timestamp.now()
                     };
                     
-                    console.log('💾 保存するデータ:', settingsData);
-                    console.log('📍 保存先パス: receipt_settings/' + window.currentStoreId);
+                    // nullの場合は旧パス（shimoakatsuka）、それ以外は新パス
+                    const docId = window.currentStoreId || 'shimoakatsuka';
+                    const receiptSettingsRef = window.getStoreDoc('receipt_settings', docId);
                     
-                    // 現在の店舗のパスに保存
-                    const receiptSettingsRef = doc(window.db, 'receipt_settings', window.currentStoreId);
+                    console.log('💾 保存するデータ:', settingsData);
+                    console.log('📍 保存先: ' + (window.currentStoreId ? 'stores/' + window.currentStoreId + '/receipt_settings/' + docId : 'receipt_settings/shimoakatsuka'));
+                    
                     await setDoc(receiptSettingsRef, settingsData);
                     
                     console.log('========================================');
@@ -1038,9 +1071,22 @@
             // レシート設定を読み込み
             const loadReceiptSettings = async () => {
                 try {
-                    // currentStoreIdがnullまたは空の場合は下赤塚店のデフォルト
-                    if (!window.currentStoreId || window.currentStoreId === 'null') {
-                        console.log('✅ 下赤塚店 - デフォルトレシート設定を使用');
+                    const { getDoc } = window.firebaseModules;
+                    
+                    // nullの場合は旧パス（shimoakatsuka）、それ以外は新パス
+                    const docId = window.currentStoreId || 'shimoakatsuka';
+                    const receiptSettingsRef = window.getStoreDoc('receipt_settings', docId);
+                    
+                    console.log('🔍 レシート設定読み込み: ' + (window.currentStoreId ? 'stores/' + window.currentStoreId + '/receipt_settings/' + docId : 'receipt_settings/shimoakatsuka'));
+                    
+                    const receiptSettingsDoc = await getDoc(receiptSettingsRef);
+                    
+                    if (receiptSettingsDoc.exists()) {
+                        setReceiptSettings(receiptSettingsDoc.data());
+                        console.log('✅ レシート設定を読み込みました');
+                    } else {
+                        // ドキュメントが存在しない場合はデフォルト設定
+                        console.log('⚠️ レシート設定が存在しないため、デフォルト設定を使用');
                         const defaultSettings = {
                             storeName: '粉もん屋 八',
                             branchName: '下赤塚店',
@@ -1051,18 +1097,6 @@
                             stampImage: ''
                         };
                         setReceiptSettings(defaultSettings);
-                        return;
-                    }
-                    
-                    const { doc, getDoc } = window.firebaseModules;
-                    
-                    // 他の店舗の場合はFirestoreから読み込み
-                    const receiptSettingsRef = doc(window.db, 'receipt_settings', window.currentStoreId);
-                    const receiptSettingsDoc = await getDoc(receiptSettingsRef);
-                    
-                    if (receiptSettingsDoc.exists()) {
-                        setReceiptSettings(receiptSettingsDoc.data());
-                        console.log('✅ レシート設定を読み込みました');
                     }
                 } catch (error) {
                     console.error('❌ レシート設定読み込みエラー:', error);
@@ -1081,14 +1115,7 @@
                     console.log('   window.currentStoreId:', window.currentStoreId);
                     console.log('   menuSettings:', menuSettings);
                     
-                    // 下赤塚店（null）の場合は保存しない（デフォルト設定を使用）
-                    if (!window.currentStoreId || window.currentStoreId === 'null') {
-                        console.log('⚠️ 下赤塚店はデフォルト設定を使用します。保存は不要です。');
-                        showCustomAlertFunc('⚠️ 下赤塚店はデフォルト設定を使用します', '情報', 'ℹ️');
-                        return;
-                    }
-                    
-                    const { doc, setDoc, Timestamp } = window.firebaseModules;
+                    const { setDoc, Timestamp } = window.firebaseModules;
                     
                     // undefinedをfalseに変換してFirestoreエラーを防ぐ
                     const cleanedSettings = {
@@ -1109,15 +1136,16 @@
                     
                     const settingsData = {
                         ...cleanedSettings,
-                        updatedAt: Timestamp.now(),
-                        storeId: window.currentStoreId
+                        updatedAt: Timestamp.now()
                     };
                     
-                    console.log('💾 保存するデータ:', settingsData);
-                    console.log('💾 保存先パス: menu_settings/' + window.currentStoreId);
+                    // nullの場合は旧パス（shimoakatsuka）、それ以外は新パス
+                    const docId = window.currentStoreId || 'shimoakatsuka';
+                    const menuSettingsRef = window.getStoreDoc('menu_settings', docId);
                     
-                    // 現在の店舗のパスに保存
-                    const menuSettingsRef = doc(window.db, 'menu_settings', window.currentStoreId);
+                    console.log('💾 保存するデータ:', settingsData);
+                    console.log('💾 保存先: ' + (window.currentStoreId ? 'stores/' + window.currentStoreId + '/menu_settings/' + docId : 'menu_settings/shimoakatsuka'));
+                    
                     await setDoc(menuSettingsRef, settingsData);
                     
                     console.log('✅ メニュー設定を保存しました:', settingsData);
@@ -1141,10 +1169,10 @@
                     
                     const { doc, getDoc } = window.firebaseModules;
                     
-                    console.log('📖 読み込みパス: menu_settings/' + window.currentStoreId);
+                    console.log('📖 読み込みパス: stores/' + window.currentStoreId + '/menu_settings/default');
                     
-                    // 現在の店舗のパスから読み込み
-                    const menuSettingsRef = doc(window.db, 'menu_settings', window.currentStoreId);
+                    // stores/{storeId}/menu_settings/default から読み込み
+                    const menuSettingsRef = doc(window.db, 'stores', window.currentStoreId, 'menu_settings', 'default');
                     const menuSettingsDoc = await getDoc(menuSettingsRef);
                     
                     console.log('📖 ドキュメント存在:', menuSettingsDoc.exists());
