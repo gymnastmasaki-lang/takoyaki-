@@ -918,25 +918,59 @@
 
                 try {
                     const { collection, getDocs } = window.firebaseModules;
-                    const attendanceRef = collection(window.db, 'stores', window.currentStoreId, 'attendance');
+                    
+                    // 🔧 修正: 下赤塚店の場合は旧パスを使用
+                    let attendanceRef;
+                    if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+                        console.log('📍 累計差異計算: 旧パスで勤怠データを読み込み (kintai_attendance)');
+                        attendanceRef = collection(window.db, 'kintai_attendance');
+                    } else {
+                        console.log('📍 累計差異計算: 新パスで勤怠データを読み込み');
+                        attendanceRef = collection(window.db, 'stores', window.currentStoreId, 'attendance');
+                    }
+                    
                     const snapshot = await getDocs(attendanceRef);
                     
                     // 月ごとにデータを集計
                     const monthlyData = {};
                     
                     snapshot.forEach(doc => {
+                        const docId = doc.id;
                         const data = doc.data();
-                        const dateKey = doc.id; // YYYY-MM-DD
                         
-                        if (data[employeeId] && data[employeeId].clockIn) {
-                            const yearMonth = dateKey.substring(0, 7); // YYYY-MM
-                            if (!monthlyData[yearMonth]) {
-                                monthlyData[yearMonth] = [];
+                        // 🔧 修正: ドキュメントIDの形式に応じて処理を分岐
+                        if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+                            // 旧パス: {employeeId}_{dateKey} 形式
+                            const parts = docId.split('_');
+                            if (parts.length >= 2) {
+                                const docEmployeeId = parts[0];
+                                const dateKey = parts.slice(1).join('_');
+                                
+                                if (docEmployeeId === employeeId && data.clockIn) {
+                                    const yearMonth = dateKey.substring(0, 7); // YYYY-MM
+                                    if (!monthlyData[yearMonth]) {
+                                        monthlyData[yearMonth] = [];
+                                    }
+                                    monthlyData[yearMonth].push({
+                                        date: dateKey,
+                                        record: data
+                                    });
+                                }
                             }
-                            monthlyData[yearMonth].push({
-                                date: dateKey,
-                                record: data[employeeId]
-                            });
+                        } else {
+                            // 新パス: 日付ドキュメント内に複数従業員
+                            const dateKey = docId; // YYYY-MM-DD
+                            
+                            if (data[employeeId] && data[employeeId].clockIn) {
+                                const yearMonth = dateKey.substring(0, 7); // YYYY-MM
+                                if (!monthlyData[yearMonth]) {
+                                    monthlyData[yearMonth] = [];
+                                }
+                                monthlyData[yearMonth].push({
+                                    date: dateKey,
+                                    record: data[employeeId]
+                                });
+                            }
                         }
                     });
                     
