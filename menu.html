@@ -576,7 +576,7 @@
 </head>
 <body>
   <div class="header">
-    <img id="header-image" src="./head.jpg" alt="粉もん屋 八 下赤塚店" style="max-width: 100%; height: auto; display: block; margin: 0 auto; object-fit: contain;" onerror="this.style.display='none'">
+    <img src="./head.jpg" alt="粉もん屋 八 下赤塚店" style="max-width: 100%; height: auto; display: block; margin: 0 auto;" onerror="this.style.display='none'">
   </div>
 
   <!-- メニュー一覧ページ -->
@@ -1058,18 +1058,26 @@
     // メニュー設定を読み込み
     async function loadMenuSettings() {
       try {
-        // 店舗IDを決定
-        const storeId = currentStoreId;
+        // 店舗IDを決定（storeパラメータがない場合は'shimoakatsuka'）
+        const storeId = currentStoreId || 'shimoakatsuka';
         console.log('🍽️ メニュー設定を読み込み中... 店舗ID:', storeId);
         
-        // storeIdがnullまたは空の場合はデフォルト設定を使用
-        if (!storeId || storeId === '') {
-          console.log('⚠️ 店舗IDがnull - デフォルト設定を使用します');
-          menuSettings = {
-            showMemoField: true,
-            showNameField: false,
-            showPostalCodeField: false,
-            showAddressField: false,
+        const menuSettingsRef = doc(db, 'menu_settings', storeId);
+        const menuSettingsDoc = await getDoc(menuSettingsRef);
+        
+        if (menuSettingsDoc.exists()) {
+          menuSettings = menuSettingsDoc.data();
+          console.log('✅ メニュー設定を読み込みました:', menuSettings);
+        } else {
+          console.log('⚠️ メニュー設定が見つかりません。デフォルト設定を使用します。');
+          
+          // 下赤塚店の場合はデフォルトで表示
+          if (storeId === 'shimoakatsuka') {
+            menuSettings = {
+              showMemoField: true,
+              showNameField: false,
+              showPostalCodeField: false,
+              showAddressField: false,
               showEmailField: false,
               showPhoneField: false,
               nameRequired: false,
@@ -1081,17 +1089,6 @@
               warningMessage: '⚠️ 重要なお知らせ\n\n• 席を外す際には先に\nお会計を済ませてください\n\n• 番号をお呼びしても未会計のまま席を外されますと注文キャンセルとなる場合があります'
             };
             console.log('✅ 下赤塚店のデフォルト設定を適用しました');
-          } else {
-            // storeIdがある場合は stores/{storeId}/menu_settings/default から読み込み
-            const menuSettingsRef = doc(db, 'stores', storeId, 'menu_settings', 'default');
-            const menuSettingsDoc = await getDoc(menuSettingsRef);
-            
-            if (menuSettingsDoc.exists()) {
-              menuSettings = menuSettingsDoc.data();
-              console.log('✅ メニュー設定を読み込みました:', menuSettings);
-            } else {
-              console.log('⚠️ メニュー設定が見つかりません。デフォルト設定を使用します。');
-            }
           }
         }
         
@@ -2834,82 +2831,55 @@
                       String(now.getHours()).padStart(2, '0') + ':' + 
                       String(now.getMinutes()).padStart(2, '0');
       
-      // 店舗IDを決定
-      const storeId = window.currentStoreId;
+      // レシート設定を読み込み
+      let receiptStoreName = '粉もん屋 八 下赤塚店';
+      let receiptAddress = '東京都板橋区赤塚2-2-4';
+      let receiptPhone = 'TEL: 03-6904-2888';
+      let receiptMessage1 = 'ご来店ありがとうございました';
+      let receiptMessage2 = 'またのお越しをお待ちしております';
       
-      console.log('========================================');
-      console.log('🧾 レシート表示開始');
-      console.log('  storeId:', storeId);
-      console.log('  window.currentStoreId:', window.currentStoreId);
-      console.log('========================================');
-      
-      // デフォルト店舗情報（下赤塚店） - Firestoreから読み込めない場合のフォールバック
-      let storeInfo = {
-        storeName: '粉もん屋 八 下赤塚店',
-        postalCode: '175-0092',
-        address: '東京都板橋区赤塚2-2-4',
-        phone: '03-6904-2888',
-        message: 'ご来店ありがとうございました\nまたのお越しをお待ちしております',
-        stampImage: ''
-      };
-      
-      console.log('📋 デフォルト設定:', storeInfo);
-      
-      // 常にFirestoreから読み込みを試みる
       try {
-        // nullの場合は旧パス（receipt_settings/shimoakatsuka）
+        const storeId = window.currentStoreId;
         let receiptSettingsRef;
+        
         if (!storeId || storeId === '') {
           receiptSettingsRef = doc(db, 'receipt_settings', 'shimoakatsuka');
-          console.log('🔍 旧パスから設定を読み込み中: receipt_settings/shimoakatsuka');
         } else {
           receiptSettingsRef = doc(db, 'stores', storeId, 'receipt_settings', 'default');
-          console.log('🔍 新パスから設定を読み込み中: stores/' + storeId + '/receipt_settings/default');
         }
         
-        // Firestoreから読み込み
         const receiptSettingsDoc = await getDoc(receiptSettingsRef);
-        
-        console.log('  ドキュメント存在:', receiptSettingsDoc.exists());
         
         if (receiptSettingsDoc.exists()) {
           const settings = receiptSettingsDoc.data();
-          console.log('  読み込んだ設定:', settings);
           
-          // storeNameとbranchNameを組み合わせる
-          let fullStoreName = storeInfo.storeName; // デフォルト
           if (settings.storeName && settings.branchName) {
-            fullStoreName = settings.storeName + ' ' + settings.branchName;
+            receiptStoreName = settings.storeName + ' ' + settings.branchName;
           } else if (settings.branchName) {
-            fullStoreName = settings.branchName;
+            receiptStoreName = settings.branchName;
           } else if (settings.storeName) {
-            fullStoreName = settings.storeName;
+            receiptStoreName = settings.storeName;
           }
           
-          storeInfo = {
-            storeName: fullStoreName,
-            postalCode: settings.postalCode || storeInfo.postalCode,
-            address: settings.address || storeInfo.address,
-            phone: settings.phone || storeInfo.phone,
-            message: settings.message || storeInfo.message,
-            stampImage: settings.stampImage || storeInfo.stampImage
-          };
-          console.log('✅ レシート設定を読み込みました:', storeInfo);
-        } else {
-          console.log('⚠️ レシート設定が存在しません。デフォルト設定を使用します。');
+          if (settings.postalCode && settings.address) {
+            receiptAddress = settings.postalCode + ' ' + settings.address;
+          } else if (settings.address) {
+            receiptAddress = settings.address;
+          }
+          
+          if (settings.phone) {
+            receiptPhone = 'TEL: ' + settings.phone;
+          }
+          
+          if (settings.message) {
+            const messages = settings.message.split('\n');
+            receiptMessage1 = messages[0] || receiptMessage1;
+            receiptMessage2 = messages[1] || receiptMessage2;
+          }
         }
       } catch (error) {
-        console.error('========================================');
-        console.error('❌ レシート設定読み込みエラー:', error);
-        console.error('  エラー詳細:', error.message);
-        console.error('  スタック:', error.stack);
-        console.error('========================================');
-        console.log('⚠️ デフォルトレシート設定を使用:', storeInfo);
+        console.error('レシート設定読み込みエラー:', error);
       }
-      
-      console.log('========================================');
-      console.log('📄 最終的なレシート設定:', storeInfo);
-      console.log('========================================');
       
       // LocalStorageから注文情報を取得
       const savedOrder = localStorage.getItem('currentOrder_' + tableNumber);
@@ -2962,7 +2932,7 @@
         <div style="font-family: 'Courier New', monospace; text-align: center;">
           <div style="border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 15px;">
             <h2 style="margin: 0; font-size: 24px;">粉もん屋 八</h2>
-            <div style="font-size: 14px; margin-top: 5px;">${storeInfo.storeName}</div>
+            <div style="font-size: 14px; margin-top: 5px;">下赤塚店</div>
           </div>
           
           <div style="text-align: left; margin: 20px 0;">
@@ -3006,11 +2976,11 @@
           </div>
           
           <div style="border-top: 2px solid #000; padding-top: 15px; margin-top: 20px; font-size: 12px;">
-            <div style="font-weight: bold; margin-bottom: 5px;">${storeInfo.storeName}</div>
-            <div>〒${storeInfo.postalCode}</div>
-            <div>${storeInfo.address}</div>
-            <div>TEL: ${storeInfo.phone}</div>
-            <div style="margin-top: 10px; white-space: pre-wrap;">${storeInfo.message || 'ご来店ありがとうございました\nまたのお越しをお待ちしております'}</div>
+            <div style="font-weight: bold; margin-bottom: 5px;">${receiptStoreName}</div>
+            <div>${receiptAddress}</div>
+            <div>${receiptPhone}</div>
+            <div style="margin-top: 10px;">${receiptMessage1}</div>
+            <div style="margin-top: 5px;">${receiptMessage2}</div>
           </div>
         </div>
       `;
@@ -3068,29 +3038,19 @@
                       String(now.getMonth() + 1).padStart(2, '0') + '月' + 
                       String(now.getDate()).padStart(2, '0') + '日';
       
-      // 店舗IDを決定
-      const storeId = window.currentStoreId;
+      // レシート設定を読み込み
+      let receiptStoreName = '粉もん屋 八 下赤塚店';
+      let receiptAddress = '東京都板橋区赤塚2-2-4';
+      let receiptPhone = 'TEL: 03-6904-2888';
       
-      // デフォルト店舗情報（下赤塚店） - Firestoreから読み込めない場合のフォールバック
-      let storeInfo = {
-        storeName: '粉もん屋 八 下赤塚店',
-        postalCode: '175-0092',
-        address: '東京都板橋区赤塚2-2-4',
-        phone: '03-6904-2888',
-        message: 'ご来店ありがとうございました\nまたのお越しをお待ちしております',
-        stampImage: ''
-      };
-      
-      // 常にFirestoreから読み込みを試みる
       try {
-        // nullの場合は旧パス（receipt_settings/shimoakatsuka）
+        const storeId = window.currentStoreId;
         let receiptSettingsRef;
+        
         if (!storeId || storeId === '') {
           receiptSettingsRef = doc(db, 'receipt_settings', 'shimoakatsuka');
-          console.log('🔍 旧パスから領収書設定を読み込み中: receipt_settings/shimoakatsuka');
         } else {
           receiptSettingsRef = doc(db, 'stores', storeId, 'receipt_settings', 'default');
-          console.log('🔍 新パスから領収書設定を読み込み中: stores/' + storeId + '/receipt_settings/default');
         }
         
         const receiptSettingsDoc = await getDoc(receiptSettingsRef);
@@ -3098,31 +3058,26 @@
         if (receiptSettingsDoc.exists()) {
           const settings = receiptSettingsDoc.data();
           
-          // storeNameとbranchNameを組み合わせる
-          let fullStoreName = storeInfo.storeName; // デフォルト
           if (settings.storeName && settings.branchName) {
-            fullStoreName = settings.storeName + ' ' + settings.branchName;
+            receiptStoreName = settings.storeName + ' ' + settings.branchName;
           } else if (settings.branchName) {
-            fullStoreName = settings.branchName;
+            receiptStoreName = settings.branchName;
           } else if (settings.storeName) {
-            fullStoreName = settings.storeName;
+            receiptStoreName = settings.storeName;
           }
           
-          storeInfo = {
-            storeName: fullStoreName,
-            postalCode: settings.postalCode || storeInfo.postalCode,
-            address: settings.address || storeInfo.address,
-            phone: settings.phone || storeInfo.phone,
-            message: settings.message || storeInfo.message,
-            stampImage: settings.stampImage || storeInfo.stampImage
-          };
-          console.log('✅ 領収書設定を読み込みました:', storeInfo);
-        } else {
-          console.log('⚠️ 領収書設定が存在しません。デフォルト設定を使用します。');
+          if (settings.postalCode && settings.address) {
+            receiptAddress = settings.postalCode + ' ' + settings.address;
+          } else if (settings.address) {
+            receiptAddress = settings.address;
+          }
+          
+          if (settings.phone) {
+            receiptPhone = 'TEL: ' + settings.phone;
+          }
         }
       } catch (error) {
         console.error('領収書設定読み込みエラー:', error);
-        console.log('⚠️ デフォルト領収書設定を使用:', storeInfo);
       }
       
       // LocalStorageから注文情報を取得して消費税を計算
@@ -3188,13 +3143,13 @@
           </div>
           
           <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 40px; position: relative;">
-            <div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 10px;">${storeInfo.storeName}</div>
+            <div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>
             <div style="text-align: center; font-size: 12px; color: #666;">
-              <div>〒${storeInfo.postalCode} ${storeInfo.address}</div>
-              <div style="margin-top: 5px;">TEL: ${storeInfo.phone}</div>
+              <div>${receiptAddress}</div>
+              <div style="margin-top: 5px;">${receiptPhone}</div>
               <div style="margin-top: 10px;">※この領収書は再発行できません</div>
             </div>
-            ${storeInfo.stampImage ? `<img src="${storeInfo.stampImage}" alt="印" style="position: absolute; top: -80px; right: 30px; width: 80px; height: 80px; opacity: 0.75;">` : ''}
+            <img src="./takada.png" alt="印" style="position: absolute; top: -80px; right: 30px; width: 80px; height: 80px; opacity: 0.75; filter: brightness(0) saturate(100%) invert(23%) sepia(89%) saturate(7471%) hue-rotate(359deg) brightness(92%) contrast(117%);" onerror="this.style.display='none'">
           </div>
         </div>
       `;
