@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>バックアップ管理システム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="container mx-auto p-6"></div>
+
+    <!-- Firebase -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, getDocs, getDoc, setDoc, doc, query, orderBy, Timestamp, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+            authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+            projectId: "takoyaki-order-system-bacd7",
+            storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+            messagingSenderId: "104494752890",
+            appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        window.db = db;
+        window.firebaseModules = { collection, getDocs, getDoc, setDoc, doc, query, orderBy, Timestamp, deleteDoc };
+        
+        // Reactのような簡易フレームワーク
+        let state = {
+            view: 'list', // 'list', 'create', 'restore'
+            backups: [],
+            stores: [],
+            selectedBackup: null,
+            selectedStore: null,
+            loading: false
+        };
+
+        function setState(newState) {
+            state = { ...state, ...newState };
+            render();
+        }
+
+        async function loadStores() {
+            const stores = [
+                { id: '', name: '下赤塚' }, // IDなし（正しい下赤塚）
+            ];
+            
+            try {
+                const storesSnapshot = await getDocs(collection(db, 'stores'));
+                storesSnapshot.forEach(doc => {
+                    // ⚠️ shimoakatsuka は旧システムなので除外
+                    if (doc.id === 'shimoakatsuka') {
+                        console.log('⚠️ 旧システムの下赤塚（shimoakatsuka）を除外しました');
+                        return;
+                    }
+                    
+                    stores.push({
+                        id: doc.id,
+                        name: doc.data().storeName || doc.id
+                    });
+                });
+            } catch (e) {
+                console.error('店舗読み込みエラー:', e);
+            }
+            
+            return stores;
+        }
+
+        async function loadBackups() {
+            try {
+                const backupsSnapshot = await getDocs(
+                    query(collection(db, 'backups'), orderBy('createdAt', 'desc'))
+                );
+                
+                const backups = [];
+                backupsSnapshot.forEach(doc => {
+                    backups.push({
+                        id: doc.id,
+                        ...doc.data()
+                    });
+                });
+                
+                return backups;
+            } catch (e) {
+                console.error('バックアップ読み込みエラー:', e);
+                return [];
+            }
+        }
+
+        async function createBackup(storeId, storeName, description) {
+            setState({ loading: true });
+            
+            try {
+                console.log('🔄 バックアップ作成開始:', storeName);
+                
+                // バックアップID生成
+                const now = new Date();
+                const dateStr = `${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}_${String(now.getDate()).padStart(2, '0')}`;
+                const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+                const backupId = `${storeName}_${dateStr}_${timeStr}`;
+                
+                // データ収集
+                const backupData = {
+                    backupId: backupId,
+                    storeId: storeId,
+                    storeName: storeName,
+                    description: description || '',
+                    createdAt: Timestamp.now(),
+                    data: {}
+                };
+                
+                // メニュー設定を取得
+                let menuSettingsPath;
+                if (!storeId || storeId === '') {
+                    menuSettingsPath = doc(db, 'menu_settings', 'settings');
+                } else {
+                    menuSettingsPath = doc(db, 'stores', storeId, 'menu_settings', 'settings');
+                }
+                
+                const menuDoc = await getDoc(menuSettingsPath);
+                if (menuDoc.exists()) {
+                    backupData.data.menuSettings = menuDoc.data();
+                    console.log('✅ メニュー設定を取得');
+                }
+                
+                // レシート設定を取得
+                let receiptSettingsPath;
+                if (!storeId || storeId === '') {
+                    receiptSettingsPath = doc(db, 'receipt_settings', 'settings');
+                } else {
+                    receiptSettingsPath = doc(db, 'stores', storeId, 'receipt_settings', 'settings');
+                }
+                
+                const receiptDoc = await getDoc(receiptSettingsPath);
+                if (receiptDoc.exists()) {
+                    backupData.data.receiptSettings = receiptDoc.data();
+                    console.log('✅ レシート設定を取得');
+                }
+                
+                // 商品登録データを取得
+                let menuItemsRef;
+                if (!storeId || storeId === '') {
+                    menuItemsRef = collection(db, 'menu_items');
+                } else {
+                    menuItemsRef = collection(db, 'stores', storeId, 'menu_items');
+                }
+                
+                const menuItemsSnapshot = await getDocs(menuItemsRef);
+                backupData.data.menuItems = [];
+                menuItemsSnapshot.forEach(doc => {
+                    backupData.data.menuItems.push({
+                        id: doc.id,
+                        ...doc.data()
+                    });
+                });
+                console.log('✅ 商品登録データを取得:', backupData.data.menuItems.length, '件');
+                
+                // Firestoreに保存
+                await setDoc(doc(db, 'backups', backupId), backupData);
+                
+                console.log('✅ バックアップ作成完了:', backupId);
+                showAlert(`バックアップを作成しました\n${backupId}`, 'success');
+                
+                // バックアップ一覧を再読み込み
+                const backups = await loadBackups();
+                setState({ view: 'list', backups, loading: false });
+                
+            } catch (e) {
+                console.error('❌ バックアップ作成エラー:', e);
+                showAlert('バックアップの作成に失敗しました:\n' + e.message, 'error');
+                setState({ loading: false });
+            }
+        }
+
+        async function restoreBackup(backupId, targetStoreId, targetStoreName) {
+            if (!confirm(`警告: ${targetStoreName} の現在のデータが上書きされます。\n\n続行しますか？`)) {
+                return;
+            }
+            
+            setState({ loading: true });
+            
+            try {
+                console.log('🔄 復元開始:', backupId, '→', targetStoreName);
+                
+                // バックアップデータを取得
+                const backupDoc = await getDoc(doc(db, 'backups', backupId));
+                if (!backupDoc.exists()) {
+                    throw new Error('バックアップが見つかりません');
+                }
+                
+                const backupData = backupDoc.data();
+                
+                // メニュー設定を復元
+                if (backupData.data.menuSettings) {
+                    let menuSettingsPath;
+                    if (!targetStoreId || targetStoreId === '') {
+                        menuSettingsPath = doc(db, 'menu_settings', 'settings');
+                    } else {
+                        menuSettingsPath = doc(db, 'stores', targetStoreId, 'menu_settings', 'settings');
+                    }
+                    
+                    await setDoc(menuSettingsPath, backupData.data.menuSettings);
+                    console.log('✅ メニュー設定を復元');
+                }
+                
+                // レシート設定を復元
+                if (backupData.data.receiptSettings) {
+                    let receiptSettingsPath;
+                    if (!targetStoreId || targetStoreId === '') {
+                        receiptSettingsPath = doc(db, 'receipt_settings', 'settings');
+                    } else {
+                        receiptSettingsPath = doc(db, 'stores', targetStoreId, 'receipt_settings', 'settings');
+                    }
+                    
+                    await setDoc(receiptSettingsPath, backupData.data.receiptSettings);
+                    console.log('✅ レシート設定を復元');
+                }
+                
+                // 商品登録データを復元
+                if (backupData.data.menuItems) {
+                    for (const item of backupData.data.menuItems) {
+                        let menuItemPath;
+                        if (!targetStoreId || targetStoreId === '') {
+                            menuItemPath = doc(db, 'menu_items', item.id);
+                        } else {
+                            menuItemPath = doc(db, 'stores', targetStoreId, 'menu_items', item.id);
+                        }
+                        
+                        const { id, ...itemData } = item;
+                        await setDoc(menuItemPath, itemData);
+                    }
+                    console.log('✅ 商品登録データを復元:', backupData.data.menuItems.length, '件');
+                }
+                
+                console.log('✅ 復元完了');
+                showAlert(`復元が完了しました\n${targetStoreName}`, 'success');
+                
+                setState({ view: 'list', loading: false });
+                
+            } catch (e) {
+                console.error('❌ 復元エラー:', e);
+                showAlert('復元に失敗しました:\n' + e.message, 'error');
+                setState({ loading: false });
+            }
+        }
+
+        async function deleteBackup(backupId) {
+            if (!confirm(`バックアップ ${backupId} を削除しますか？`)) {
+                return;
+            }
+            
+            try {
+                await deleteDoc(doc(db, 'backups', backupId));
+                console.log('✅ バックアップを削除:', backupId);
+                showAlert('バックアップを削除しました', 'success');
+                
+                const backups = await loadBackups();
+                setState({ backups });
+            } catch (e) {
+                console.error('❌ 削除エラー:', e);
+                showAlert('削除に失敗しました:\n' + e.message, 'error');
+            }
+        }
+
+        function showAlert(message, type = 'info') {
+            const colors = {
+                success: 'bg-green-500',
+                error: 'bg-red-500',
+                info: 'bg-blue-500'
+            };
+            
+            const alert = document.createElement('div');
+            alert.className = `fixed top-4 right-4 ${colors[type]} text-white px-6 py-4 rounded-lg shadow-lg z-50`;
+            alert.textContent = message;
+            document.body.appendChild(alert);
+            
+            setTimeout(() => alert.remove(), 3000);
+        }
+
+        function render() {
+            const app = document.getElementById('app');
+            
+            if (state.loading) {
+                app.innerHTML = `
+                    <div class="flex items-center justify-center h-screen">
+                        <div class="text-center">
+                            <div class="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+                            <p class="text-xl text-gray-700">処理中...</p>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+            
+            if (state.view === 'create') {
+                app.innerHTML = `
+                    <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-6">
+                        <h1 class="text-3xl font-bold mb-6">📦 バックアップ作成</h1>
+                        
+                        <div class="mb-4">
+                            <label class="block text-sm font-bold mb-2">店舗を選択</label>
+                            <select id="store-select" class="w-full p-3 border rounded-lg">
+                                ${state.stores.map(store => `
+                                    <option value="${store.id}">${store.name}</option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label class="block text-sm font-bold mb-2">説明（オプション）</label>
+                            <textarea id="description" class="w-full p-3 border rounded-lg" rows="3" placeholder="例: メニュー更新前のバックアップ"></textarea>
+                        </div>
+                        
+                        <div class="flex gap-4">
+                            <button onclick="handleCreateBackup()" class="flex-1 bg-blue-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-600">
+                                作成する
+                            </button>
+                            <button onclick="setState({ view: 'list' })" class="flex-1 bg-gray-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-gray-600">
+                                キャンセル
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else if (state.view === 'restore') {
+                app.innerHTML = `
+                    <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-6">
+                        <h1 class="text-3xl font-bold mb-6">🔄 バックアップ復元</h1>
+                        
+                        <div class="mb-6 p-4 bg-blue-50 rounded-lg">
+                            <h3 class="font-bold mb-2">復元元バックアップ:</h3>
+                            <p class="text-lg">${state.selectedBackup.backupId}</p>
+                            <p class="text-sm text-gray-600">作成日時: ${new Date(state.selectedBackup.createdAt.seconds * 1000).toLocaleString('ja-JP')}</p>
+                            <p class="text-sm text-gray-600">元の店舗: ${state.selectedBackup.storeName}</p>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label class="block text-sm font-bold mb-2">復元先店舗を選択</label>
+                            <select id="target-store-select" class="w-full p-3 border rounded-lg">
+                                ${state.stores.map(store => `
+                                    <option value="${store.id}">${store.name}</option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        
+                        <div class="mb-6 p-4 bg-yellow-50 border-2 border-yellow-500 rounded-lg">
+                            <p class="text-red-600 font-bold">⚠️ 警告</p>
+                            <p class="text-sm">復元先のメニューデータが上書きされます。この操作は取り消せません。</p>
+                        </div>
+                        
+                        <div class="flex gap-4">
+                            <button onclick="handleRestoreBackup()" class="flex-1 bg-red-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-600">
+                                復元する
+                            </button>
+                            <button onclick="setState({ view: 'list' })" class="flex-1 bg-gray-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-gray-600">
+                                キャンセル
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // バックアップ一覧
+                app.innerHTML = `
+                    <div class="max-w-6xl mx-auto">
+                        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div class="flex justify-between items-center mb-4">
+                                <h1 class="text-3xl font-bold">📦 バックアップ管理</h1>
+                                <button onclick="showCreateView()" class="bg-blue-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-600">
+                                    + 新規バックアップ
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-4">
+                            ${state.backups.length === 0 ? `
+                                <div class="bg-white rounded-lg shadow p-6 text-center text-gray-500">
+                                    バックアップがありません
+                                </div>
+                            ` : state.backups.map(backup => `
+                                <div class="bg-white rounded-lg shadow-lg p-6">
+                                    <div class="flex justify-between items-start">
+                                        <div class="flex-1">
+                                            <h3 class="text-xl font-bold mb-2">📦 ${backup.backupId}</h3>
+                                            <p class="text-sm text-gray-600 mb-1">店舗: ${backup.storeName}</p>
+                                            <p class="text-sm text-gray-600 mb-1">作成日時: ${new Date(backup.createdAt.seconds * 1000).toLocaleString('ja-JP')}</p>
+                                            ${backup.description ? `<p class="text-sm text-gray-600">説明: ${backup.description}</p>` : ''}
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button onclick="showRestoreView('${backup.id}')" class="bg-green-500 text-white px-4 py-2 rounded-lg font-bold hover:bg-green-600">
+                                                復元
+                                            </button>
+                                            <button onclick="deleteBackup('${backup.id}')" class="bg-red-500 text-white px-4 py-2 rounded-lg font-bold hover:bg-red-600">
+                                                削除
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        window.setState = setState;
+        window.createBackup = createBackup;
+        window.restoreBackup = restoreBackup;
+        window.deleteBackup = deleteBackup;
+
+        window.showCreateView = async function() {
+            const stores = await loadStores();
+            setState({ view: 'create', stores });
+        };
+
+        window.showRestoreView = function(backupId) {
+            const backup = state.backups.find(b => b.id === backupId);
+            if (backup) {
+                setState({ view: 'restore', selectedBackup: backup });
+            }
+        };
+
+        window.handleCreateBackup = function() {
+            const storeSelect = document.getElementById('store-select');
+            const description = document.getElementById('description').value;
+            
+            const storeId = storeSelect.value;
+            const storeName = storeSelect.options[storeSelect.selectedIndex].text;
+            
+            createBackup(storeId, storeName, description);
+        };
+
+        window.handleRestoreBackup = function() {
+            const targetSelect = document.getElementById('target-store-select');
+            const targetStoreId = targetSelect.value;
+            const targetStoreName = targetSelect.options[targetSelect.selectedIndex].text;
+            
+            restoreBackup(state.selectedBackup.id, targetStoreId, targetStoreName);
+        };
+
+        // 初期化
+        async function init() {
+            setState({ loading: true });
+            const stores = await loadStores();
+            const backups = await loadBackups();
+            setState({ stores, backups, loading: false });
+        }
+
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
