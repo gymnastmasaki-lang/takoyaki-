@@ -2721,6 +2721,15 @@
             <button onclick="editOrder('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
               ✏️ 編集
             </button>
+            ${!order.deleted ? `
+              <button onclick="deleteOrderFromHistory('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                🗑️ 取消
+              </button>
+            ` : `
+              <button onclick="restoreOrderFromHistory('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                🔄 復元
+              </button>
+            `}
             ${order.paidAt ? `
               <button onclick="reprintReceipt('${order.id}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                 レシート再印刷
@@ -3031,10 +3040,10 @@
             <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
           `;
         } else {
-          // 通常の注文：保存と削除ボタン
+          // 通常の注文：保存と取消ボタン
           buttonsContainer.innerHTML = `
             <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
-            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrderFromEdit()">注文削除</button>
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrderFromEdit()">🗑️ 注文取消</button>
             <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
           `;
         }
@@ -3439,29 +3448,43 @@
       // カスタム確認ダイアログを表示
       const confirmed = await showCustomConfirm({
         icon: '🗑️',
-        title: '注文を削除',
-        message: `注文 #${currentEditingOrder.orderNumber} を削除しますか？\n\n削除後も履歴から復元できます。`,
-        confirmText: '削除する',
+        title: '注文取消（キャンセル）',
+        message: `注文 #${currentEditingOrder.orderNumber} を取り消しますか？\n金額: ¥${currentEditingOrder.totalAmount.toLocaleString()}\n\n⚠️ 取消後、この注文は売上から除外されます。\n※ 履歴から復元できます`,
+        confirmText: '取消する',
         confirmColor: '#f44336'
       });
       
       if (!confirmed) return;
       
       try {
-        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
-          deleted: true,
-          deletedAt: window.Timestamp.now()
+        console.log('🗑️ 注文取消処理開始:', {
+          注文ID: currentEditingOrder.id,
+          注文番号: currentEditingOrder.orderNumber,
+          金額: currentEditingOrder.totalAmount,
+          会計済み: !!currentEditingOrder.paidAt
         });
         
-        showCustomAlert('注文を削除しました', '✅ 完了', '🗑️');
+        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
+          deleted: true,
+          deletedAt: window.Timestamp.now(),
+          cancelReason: '注文取消'  // 🆕 取消理由を記録
+        });
+        
+        console.log('✅ 注文を取り消しました。確定申告の売上からは除外されます。');
+        
+        showCustomAlert(
+          `注文 #${currentEditingOrder.orderNumber} を取り消しました\n\n売上から除外されます`,
+          '✅ 取消完了',
+          '🗑️'
+        );
         closeEditOrderModal();
         
         // 履歴を再読み込み
         await loadHistory();
         
       } catch (e) {
-        console.error('注文削除エラー:', e);
-        showCustomAlert('注文の削除に失敗しました: ' + e.message, '❌ エラー', '⚠️');
+        console.error('注文取消エラー:', e);
+        showCustomAlert('注文の取消に失敗しました: ' + e.message, '❌ エラー', '⚠️');
       }
     };
     
@@ -3509,6 +3532,107 @@
           '🔄'
         );
         closeEditOrderModal();
+        
+        // 履歴を再読み込み
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('注文復元エラー:', e);
+        showCustomAlert('注文の復元に失敗しました: ' + e.message, '❌ エラー', '⚠️');
+      }
+    };
+    
+    // 履歴画面から直接削除（注文取消）
+    window.deleteOrderFromHistory = async function(orderId) {
+      try {
+        const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
+        if (!orderDoc.exists()) {
+          showCustomAlert('注文が見つかりません', '❌ エラー', '⚠️');
+          return;
+        }
+        
+        const orderData = orderDoc.data();
+        
+        // カスタム確認ダイアログを表示
+        const confirmed = await showCustomConfirm({
+          icon: '🗑️',
+          title: '注文取消（キャンセル）',
+          message: `注文 #${orderData.orderNumber} を取り消しますか？\n金額: ¥${orderData.totalAmount.toLocaleString()}\n\n⚠️ 取消後、この注文は売上から除外されます。\n※ 履歴から復元できます`,
+          confirmText: '取消する',
+          confirmColor: '#f44336'
+        });
+        
+        if (!confirmed) return;
+        
+        console.log('🗑️ 注文取消処理開始:', {
+          注文ID: orderId,
+          注文番号: orderData.orderNumber,
+          金額: orderData.totalAmount,
+          会計済み: !!orderData.paidAt
+        });
+        
+        // 注文を削除（取消）扱いにする
+        await window.updateDoc(window.getStoreDoc('orders', orderId), {
+          deleted: true,
+          deletedAt: window.Timestamp.now(),
+          cancelReason: '注文取消'  // 🆕 取消理由を記録
+        });
+        
+        console.log('✅ 注文を取り消しました。確定申告の売上からは除外されます。');
+        
+        showCustomAlert(
+          `注文 #${orderData.orderNumber} を取り消しました\n\n売上から除外されます`,
+          '✅ 取消完了',
+          '🗑️'
+        );
+        
+        // 履歴を再読み込み
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('注文取消エラー:', e);
+        showCustomAlert('注文の取消に失敗しました: ' + e.message, '❌ エラー', '⚠️');
+      }
+    };
+    
+    // 履歴画面から直接復元
+    window.restoreOrderFromHistory = async function(orderId) {
+      try {
+        const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
+        if (!orderDoc.exists()) {
+          showCustomAlert('注文が見つかりません', '❌ エラー', '⚠️');
+          return;
+        }
+        
+        const orderData = orderDoc.data();
+        const hasPaidAt = !!orderData.paidAt;
+        
+        // カスタム確認ダイアログを表示
+        let message = `注文 #${orderData.orderNumber} を復元しますか？`;
+        if (!hasPaidAt) {
+          message += '\n\n⚠️ この注文は未会計です。\n復元後に会計処理を行ってください。';
+        }
+        
+        const confirmed = await showCustomConfirm({
+          icon: '🔄',
+          title: '注文を復元',
+          message: message,
+          confirmText: '復元する',
+          confirmColor: '#2196F3'
+        });
+        
+        if (!confirmed) return;
+        
+        await window.updateDoc(window.getStoreDoc('orders', orderId), {
+          deleted: false,
+          deletedAt: null
+        });
+        
+        showCustomAlert(
+          hasPaidAt ? '注文を復元しました（会計済み）' : '注文を復元しました（未会計）\n会計処理が必要です',
+          '✅ 成功',
+          '🔄'
+        );
         
         // 履歴を再読み込み
         await loadHistory();
