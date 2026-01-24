@@ -3544,16 +3544,29 @@
     
     // 履歴画面から直接削除（注文取消）
     window.deleteOrderFromHistory = async function(orderId) {
+      console.log('🔍 削除ボタンがクリックされました。注文ID:', orderId);
+      
       try {
+        console.log('📡 Firestoreから注文を取得中...');
         const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
+        
         if (!orderDoc.exists()) {
+          console.error('❌ 注文が見つかりません:', orderId);
           showCustomAlert('注文が見つかりません', '❌ エラー', '⚠️');
           return;
         }
         
         const orderData = orderDoc.data();
+        console.log('✅ 注文データを取得しました:', {
+          注文ID: orderId,
+          注文番号: orderData.orderNumber,
+          金額: orderData.totalAmount,
+          会計済み: !!orderData.paidAt,
+          既に削除済み: !!orderData.deleted
+        });
         
         // カスタム確認ダイアログを表示
+        console.log('💬 確認ダイアログを表示中...');
         const confirmed = await showCustomConfirm({
           icon: '🗑️',
           title: '注文取消（キャンセル）',
@@ -3562,23 +3575,23 @@
           confirmColor: '#f44336'
         });
         
-        if (!confirmed) return;
+        if (!confirmed) {
+          console.log('⏸️ ユーザーがキャンセルしました');
+          return;
+        }
         
-        console.log('🗑️ 注文取消処理開始:', {
-          注文ID: orderId,
-          注文番号: orderData.orderNumber,
-          金額: orderData.totalAmount,
-          会計済み: !!orderData.paidAt
-        });
+        console.log('🗑️ 注文取消処理を実行中...');
+        console.log('📍 更新するパス:', window.getStoreDoc('orders', orderId).path);
         
         // 注文を削除（取消）扱いにする
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           deleted: true,
           deletedAt: window.Timestamp.now(),
-          cancelReason: '注文取消'  // 🆕 取消理由を記録
+          cancelReason: '注文取消'
         });
         
-        console.log('✅ 注文を取り消しました。確定申告の売上からは除外されます。');
+        console.log('✅ 注文を取り消しました！');
+        console.log('📊 確定申告の売上からは除外されます');
         
         showCustomAlert(
           `注文 #${orderData.orderNumber} を取り消しました\n\n売上から除外されます`,
@@ -3587,10 +3600,13 @@
         );
         
         // 履歴を再読み込み
+        console.log('🔄 履歴を再読み込み中...');
         await loadHistory();
+        console.log('✅ 履歴の再読み込み完了');
         
       } catch (e) {
-        console.error('注文取消エラー:', e);
+        console.error('❌ 注文取消エラー:', e);
+        console.error('エラー詳細:', e.stack);
         showCustomAlert('注文の取消に失敗しました: ' + e.message, '❌ エラー', '⚠️');
       }
     };
