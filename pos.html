@@ -3507,13 +3507,80 @@
           会計済み: !!currentEditingOrder.paidAt
         });
         
+        // 1. 注文を取消（deleted: true）
         await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
           deleted: true,
           deletedAt: window.Timestamp.now(),
-          cancelReason: '注文取消'  // 🆕 取消理由を記録
+          cancelReason: '注文取消'
         });
         
-        console.log('✅ 注文を取り消しました。確定申告の売上からは除外されます。');
+        console.log('✅ 注文を取り消しました。');
+        
+        // 2. 🆕 会計済みの注文の場合、dailySalesから減算
+        if (currentEditingOrder.paidAt) {
+          console.log('💰 会計済み注文のため、dailySalesを更新します');
+          
+          // 注文日を取得（JSTに変換）
+          const orderDate = currentEditingOrder.timestamp.toDate();
+          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+          const dateStr = `${jstOrderDate.getFullYear()}-${String(jstOrderDate.getMonth() + 1).padStart(2, '0')}-${String(jstOrderDate.getDate()).padStart(2, '0')}`;
+          
+          console.log('📅 注文日:', dateStr);
+          
+          // dailySalesを取得
+          const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+          const dailySalesDoc = await window.getDoc(dailySalesRef);
+          
+          if (dailySalesDoc.exists()) {
+            const dailyData = dailySalesDoc.data();
+            
+            // 注文金額と税金を取得
+            const totalAmount = currentEditingOrder.totalAmount || 0;
+            const tax8Total = currentEditingOrder.tax8Total || 0;
+            const tax10Total = currentEditingOrder.tax10Total || 0;
+            
+            // 支払い方法別の金額
+            let cashSales = 0, emoneSales = 0, creditSales = 0;
+            if (currentEditingOrder.paymentMethod === '現金') cashSales = totalAmount;
+            else if (currentEditingOrder.paymentMethod === '電子マネー') emoneSales = totalAmount;
+            else if (currentEditingOrder.paymentMethod === 'クレジットカード') creditSales = totalAmount;
+            
+            // 商品数を計算
+            let totalItems = 0;
+            if (currentEditingOrder.items && Array.isArray(currentEditingOrder.items)) {
+              currentEditingOrder.items.forEach(item => {
+                totalItems += item.quantity || 0;
+              });
+            }
+            
+            // 更新データを作成（マイナスにならないようにする）
+            const updateData = {
+              totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
+              customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+              totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
+              cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
+              emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
+              creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
+              tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
+              tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
+            };
+            
+            console.log('📊 dailySales更新:', {
+              元の総売上: dailyData.totalSales,
+              減算額: totalAmount,
+              新しい総売上: updateData.totalSales
+            });
+            
+            // dailySalesを更新
+            await window.updateDoc(dailySalesRef, updateData);
+            
+            console.log('✅ dailySalesを更新しました');
+          } else {
+            console.warn('⚠️ dailySalesが見つかりません:', dateStr);
+          }
+        } else {
+          console.log('ℹ️ 未会計の注文のため、dailySalesの更新は不要です');
+        }
         
         showCustomAlert(
           `注文 #${currentEditingOrder.orderNumber} を取り消しました\n\n売上から除外されます`,
@@ -3568,6 +3635,86 @@
         });
         
         await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), updates);
+        
+        // 🆕 会計済みの注文の場合、dailySalesに加算
+        if (hasPaidAt) {
+          console.log('💰 会計済み注文のため、dailySalesを更新します');
+          
+          // 注文日を取得（JSTに変換）
+          const orderDate = currentEditingOrder.timestamp.toDate();
+          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+          const dateStr = `${jstOrderDate.getFullYear()}-${String(jstOrderDate.getMonth() + 1).padStart(2, '0')}-${String(jstOrderDate.getDate()).padStart(2, '0')}`;
+          
+          console.log('📅 注文日:', dateStr);
+          
+          // dailySalesを取得または作成
+          const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+          const dailySalesDoc = await window.getDoc(dailySalesRef);
+          
+          // 注文金額と税金を取得
+          const totalAmount = currentEditingOrder.totalAmount || 0;
+          const tax8Total = currentEditingOrder.tax8Total || 0;
+          const tax10Total = currentEditingOrder.tax10Total || 0;
+          
+          // 支払い方法別の金額
+          let cashSales = 0, emoneSales = 0, creditSales = 0;
+          if (currentEditingOrder.paymentMethod === '現金') cashSales = totalAmount;
+          else if (currentEditingOrder.paymentMethod === '電子マネー') emoneSales = totalAmount;
+          else if (currentEditingOrder.paymentMethod === 'クレジットカード') creditSales = totalAmount;
+          
+          // 商品数を計算
+          let totalItems = 0;
+          if (currentEditingOrder.items && Array.isArray(currentEditingOrder.items)) {
+            currentEditingOrder.items.forEach(item => {
+              totalItems += item.quantity || 0;
+            });
+          }
+          
+          if (dailySalesDoc.exists()) {
+            const dailyData = dailySalesDoc.data();
+            
+            // 更新データを作成（加算）
+            const updateData = {
+              totalSales: (dailyData.totalSales || 0) + totalAmount,
+              customerCount: (dailyData.customerCount || 0) + 1,
+              totalItems: (dailyData.totalItems || 0) + totalItems,
+              cashSales: (dailyData.cashSales || 0) + cashSales,
+              emoneSales: (dailyData.emoneSales || 0) + emoneSales,
+              creditSales: (dailyData.creditSales || 0) + creditSales,
+              tax8Total: (dailyData.tax8Total || 0) + tax8Total,
+              tax10Total: (dailyData.tax10Total || 0) + tax10Total
+            };
+            
+            console.log('📊 dailySales更新:', {
+              元の総売上: dailyData.totalSales,
+              加算額: totalAmount,
+              新しい総売上: updateData.totalSales
+            });
+            
+            await window.updateDoc(dailySalesRef, updateData);
+          } else {
+            // dailySalesが存在しない場合は作成
+            const newData = {
+              totalSales: totalAmount,
+              customerCount: 1,
+              totalItems: totalItems,
+              cashSales: cashSales,
+              emoneSales: emoneSales,
+              creditSales: creditSales,
+              tax8Total: tax8Total,
+              tax10Total: tax10Total,
+              totalDiscount: 0,
+              drawerOpenCount: 0
+            };
+            
+            console.log('📊 dailySales作成:', newData);
+            await window.setDoc(dailySalesRef, newData);
+          }
+          
+          console.log('✅ dailySalesを更新しました');
+        } else {
+          console.log('ℹ️ 未会計の注文のため、dailySalesの更新は不要です');
+        }
         
         showCustomAlert(
           hasPaidAt ? '注文を復元しました（会計済み）' : '注文を復元しました（未会計）\n会計処理が必要です',
@@ -3626,7 +3773,7 @@
         console.log('🗑️ 注文取消処理を実行中...');
         console.log('📍 更新するパス:', window.getStoreDoc('orders', orderId).path);
         
-        // 注文を削除（取消）扱いにする
+        // 1. 注文を削除（取消）扱いにする
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           deleted: true,
           deletedAt: window.Timestamp.now(),
@@ -3634,7 +3781,74 @@
         });
         
         console.log('✅ 注文を取り消しました！');
-        console.log('📊 確定申告の売上からは除外されます');
+        
+        // 2. 🆕 会計済みの注文の場合、dailySalesから減算
+        if (orderData.paidAt) {
+          console.log('💰 会計済み注文のため、dailySalesを更新します');
+          
+          // 注文日を取得（JSTに変換）
+          const orderDate = orderData.timestamp.toDate();
+          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+          const dateStr = `${jstOrderDate.getFullYear()}-${String(jstOrderDate.getMonth() + 1).padStart(2, '0')}-${String(jstOrderDate.getDate()).padStart(2, '0')}`;
+          
+          console.log('📅 注文日:', dateStr);
+          
+          // dailySalesを取得
+          const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+          const dailySalesDoc = await window.getDoc(dailySalesRef);
+          
+          if (dailySalesDoc.exists()) {
+            const dailyData = dailySalesDoc.data();
+            
+            // 注文金額と税金を取得
+            const totalAmount = orderData.totalAmount || 0;
+            const tax8Total = orderData.tax8Total || 0;
+            const tax10Total = orderData.tax10Total || 0;
+            
+            // 支払い方法別の金額
+            let cashSales = 0, emoneSales = 0, creditSales = 0;
+            if (orderData.paymentMethod === '現金') cashSales = totalAmount;
+            else if (orderData.paymentMethod === '電子マネー') emoneSales = totalAmount;
+            else if (orderData.paymentMethod === 'クレジットカード') creditSales = totalAmount;
+            
+            // 商品数を計算
+            let totalItems = 0;
+            if (orderData.items && Array.isArray(orderData.items)) {
+              orderData.items.forEach(item => {
+                totalItems += item.quantity || 0;
+              });
+            }
+            
+            // 更新データを作成（マイナスにならないようにする）
+            const updateData = {
+              totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
+              customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+              totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
+              cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
+              emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
+              creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
+              tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
+              tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
+            };
+            
+            console.log('📊 dailySales更新:', {
+              元の総売上: dailyData.totalSales,
+              減算額: totalAmount,
+              新しい総売上: updateData.totalSales
+            });
+            
+            // dailySalesを更新
+            await window.updateDoc(dailySalesRef, updateData);
+            
+            console.log('✅ dailySalesを更新しました');
+          } else {
+            console.warn('⚠️ dailySalesが見つかりません:', dateStr);
+          }
+        } else {
+          console.log('ℹ️ 未会計の注文のため、dailySalesの更新は不要です');
+        }
+        
+        console.log('📊 確定申告と精算実行の売上から除外されます');
         
         showCustomAlert(
           `注文 #${orderData.orderNumber} を取り消しました\n\n売上から除外されます`,
