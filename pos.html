@@ -3080,23 +3080,53 @@
       });
       
       if (confirmed) {
-        // 🆕 元の金額を一時保存
-        const originalAmount = currentEditingOrder.originalTotalAmount;
-        
-        currentEditingOrder.items.splice(index, 1);
-        
-        // 合計金額を再計算
-        let total = 0;
-        currentEditingOrder.items.forEach(item => {
-          total += (item.price + (item.toppingPrice || 0)) * item.quantity;
-        });
-        currentEditingOrder.totalAmount = total;
-        
-        // 表示を更新（モーダルを再描画）
-        editOrder(currentEditingOrder.id);
-        
-        // 🆕 元の金額を復元
-        currentEditingOrder.originalTotalAmount = originalAmount;
+        try {
+          console.log('🗑️ 商品削除処理開始:', itemName);
+          
+          // 商品を配列から削除
+          currentEditingOrder.items.splice(index, 1);
+          
+          // 合計金額を再計算
+          let total = 0;
+          let tax8Total = 0;
+          let tax10Total = 0;
+          
+          currentEditingOrder.items.forEach(item => {
+            const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+            total += itemTotal;
+            
+            // 税率別集計
+            if (item.taxRate === 8) {
+              tax8Total += itemTotal;
+            } else {
+              tax10Total += itemTotal;
+            }
+          });
+          
+          currentEditingOrder.totalAmount = total;
+          currentEditingOrder.tax8Total = tax8Total;
+          currentEditingOrder.tax10Total = tax10Total;
+          
+          // 🔥 Firestoreに保存
+          await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
+            items: currentEditingOrder.items,
+            totalAmount: total,
+            tax8Total: tax8Total,
+            tax10Total: tax10Total,
+            updatedAt: window.Timestamp.now()
+          });
+          
+          console.log('✅ 商品を削除してFirestoreに保存しました');
+          
+          // 表示を更新（モーダルを再描画）
+          editOrder(currentEditingOrder.id);
+          
+          showCustomAlert('商品を削除しました', '✅ 完了', '🗑️');
+          
+        } catch (e) {
+          console.error('商品削除エラー:', e);
+          showCustomAlert('商品の削除に失敗しました: ' + e.message, '❌ エラー', '⚠️');
+        }
       }
     };
     
