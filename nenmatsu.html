@@ -271,7 +271,29 @@
             try {
                 const { collection, query, where, getDocs } = window.firebaseModules;
                 
-                // 店舗名で検索
+                // 🔧 下赤塚店の場合は特別処理（storeIdを空にする）
+                if (storeNameValue === '下赤塚' || storeNameValue === 'shimoakatsuka') {
+                    const shimoarekasukaPassword = 'takada';
+                    
+                    if (passwordValue === shimoarekasukaPassword) {
+                        window.currentStoreId = '';  // 🔧 空文字列にしてルートコレクションを使用
+                        window.currentStoreName = '下赤塚';
+                        
+                        localStorage.setItem('nenmatsuStoreId', '');
+                        localStorage.setItem('nenmatsuStoreName', '下赤塚');
+                        
+                        storeName = '下赤塚';
+                        console.log('✅ 下赤塚店でログインしました（ルートコレクション使用）');
+                        await loadEmployees();
+                        render();
+                        return;
+                    } else {
+                        alert('パスワードが正しくありません');
+                        return;
+                    }
+                }
+                
+                // 通常の店舗のログイン処理
                 const storesRef = collection(window.db, 'stores');
                 const q = query(storesRef, where('storeName', '==', storeNameValue));
                 const querySnapshot = await getDocs(q);
@@ -320,13 +342,16 @@
         async function loadEmployees() {
             const { collection, getDocs } = window.firebaseModules;
             
-            if (!window.currentStoreId) {
-                console.error('storeIdが設定されていません');
-                return;
+            // 🔧 下赤塚店（storeIdが空）の場合はルートコレクションから読み込み
+            let empRef;
+            if (!window.currentStoreId || window.currentStoreId === '') {
+                console.log('📍 下赤塚店（IDなし）: ルートパスで従業員を取得 (kintai_employees/)');
+                empRef = collection(window.db, 'kintai_employees');
+            } else {
+                console.log('📍 店舗ID使用: stores/' + window.currentStoreId + '/employees');
+                empRef = collection(window.db, 'stores', window.currentStoreId, 'employees');
             }
             
-            // 店舗のサブコレクションから従業員を取得
-            const empRef = collection(window.db, 'stores', window.currentStoreId, 'employees');
             const snapshot = await getDocs(empRef);
             
             employees = [];
@@ -354,19 +379,22 @@
             const employee = employees.find(e => e.id === employeeId);
             if (!employee) return null;
 
-            if (!window.currentStoreId) {
-                console.error('storeIdが設定されていません');
-                return null;
-            }
-
-            // 勤怠データを取得（店舗のサブコレクション）
+            // 勤怠データを取得
             let totalIncome = 0;
             let totalSocialInsurance = 0;
             let totalWithholdingTax = 0;
             const monthlyData = [];
 
-            // 勤怠データを全取得
-            const attRef = collection(window.db, 'stores', window.currentStoreId, 'attendance');
+            // 🔧 下赤塚店（storeIdが空）の場合はルートコレクションから読み込み
+            let attRef;
+            if (!window.currentStoreId || window.currentStoreId === '') {
+                console.log('📍 下赤塚店（IDなし）: ルートパスで勤怠を取得 (kintai_attendance/)');
+                attRef = collection(window.db, 'kintai_attendance');
+            } else {
+                console.log('📍 店舗ID使用: stores/' + window.currentStoreId + '/attendance');
+                attRef = collection(window.db, 'stores', window.currentStoreId, 'attendance');
+            }
+            
             const snapshot = await getDocs(attRef);
             
             // 月別に集計
