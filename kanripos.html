@@ -345,46 +345,57 @@
                         コピー先: editingStore.id
                     });
                     
-                    // 1. menu_settings をコピー
+                    // 1. menusコレクションをコピー
+                    let sourceMenusRef;
+                    if (sourceStoreId === '' || sourceStoreId === 'shimoakatsuka' || sourceStoreId === '下赤塚') {
+                        // 下赤塚（ルートコレクション）- 旧データは'menu'
+                        sourceMenusRef = collection(window.db, 'menu');
+                        console.log('📍 コピー元: 旧パス menu コレクション');
+                    } else {
+                        sourceMenusRef = collection(window.db, 'stores', sourceStoreId, 'menus');
+                        console.log('📍 コピー元: stores/' + sourceStoreId + '/menus');
+                    }
+                    
+                    const menusSnapshot = await getDocs(sourceMenusRef);
+                    console.log('📊 取得したメニュー数:', menusSnapshot.size);
+                    
+                    let copiedCount = 0;
+                    for (const menuDoc of menusSnapshot.docs) {
+                        const menuData = menuDoc.data();
+                        console.log('📄 コピー中:', menuDoc.id, menuData);
+                        
+                        const targetMenuRef = doc(window.db, 'stores', editingStore.id, 'menus', menuDoc.id);
+                        await setDoc(targetMenuRef, menuData);
+                        copiedCount++;
+                    }
+                    
+                    console.log(`✅ メニューをコピーしました: ${copiedCount}件`);
+                    
+                    // 2. menu_settings をコピー（カテゴリや設定）
                     let sourceMenuSettingsPath;
                     if (sourceStoreId === '' || sourceStoreId === 'shimoakatsuka' || sourceStoreId === '下赤塚') {
-                        // 下赤塚（ルートコレクション）
-                        sourceMenuSettingsPath = doc(window.db, 'menu_settings', 'settings');
+                        sourceMenuSettingsPath = doc(window.db, 'menu_settings', 'shimoakatsuka');
+                        console.log('📍 設定コピー元: menu_settings/shimoakatsuka');
                     } else {
-                        sourceMenuSettingsPath = doc(window.db, 'stores', sourceStoreId, 'menu_settings', 'settings');
+                        sourceMenuSettingsPath = doc(window.db, 'stores', sourceStoreId, 'menu_settings', 'default');
+                        console.log('📍 設定コピー元: stores/' + sourceStoreId + '/menu_settings/default');
                     }
                     
-                    const targetMenuSettingsPath = doc(window.db, 'stores', editingStore.id, 'menu_settings', 'settings');
+                    const targetMenuSettingsPath = doc(window.db, 'stores', editingStore.id, 'menu_settings', 'default');
                     
                     const menuSettingsDoc = await getDoc(sourceMenuSettingsPath);
-                    let menuItemsCount = 0;
                     if (menuSettingsDoc.exists()) {
                         await setDoc(targetMenuSettingsPath, menuSettingsDoc.data());
-                        menuItemsCount = menuSettingsDoc.data().menuItems?.length || 0;
                         console.log('✅ メニュー設定をコピーしました');
-                    }
-                    
-                    // 2. menu_items をコピー
-                    let sourceMenuItemsRef;
-                    if (sourceStoreId === '' || sourceStoreId === 'shimoakatsuka' || sourceStoreId === '下赤塚') {
-                        sourceMenuItemsRef = collection(window.db, 'menu_items');
                     } else {
-                        sourceMenuItemsRef = collection(window.db, 'stores', sourceStoreId, 'menu_items');
+                        console.log('⚠️ メニュー設定が見つかりませんでした');
                     }
                     
-                    const menuItemsSnapshot = await getDocs(sourceMenuItemsRef);
-                    let individualItemCount = 0;
-                    
-                    for (const itemDoc of menuItemsSnapshot.docs) {
-                        const itemData = itemDoc.data();
-                        const targetItemRef = doc(window.db, 'stores', editingStore.id, 'menu_items', itemDoc.id);
-                        await setDoc(targetItemRef, itemData);
-                        individualItemCount++;
+                    if (copiedCount === 0) {
+                        showAlert('warning', '注意', 'コピーするメニューが見つかりませんでした。\nコピー元の店舗にメニューが登録されているか確認してください。');
+                    } else {
+                        showAlert('success', 'コピー完了', `メニューをコピーしました\n\n商品数: ${copiedCount}件`);
                     }
-                    
-                    console.log(`✅ 商品データをコピーしました: ${individualItemCount}件`);
-                    
-                    showAlert('success', 'コピー完了', `メニューをコピーしました\n\n商品数: ${menuItemsCount}件\n個別登録: ${individualItemCount}件`);
                     
                 } catch (error) {
                     console.error('コピーエラー:', error);
