@@ -3786,12 +3786,19 @@
         if (orderData.paidAt) {
           console.log('💰 会計済み注文のため、dailySalesを更新します');
           
-          // 注文日を取得（JSTに変換）
-          const orderDate = orderData.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-          const dateStr = `${jstOrderDate.getFullYear()}-${String(jstOrderDate.getMonth() + 1).padStart(2, '0')}-${String(jstOrderDate.getDate()).padStart(2, '0')}`;
+          // 🔧 修正: 会計日時から営業日を計算（3時基準）
+          const paidDate = orderData.paidAt.toDate();
+          let businessDate = new Date(paidDate);
           
-          console.log('📅 注文日:', dateStr);
+          // 3時より前の場合は前日の営業日扱い
+          if (paidDate.getHours() < 3) {
+            businessDate.setDate(businessDate.getDate() - 1);
+          }
+          
+          const dateStr = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
+          
+          console.log('📅 会計日時:', paidDate);
+          console.log('📅 営業日:', dateStr);
           
           // dailySalesを取得
           const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
@@ -3811,6 +3818,8 @@
             if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
             else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
             else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
+            
+            console.log('💳 支払い方法:', paymentMethod, '→ 減算額:', { cashSales, emoneSales, creditSales });
             
             // 商品数を計算
             let totalItems = 0;
@@ -3835,7 +3844,15 @@
             console.log('📊 dailySales更新:', {
               元の総売上: dailyData.totalSales,
               減算額: totalAmount,
-              新しい総売上: updateData.totalSales
+              新しい総売上: updateData.totalSales,
+              元の客数: dailyData.customerCount,
+              新しい客数: updateData.customerCount,
+              元のcashSales: dailyData.cashSales,
+              新しいcashSales: updateData.cashSales,
+              元のemoneSales: dailyData.emoneSales,
+              新しいemoneSales: updateData.emoneSales,
+              元のcreditSales: dailyData.creditSales,
+              新しいcreditSales: updateData.creditSales
             });
             
             // dailySalesを更新
