@@ -3874,32 +3874,29 @@
             
             // dailySalesを更新
             console.log('🔄 dailySalesを更新中...');
-            
-            if (dailySalesDoc.exists()) {
-              // dailySalesが存在する場合は更新
-              await window.updateDoc(dailySalesRef, updateData);
-              console.log('✅ dailySalesを更新しました（既存データを更新）');
-            } else {
-              // dailySalesが存在しない場合は、マイナス値で作成（後で他の注文で加算される）
-              console.warn('⚠️ dailySalesが見つかりません。新規作成します:', dateStr);
-              await window.setDoc(dailySalesRef, {
-                totalSales: 0,
-                customerCount: 0,
-                totalItems: 0,
-                cashSales: 0,
-                emoneSales: 0,
-                creditSales: 0,
-                tax8Total: 0,
-                tax10Total: 0,
-                createdAt: window.Timestamp.now(),
-                updatedAt: window.Timestamp.now()
-              });
-              console.log('✅ dailySalesを新規作成しました（売上=0）');
-            }
+            await window.updateDoc(dailySalesRef, updateData);
+            console.log('✅ dailySalesを更新しました');
             
             // 更新後の確認
             const updatedDoc = await window.getDoc(dailySalesRef);
             console.log('✅ 更新後のdailySalesデータ:', JSON.stringify(updatedDoc.data(), null, 2));
+          } else {
+            // dailySalesが存在しない場合は、新規作成して0で初期化
+            console.warn('⚠️ dailySalesが見つかりません。新規作成します:', dateStr);
+            await window.setDoc(dailySalesRef, {
+              totalSales: 0,
+              customerCount: 0,
+              totalItems: 0,
+              cashSales: 0,
+              emoneSales: 0,
+              creditSales: 0,
+              tax8Total: 0,
+              tax10Total: 0,
+              createdAt: window.Timestamp.now(),
+              updatedAt: window.Timestamp.now()
+            });
+            console.log('✅ dailySalesを新規作成しました（売上=0）');
+          }
         } else {
           console.log('ℹ️ 未会計の注文のため、dailySalesの更新は不要です');
         }
@@ -4066,38 +4063,47 @@
         
         const currentAmount = orderData.totalAmount;
         
-        // プロンプトで新しい金額を入力
-        const newAmountStr = prompt(
-          `金額を調整します\n\n現在の金額: ¥${currentAmount.toLocaleString()}\n\n新しい金額を入力してください（半角数字のみ）:`,
-          currentAmount
-        );
+        // カスタムプロンプトで調整額を入力（マイナス可）
+        const adjustmentStr = await showCustomPrompt({
+          icon: '💴',
+          title: '金額を調整します',
+          message: `現在の金額: ¥${currentAmount.toLocaleString()}`,
+          placeholder: '例: -500 または +300',
+          hint: '💡 ヒント: マイナス金額を入力すると売上から減額されます<br>例: 500円返金したい場合は「-500」と入力'
+        });
         
-        if (newAmountStr === null) {
+        if (adjustmentStr === null) {
           // キャンセルされた
           return;
         }
         
-        const newAmount = parseInt(newAmountStr);
+        const adjustment = parseInt(adjustmentStr);
         
-        if (isNaN(newAmount) || newAmount < 0) {
+        if (isNaN(adjustment)) {
           showCustomAlert('正しい金額を入力してください', '❌ エラー', '⚠️');
           return;
         }
         
-        if (newAmount === currentAmount) {
+        if (adjustment === 0) {
           showCustomAlert('金額が変更されていません', 'ℹ️ 情報', 'ℹ️');
           return;
         }
         
-        const difference = newAmount - currentAmount;
-        const isIncrease = difference > 0;
+        const newAmount = currentAmount + adjustment;
+        
+        if (newAmount < 0) {
+          showCustomAlert('調整後の金額がマイナスになります\n\n現在の金額: ¥' + currentAmount.toLocaleString() + '\n調整額: ¥' + adjustment.toLocaleString() + '\n調整後: ¥' + newAmount.toLocaleString(), '❌ エラー', '⚠️');
+          return;
+        }
+        
+        const isIncrease = adjustment > 0;
         
         const confirmed = await showCustomConfirm({
           icon: '💴',
           title: '金額調整の確認',
-          message: `金額を調整しますか？\n\n元の金額: ¥${currentAmount.toLocaleString()}\n新しい金額: ¥${newAmount.toLocaleString()}\n差額: ${isIncrease ? '+' : ''}¥${difference.toLocaleString()}\n\n⚠️ この操作は売上データにも反映されます`,
-          confirmText: '調整する',
-          confirmColor: '#9C27B0'
+          message: `金額を調整しますか？\n\n元の金額: ¥${currentAmount.toLocaleString()}\n調整額: ${isIncrease ? '+' : ''}¥${adjustment.toLocaleString()}\n調整後の金額: ¥${newAmount.toLocaleString()}\n\n⚠️ この操作は売上データにも反映されます`,
+          btnText: '調整する',
+          btnClass: 'modal-btn-primary'
         });
         
         if (!confirmed) return;
@@ -4105,8 +4111,8 @@
         console.log('💴 金額調整開始:', {
           注文ID: orderId,
           元の金額: currentAmount,
-          新しい金額: newAmount,
-          差額: difference
+          調整額: adjustment,
+          新しい金額: newAmount
         });
         
         // 会計日時から営業日を計算（3時基準）
@@ -4132,22 +4138,38 @@
         
         const dailyData = dailySalesDoc.data();
         
+        console.log('📊 現在のdailySales:', {
+          totalSales: dailyData.totalSales,
+          cashSales: dailyData.cashSales,
+          emoneSales: dailyData.emoneSales,
+          creditSales: dailyData.creditSales
+        });
+        
         // 支払い方法別の調整
         let cashAdjust = 0, emoneAdjust = 0, creditAdjust = 0;
         const paymentMethod = orderData.paymentMethod || '';
-        if (paymentMethod === '現金' || paymentMethod === 'cash') cashAdjust = difference;
-        else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneAdjust = difference;
-        else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditAdjust = difference;
+        if (paymentMethod === '現金' || paymentMethod === 'cash') cashAdjust = adjustment;
+        else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneAdjust = adjustment;
+        else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditAdjust = adjustment;
         
-        // dailySalesを更新（差額を加算）
+        // dailySalesを更新（調整額を加算）
         const updateData = {
-          totalSales: (dailyData.totalSales || 0) + difference,
+          totalSales: (dailyData.totalSales || 0) + adjustment,
           cashSales: (dailyData.cashSales || 0) + cashAdjust,
           emoneSales: (dailyData.emoneSales || 0) + emoneAdjust,
           creditSales: (dailyData.creditSales || 0) + creditAdjust
         };
         
-        console.log('📊 dailySales更新:', updateData);
+        console.log('📊 dailySales更新内容:', {
+          調整前: {
+            totalSales: dailyData.totalSales,
+            cashSales: dailyData.cashSales,
+            emoneSales: dailyData.emoneSales,
+            creditSales: dailyData.creditSales
+          },
+          調整額: adjustment,
+          調整後: updateData
+        });
         
         await window.updateDoc(dailySalesRef, updateData);
         
@@ -4156,11 +4178,12 @@
           totalAmount: newAmount,
           adjustedAmount: true,
           adjustedAt: window.Timestamp.now(),
-          originalAmount: currentAmount
+          originalAmount: currentAmount,
+          adjustmentValue: adjustment
         });
         
         showCustomAlert(
-          `金額を調整しました\n\n元の金額: ¥${currentAmount.toLocaleString()}\n新しい金額: ¥${newAmount.toLocaleString()}\n差額: ${isIncrease ? '+' : ''}¥${difference.toLocaleString()}`,
+          `金額を調整しました\n\n元の金額: ¥${currentAmount.toLocaleString()}\n調整額: ${isIncrease ? '+' : ''}¥${adjustment.toLocaleString()}\n調整後の金額: ¥${newAmount.toLocaleString()}`,
           '✅ 完了',
           '💴'
         );
@@ -13119,7 +13142,90 @@
         customModalResolve = null;
       }
     }
+    
+    // カスタムプロンプトモーダル
+    let customPromptResolve = null;
+    
+    function showCustomPrompt(options) {
+      return new Promise((resolve) => {
+        customPromptResolve = resolve;
+        
+        const modal = document.getElementById('customPromptModal');
+        const icon = document.getElementById('promptModalIcon');
+        const title = document.getElementById('promptModalTitle');
+        const message = document.getElementById('promptModalMessage');
+        const input = document.getElementById('promptInput');
+        const hint = document.getElementById('promptHint');
+        
+        icon.textContent = options.icon || '💬';
+        title.textContent = options.title || '入力してください';
+        message.textContent = options.message || '';
+        input.value = '';
+        input.placeholder = options.placeholder || '入力してください';
+        hint.innerHTML = options.hint || '';
+        
+        modal.style.display = 'flex';
+        
+        // 少し遅延させてフォーカス
+        setTimeout(() => {
+          input.focus();
+        }, 100);
+      });
+    }
+    
+    function closeCustomPrompt() {
+      document.getElementById('customPromptModal').style.display = 'none';
+      if (customPromptResolve) {
+        customPromptResolve(null);
+        customPromptResolve = null;
+      }
+    }
+    
+    function confirmCustomPrompt() {
+      const input = document.getElementById('promptInput');
+      const value = input.value;
+      document.getElementById('customPromptModal').style.display = 'none';
+      if (customPromptResolve) {
+        customPromptResolve(value);
+        customPromptResolve = null;
+      }
+    }
+    
+    // Enterキーで確定、Escキーでキャンセル
+    document.addEventListener('DOMContentLoaded', function() {
+      const promptInput = document.getElementById('promptInput');
+      if (promptInput) {
+        promptInput.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            confirmCustomPrompt();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            closeCustomPrompt();
+          }
+        });
+      }
+    });
   </script>
+  
+  <!-- カスタムプロンプトモーダル -->
+  <div id="customPromptModal" class="custom-modal-overlay">
+    <div class="custom-modal-box">
+      <div class="modal-icon" id="promptModalIcon">💴</div>
+      <div class="modal-title" id="promptModalTitle">金額を調整します</div>
+      <div class="modal-message" id="promptModalMessage">現在の金額: ¥0</div>
+      <div style="margin: 20px 0;">
+        <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #374151;">調整額を入力してください:</label>
+        <input type="number" id="promptInput" class="w-full px-4 py-3 text-2xl border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none" placeholder="例: -500" style="font-size: 24px; text-align: center;">
+        <div id="promptHint" style="margin-top: 8px; font-size: 14px; color: #6b7280; line-height: 1.5;">
+        </div>
+      </div>
+      <div class="modal-buttons">
+        <button class="modal-btn modal-btn-cancel" onclick="closeCustomPrompt()">キャンセル</button>
+        <button class="modal-btn modal-btn-success" onclick="confirmCustomPrompt()">OK</button>
+      </div>
+    </div>
+  </div>
   
 </body>
 </html>
