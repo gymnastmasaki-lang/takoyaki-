@@ -199,14 +199,16 @@
                        this.getSmallBusinessDeduction();
             }
 
-            // 課税所得
+            // 課税所得（赤字も許可）
             getTaxableIncome() {
-                return Math.max(0, this.getBusinessIncome() - this.getTotalDeductions());
+                // 🔧 修正: Math.max を削除してマイナス（赤字）を許可
+                return this.getBusinessIncome() - this.getTotalDeductions();
             }
 
-            // 所得税額
+            // 所得税額（課税所得が0以下なら0）
             getIncomeTax() {
                 const taxable = this.getTaxableIncome();
+                if (taxable <= 0) return 0; // 🔧 追加: 赤字なら税金0
                 if (taxable <= 1950000) return taxable * 0.05;
                 if (taxable <= 3300000) return taxable * 0.1 - 97500;
                 if (taxable <= 6950000) return taxable * 0.2 - 427500;
@@ -582,12 +584,25 @@
                 
                 // 🔧 未会計または削除済みの注文は除外
                 if (!data.paidAt || data.deleted) {
-                    console.log('⏭️ スキップ:', doc.id, data.deleted ? '(削除済み)' : '(未会計)');
+                    console.log('⏭️ スキップ:', doc.id, {
+                        paidAt: data.paidAt ? 'あり' : 'なし',
+                        deleted: data.deleted,
+                        金額: data.totalAmount
+                    });
                     return;
                 }
                 
                 const paidDate = data.paidAt.toDate();
-                if (paidDate.getFullYear() !== year) return;
+                if (paidDate.getFullYear() !== year) {
+                    console.log('⏭️ スキップ(年度外):', doc.id, paidDate.getFullYear());
+                    return;
+                }
+                
+                console.log('✅ 集計に含める:', doc.id, {
+                    金額: data.totalAmount,
+                    会計日: paidDate,
+                    削除済み: !!data.deleted
+                });
                 
                 const month = paidDate.getMonth();
                 const amount = data.totalAmount || 0;
@@ -609,6 +624,13 @@
                 const tax10Excluded = Math.floor(tax10Total / 1.10);
                 tax8Amount += (tax8Total - tax8Excluded);
                 tax10Amount += (tax10Total - tax10Excluded);
+            });
+            
+            console.log('📊 売上集計結果:', {
+                総売上: totalSales,
+                取得した注文数: ordersSnapshot.size,
+                '8%売上': tax8Sales,
+                '10%売上': tax10Sales
             });
             
             // 🔧 経費データ取得（下赤塚店対応）
@@ -1002,7 +1024,9 @@
                         </div>
                         <div class="p-4 bg-white rounded-lg shadow">
                             <div class="text-sm text-gray-600">事業所得</div>
-                            <div class="text-xl font-bold text-blue-600">¥${calc.getBusinessIncome().toLocaleString()}</div>
+                            <div class="text-xl font-bold ${calc.getBusinessIncome() < 0 ? 'text-red-600' : 'text-blue-600'}">
+                                ${calc.getBusinessIncome() < 0 ? '▲' : ''}¥${Math.abs(calc.getBusinessIncome()).toLocaleString()}
+                            </div>
                         </div>
                     </div>
 
@@ -1014,7 +1038,9 @@
                     <div class="grid grid-cols-2 gap-4 mb-6">
                         <div class="p-4 bg-white rounded-lg shadow">
                             <div class="text-sm text-gray-600">課税所得</div>
-                            <div class="text-xl font-bold">¥${calc.getTaxableIncome().toLocaleString()}</div>
+                            <div class="text-xl font-bold ${calc.getTaxableIncome() < 0 ? 'text-red-600' : ''}">
+                                ${calc.getTaxableIncome() < 0 ? '▲' : ''}¥${Math.abs(calc.getTaxableIncome()).toLocaleString()}
+                            </div>
                         </div>
                         <div class="p-4 bg-white rounded-lg shadow">
                             <div class="text-sm text-gray-600">所得税額</div>
