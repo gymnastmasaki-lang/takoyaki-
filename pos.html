@@ -3672,11 +3672,16 @@
           const tax8Total = currentEditingOrder.tax8Total || 0;
           const tax10Total = currentEditingOrder.tax10Total || 0;
           
-          // 支払い方法別の金額
+          // 支払い方法別の金額（日本語と英語の両方に対応）
           let cashSales = 0, emoneSales = 0, creditSales = 0;
-          if (currentEditingOrder.paymentMethod === '現金') cashSales = totalAmount;
-          else if (currentEditingOrder.paymentMethod === '電子マネー') emoneSales = totalAmount;
-          else if (currentEditingOrder.paymentMethod === 'クレジットカード') creditSales = totalAmount;
+          const paymentMethod = currentEditingOrder.paymentMethod || '';
+          console.log('💳 支払い方法（復元時）:', paymentMethod, '型:', typeof paymentMethod);
+          
+          if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
+          else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
+          else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
+          
+          console.log('💳 支払い方法振り分け結果:', { cashSales, emoneSales, creditSales });
           
           // 商品数を計算
           let totalItems = 0;
@@ -3701,13 +3706,41 @@
               tax10Total: (dailyData.tax10Total || 0) + tax10Total
             };
             
-            console.log('📊 dailySales更新:', {
-              元の総売上: dailyData.totalSales,
-              加算額: totalAmount,
-              新しい総売上: updateData.totalSales
+            console.log('📊 ========== 復元: dailySales更新 ==========');
+            console.log('📊 元のデータ:', {
+              totalSales: dailyData.totalSales,
+              customerCount: dailyData.customerCount,
+              cashSales: dailyData.cashSales,
+              emoneSales: dailyData.emoneSales,
+              creditSales: dailyData.creditSales
+            });
+            console.log('📊 加算する値:', {
+              totalAmount: totalAmount,
+              customerCount: 1,
+              cashSales: cashSales,
+              emoneSales: emoneSales,
+              creditSales: creditSales
+            });
+            console.log('📊 新しいデータ:', {
+              totalSales: updateData.totalSales,
+              customerCount: updateData.customerCount,
+              cashSales: updateData.cashSales,
+              emoneSales: updateData.emoneSales,
+              creditSales: updateData.creditSales
             });
             
             await window.updateDoc(dailySalesRef, updateData);
+            
+            // 🆕 更新後のデータを再取得して確認
+            const verifyDoc = await window.getDoc(dailySalesRef);
+            const verifyData = verifyDoc.data();
+            console.log('✅ Firestore更新後の実データ:', {
+              totalSales: verifyData.totalSales,
+              customerCount: verifyData.customerCount,
+              cashSales: verifyData.cashSales,
+              emoneSales: verifyData.emoneSales,
+              creditSales: verifyData.creditSales
+            });
           } else {
             // dailySalesが存在しない場合は作成
             const newData = {
@@ -3869,18 +3902,33 @@
               tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
             };
             
-            console.log('📊 dailySales更新:', {
-              元の総売上: dailyData.totalSales,
-              減算額: totalAmount,
-              新しい総売上: updateData.totalSales,
-              元の客数: dailyData.customerCount,
-              新しい客数: updateData.customerCount,
-              元のcashSales: dailyData.cashSales,
-              新しいcashSales: updateData.cashSales,
-              元のemoneSales: dailyData.emoneSales,
-              新しいemoneSales: updateData.emoneSales,
-              元のcreditSales: dailyData.creditSales,
-              新しいcreditSales: updateData.creditSales
+            console.log('📊 ========== 取消: dailySales更新 ==========');
+            console.log('📊 元のデータ:', {
+              totalSales: dailyData.totalSales,
+              customerCount: dailyData.customerCount,
+              cashSales: dailyData.cashSales,
+              emoneSales: dailyData.emoneSales,
+              creditSales: dailyData.creditSales
+            });
+            console.log('📊 減算する値:', {
+              totalAmount: totalAmount,
+              customerCount: 1,
+              cashSales: cashSales,
+              emoneSales: emoneSales,
+              creditSales: creditSales
+            });
+            console.log('📊 計算式:', {
+              totalSales: `${dailyData.totalSales} - ${totalAmount} = ${(dailyData.totalSales || 0) - totalAmount}`,
+              cashSales: `${dailyData.cashSales} - ${cashSales} = ${(dailyData.cashSales || 0) - cashSales}`,
+              emoneSales: `${dailyData.emoneSales} - ${emoneSales} = ${(dailyData.emoneSales || 0) - emoneSales}`,
+              creditSales: `${dailyData.creditSales} - ${creditSales} = ${(dailyData.creditSales || 0) - creditSales}`
+            });
+            console.log('📊 新しいデータ（Math.max適用後）:', {
+              totalSales: updateData.totalSales,
+              customerCount: updateData.customerCount,
+              cashSales: updateData.cashSales,
+              emoneSales: updateData.emoneSales,
+              creditSales: updateData.creditSales
             });
             
             // dailySalesを更新
@@ -3890,7 +3938,16 @@
             
             // 更新後の確認
             const updatedDoc = await window.getDoc(dailySalesRef);
-            console.log('✅ 更新後のdailySalesデータ:', JSON.stringify(updatedDoc.data(), null, 2));
+            const updatedData = updatedDoc.data();
+            console.log('✅ ========== 取消後のFirestore実データ ==========');
+            console.log('✅ Firestore更新後の実データ:', {
+              totalSales: updatedData.totalSales,
+              customerCount: updatedData.customerCount,
+              cashSales: updatedData.cashSales,
+              emoneSales: updatedData.emoneSales,
+              creditSales: updatedData.creditSales
+            });
+            console.log('✅ JSON:', JSON.stringify(updatedData, null, 2));
           } else {
             // dailySalesが存在しない場合は、新規作成して0で初期化
             console.warn('⚠️ dailySalesが見つかりません。新規作成します:', dateStr);
