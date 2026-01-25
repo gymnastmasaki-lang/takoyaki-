@@ -3524,31 +3524,50 @@
         // 2. 🆕 会計済みの注文の場合、dailySalesから減算
         if (currentEditingOrder.paidAt) {
           console.log('💰 会計済み注文のため、dailySalesを更新します');
+          console.log('📋 注文データ:', JSON.stringify(currentEditingOrder, null, 2));
           
-          // 注文日を取得（JSTに変換）
-          const orderDate = currentEditingOrder.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-          const dateStr = `${jstOrderDate.getFullYear()}-${String(jstOrderDate.getMonth() + 1).padStart(2, '0')}-${String(jstOrderDate.getDate()).padStart(2, '0')}`;
+          // 🔧 修正: 会計日時から営業日を計算（3時基準）
+          const paidDate = currentEditingOrder.paidAt.toDate();
+          console.log('🕐 会計日時（paidAt）:', paidDate);
+          console.log('🕐 paidDate.getHours():', paidDate.getHours());
           
-          console.log('📅 注文日:', dateStr);
+          let businessDate = new Date(paidDate);
+          
+          // 3時より前の場合は前日の営業日扱い
+          if (paidDate.getHours() < 3) {
+            businessDate.setDate(businessDate.getDate() - 1);
+            console.log('⏰ 3時より前なので前日扱い');
+          }
+          
+          const dateStr = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
+          
+          console.log('📅 会計日時:', paidDate);
+          console.log('📅 営業日:', dateStr);
           
           // dailySalesを取得
           const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+          console.log('📍 dailySalesパス:', dailySalesRef.path);
           const dailySalesDoc = await window.getDoc(dailySalesRef);
           
           if (dailySalesDoc.exists()) {
             const dailyData = dailySalesDoc.data();
+            console.log('📊 取消前のdailySales:', JSON.stringify(dailyData, null, 2));
             
             // 注文金額と税金を取得
             const totalAmount = currentEditingOrder.totalAmount || 0;
             const tax8Total = currentEditingOrder.tax8Total || 0;
             const tax10Total = currentEditingOrder.tax10Total || 0;
             
-            // 支払い方法別の金額
+            // 支払い方法別の金額（日本語と英語の両方に対応）
             let cashSales = 0, emoneSales = 0, creditSales = 0;
-            if (currentEditingOrder.paymentMethod === '現金') cashSales = totalAmount;
-            else if (currentEditingOrder.paymentMethod === '電子マネー') emoneSales = totalAmount;
-            else if (currentEditingOrder.paymentMethod === 'クレジットカード') creditSales = totalAmount;
+            const paymentMethod = currentEditingOrder.paymentMethod || '';
+            console.log('💳 支払い方法:', paymentMethod, '型:', typeof paymentMethod);
+            
+            if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
+            else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
+            else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
+            
+            console.log('💳 支払い方法振り分け:', { cashSales, emoneSales, creditSales });
             
             // 商品数を計算
             let totalItems = 0;
@@ -3570,17 +3589,50 @@
               tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
             };
             
-            console.log('📊 dailySales更新:', {
-              元の総売上: dailyData.totalSales,
-              減算額: totalAmount,
-              新しい総売上: updateData.totalSales
+            console.log('📊 ========== 編集モーダルから削除: dailySales更新 ==========');
+            console.log('📊 計算前:', {
+              totalSales: dailyData.totalSales,
+              customerCount: dailyData.customerCount,
+              cashSales: dailyData.cashSales,
+              emoneSales: dailyData.emoneSales,
+              creditSales: dailyData.creditSales
+            });
+            console.log('📊 減算値:', {
+              totalAmount: totalAmount,
+              customerCount: 1,
+              cashSales: cashSales,
+              emoneSales: emoneSales,
+              creditSales: creditSales
+            });
+            console.log('📊 計算後:', {
+              totalSales: updateData.totalSales,
+              customerCount: updateData.customerCount,
+              cashSales: updateData.cashSales,
+              emoneSales: updateData.emoneSales,
+              creditSales: updateData.creditSales
             });
             
             // dailySalesを更新（setDocで強制上書き）
+            console.log('🔄 setDocで更新開始...');
             const finalData = {...dailyData, ...updateData, updatedAt: window.Timestamp.now()};
+            console.log('📝 書き込むデータ:', JSON.stringify(finalData, null, 2));
             await window.setDoc(dailySalesRef, finalData);
             
             console.log('✅ dailySalesを更新しました（setDoc完了）');
+            
+            // 検証
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const verifyDoc = await window.getDoc(dailySalesRef);
+            const verifyData = verifyDoc.data();
+            console.log('✅ ========== 検証: Firestore実データ ==========');
+            console.log('✅ totalSales:', verifyData.totalSales, '（期待:', updateData.totalSales, '）');
+            console.log('✅ customerCount:', verifyData.customerCount, '（期待:', updateData.customerCount, '）');
+            
+            if (verifyData.totalSales === updateData.totalSales && verifyData.customerCount === updateData.customerCount) {
+              console.log('✅✅✅ 編集モーダルからの削除: Firestore更新成功！');
+            } else {
+              console.error('❌❌❌ 編集モーダルからの削除: Firestore更新失敗！');
+            }
           } else {
             console.warn('⚠️ dailySalesが見つかりません:', dateStr);
           }
