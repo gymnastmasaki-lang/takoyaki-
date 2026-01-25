@@ -479,21 +479,49 @@
                         const attData = {};
                         
                         attSnapshot.forEach(doc => {
-                            const dateKey = doc.id;
-                            const dateData = doc.data();
+                            const docId = doc.id;
+                            const docData = doc.data();
                             
+                            // 🔧 修正: ドキュメントIDが {employeeId}_{date} 形式の場合に対応（kintai.htmlと同じ）
+                            const parts = docId.split('_');
+                            let employeeId, dateKey;
+                            
+                            if (parts.length >= 2) {
+                                // {employeeId}_{date} 形式（kintai.htmlが保存する形式）
+                                employeeId = parts[0];
+                                dateKey = parts.slice(1).join('_'); // 2026-01-24
+                            } else {
+                                // 日付のみの形式（旧形式との互換性）
+                                dateKey = docId;
+                                // この場合、docData内に複数の従業員データが含まれている
+                                const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
+                                if (dateMatch) {
+                                    const year = parseInt(dateMatch[1]);
+                                    const month = parseInt(dateMatch[2]) - 1;
+                                    
+                                    if (year === currentYear && month === currentMonth) {
+                                        Object.keys(docData).forEach(empId => {
+                                            if (!attData[empId]) {
+                                                attData[empId] = {};
+                                            }
+                                            attData[empId][dateKey] = docData[empId];
+                                        });
+                                    }
+                                }
+                                return; // 次のドキュメントへ
+                            }
+                            
+                            // {employeeId}_{date} 形式の処理
                             const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
-                            if (dateMatch) {
+                            if (dateMatch && employeeId) {
                                 const year = parseInt(dateMatch[1]);
                                 const month = parseInt(dateMatch[2]) - 1;
                                 
                                 if (year === currentYear && month === currentMonth) {
-                                    Object.keys(dateData).forEach(employeeId => {
-                                        if (!attData[employeeId]) {
-                                            attData[employeeId] = {};
-                                        }
-                                        attData[employeeId][dateKey] = dateData[employeeId];
-                                    });
+                                    if (!attData[employeeId]) {
+                                        attData[employeeId] = {};
+                                    }
+                                    attData[employeeId][dateKey] = docData;
                                 }
                             }
                         });
@@ -950,37 +978,20 @@
                         const docId = doc.id;
                         const data = doc.data();
                         
-                        // 🔧 修正: ドキュメントIDの形式に応じて処理を分岐
-                        if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
-                            // 旧パス: {employeeId}_{dateKey} 形式
-                            const parts = docId.split('_');
-                            if (parts.length >= 2) {
-                                const docEmployeeId = parts[0];
-                                const dateKey = parts.slice(1).join('_');
-                                
-                                if (docEmployeeId === employeeId && data.clockIn) {
-                                    const yearMonth = dateKey.substring(0, 7); // YYYY-MM
-                                    if (!monthlyData[yearMonth]) {
-                                        monthlyData[yearMonth] = [];
-                                    }
-                                    monthlyData[yearMonth].push({
-                                        date: dateKey,
-                                        record: data
-                                    });
-                                }
-                            }
-                        } else {
-                            // 新パス: 日付ドキュメント内に複数従業員
-                            const dateKey = docId; // YYYY-MM-DD
+                        // 🔧 修正: 旧パスと新パスで同じ形式 ({employeeId}_{dateKey})
+                        const parts = docId.split('_');
+                        if (parts.length >= 2) {
+                            const docEmployeeId = parts[0];
+                            const dateKey = parts.slice(1).join('_');
                             
-                            if (data[employeeId] && data[employeeId].clockIn) {
+                            if (docEmployeeId === employeeId && data.clockIn) {
                                 const yearMonth = dateKey.substring(0, 7); // YYYY-MM
                                 if (!monthlyData[yearMonth]) {
                                     monthlyData[yearMonth] = [];
                                 }
                                 monthlyData[yearMonth].push({
                                     date: dateKey,
-                                    record: data[employeeId]
+                                    record: data
                                 });
                             }
                         }
@@ -1717,7 +1728,8 @@
                         docRef = doc(window.db, 'kintai_attendance', `${employeeId}_${dateKey}`);
                     } else {
                         console.log('📍 新パスで勤怠を保存: stores/' + window.currentStoreId + '/attendance');
-                        docRef = doc(window.db, 'stores', window.currentStoreId, 'attendance', dateKey);
+                        // 🔧 修正: kintai.htmlと同じ形式 ({employeeId}_{dateKey}) で保存
+                        docRef = doc(window.db, 'stores', window.currentStoreId, 'attendance', `${employeeId}_${dateKey}`);
                     }
                     
                     const docSnap = await getDoc(docRef);
@@ -1726,37 +1738,14 @@
                     
                     let employeeData;
                     
-                    // 🔧 修正: 旧パスと新パスでデータ構造が異なる
-                    if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
-                        // 旧パス: ドキュメント自体が1人の従業員のデータ
-                        if (docSnap.exists()) {
-                            employeeData = docSnap.data();
-                        } else {
-                            employeeData = {
-                                employeeId: employeeId,
-                                employeeName: employee?.name || '',
-                                date: dateKey,
-                                clockIn: null,
-                                breakStart1: null,
-                                breakEnd1: null,
-                                breakStart2: null,
-                                breakEnd2: null,
-                                clockOut: null,
-                                isHoliday: false,
-                                hourlyRate: employee?.hourlyRate || 0,
-                                editHistory: [],
-                                createdAt: Timestamp.now(),
-                                updatedAt: Timestamp.now()
-                            };
-                        }
+                    // 🔧 修正: 旧パスと新パスでデータ構造が同じ（1ドキュメント=1従業員）
+                    if (docSnap.exists()) {
+                        employeeData = docSnap.data();
                     } else {
-                        // 新パス: 日付ドキュメント内に複数従業員のデータ
-                        let currentData = {};
-                        if (docSnap.exists()) {
-                            currentData = docSnap.data();
-                        }
-                        
-                        employeeData = currentData[employeeId] || {
+                        employeeData = {
+                            employeeId: employeeId,
+                            employeeName: employee?.name || '',
+                            date: dateKey,
                             clockIn: null,
                             breakStart1: null,
                             breakEnd1: null,
@@ -1765,7 +1754,9 @@
                             clockOut: null,
                             isHoliday: false,
                             hourlyRate: employee?.hourlyRate || 0,
-                            editHistory: []
+                            editHistory: [],
+                            createdAt: Timestamp.now(),
+                            updatedAt: Timestamp.now()
                         };
                     }
                     
@@ -1789,17 +1780,10 @@
                         editor: '管理者'
                     });
                     
-                    // 🔧 修正: 保存処理も旧パスと新パスで分岐
-                    if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
-                        // 旧パス: ドキュメント全体を保存
-                        employeeData.updatedAt = Timestamp.now();
-                        await setDoc(docRef, employeeData);
-                    } else {
-                        // 新パス: 日付ドキュメント内の従業員データを更新
-                        let currentData = docSnap.exists() ? docSnap.data() : {};
-                        currentData[employeeId] = employeeData;
-                        await setDoc(docRef, currentData, { merge: true });
-                    }
+                    // 🔧 修正: 旧パスと新パスで同じ構造（1ドキュメント=1従業員）
+                    employeeData.updatedAt = Timestamp.now();
+                    await setDoc(docRef, employeeData);
+                    
                     await loadAllData();
                     
                     showCustomAlertFunc('時刻を保存しました', '✅ 保存完了', '✅');
