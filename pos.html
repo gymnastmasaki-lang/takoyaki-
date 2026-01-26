@@ -3702,9 +3702,17 @@
         
         await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), updates);
         
-        // 🆕 会計済みの注文の場合、dailySalesに加算
-        if (hasPaidAt) {
-          console.log('💰 会計済み注文のため、dailySalesを更新します');
+        // 🆕 削除済みだった会計済み注文を復元する場合のみ、dailySalesに加算
+        // （既に削除されていない注文を復元しようとした場合は加算しない）
+        const wasDeleted = currentEditingOrder.deleted === true;  // 削除済みだったか
+        
+        if (hasPaidAt && wasDeleted) {
+          console.log('💰 削除済みだった会計済み注文を復元するため、dailySalesに加算します');
+          console.log('📋 注文状態:', {
+            deleted: currentEditingOrder.deleted,
+            paidAt: !!currentEditingOrder.paidAt,
+            復元により加算: true
+          });
           
           // 🔧 修正: 会計日時から営業日を計算（3時基準）- 取消処理と同じロジック
           const paidDate = currentEditingOrder.paidAt.toDate();
@@ -3824,7 +3832,15 @@
             await window.setDoc(dailySalesRef, newData);
           }
           
-          console.log('✅ dailySalesを更新しました');
+          console.log('✅ dailySalesを更新しました（復元により加算）');
+        } else if (hasPaidAt && !wasDeleted) {
+          console.log('ℹ️ この注文は既に削除されていないため、dailySalesへの加算は不要です');
+          console.log('📋 注文状態:', {
+            deleted: currentEditingOrder.deleted,
+            paidAt: !!currentEditingOrder.paidAt,
+            復元により加算: false,
+            理由: '既に売上に含まれているため'
+          });
         } else {
           console.log('ℹ️ 未会計の注文のため、dailySalesの更新は不要です');
         }
@@ -4122,9 +4138,16 @@
           deletedAt: null
         });
         
-        // 🆕 会計済みの注文の場合、dailySalesに加算
-        if (hasPaidAt && orderData.paidAt) {
-          console.log('💰 会計済み注文のため、dailySalesに加算します');
+        // 🆕 削除済みだった会計済み注文を復元する場合のみ、dailySalesに加算
+        const wasDeleted = orderData.deleted === true;
+        
+        if (hasPaidAt && orderData.paidAt && wasDeleted) {
+          console.log('💰 削除済みだった会計済み注文を復元するため、dailySalesに加算します');
+          console.log('📋 注文状態:', {
+            deleted: orderData.deleted,
+            paidAt: !!orderData.paidAt,
+            復元により加算: true
+          });
           
           // 会計日時から営業日を計算（3時基準）
           const paidDate = orderData.paidAt.toDate();
@@ -4179,12 +4202,22 @@
             // setDocで強制上書き
             const finalData = {...dailyData, ...updateData, updatedAt: window.Timestamp.now()};
             await window.setDoc(dailySalesRef, finalData);
-            console.log('✅ dailySalesに加算しました（setDoc完了）');
+            console.log('✅ dailySalesに加算しました（復元により加算）');
           }
+        } else if (hasPaidAt && !wasDeleted) {
+          console.log('ℹ️ この注文は既に削除されていないため、dailySalesへの加算は不要です');
+          console.log('📋 注文状態:', {
+            deleted: orderData.deleted,
+            paidAt: !!orderData.paidAt,
+            復元により加算: false,
+            理由: '既に売上に含まれているため'
+          });
         }
         
         showCustomAlert(
-          hasPaidAt ? '注文を復元しました（会計済み）\n売上に反映されました' : '注文を復元しました（未会計）\n会計処理が必要です',
+          (hasPaidAt && wasDeleted) ? '注文を復元しました（会計済み）\n売上に反映されました' : 
+          hasPaidAt ? '注文を復元しました（会計済み）' : 
+          '注文を復元しました（未会計）\n会計処理が必要です',
           '✅ 成功',
           '🔄'
         );
