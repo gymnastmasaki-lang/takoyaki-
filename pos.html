@@ -3664,7 +3664,7 @@
       }
     };
     
-    // 注文を復元（会計をキャンセルして会計前に戻す）
+    // 注文を復元
     window.restoreOrder = async function() {
       if (!currentEditingOrder) return;
       
@@ -3673,15 +3673,13 @@
       
       // カスタム確認ダイアログを表示
       let message = `注文 #${currentEditingOrder.orderNumber} を復元しますか？`;
-      if (hasPaidAt) {
-        message += '\n\n⚠️ この注文は会計済みです。\n復元すると会計前の状態に戻り、売上から除外されます。';
-      } else {
-        message += '\n\n⚠️ この注文は未会計です。\n復元後に再度会計処理を行ってください。';
+      if (!hasPaidAt) {
+        message += '\n\n⚠️ この注文は未会計です。\n復元後に会計処理を行ってください。';
       }
       
       const confirmed = await showCustomConfirm({
         icon: '🔄',
-        title: '注文を復元（会計キャンセル）',
+        title: '注文を復元',
         message: message,
         confirmText: '復元する',
         confirmColor: '#2196F3'
@@ -3690,132 +3688,10 @@
       if (!confirmed) return;
       
       try {
-        console.log('🔄 ========== 注文復元処理開始 ==========');
-        console.log('📋 注文データ:', currentEditingOrder);
-        
-        // 1. 注文を復元（deleted: false）+ 会計情報を削除
         const updates = {
           deleted: false,
-          deletedAt: null,
-          paidAt: null,  // 🆕 会計情報を削除して会計前に戻す
-          paymentMethod: null  // 🆕 支払い方法も削除
+          deletedAt: null
         };
-        
-        console.log('📝 注文データ更新:', updates);
-        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), updates);
-        console.log('✅ 注文を復元しました（会計前の状態）');
-        
-        // 2. 🆕 会計済みだった注文の場合、dailySalesから減算
-        if (hasPaidAt) {
-          console.log('💰 元々会計済みだったため、dailySalesから減算します');
-          
-          // 🔧 会計日時から営業日を計算（3時基準）
-          const paidDate = currentEditingOrder.paidAt.toDate();
-          console.log('🕐 会計日時（paidAt）:', paidDate);
-          
-          let businessDate = new Date(paidDate);
-          
-          // 3時より前の場合は前日の営業日扱い
-          if (paidDate.getHours() < 3) {
-            businessDate.setDate(businessDate.getDate() - 1);
-            console.log('⏰ 3時より前なので前日扱い');
-          }
-          
-          const dateStr = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
-          
-          console.log('📅 営業日:', dateStr);
-          
-          // dailySalesを取得
-          const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
-          const dailySalesDoc = await window.getDoc(dailySalesRef);
-          
-          if (dailySalesDoc.exists()) {
-            const dailyData = dailySalesDoc.data();
-            console.log('📊 復元前のdailySales:', dailyData);
-            
-            // 注文金額と税金を取得
-            const totalAmount = currentEditingOrder.totalAmount || 0;
-            const tax8Total = currentEditingOrder.tax8Total || 0;
-            const tax10Total = currentEditingOrder.tax10Total || 0;
-            
-            // 支払い方法別の金額（日本語と英語の両方に対応）
-            let cashSales = 0, emoneSales = 0, creditSales = 0;
-            const paymentMethod = currentEditingOrder.paymentMethod || '';
-            console.log('💳 支払い方法:', paymentMethod);
-            
-            if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
-            else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
-            else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
-            
-            // 商品数を計算
-            let totalItems = 0;
-            if (currentEditingOrder.items && Array.isArray(currentEditingOrder.items)) {
-              currentEditingOrder.items.forEach(item => {
-                totalItems += item.quantity || 0;
-              });
-            }
-            
-            // 更新データを作成（減算）
-            const updateData = {
-              totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
-              customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
-              totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
-              cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
-              emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
-              creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
-              tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
-              tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
-            };
-            
-            console.log('📊 dailySales更新（減算）:', {
-              totalSales: `${dailyData.totalSales} - ${totalAmount} = ${updateData.totalSales}`,
-              customerCount: `${dailyData.customerCount} - 1 = ${updateData.customerCount}`
-            });
-            
-            // setDocで強制上書き
-            const finalData = {...dailyData, ...updateData, updatedAt: window.Timestamp.now()};
-            await window.setDoc(dailySalesRef, finalData);
-            
-            console.log('✅ dailySalesから減算しました（会計キャンセル）');
-            
-            // 検証
-            await new Promise(resolve => setTimeout(resolve, 500));
-            const verifyDoc = await window.getDoc(dailySalesRef);
-            const verifyData = verifyDoc.data();
-            console.log('✅ 検証: totalSales =', verifyData.totalSales, ', customerCount =', verifyData.customerCount);
-            
-            if (verifyData.totalSales === updateData.totalSales && verifyData.customerCount === updateData.customerCount) {
-              console.log('✅✅✅ 復元（会計キャンセル）: Firestore更新成功！');
-            } else {
-              console.error('❌❌❌ 復元（会計キャンセル）: Firestore更新失敗！');
-            }
-          }
-        } else {
-          console.log('ℹ️ 未会計の注文のため、dailySalesの更新は不要です');
-        }
-        
-        showCustomAlert(
-          hasPaidAt ? '注文を復元しました（会計前の状態）\n売上から除外されました' : '注文を復元しました（未会計）',
-          '✅ 成功',
-          '🔄'
-        );
-        closeEditOrderModal();
-        
-        // 📊 売上モーダルの強制再計算
-        const salesModal = document.getElementById('salesModal');
-        if (salesModal && !salesModal.classList.contains('hidden')) {
-          console.log('📊 売上モーダルを再計算');
-          await calculateSales();
-        }
-        
-        // 履歴を再読み込み
-        await loadHistory();
-        
-      } catch (e) {
-        console.error('注文復元エラー:', e);
-        showCustomAlert('注文の復元に失敗しました: ' + e.message, '❌ エラー', '⚠️');
-      }
-    };
         
         // paidAtは元の状態を保持（あればそのまま、なければnullのまま）
         console.log('🔄 注文復元:', {
