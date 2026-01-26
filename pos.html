@@ -2721,25 +2721,19 @@
             <button onclick="editOrder('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
               ✏️ 編集
             </button>
-            ${!order.deleted ? `
-              ${order.paidAt ? `
-                <button onclick="redSlip('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                  🔴 赤伝票
-                </button>
-              ` : `
+            ${order.paidAt ? `
+              <button onclick="redSlip('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                🔴 赤伝票
+              </button>
+            ` : `
+              ${!order.deleted ? `
                 <button onclick="deleteOrderFromHistory('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                   🗑️ 取消
                 </button>
-              `}
-            ` : `
-              ${!order.paidAt ? `
+              ` : `
                 <button onclick="restoreOrderFromHistory('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                   🔄 復元
                 </button>
-              ` : `
-                <div style="flex: 1; min-width: 120px; padding: 10px; background: #9e9e9e; color: white; border-radius: 8px; text-align: center; font-weight: bold; opacity: 0.6;">
-                  🚫 復元不可
-                </div>
               `}
             `}
             ${order.paidAt ? `
@@ -3044,30 +3038,30 @@
         
         // ボタンを動的に生成（削除済みかどうかで変わる）
         const buttonsContainer = document.getElementById('editOrderButtons');
-        if (orderData.deleted) {
-          // 削除済み注文
-          if (orderData.paidAt) {
-            // 会計済み削除注文：復元不可
-            buttonsContainer.innerHTML = `
-              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
-              <button class="btn" style="flex: 1; background: #9e9e9e; color: white; cursor: not-allowed; opacity: 0.6;" disabled>🚫 復元不可</button>
-              <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
-            `;
-          } else {
-            // 未会計削除注文：復元可能
+        if (orderData.paidAt) {
+          // 会計済み注文：削除状態に関わらず赤伝票
+          buttonsContainer.innerHTML = `
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="redSlipFromEdit()">🔴 赤伝票</button>
+            <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+          `;
+        } else {
+          // 未会計注文
+          if (orderData.deleted) {
+            // 削除済み未会計注文：復元可能
             buttonsContainer.innerHTML = `
               <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
               <button class="btn" style="flex: 1; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;" onclick="restoreOrder()">注文を復元</button>
               <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
             `;
+          } else {
+            // 通常の未会計注文：取消可能
+            buttonsContainer.innerHTML = `
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrderFromEdit()">🗑️ 注文取消</button>
+              <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+            `;
           }
-        } else {
-          // 通常の注文：保存と取消ボタン
-          buttonsContainer.innerHTML = `
-            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
-            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrderFromEdit()">🗑️ 注文取消</button>
-            <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
-          `;
         }
         
         document.getElementById('editOrderModal').classList.remove('hidden');
@@ -3617,6 +3611,126 @@
       } catch (e) {
         console.error('注文取消エラー:', e);
         showCustomAlert('注文の取消に失敗しました: ' + e.message, '❌ エラー', '⚠️');
+      }
+    };
+    
+    // 編集モーダルから赤伝票（会計済み注文の完全取消）
+    window.redSlipFromEdit = async function() {
+      if (!currentEditingOrder) return;
+      
+      const orderData = currentEditingOrder;
+      
+      if (!orderData.paidAt) {
+        showCustomAlert('会計済みの注文のみ赤伝票できます', '⚠️ 警告', '⚠️');
+        return;
+      }
+      
+      // 確認ダイアログ
+      const confirmed = await showCustomConfirm({
+        icon: '🔴',
+        title: '赤伝票（完全取消）',
+        message: `注文 #${orderData.orderNumber} を赤伝票で完全取消しますか？\n\n金額: ¥${orderData.totalAmount.toLocaleString()}\n\n⚠️ 重要な注意事項:\n• 売上から完全に除外されます\n• 客数も減少します\n• 復元できません（伝票打ち直しが必要）\n• この操作は取り消せません`,
+        btnText: '赤伝票で取消',
+        btnClass: 'modal-btn-danger'
+      });
+      
+      if (!confirmed) return;
+      
+      try {
+        console.log('🔴 赤伝票処理開始（編集モーダルから）:', {
+          注文ID: orderData.id,
+          注文番号: orderData.orderNumber,
+          金額: orderData.totalAmount
+        });
+        
+        // 会計日時から営業日を計算（3時基準）
+        const paidDate = orderData.paidAt.toDate();
+        let businessDate = new Date(paidDate);
+        
+        if (paidDate.getHours() < 3) {
+          businessDate.setDate(businessDate.getDate() - 1);
+        }
+        
+        const dateStr = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
+        
+        console.log('📅 営業日:', dateStr);
+        
+        // dailySalesを取得
+        const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+        const dailySalesDoc = await window.getDoc(dailySalesRef);
+        
+        if (!dailySalesDoc.exists()) {
+          showCustomAlert('この営業日のdailySalesが見つかりません\n営業日: ' + dateStr, '⚠️ 警告', '⚠️');
+          return;
+        }
+        
+        const dailyData = dailySalesDoc.data();
+        
+        // 注文金額と税金を取得
+        const totalAmount = orderData.totalAmount || 0;
+        const tax8Total = orderData.tax8Total || 0;
+        const tax10Total = orderData.tax10Total || 0;
+        
+        // 支払い方法別の金額
+        let cashSales = 0, emoneSales = 0, creditSales = 0;
+        const paymentMethod = orderData.paymentMethod || '';
+        if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
+        else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
+        else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
+        
+        // 商品数を計算
+        let totalItems = 0;
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            totalItems += item.quantity || 0;
+          });
+        }
+        
+        console.log('📊 dailySalesから減算:', {
+          売上: totalAmount,
+          客数: 1,
+          商品数: totalItems
+        });
+        
+        // dailySalesから減算
+        const updateData = {
+          totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
+          customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+          totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
+          cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
+          emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
+          creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
+          tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
+          tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
+        };
+        
+        console.log('📊 dailySales更新:', {
+          更新前: { totalSales: dailyData.totalSales, customerCount: dailyData.customerCount },
+          更新後: { totalSales: updateData.totalSales, customerCount: updateData.customerCount }
+        });
+        
+        // dailySalesを更新
+        await window.updateDoc(dailySalesRef, updateData);
+        
+        // 注文を完全削除
+        await window.deleteDoc(window.getStoreDoc('orders', orderData.id));
+        
+        console.log('✅ 赤伝票処理完了 - 注文を完全削除しました');
+        
+        showCustomAlert(
+          `注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n\n売上・客数から除外されました\n※ 復元不可（伝票打ち直しが必要）`,
+          '✅ 赤伝票完了',
+          '🔴'
+        );
+        
+        closeEditOrderModal();
+        
+        // 履歴を再読み込み
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('赤伝票エラー:', e);
+        showCustomAlert('赤伝票処理に失敗しました: ' + e.message, '❌ エラー', '⚠️');
       }
     };
     
