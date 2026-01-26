@@ -3045,12 +3045,22 @@
         // ボタンを動的に生成（削除済みかどうかで変わる）
         const buttonsContainer = document.getElementById('editOrderButtons');
         if (orderData.deleted) {
-          // 削除済み注文：保存と復元ボタン
-          buttonsContainer.innerHTML = `
-            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
-            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;" onclick="restoreOrder()">注文を復元</button>
-            <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
-          `;
+          // 削除済み注文
+          if (orderData.paidAt) {
+            // 会計済み削除注文：復元不可
+            buttonsContainer.innerHTML = `
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+              <button class="btn" style="flex: 1; background: #9e9e9e; color: white; cursor: not-allowed; opacity: 0.6;" disabled>🚫 復元不可</button>
+              <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+            `;
+          } else {
+            // 未会計削除注文：復元可能
+            buttonsContainer.innerHTML = `
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;" onclick="restoreOrder()">注文を復元</button>
+              <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+            `;
+          }
         } else {
           // 通常の注文：保存と取消ボタン
           buttonsContainer.innerHTML = `
@@ -3610,25 +3620,26 @@
       }
     };
     
-    // 注文を復元
+    // 注文を復元（未会計注文のみ）
     window.restoreOrder = async function() {
       if (!currentEditingOrder) return;
       
       // paidAtの有無を確認
       const hasPaidAt = !!currentEditingOrder.paidAt;
       
-      // カスタム確認ダイアログを表示
-      let message = `注文 #${currentEditingOrder.orderNumber} を復元しますか？`;
-      if (!hasPaidAt) {
-        message += '\n\n⚠️ この注文は未会計です。\n復元後に会計処理を行ってください。';
+      // 会計済み注文は復元不可
+      if (hasPaidAt) {
+        showCustomAlert('会計済みの注文は復元できません\n\n赤伝票で取り消された注文は、\n新しく伝票を打ち直してください', '⚠️ 復元不可', '🚫');
+        return;
       }
       
+      // カスタム確認ダイアログを表示
       const confirmed = await showCustomConfirm({
         icon: '🔄',
         title: '注文を復元',
-        message: message,
-        confirmText: '復元する',
-        confirmColor: '#2196F3'
+        message: `注文 #${currentEditingOrder.orderNumber} を復元しますか？\n\n⚠️ この注文は未会計です。\n復元後に会計処理を行ってください。`,
+        btnText: '復元する',
+        btnClass: 'modal-btn-primary'
       });
       
       if (!confirmed) return;
@@ -3639,97 +3650,17 @@
           deletedAt: null
         };
         
-        // paidAtは元の状態を保持（あればそのまま、なければnullのまま）
-        console.log('🔄 注文復元:', {
+        console.log('🔄 未会計注文復元:', {
           注文番号: currentEditingOrder.orderNumber,
-          paidAt: hasPaidAt ? '会計済み' : '未会計',
           timestamp: currentEditingOrder.timestamp
         });
         
         await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), updates);
         
-        // 🆕 会計済みの注文の場合、dailySalesに加算
-        if (hasPaidAt) {
-          console.log('💰 会計済み注文のため、dailySalesを更新します');
-          
-          // 注文日を取得（JSTに変換）
-          const orderDate = currentEditingOrder.timestamp.toDate();
-          const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-          const dateStr = `${jstOrderDate.getFullYear()}-${String(jstOrderDate.getMonth() + 1).padStart(2, '0')}-${String(jstOrderDate.getDate()).padStart(2, '0')}`;
-          
-          console.log('📅 注文日:', dateStr);
-          
-          // dailySalesを取得または作成
-          const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
-          const dailySalesDoc = await window.getDoc(dailySalesRef);
-          
-          // 注文金額と税金を取得
-          const totalAmount = currentEditingOrder.totalAmount || 0;
-          const tax8Total = currentEditingOrder.tax8Total || 0;
-          const tax10Total = currentEditingOrder.tax10Total || 0;
-          
-          // 支払い方法別の金額
-          let cashSales = 0, emoneSales = 0, creditSales = 0;
-          if (currentEditingOrder.paymentMethod === '現金') cashSales = totalAmount;
-          else if (currentEditingOrder.paymentMethod === '電子マネー') emoneSales = totalAmount;
-          else if (currentEditingOrder.paymentMethod === 'クレジットカード') creditSales = totalAmount;
-          
-          // 商品数を計算
-          let totalItems = 0;
-          if (currentEditingOrder.items && Array.isArray(currentEditingOrder.items)) {
-            currentEditingOrder.items.forEach(item => {
-              totalItems += item.quantity || 0;
-            });
-          }
-          
-          if (dailySalesDoc.exists()) {
-            const dailyData = dailySalesDoc.data();
-            
-            // 更新データを作成（加算）
-            const updateData = {
-              totalSales: (dailyData.totalSales || 0) + totalAmount,
-              customerCount: (dailyData.customerCount || 0) + 1,
-              totalItems: (dailyData.totalItems || 0) + totalItems,
-              cashSales: (dailyData.cashSales || 0) + cashSales,
-              emoneSales: (dailyData.emoneSales || 0) + emoneSales,
-              creditSales: (dailyData.creditSales || 0) + creditSales,
-              tax8Total: (dailyData.tax8Total || 0) + tax8Total,
-              tax10Total: (dailyData.tax10Total || 0) + tax10Total
-            };
-            
-            console.log('📊 dailySales更新:', {
-              元の総売上: dailyData.totalSales,
-              加算額: totalAmount,
-              新しい総売上: updateData.totalSales
-            });
-            
-            await window.updateDoc(dailySalesRef, updateData);
-          } else {
-            // dailySalesが存在しない場合は作成
-            const newData = {
-              totalSales: totalAmount,
-              customerCount: 1,
-              totalItems: totalItems,
-              cashSales: cashSales,
-              emoneSales: emoneSales,
-              creditSales: creditSales,
-              tax8Total: tax8Total,
-              tax10Total: tax10Total,
-              totalDiscount: 0,
-              drawerOpenCount: 0
-            };
-            
-            console.log('📊 dailySales作成:', newData);
-            await window.setDoc(dailySalesRef, newData);
-          }
-          
-          console.log('✅ dailySalesを更新しました');
-        } else {
-          console.log('ℹ️ 未会計の注文のため、dailySalesの更新は不要です');
-        }
+        console.log('✅ 未会計注文を復元しました');
         
         showCustomAlert(
-          hasPaidAt ? '注文を復元しました（会計済み）' : '注文を復元しました（未会計）\n会計処理が必要です',
+          '注文を復元しました（未会計）\n\n会計処理を行ってください',
           '✅ 成功',
           '🔄'
         );
