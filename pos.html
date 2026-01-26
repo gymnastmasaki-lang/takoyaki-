@@ -2726,15 +2726,9 @@
                 💴 金額調整
               </button>
             ` : ''}
-            ${!order.deleted ? `
-              <button onclick="deleteOrderFromHistory('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                🗑️ 取消
-              </button>
-            ` : `
-              <button onclick="restoreOrderFromHistory('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                🔄 復元
-              </button>
-            `}
+            <button onclick="deleteOrderFromHistory('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+              🗑️ 取消
+            </button>
             ${order.paidAt ? `
               <button onclick="reprintReceipt('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                 レシート再印刷
@@ -3035,23 +3029,14 @@
           </div>
         `;
         
-        // ボタンを動的に生成（削除済みかどうかで変わる）
+        // ボタンを動的に生成（削除済みでも同じボタン）
         const buttonsContainer = document.getElementById('editOrderButtons');
-        if (orderData.deleted) {
-          // 削除済み注文：保存と復元ボタン
-          buttonsContainer.innerHTML = `
-            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
-            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;" onclick="restoreOrder()">注文を復元</button>
-            <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
-          `;
-        } else {
-          // 通常の注文：保存と取消ボタン
-          buttonsContainer.innerHTML = `
-            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
-            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrderFromEdit()">🗑️ 注文取消</button>
-            <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
-          `;
-        }
+        // 削除済みでも通常でも、同じボタンを表示
+        buttonsContainer.innerHTML = `
+          <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+          <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrderFromEdit()">🗑️ 注文取消</button>
+          <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+        `;
         
         document.getElementById('editOrderModal').classList.remove('hidden');
         
@@ -3521,10 +3506,17 @@
         
         console.log('✅ 注文を取り消しました。');
         
-        // 2. 🆕 会計済みの注文の場合、dailySalesから減算
-        if (currentEditingOrder.paidAt) {
-          console.log('💰 会計済み注文のため、dailySalesを更新します');
+        // 2. 🆕 会計済みで、かつ削除されていなかった注文の場合のみ、dailySalesから減算
+        const wasNotDeleted = !currentEditingOrder.deleted;
+        
+        if (currentEditingOrder.paidAt && wasNotDeleted) {
+          console.log('💰 会計済みで削除されていなかった注文のため、dailySalesから減算します');
           console.log('📋 注文データ:', JSON.stringify(currentEditingOrder, null, 2));
+          console.log('📋 注文状態:', {
+            deleted: currentEditingOrder.deleted,
+            paidAt: !!currentEditingOrder.paidAt,
+            減算実行: true
+          });
           
           // 🔧 修正: 会計日時から営業日を計算（3時基準）
           const paidDate = currentEditingOrder.paidAt.toDate();
@@ -3636,6 +3628,14 @@
           } else {
             console.warn('⚠️ dailySalesが見つかりません:', dateStr);
           }
+        } else if (currentEditingOrder.paidAt && !wasNotDeleted) {
+          console.log('ℹ️ この注文は既に削除済みのため、dailySalesからの減算は不要です');
+          console.log('📋 注文状態:', {
+            deleted: currentEditingOrder.deleted,
+            paidAt: !!currentEditingOrder.paidAt,
+            減算実行: false,
+            理由: '既に売上から除外されているため'
+          });
         } else {
           console.log('ℹ️ 未会計の注文のため、dailySalesの更新は不要です');
         }
@@ -3911,8 +3911,16 @@
         
         console.log('✅ 注文を取り消しました！');
         
-        // 2. 🆕 会計済みの注文の場合、dailySalesから減算
-        if (orderData.paidAt) {
+        // 2. 🆕 会計済みで、かつ削除されていなかった注文の場合のみ、dailySalesから減算
+        const wasNotDeleted = !orderData.deleted;  // 削除されていなかったか
+        
+        if (orderData.paidAt && wasNotDeleted) {
+          console.log('💰 会計済みで削除されていなかった注文のため、dailySalesから減算します');
+          console.log('📋 注文状態:', {
+            deleted: orderData.deleted,
+            paidAt: !!orderData.paidAt,
+            減算実行: true
+          });
           console.log('💰 会計済み注文のため、dailySalesを更新します');
           console.log('📋 注文データ詳細:', JSON.stringify(orderData, null, 2));
           
@@ -4073,6 +4081,14 @@
             });
             console.log('✅ dailySalesを新規作成しました（売上=0）');
           }
+        } else if (orderData.paidAt && !wasNotDeleted) {
+          console.log('ℹ️ この注文は既に削除済みのため、dailySalesからの減算は不要です');
+          console.log('📋 注文状態:', {
+            deleted: orderData.deleted,
+            paidAt: !!orderData.paidAt,
+            減算実行: false,
+            理由: '既に売上から除外されているため'
+          });
         } else {
           console.log('ℹ️ 未会計の注文のため、dailySalesの更新は不要です');
         }
