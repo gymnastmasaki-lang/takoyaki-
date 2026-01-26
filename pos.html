@@ -3692,7 +3692,7 @@
           商品数: totalItems
         });
         
-        // dailySalesから減算
+        // dailySalesから減算 + 赤伝票情報を記録
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
           customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
@@ -3701,21 +3701,47 @@
           emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
           creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
           tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
-          tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
+          tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total),
+          redSlipCount: (dailyData.redSlipCount || 0) + 1,  // 🆕 赤伝票件数
+          redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount  // 🆕 赤伝票金額
         };
         
         console.log('📊 dailySales更新:', {
-          更新前: { totalSales: dailyData.totalSales, customerCount: dailyData.customerCount },
-          更新後: { totalSales: updateData.totalSales, customerCount: updateData.customerCount }
+          更新前: { 
+            totalSales: dailyData.totalSales, 
+            customerCount: dailyData.customerCount,
+            赤伝票件数: dailyData.redSlipCount || 0,
+            赤伝票金額: dailyData.redSlipAmount || 0
+          },
+          更新後: { 
+            totalSales: updateData.totalSales, 
+            customerCount: updateData.customerCount,
+            赤伝票件数: updateData.redSlipCount,
+            赤伝票金額: updateData.redSlipAmount
+          }
         });
         
         // dailySalesを更新
         await window.updateDoc(dailySalesRef, updateData);
         
-        // 注文を完全削除
+        // 🆕 redSlipsコレクションに保存（監査用）
+        const redSlipData = {
+          ...orderData,
+          redSlippedAt: window.Timestamp.now(),
+          redSlippedBy: window.currentStoreId,
+          businessDate: dateStr,
+          originalOrderId: orderData.id
+        };
+        
+        const redSlipRef = window.doc(window.collection(window.db, 'stores', window.currentStoreId, 'redSlips'));
+        await window.setDoc(redSlipRef, redSlipData);
+        
+        console.log('📝 redSlipsコレクションに保存しました:', redSlipRef.id);
+        
+        // 注文を削除（redSlipsに移動済み）
         await window.deleteDoc(window.getStoreDoc('orders', orderData.id));
         
-        console.log('✅ 赤伝票処理完了 - 注文を完全削除しました');
+        console.log('✅ 赤伝票処理完了 - 注文を削除し、redSlipsに保存しました');
         
         showCustomAlert(
           `注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n\n売上・客数から除外されました\n※ 復元不可（伝票打ち直しが必要）`,
@@ -4100,7 +4126,7 @@
           クレジット: creditSales
         });
         
-        // dailySalesから減算（マイナスにならないようにする）
+        // dailySalesから減算 + 赤伝票情報を記録
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
           customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
@@ -4109,27 +4135,47 @@
           emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
           creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
           tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
-          tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
+          tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total),
+          redSlipCount: (dailyData.redSlipCount || 0) + 1,  // 🆕 赤伝票件数
+          redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount  // 🆕 赤伝票金額
         };
         
         console.log('📊 dailySales更新:', {
           更新前: {
             totalSales: dailyData.totalSales,
-            customerCount: dailyData.customerCount
+            customerCount: dailyData.customerCount,
+            赤伝票件数: dailyData.redSlipCount || 0,
+            赤伝票金額: dailyData.redSlipAmount || 0
           },
           更新後: {
             totalSales: updateData.totalSales,
-            customerCount: updateData.customerCount
+            customerCount: updateData.customerCount,
+            赤伝票件数: updateData.redSlipCount,
+            赤伝票金額: updateData.redSlipAmount
           }
         });
         
         // dailySalesを更新
         await window.updateDoc(dailySalesRef, updateData);
         
-        // 注文を完全削除
+        // 🆕 redSlipsコレクションに保存（監査用）
+        const redSlipData = {
+          ...orderData,
+          redSlippedAt: window.Timestamp.now(),
+          redSlippedBy: window.currentStoreId,
+          businessDate: dateStr,
+          originalOrderId: orderId
+        };
+        
+        const redSlipRef = window.doc(window.collection(window.db, 'stores', window.currentStoreId, 'redSlips'));
+        await window.setDoc(redSlipRef, redSlipData);
+        
+        console.log('📝 redSlipsコレクションに保存しました:', redSlipRef.id);
+        
+        // 注文を削除（redSlipsに移動済み）
         await window.deleteDoc(window.getStoreDoc('orders', orderId));
         
-        console.log('✅ 赤伝票処理完了 - 注文を完全削除しました');
+        console.log('✅ 赤伝票処理完了 - 注文を削除し、redSlipsに保存しました');
         
         showCustomAlert(
           `注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n\n売上・客数から除外されました\n※ 復元不可（伝票打ち直しが必要）`,
@@ -4571,6 +4617,8 @@
         let totalTax8 = 0;
         let totalTax10 = 0;
         let totalDrawerOpen = 0;
+        let totalRedSlipCount = 0;  // 🆕 赤伝票件数
+        let totalRedSlipAmount = 0;  // 🆕 赤伝票金額
         let totalExpense = 0;
         let totalLaborCost = 0;
         const itemCounts = {}; // 商品別カウント
@@ -4621,6 +4669,8 @@
             totalTax8 += data.tax8Total || 0;
             totalTax10 += data.tax10Total || 0;
             totalDrawerOpen += data.drawerOpenCount || 0;
+            totalRedSlipCount += data.redSlipCount || 0;  // 🆕 赤伝票件数
+            totalRedSlipAmount += data.redSlipAmount || 0;  // 🆕 赤伝票金額
           }
           
           // 支出データ
@@ -4774,6 +4824,8 @@
 その他
 -------------------------------------
 ドロアオープン数: ${totalDrawerOpen}回
+赤伝票件数: ${totalRedSlipCount}件
+赤伝票金額: ¥${totalRedSlipAmount.toLocaleString()}
 人件費: ¥${Math.round(totalLaborCost).toLocaleString()}
 
 =====================================
@@ -5811,6 +5863,12 @@
         console.log('🔓 精算時のdrawerOpenCount:', drawerOpenCount);
         console.log('📊 settlementData全体:', settlementData);
         
+        // ===== 🆕 赤伝票情報を取得 =====
+        const redSlipCount = settlementData.redSlipCount || 0;
+        const redSlipAmount = settlementData.redSlipAmount || 0;
+        console.log('🔴 赤伝票件数:', redSlipCount);
+        console.log('🔴 赤伝票金額:', redSlipAmount);
+        
         // ===== 支出を取得 =====
         let expenseTotal = 0;
         try {
@@ -5977,6 +6035,8 @@
 その他
 -------------------------------------
 ドロアオープン数: ${drawerOpenCount}回
+赤伝票件数: ${redSlipCount}件
+赤伝票金額: ¥${redSlipAmount.toLocaleString()}
 人件費: ¥${Math.round(laborCost).toLocaleString()}
 担当者: ${staffName}
 
@@ -6041,6 +6101,8 @@
           taxExcludedTotal: taxExcludedTotal,
           taxIncludedTotal: taxIncludedTotal,
           drawerOpenCount: drawerOpenCount,
+          redSlipCount: redSlipCount,  // 🆕 赤伝票件数
+          redSlipAmount: redSlipAmount,  // 🆕 赤伝票金額
           staffName: staffName,
           aiComment: ""
         });
