@@ -2715,25 +2715,32 @@
           </div>`;
         });
         
-        // アクションボタン（すべての注文が編集可能）
+        // アクションボタン
         let actionsHtml = `
           <div style="display: flex; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 2px solid #eee; flex-wrap: wrap;">
             <button onclick="editOrder('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
               ✏️ 編集
             </button>
-            ${order.paidAt && !order.deleted ? `
-              <button onclick="adjustOrderAmount('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                💴 金額調整
-              </button>
-            ` : ''}
             ${!order.deleted ? `
-              <button onclick="deleteOrderFromHistory('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                🗑️ 取消
-              </button>
+              ${order.paidAt ? `
+                <button onclick="redSlip('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                  🔴 赤伝票
+                </button>
+              ` : `
+                <button onclick="deleteOrderFromHistory('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                  🗑️ 取消
+                </button>
+              `}
             ` : `
-              <button onclick="restoreOrderFromHistory('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                🔄 復元
-              </button>
+              ${!order.paidAt ? `
+                <button onclick="restoreOrderFromHistory('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                  🔄 復元
+                </button>
+              ` : `
+                <div style="flex: 1; min-width: 120px; padding: 10px; background: #9e9e9e; color: white; border-radius: 8px; text-align: center; font-weight: bold; opacity: 0.6;">
+                  🚫 復元不可
+                </div>
+              `}
             `}
             ${order.paidAt ? `
               <button onclick="reprintReceipt('${order.id}')" style="flex: 1; min-width: 120px; padding: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
@@ -3909,7 +3916,7 @@
       }
     };
     
-    // 履歴画面から直接復元
+    // 履歴画面から直接復元（未会計注文のみ）
     window.restoreOrderFromHistory = async function(orderId) {
       try {
         const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
@@ -3921,89 +3928,33 @@
         const orderData = orderDoc.data();
         const hasPaidAt = !!orderData.paidAt;
         
-        // カスタム確認ダイアログを表示
-        let message = `注文 #${orderData.orderNumber} を復元しますか？`;
-        if (!hasPaidAt) {
-          message += '\n\n⚠️ この注文は未会計です。\n復元後に会計処理を行ってください。';
+        // 会計済み注文は復元不可
+        if (hasPaidAt) {
+          showCustomAlert('会計済みの注文は復元できません\n\n赤伝票で取り消された注文は、\n新しく伝票を打ち直してください', '⚠️ 復元不可', '🚫');
+          return;
         }
         
+        // カスタム確認ダイアログを表示
         const confirmed = await showCustomConfirm({
           icon: '🔄',
           title: '注文を復元',
-          message: message,
-          confirmText: '復元する',
-          confirmColor: '#2196F3'
+          message: `注文 #${orderData.orderNumber} を復元しますか？\n\n⚠️ この注文は未会計です。\n復元後に会計処理を行ってください。`,
+          btnText: '復元する',
+          btnClass: 'modal-btn-primary'
         });
         
         if (!confirmed) return;
         
-        // 注文を復元
+        // 注文を復元（未会計注文のみ）
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           deleted: false,
           deletedAt: null
         });
         
-        // 🆕 会計済みの注文の場合、dailySalesに加算
-        if (hasPaidAt && orderData.paidAt) {
-          console.log('💰 会計済み注文のため、dailySalesに加算します');
-          
-          // 会計日時から営業日を計算（3時基準）
-          const paidDate = orderData.paidAt.toDate();
-          let businessDate = new Date(paidDate);
-          
-          if (paidDate.getHours() < 3) {
-            businessDate.setDate(businessDate.getDate() - 1);
-          }
-          
-          const dateStr = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
-          
-          console.log('📅 営業日:', dateStr);
-          
-          // dailySalesを取得
-          const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
-          const dailySalesDoc = await window.getDoc(dailySalesRef);
-          
-          if (dailySalesDoc.exists()) {
-            const dailyData = dailySalesDoc.data();
-            
-            const totalAmount = orderData.totalAmount || 0;
-            const tax8Total = orderData.tax8Total || 0;
-            const tax10Total = orderData.tax10Total || 0;
-            
-            // 支払い方法別の金額
-            let cashSales = 0, emoneSales = 0, creditSales = 0;
-            const paymentMethod = orderData.paymentMethod || '';
-            if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
-            else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
-            else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
-            
-            // 商品数を計算
-            let totalItems = 0;
-            if (orderData.items && Array.isArray(orderData.items)) {
-              orderData.items.forEach(item => {
-                totalItems += item.quantity || 0;
-              });
-            }
-            
-            // 🔧 加算処理
-            const updateData = {
-              totalSales: (dailyData.totalSales || 0) + totalAmount,
-              customerCount: (dailyData.customerCount || 0) + 1,
-              totalItems: (dailyData.totalItems || 0) + totalItems,
-              cashSales: (dailyData.cashSales || 0) + cashSales,
-              emoneSales: (dailyData.emoneSales || 0) + emoneSales,
-              creditSales: (dailyData.creditSales || 0) + creditSales,
-              tax8Total: (dailyData.tax8Total || 0) + tax8Total,
-              tax10Total: (dailyData.tax10Total || 0) + tax10Total
-            };
-            
-            await window.updateDoc(dailySalesRef, updateData);
-            console.log('✅ dailySalesに加算しました');
-          }
-        }
+        console.log('✅ 未会計注文を復元しました');
         
         showCustomAlert(
-          hasPaidAt ? '注文を復元しました（会計済み）\n売上に反映されました' : '注文を復元しました（未会計）\n会計処理が必要です',
+          '注文を復元しました（未会計）\n\n会計処理を行ってください',
           '✅ 成功',
           '🔄'
         );
@@ -4017,10 +3968,10 @@
       }
     };
     
-    // ========== 💴 金額調整機能 ==========
+    // ========== 🔴 赤伝票機能 ==========
     
-    // 金額調整モーダルを表示
-    window.adjustOrderAmount = async function(orderId) {
+    // 赤伝票処理（会計済み注文の完全取消）
+    window.redSlip = async function(orderId) {
       try {
         const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
         if (!orderDoc.exists()) {
@@ -4031,88 +3982,25 @@
         const orderData = orderDoc.data();
         
         if (!orderData.paidAt) {
-          showCustomAlert('会計済みの注文のみ金額調整できます', '⚠️ 警告', '⚠️');
+          showCustomAlert('会計済みの注文のみ赤伝票できます', '⚠️ 警告', '⚠️');
           return;
         }
         
-        const currentAmount = orderData.totalAmount;
-        
-        // プロンプトで新しい金額または調整額を入力
-        const inputStr = prompt(
-          `金額を調整します\n\n現在の金額: ¥${currentAmount.toLocaleString()}\n\n【入力方法】\n• 新しい金額: 500（500円に変更）\n• 調整額（減額）: -480（480円減額）\n• 調整額（加算）: +100（100円加算）\n\n金額を入力してください:`,
-          currentAmount
-        );
-        
-        if (inputStr === null) {
-          // キャンセルされた
-          return;
-        }
-        
-        const trimmedInput = inputStr.trim();
-        let newAmount;
-        let isAdjustmentMode = false;
-        
-        // 入力値の処理
-        if (trimmedInput.startsWith('-') || trimmedInput.startsWith('+')) {
-          // マイナスまたはプラスで始まる場合 → 調整額として扱う
-          isAdjustmentMode = true;
-          const adjustment = parseInt(trimmedInput);
-          
-          if (isNaN(adjustment)) {
-            showCustomAlert('正しい金額を入力してください', '❌ エラー', '⚠️');
-            return;
-          }
-          
-          newAmount = currentAmount + adjustment;
-          
-          console.log('📝 調整額モード:', {
-            現在の金額: currentAmount,
-            調整額: adjustment,
-            新しい金額: newAmount
-          });
-        } else {
-          // 通常の数値 → 新しい金額として扱う
-          newAmount = parseInt(trimmedInput);
-          
-          if (isNaN(newAmount)) {
-            showCustomAlert('正しい金額を入力してください', '❌ エラー', '⚠️');
-            return;
-          }
-          
-          console.log('📝 新金額モード:', {
-            現在の金額: currentAmount,
-            新しい金額: newAmount
-          });
-        }
-        
-        if (newAmount < 0) {
-          showCustomAlert('調整後の金額がマイナスになります\n\n現在の金額: ¥' + currentAmount.toLocaleString() + '\n調整後: ¥' + newAmount.toLocaleString(), '❌ エラー', '⚠️');
-          return;
-        }
-        
-        if (newAmount === currentAmount) {
-          showCustomAlert('金額が変更されていません', 'ℹ️ 情報', 'ℹ️');
-          return;
-        }
-        
-        const difference = newAmount - currentAmount;
-        const isIncrease = difference > 0;
-        
+        // 確認ダイアログ
         const confirmed = await showCustomConfirm({
-          icon: '💴',
-          title: '金額調整の確認',
-          message: `金額を調整しますか？\n\n元の金額: ¥${currentAmount.toLocaleString()}\n新しい金額: ¥${newAmount.toLocaleString()}\n差額: ${isIncrease ? '+' : ''}¥${difference.toLocaleString()}\n\n⚠️ この操作は売上データにも反映されます`,
-          confirmText: '調整する',
-          confirmColor: '#9C27B0'
+          icon: '🔴',
+          title: '赤伝票（完全取消）',
+          message: `注文 #${orderData.orderNumber} を赤伝票で完全取消しますか？\n\n金額: ¥${orderData.totalAmount.toLocaleString()}\n\n⚠️ 重要な注意事項:\n• 売上から完全に除外されます\n• 客数も減少します\n• 復元できません（伝票打ち直しが必要）\n• この操作は取り消せません`,
+          btnText: '赤伝票で取消',
+          btnClass: 'modal-btn-danger'
         });
         
         if (!confirmed) return;
         
-        console.log('💴 金額調整開始:', {
+        console.log('🔴 赤伝票処理開始:', {
           注文ID: orderId,
-          元の金額: currentAmount,
-          新しい金額: newAmount,
-          差額: difference
+          注文番号: orderData.orderNumber,
+          金額: orderData.totalAmount
         });
         
         // 会計日時から営業日を計算（3時基準）
@@ -4138,45 +4026,78 @@
         
         const dailyData = dailySalesDoc.data();
         
-        // 支払い方法別の調整
-        let cashAdjust = 0, emoneAdjust = 0, creditAdjust = 0;
+        // 注文金額と税金を取得
+        const totalAmount = orderData.totalAmount || 0;
+        const tax8Total = orderData.tax8Total || 0;
+        const tax10Total = orderData.tax10Total || 0;
+        
+        // 支払い方法別の金額
+        let cashSales = 0, emoneSales = 0, creditSales = 0;
         const paymentMethod = orderData.paymentMethod || '';
-        if (paymentMethod === '現金' || paymentMethod === 'cash') cashAdjust = difference;
-        else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneAdjust = difference;
-        else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditAdjust = difference;
+        if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
+        else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
+        else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
         
-        // dailySalesを更新（差額を加算）
-        const updateData = {
-          totalSales: (dailyData.totalSales || 0) + difference,
-          cashSales: (dailyData.cashSales || 0) + cashAdjust,
-          emoneSales: (dailyData.emoneSales || 0) + emoneAdjust,
-          creditSales: (dailyData.creditSales || 0) + creditAdjust
-        };
+        // 商品数を計算
+        let totalItems = 0;
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            totalItems += item.quantity || 0;
+          });
+        }
         
-        console.log('📊 dailySales更新:', updateData);
-        
-        await window.updateDoc(dailySalesRef, updateData);
-        
-        // 注文データを更新
-        await window.updateDoc(window.getStoreDoc('orders', orderId), {
-          totalAmount: newAmount,
-          adjustedAmount: true,
-          adjustedAt: window.Timestamp.now(),
-          originalAmount: currentAmount
+        console.log('📊 dailySalesから減算:', {
+          売上: totalAmount,
+          客数: 1,
+          商品数: totalItems,
+          現金: cashSales,
+          電子マネー: emoneSales,
+          クレジット: creditSales
         });
         
+        // dailySalesから減算（マイナスにならないようにする）
+        const updateData = {
+          totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
+          customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+          totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
+          cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
+          emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
+          creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
+          tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
+          tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
+        };
+        
+        console.log('📊 dailySales更新:', {
+          更新前: {
+            totalSales: dailyData.totalSales,
+            customerCount: dailyData.customerCount
+          },
+          更新後: {
+            totalSales: updateData.totalSales,
+            customerCount: updateData.customerCount
+          }
+        });
+        
+        // dailySalesを更新
+        await window.updateDoc(dailySalesRef, updateData);
+        
+        // 注文を完全削除
+        await window.deleteDoc(window.getStoreDoc('orders', orderId));
+        
+        console.log('✅ 赤伝票処理完了 - 注文を完全削除しました');
+        
         showCustomAlert(
-          `金額を調整しました\n\n元の金額: ¥${currentAmount.toLocaleString()}\n新しい金額: ¥${newAmount.toLocaleString()}\n差額: ${isIncrease ? '+' : ''}¥${difference.toLocaleString()}`,
-          '✅ 完了',
-          '💴'
+          `注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n\n売上・客数から除外されました\n※ 復元不可（伝票打ち直しが必要）`,
+          '✅ 赤伝票完了',
+          '🔴'
         );
         
         // 履歴を再読み込み
         await loadHistory();
         
       } catch (e) {
-        console.error('金額調整エラー:', e);
-        showCustomAlert('金額の調整に失敗しました: ' + e.message, '❌ エラー', '⚠️');
+        console.error('赤伝票エラー:', e);
+        showCustomAlert('赤伝票処理に失敗しました: ' + e.message, '❌ エラー', '⚠️');
       }
     };
     
