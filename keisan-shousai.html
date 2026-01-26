@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>詳細給与計算</title>
+    <title>住民税計算</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
     <div id="root"></div>
@@ -38,7 +37,7 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // 店舗IDヘルパー関数（kanri.htmlと同じ）
+        // 店舗IDヘルパー関数
         window.currentStoreId = null;
         window.currentStoreName = null;
 
@@ -54,24 +53,11 @@
             return window.firebaseModules.collection(window.db, 'stores', window.currentStoreId, collectionName);
         };
 
-        window.getStoreDoc = function(collectionName, docId) {
-            if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
-                const oldPathMap = {
-                    'employees': 'kintai_employees',
-                    'attendance': 'kintai_attendance'
-                };
-                const path = oldPathMap[collectionName] || collectionName;
-                return window.firebaseModules.doc(window.db, path, docId);
-            }
-            return window.firebaseModules.doc(window.db, 'stores', window.currentStoreId, collectionName, docId);
-        };
-
-        const DetailedSalaryCalculator = () => {
+        const ResidentTaxCalculator = () => {
             const [employees, setEmployees] = useState([]);
             const [selectedEmployee, setSelectedEmployee] = useState(null);
             const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
             const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
-            const [attendanceData, setAttendanceData] = useState({});
             
             // 前年所得入力フォーム
             const [previousYearIncome, setPreviousYearIncome] = useState({
@@ -82,14 +68,15 @@
                 incomeType: 'salary'
             });
             
-            // 計算結果
-            const [calculationResult, setCalculationResult] = useState(null);
-            const [showResult, setShowResult] = useState(false);
+            // 計算タイプ（時給 or 固定給）
+            const [salaryType, setSalaryType] = useState('hourly');
+            const [hourlyWage, setHourlyWage] = useState(0);
+            const [workHours, setWorkHours] = useState(0);
+            const [monthlySalary, setMonthlySalary] = useState(0);
             
-            // ログイン状態
-            const [isAuthenticated, setIsAuthenticated] = useState(false);
-            const [storeNameInput, setStoreNameInput] = useState('');
-            const [passwordInput, setPasswordInput] = useState('');
+            // 計算結果
+            const [residentTax, setResidentTax] = useState(0);
+            const [calculationDetails, setCalculationDetails] = useState(null);
 
             // セッション復元
             useEffect(() => {
@@ -104,318 +91,290 @@
                     
                     window.currentStoreId = actualStoreId;
                     window.currentStoreName = storedStoreName;
-                    setIsAuthenticated(true);
+                    loadEmployees();
                 }
             }, []);
 
-            // ログイン処理
-            const handleLogin = async (e) => {
-                e.preventDefault();
-                
+            // 従業員データ読み込み
+            const loadEmployees = async () => {
                 try {
-                    const { collection, getDocs } = window.firebaseModules;
-                    
-                    // 下赤塚店チェック
-                    if (storeNameInput === '下赤塚' && passwordInput === 'K12290619T') {
-                        window.currentStoreId = null;
-                        window.currentStoreName = '下赤塚';
-                        sessionStorage.setItem('kanriStoreId', '');
-                        sessionStorage.setItem('kanriStoreName', '下赤塚');
-                        setIsAuthenticated(true);
-                        return;
+                    while (!window.FirebaseReady) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
                     }
                     
-                    // 他店舗チェック
-                    const storesRef = collection(window.db, 'stores');
-                    const storesSnapshot = await getDocs(storesRef);
+                    const { getDocs } = window.firebaseModules;
+                    const empRef = window.getStoreCollection('employees');
+                    const empSnapshot = await getDocs(empRef);
+                    const empList = [];
                     
-                    let foundStore = null;
-                    storesSnapshot.forEach(docSnap => {
-                        const data = docSnap.data();
-                        if (data.storeName === storeNameInput && data.storePassword === passwordInput) {
-                            foundStore = { id: docSnap.id, ...data };
-                        }
+                    empSnapshot.forEach(docSnap => {
+                        empList.push({ id: docSnap.id, ...docSnap.data() });
                     });
                     
-                    if (foundStore) {
-                        window.currentStoreId = foundStore.id;
-                        window.currentStoreName = foundStore.storeName;
-                        sessionStorage.setItem('kanriStoreId', foundStore.id);
-                        sessionStorage.setItem('kanriStoreName', foundStore.storeName);
-                        setIsAuthenticated(true);
-                    } else {
-                        alert('店舗名またはパスワードが正しくありません');
+                    empList.sort((a, b) => (a.order || 0) - (b.order || 0));
+                    setEmployees(empList);
+                    
+                    // 🆕 URLパラメータから従業員を自動選択
+                    const params = new URLSearchParams(window.location.search);
+                    const employeeId = params.get('employeeId');
+                    const salaryTypeParam = params.get('salaryType');
+                    const yearParam = params.get('year');
+                    const monthParam = params.get('month');
+                    
+                    if (employeeId) {
+                        const emp = empList.find(e => e.id === employeeId);
+                        if (emp) {
+                            setSelectedEmployee(emp);
+                            console.log('✅ URLパラメータから従業員を自動選択:', emp.name);
+                        }
                     }
+                    
+                    if (salaryTypeParam) {
+                        setSalaryType(salaryTypeParam);
+                        console.log('✅ 給与タイプ:', salaryTypeParam === 'hourly' ? '時間給' : '固定給');
+                    }
+                    
+                    if (yearParam) setCurrentYear(parseInt(yearParam));
+                    if (monthParam) setCurrentMonth(parseInt(monthParam));
+                    
+                    console.log('✅ 従業員データ読み込み完了:', empList.length, '人');
                 } catch (error) {
-                    console.error('ログインエラー:', error);
-                    alert('ログインに失敗しました');
+                    console.error('従業員データ読み込みエラー:', error);
                 }
             };
 
-            // 従業員データ読み込み
+            // 従業員選択時
             useEffect(() => {
-                if (!isAuthenticated) return;
-                
-                const loadEmployees = async () => {
-                    try {
-                        while (!window.FirebaseReady) {
-                            await new Promise(resolve => setTimeout(resolve, 100));
-                        }
-                        
-                        const { getDocs } = window.firebaseModules;
-                        const empRef = window.getStoreCollection('employees');
-                        const empSnapshot = await getDocs(empRef);
-                        const empList = [];
-                        
-                        empSnapshot.forEach(docSnap => {
-                            empList.push({ id: docSnap.id, ...docSnap.data() });
-                        });
-                        
-                        empList.sort((a, b) => (a.order || 0) - (b.order || 0));
-                        setEmployees(empList);
-                    } catch (error) {
-                        console.error('従業員データ読み込みエラー:', error);
+                if (selectedEmployee) {
+                    // 従業員の給与タイプを自動設定
+                    if (selectedEmployee.salaryType === 'fixed') {
+                        setSalaryType('fixed');
+                        setMonthlySalary(selectedEmployee.monthlySalary || 0);
+                    } else {
+                        setSalaryType('hourly');
+                        setHourlyWage(selectedEmployee.hourlyWage || 0);
                     }
-                };
-                
-                loadEmployees();
-            }, [isAuthenticated]);
+                    
+                    // 🆕 前年所得を自動取得
+                    loadPreviousYearIncome(selectedEmployee.id);
+                }
+            }, [selectedEmployee]);
 
-            // 勤怠データ読み込み
-            useEffect(() => {
-                if (!isAuthenticated || !selectedEmployee) return;
-                
-                const loadAttendance = async () => {
-                    try {
-                        const { getDocs } = window.firebaseModules;
-                        const attRef = window.getStoreCollection('attendance');
-                        const attSnapshot = await getDocs(attRef);
+            // 🆕 前年所得を自動取得
+            const loadPreviousYearIncome = async (employeeId) => {
+                try {
+                    const prevYear = currentYear - 1;
+                    console.log(`📊 ${prevYear}年の所得を取得中...`);
+                    
+                    const { getDocs } = window.firebaseModules;
+                    const attRef = window.getStoreCollection('attendance');
+                    const attSnapshot = await getDocs(attRef);
+                    
+                    let totalIncome = 0;
+                    let totalSocialInsurance = 0;
+                    
+                    // 前年1月〜12月のデータを集計
+                    attSnapshot.forEach(docSnap => {
+                        const docId = docSnap.id;
+                        const parts = docId.split('_');
                         
-                        const attData = {};
-                        attSnapshot.forEach(docSnap => {
-                            const docId = docSnap.id;
-                            const docData = docSnap.data();
+                        if (parts.length >= 2) {
+                            const empId = parts[0];
+                            const dateKey = parts.slice(1).join('_');
                             
-                            const parts = docId.split('_');
-                            if (parts.length >= 2) {
-                                const employeeId = parts[0];
-                                const dateKey = parts.slice(1).join('_');
+                            // 従業員IDと年をチェック
+                            if (empId === employeeId && dateKey.startsWith(`${prevYear}-`)) {
+                                const data = docSnap.data();
                                 
-                                const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
-                                if (dateMatch) {
-                                    const year = parseInt(dateMatch[1]);
-                                    const month = parseInt(dateMatch[2]) - 1;
-                                    
-                                    if (year === currentYear && month === currentMonth && employeeId === selectedEmployee.id) {
-                                        if (!attData[employeeId]) {
-                                            attData[employeeId] = {};
-                                        }
-                                        attData[employeeId][dateKey] = docData;
-                                    }
+                                // 総支給額を加算（hourlyTotalGrossまたはfixedTotalGrossから取得）
+                                if (data.hourlyTotalGross) {
+                                    totalIncome += data.hourlyTotalGross || 0;
+                                }
+                                if (data.fixedTotalGross) {
+                                    totalIncome += data.fixedTotalGross || 0;
+                                }
+                                
+                                // 社会保険料を加算
+                                if (data.hourlyDeductions) {
+                                    totalSocialInsurance += (data.hourlyDeductions.healthInsurance || 0);
+                                    totalSocialInsurance += (data.hourlyDeductions.pension || 0);
+                                    totalSocialInsurance += (data.hourlyDeductions.employmentInsurance || 0);
+                                }
+                                if (data.fixedDeductions) {
+                                    totalSocialInsurance += (data.fixedDeductions.healthInsurance || 0);
+                                    totalSocialInsurance += (data.fixedDeductions.pension || 0);
+                                    totalSocialInsurance += (data.fixedDeductions.employmentInsurance || 0);
                                 }
                             }
+                        }
+                    });
+                    
+                    // 自動入力
+                    if (totalIncome > 0) {
+                        setPreviousYearIncome(prev => ({
+                            ...prev,
+                            year: prevYear,
+                            totalIncome: Math.round(totalIncome),
+                            socialInsurance: Math.round(totalSocialInsurance)
+                        }));
+                        
+                        console.log(`✅ ${prevYear}年の所得を取得しました:`, {
+                            総所得: totalIncome,
+                            社会保険料: totalSocialInsurance
                         });
                         
-                        setAttendanceData(attData);
-                    } catch (error) {
-                        console.error('勤怠データ読み込みエラー:', error);
+                        alert(
+                            `${prevYear}年の所得データを読み込みました\n\n` +
+                            `総所得: ¥${Math.round(totalIncome).toLocaleString()}\n` +
+                            `社会保険料: ¥${Math.round(totalSocialInsurance).toLocaleString()}\n\n` +
+                            `※手動で編集できます`
+                        );
+                    } else {
+                        console.log(`⚠️ ${prevYear}年のデータがありません`);
+                        setPreviousYearIncome(prev => ({
+                            ...prev,
+                            year: prevYear,
+                            totalIncome: 0,
+                            socialInsurance: 0
+                        }));
                     }
-                };
-                
-                loadAttendance();
-            }, [isAuthenticated, selectedEmployee, currentYear, currentMonth]);
+                } catch (error) {
+                    console.error('前年所得取得エラー:', error);
+                }
+            };
 
-            // 給与計算
-            const calculateSalary = () => {
+            // 住民税計算
+            const calculateResidentTax = () => {
                 if (!selectedEmployee) {
                     alert('従業員を選択してください');
                     return;
                 }
                 
-                const employee = selectedEmployee;
-                const empAttendance = attendanceData[employee.id] || {};
-                
-                // 総労働時間と賃金を計算
-                let totalHours = 0;
-                let totalWage = 0;
-                
-                Object.keys(empAttendance).forEach(dateKey => {
-                    const att = empAttendance[dateKey];
-                    if (att.workHours && att.totalWage) {
-                        totalHours += att.workHours;
-                        totalWage += att.totalWage;
-                    }
-                });
-                
-                // 固定給の場合
-                if (employee.salaryType === 'fixed' && employee.monthlySalary) {
-                    totalWage = employee.monthlySalary;
+                if (previousYearIncome.totalIncome <= 0) {
+                    alert('前年の年間所得を入力してください');
+                    return;
                 }
                 
-                // 控除計算
-                const deductions = calculateDetailedDeductions(employee, totalWage, previousYearIncome);
-                
-                // 結果を保存
-                setCalculationResult({
-                    employee,
-                    year: currentYear,
-                    month: currentMonth,
-                    totalHours,
-                    totalWage,
-                    deductions,
-                    netPay: totalWage - deductions.totalDeductions,
-                    previousYearIncome
-                });
-                
-                setShowResult(true);
-            };
-
-            // 詳細な控除計算
-            const calculateDetailedDeductions = (employee, totalWage, prevYearData) => {
-                const result = {
-                    healthInsurance: 0,
-                    pension: 0,
-                    employmentInsurance: 0,
-                    incomeTax: 0,
-                    residentTax: 0,
-                    rent: employee.deductions?.rent || 0,
-                    utilities: employee.deductions?.utilities || 0,
-                    totalDeductions: 0,
-                    details: {}
-                };
-                
-                // 社会保険料計算（kanri.htmlと同じロジック）
-                // ... (省略、後で実装)
-                
-                // 住民税計算（前年の所得に基づく）
-                if (prevYearData && prevYearData.totalIncome > 0) {
-                    // 給与所得控除
-                    let employmentIncomeDeduction = 0;
-                    if (prevYearData.incomeType === 'salary') {
-                        const income = prevYearData.totalIncome;
-                        if (income <= 1625000) {
-                            employmentIncomeDeduction = 550000;
-                        } else if (income <= 1800000) {
-                            employmentIncomeDeduction = Math.floor(income * 0.4 - 100000);
-                        } else if (income <= 3600000) {
-                            employmentIncomeDeduction = Math.floor(income * 0.3 + 80000);
-                        } else if (income <= 6600000) {
-                            employmentIncomeDeduction = Math.floor(income * 0.2 + 440000);
-                        } else if (income <= 8500000) {
-                            employmentIncomeDeduction = Math.floor(income * 0.1 + 1100000);
-                        } else {
-                            employmentIncomeDeduction = 1950000;
-                        }
-                    }
-                    
-                    // 給与所得
-                    const employmentIncome = Math.max(0, prevYearData.totalIncome - employmentIncomeDeduction);
-                    
-                    // 課税所得
-                    const socialInsurance = prevYearData.socialInsurance || 0;
-                    const baseDeduction = 480000;
-                    const taxableIncome = Math.max(0, employmentIncome - socialInsurance - baseDeduction);
-                    
-                    // 年間住民税
-                    const municipalityEqualTax = {
-                        '東京都': 5000, '大阪府': 5300, '神奈川県': 5800,
-                        '埼玉県': 5000, '千葉県': 5000
-                    };
-                    const equalTax = municipalityEqualTax[prevYearData.municipality] || 5500;
-                    const annualResidentTax = Math.floor(taxableIncome * 0.10) + equalTax;
-                    
-                    // 月額住民税（6月から12回払い）
-                    if (currentMonth >= 5) {
-                        result.residentTax = Math.floor(annualResidentTax / 12);
+                // 給与所得控除
+                let employmentIncomeDeduction = 0;
+                if (previousYearIncome.incomeType === 'salary') {
+                    const income = previousYearIncome.totalIncome;
+                    if (income <= 1625000) {
+                        employmentIncomeDeduction = 550000;
+                    } else if (income <= 1800000) {
+                        employmentIncomeDeduction = Math.floor(income * 0.4 - 100000);
+                    } else if (income <= 3600000) {
+                        employmentIncomeDeduction = Math.floor(income * 0.3 + 80000);
+                    } else if (income <= 6600000) {
+                        employmentIncomeDeduction = Math.floor(income * 0.2 + 440000);
+                    } else if (income <= 8500000) {
+                        employmentIncomeDeduction = Math.floor(income * 0.1 + 1100000);
                     } else {
-                        result.residentTax = 0;
+                        employmentIncomeDeduction = 1950000;
                     }
-                    
-                    // 詳細情報を保存
-                    result.details.previousYearIncome = prevYearData.totalIncome;
-                    result.details.employmentIncomeDeduction = employmentIncomeDeduction;
-                    result.details.employmentIncome = employmentIncome;
-                    result.details.socialInsuranceDeduction = socialInsurance;
-                    result.details.baseDeduction = baseDeduction;
-                    result.details.taxableIncome = taxableIncome;
-                    result.details.annualResidentTax = annualResidentTax;
-                    result.details.monthlyResidentTax = result.residentTax;
                 }
                 
-                result.totalDeductions = result.healthInsurance + result.pension + result.employmentInsurance + result.incomeTax + result.residentTax + result.rent + result.utilities;
+                // 給与所得
+                const employmentIncome = Math.max(0, previousYearIncome.totalIncome - employmentIncomeDeduction);
                 
-                return result;
+                // 課税所得
+                const socialInsurance = previousYearIncome.socialInsurance || 0;
+                const baseDeduction = 480000;
+                const taxableIncome = Math.max(0, employmentIncome - socialInsurance - baseDeduction);
+                
+                // 年間住民税
+                const municipalityEqualTax = {
+                    '東京都': 5000, '大阪府': 5300, '神奈川県': 5800,
+                    '埼玉県': 5000, '千葉県': 5000, '北海道': 5500,
+                    '青森県': 5500, '岩手県': 6000, '宮城県': 5500,
+                    '秋田県': 5500, '山形県': 5500, '福島県': 5500,
+                    '茨城県': 5000, '栃木県': 5000, '群馬県': 5500,
+                    '新潟県': 5500, '富山県': 5500, '石川県': 5500,
+                    '福井県': 5500, '山梨県': 5500, '長野県': 5500,
+                    '岐阜県': 5500, '静岡県': 5500, '愛知県': 5300,
+                    '三重県': 5500, '滋賀県': 5300, '京都府': 5600,
+                    '兵庫県': 5800, '奈良県': 5500, '和歌山県': 5500,
+                    '鳥取県': 5500, '島根県': 5500, '岡山県': 5500,
+                    '広島県': 5500, '山口県': 5500, '徳島県': 5500,
+                    '香川県': 5500, '愛媛県': 5500, '高知県': 5500,
+                    '福岡県': 5500, '佐賀県': 5500, '長崎県': 5500,
+                    '熊本県': 5500, '大分県': 5500, '宮崎県': 5500,
+                    '鹿児島県': 5500, '沖縄県': 5500
+                };
+                const equalTax = municipalityEqualTax[previousYearIncome.municipality] || 5500;
+                const annualResidentTax = Math.floor(taxableIncome * 0.10) + equalTax;
+                
+                // 月額住民税（6月から12回払い）
+                let monthlyResidentTax = 0;
+                if (currentMonth >= 5) {
+                    monthlyResidentTax = Math.floor(annualResidentTax / 12);
+                } else {
+                    monthlyResidentTax = 0;
+                }
+                
+                setResidentTax(monthlyResidentTax);
+                setCalculationDetails({
+                    previousYearIncome: previousYearIncome.totalIncome,
+                    employmentIncomeDeduction,
+                    employmentIncome,
+                    socialInsuranceDeduction: socialInsurance,
+                    baseDeduction,
+                    taxableIncome,
+                    equalTax,
+                    annualResidentTax,
+                    monthlyResidentTax
+                });
+                
+                console.log('✅ 住民税計算完了:', {
+                    前年所得: previousYearIncome.totalIncome,
+                    課税所得: taxableIncome,
+                    年間住民税: annualResidentTax,
+                    月額住民税: monthlyResidentTax
+                });
             };
 
-            // 給与明細印刷
-            const printPayslip = async () => {
-                if (!calculationResult) return;
+            // kanri.htmlに結果を送信して閉じる
+            const sendResultAndClose = () => {
+                if (residentTax === 0) {
+                    alert('先に計算を実行してください');
+                    return;
+                }
                 
-                const payslipElement = document.getElementById('payslip-content');
-                if (!payslipElement) return;
+                // 今月の給与を計算
+                let monthlySalaryAmount = 0;
+                if (salaryType === 'hourly') {
+                    monthlySalaryAmount = hourlyWage * workHours;
+                } else {
+                    monthlySalaryAmount = monthlySalary;
+                }
                 
-                try {
-                    const canvas = await html2canvas(payslipElement, {
-                        scale: 2,
-                        backgroundColor: '#ffffff'
-                    });
+                // kanri.htmlに送信
+                if (window.opener) {
+                    window.opener.postMessage({
+                        type: 'residentTaxCalculated',
+                        employeeId: selectedEmployee.id,
+                        employeeName: selectedEmployee.name,
+                        year: currentYear,
+                        month: currentMonth,
+                        residentTax: residentTax,
+                        monthlySalary: monthlySalaryAmount,
+                        salaryType: salaryType,
+                        calculationDetails: calculationDetails,
+                        previousYearIncome: previousYearIncome
+                    }, '*');
                     
-                    const link = document.createElement('a');
-                    link.download = `給与明細_${calculationResult.employee.name}_${currentYear}年${currentMonth + 1}月.png`;
-                    link.href = canvas.toDataURL();
-                    link.click();
-                } catch (error) {
-                    console.error('印刷エラー:', error);
-                    alert('印刷に失敗しました');
+                    console.log('✅ データ送信完了。ウィンドウを閉じます。');
+                    window.close();
+                } else {
+                    alert('親ウィンドウが見つかりません。このウィンドウを手動で閉じてください。');
                 }
             };
-
-            if (!isAuthenticated) {
-                return (
-                    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
-                            <h1 className="text-3xl font-bold text-gray-800 mb-6 text-center">詳細給与計算システム</h1>
-                            <form onSubmit={handleLogin}>
-                                <div className="mb-4">
-                                    <label className="block text-gray-700 text-sm font-bold mb-2">店舗名</label>
-                                    <input
-                                        type="text"
-                                        value={storeNameInput}
-                                        onChange={(e) => setStoreNameInput(e.target.value)}
-                                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg"
-                                        required
-                                    />
-                                </div>
-                                <div className="mb-6">
-                                    <label className="block text-gray-700 text-sm font-bold mb-2">パスワード</label>
-                                    <input
-                                        type="password"
-                                        value={passwordInput}
-                                        onChange={(e) => setPasswordInput(e.target.value)}
-                                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg"
-                                        required
-                                    />
-                                </div>
-                                <button
-                                    type="submit"
-                                    className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white py-3 rounded-lg font-bold"
-                                >
-                                    ログイン
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                );
-            }
 
             return (
-                <div className="min-h-screen bg-gray-50 p-4">
-                    <div className="max-w-6xl mx-auto">
-                        <div className="bg-white rounded-2xl shadow-lg p-6 mb-4">
-                            <h1 className="text-3xl font-bold text-gray-800 mb-4">📊 詳細給与計算システム</h1>
-                            <p className="text-gray-600 mb-4">
-                                前年の所得データに基づいて、正確な住民税を計算します。
-                            </p>
+                <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 p-4">
+                    <div className="max-w-4xl mx-auto">
+                        <div className="bg-white rounded-2xl shadow-2xl p-8">
+                            <h1 className="text-3xl font-bold text-gray-800 mb-6">💰 住民税計算システム</h1>
                             
                             {/* 従業員選択 */}
                             <div className="mb-6">
@@ -423,11 +382,11 @@
                                 <select
                                     value={selectedEmployee?.id || ''}
                                     onChange={(e) => {
-                                        const emp = employees.find(e => e.id === e.target.value);
+                                        const emp = employees.find(emp => emp.id === e.target.value);
                                         setSelectedEmployee(emp);
-                                        setShowResult(false);
+                                        console.log('✅ 従業員選択:', emp);
                                     }}
-                                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg"
+                                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500"
                                 >
                                     <option value="">選択してください</option>
                                     {employees.map(emp => (
@@ -462,6 +421,80 @@
                                         ))}
                                     </select>
                                 </div>
+                            </div>
+                            
+                            {/* 今月の給与入力 */}
+                            <div className="border-t-2 pt-6 mb-6">
+                                <h2 className="text-xl font-bold text-gray-800 mb-4">今月の給与</h2>
+                                
+                                <div className="mb-4">
+                                    <label className="block text-gray-700 font-bold mb-2">給与タイプ</label>
+                                    <div className="flex gap-4">
+                                        <label className="flex items-center">
+                                            <input
+                                                type="radio"
+                                                value="hourly"
+                                                checked={salaryType === 'hourly'}
+                                                onChange={(e) => setSalaryType(e.target.value)}
+                                                className="mr-2"
+                                            />
+                                            時間給
+                                        </label>
+                                        <label className="flex items-center">
+                                            <input
+                                                type="radio"
+                                                value="fixed"
+                                                checked={salaryType === 'fixed'}
+                                                onChange={(e) => setSalaryType(e.target.value)}
+                                                className="mr-2"
+                                            />
+                                            固定給
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                {salaryType === 'hourly' ? (
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-gray-700 font-bold mb-2">時給</label>
+                                            <input
+                                                type="number"
+                                                value={hourlyWage}
+                                                onChange={(e) => setHourlyWage(parseInt(e.target.value) || 0)}
+                                                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg"
+                                                placeholder="1200"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-700 font-bold mb-2">労働時間</label>
+                                            <input
+                                                type="number"
+                                                value={workHours}
+                                                onChange={(e) => setWorkHours(parseFloat(e.target.value) || 0)}
+                                                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg"
+                                                placeholder="100"
+                                                step="0.5"
+                                            />
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <label className="block text-gray-700 font-bold mb-2">月額給与</label>
+                                        <input
+                                            type="number"
+                                            value={monthlySalary}
+                                            onChange={(e) => setMonthlySalary(parseInt(e.target.value) || 0)}
+                                            className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg"
+                                            placeholder="250000"
+                                        />
+                                    </div>
+                                )}
+                                
+                                {salaryType === 'hourly' && (
+                                    <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                                        <p className="text-lg font-bold">今月の給与: ¥{(hourlyWage * workHours).toLocaleString()}</p>
+                                    </div>
+                                )}
                             </div>
                             
                             {/* 前年所得入力 */}
@@ -500,7 +533,7 @@
                                         value={previousYearIncome.totalIncome}
                                         onChange={(e) => setPreviousYearIncome({...previousYearIncome, totalIncome: parseInt(e.target.value) || 0})}
                                         className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg"
-                                        placeholder="例: 3000000"
+                                        placeholder="3000000"
                                     />
                                     <p className="text-sm text-gray-600 mt-1">
                                         ※給与所得者: 毎月の給与明細の「総支給額」を1年分合計<br/>
@@ -521,6 +554,9 @@
                                             <option value="神奈川県">神奈川県</option>
                                             <option value="埼玉県">埼玉県</option>
                                             <option value="千葉県">千葉県</option>
+                                            <option value="北海道">北海道</option>
+                                            <option value="愛知県">愛知県</option>
+                                            <option value="福岡県">福岡県</option>
                                         </select>
                                     </div>
                                     <div>
@@ -530,7 +566,7 @@
                                             value={previousYearIncome.socialInsurance}
                                             onChange={(e) => setPreviousYearIncome({...previousYearIncome, socialInsurance: parseInt(e.target.value) || 0})}
                                             className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg"
-                                            placeholder="例: 450000"
+                                            placeholder="450000"
                                         />
                                     </div>
                                 </div>
@@ -538,146 +574,82 @@
                             
                             {/* 計算ボタン */}
                             <button
-                                onClick={calculateSalary}
-                                className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-4 rounded-lg font-bold text-lg hover:opacity-90"
+                                onClick={calculateResidentTax}
+                                className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white py-4 rounded-lg font-bold text-lg hover:opacity-90 mb-4"
                             >
-                                📊 計算する
+                                💰 住民税を計算
                             </button>
-                        </div>
-                        
-                        {/* 計算結果 */}
-                        {showResult && calculationResult && (
-                            <div className="bg-white rounded-2xl shadow-lg p-6">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h2 className="text-2xl font-bold text-gray-800">給与明細（詳細計算）</h2>
-                                    <button
-                                        onClick={printPayslip}
-                                        className="bg-blue-500 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-600"
-                                    >
-                                        📄 明細を保存
-                                    </button>
-                                </div>
-                                
-                                <div id="payslip-content" className="bg-white p-8">
-                                    <div className="text-center mb-6">
-                                        <h3 className="text-2xl font-bold">給与明細書</h3>
-                                        <p className="text-gray-600">{currentYear}年{currentMonth + 1}月分</p>
-                                    </div>
+                            
+                            {/* 計算結果 */}
+                            {calculationDetails && (
+                                <div className="bg-green-50 border-2 border-green-500 rounded-lg p-6 mb-4">
+                                    <h3 className="text-xl font-bold text-gray-800 mb-4">計算結果</h3>
                                     
-                                    <div className="mb-4">
-                                        <p className="text-lg"><strong>氏名:</strong> {calculationResult.employee.name}</p>
-                                    </div>
-                                    
-                                    <table className="w-full border-2 border-black mb-6">
-                                        <thead>
-                                            <tr className="bg-gray-200">
-                                                <th className="border-2 border-black p-2">項目</th>
-                                                <th className="border-2 border-black p-2 text-right">金額</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr>
-                                                <td className="border-2 border-black p-2">総支給額</td>
-                                                <td className="border-2 border-black p-2 text-right">¥{calculationResult.totalWage.toLocaleString()}</td>
-                                            </tr>
-                                            <tr className="bg-gray-100">
-                                                <td className="border-2 border-black p-2 font-bold">控除</td>
-                                                <td className="border-2 border-black p-2"></td>
-                                            </tr>
-                                            <tr>
-                                                <td className="border-2 border-black p-2 pl-6">健康保険</td>
-                                                <td className="border-2 border-black p-2 text-right">¥{calculationResult.deductions.healthInsurance.toLocaleString()}</td>
-                                            </tr>
-                                            <tr>
-                                                <td className="border-2 border-black p-2 pl-6">厚生年金</td>
-                                                <td className="border-2 border-black p-2 text-right">¥{calculationResult.deductions.pension.toLocaleString()}</td>
-                                            </tr>
-                                            <tr>
-                                                <td className="border-2 border-black p-2 pl-6">雇用保険</td>
-                                                <td className="border-2 border-black p-2 text-right">¥{calculationResult.deductions.employmentInsurance.toLocaleString()}</td>
-                                            </tr>
-                                            <tr>
-                                                <td className="border-2 border-black p-2 pl-6">所得税</td>
-                                                <td className="border-2 border-black p-2 text-right">¥{calculationResult.deductions.incomeTax.toLocaleString()}</td>
-                                            </tr>
-                                            <tr>
-                                                <td className="border-2 border-black p-2 pl-6">住民税</td>
-                                                <td className="border-2 border-black p-2 text-right">¥{calculationResult.deductions.residentTax.toLocaleString()}</td>
-                                            </tr>
-                                            {calculationResult.deductions.rent > 0 && (
-                                                <tr>
-                                                    <td className="border-2 border-black p-2 pl-6">家賃</td>
-                                                    <td className="border-2 border-black p-2 text-right">¥{calculationResult.deductions.rent.toLocaleString()}</td>
-                                                </tr>
-                                            )}
-                                            {calculationResult.deductions.utilities > 0 && (
-                                                <tr>
-                                                    <td className="border-2 border-black p-2 pl-6">光熱費</td>
-                                                    <td className="border-2 border-black p-2 text-right">¥{calculationResult.deductions.utilities.toLocaleString()}</td>
-                                                </tr>
-                                            )}
-                                            <tr className="bg-gray-100">
-                                                <td className="border-2 border-black p-2 font-bold">控除合計</td>
-                                                <td className="border-2 border-black p-2 text-right font-bold">¥{calculationResult.deductions.totalDeductions.toLocaleString()}</td>
-                                            </tr>
-                                            <tr className="bg-yellow-100">
-                                                <td className="border-2 border-black p-2 font-bold text-lg">差引支給額</td>
-                                                <td className="border-2 border-black p-2 text-right font-bold text-lg">¥{calculationResult.netPay.toLocaleString()}</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                    
-                                    {/* 住民税計算詳細 */}
-                                    {calculationResult.deductions.details.previousYearIncome && (
-                                        <div className="border-t-2 pt-4 mt-4">
-                                            <h4 className="font-bold text-lg mb-2">住民税計算詳細</h4>
-                                            <table className="w-full text-sm">
-                                                <tbody>
-                                                    <tr>
-                                                        <td className="p-1">前年（{previousYearIncome.year}年）総収入:</td>
-                                                        <td className="p-1 text-right">¥{calculationResult.deductions.details.previousYearIncome.toLocaleString()}</td>
-                                                    </tr>
-                                                    <tr>
-                                                        <td className="p-1">給与所得控除:</td>
-                                                        <td className="p-1 text-right">-¥{calculationResult.deductions.details.employmentIncomeDeduction.toLocaleString()}</td>
-                                                    </tr>
-                                                    <tr>
-                                                        <td className="p-1">給与所得:</td>
-                                                        <td className="p-1 text-right">¥{calculationResult.deductions.details.employmentIncome.toLocaleString()}</td>
-                                                    </tr>
-                                                    <tr>
-                                                        <td className="p-1">社会保険料控除:</td>
-                                                        <td className="p-1 text-right">-¥{calculationResult.deductions.details.socialInsuranceDeduction.toLocaleString()}</td>
-                                                    </tr>
-                                                    <tr>
-                                                        <td className="p-1">基礎控除:</td>
-                                                        <td className="p-1 text-right">-¥{calculationResult.deductions.details.baseDeduction.toLocaleString()}</td>
-                                                    </tr>
-                                                    <tr className="border-t">
-                                                        <td className="p-1 font-bold">課税所得:</td>
-                                                        <td className="p-1 text-right font-bold">¥{calculationResult.deductions.details.taxableIncome.toLocaleString()}</td>
-                                                    </tr>
-                                                    <tr>
-                                                        <td className="p-1">年間住民税（所得割10% + 均等割）:</td>
-                                                        <td className="p-1 text-right">¥{calculationResult.deductions.details.annualResidentTax.toLocaleString()}</td>
-                                                    </tr>
-                                                    <tr className="border-t">
-                                                        <td className="p-1 font-bold">月額住民税（12回払い）:</td>
-                                                        <td className="p-1 text-right font-bold">¥{calculationResult.deductions.details.monthlyResidentTax.toLocaleString()}</td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
+                                    <div className="space-y-2 mb-4">
+                                        <div className="flex justify-between">
+                                            <span>前年総収入:</span>
+                                            <span className="font-bold">¥{calculationDetails.previousYearIncome.toLocaleString()}</span>
                                         </div>
-                                    )}
+                                        <div className="flex justify-between text-gray-600">
+                                            <span>給与所得控除:</span>
+                                            <span>-¥{calculationDetails.employmentIncomeDeduction.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span>給与所得:</span>
+                                            <span className="font-bold">¥{calculationDetails.employmentIncome.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex justify-between text-gray-600">
+                                            <span>社会保険料控除:</span>
+                                            <span>-¥{calculationDetails.socialInsuranceDeduction.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex justify-between text-gray-600">
+                                            <span>基礎控除:</span>
+                                            <span>-¥{calculationDetails.baseDeduction.toLocaleString()}</span>
+                                        </div>
+                                        <div className="border-t-2 pt-2 flex justify-between">
+                                            <span className="font-bold">課税所得:</span>
+                                            <span className="font-bold">¥{calculationDetails.taxableIncome.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="bg-white rounded-lg p-4 mb-4">
+                                        <div className="flex justify-between mb-2">
+                                            <span>年間住民税:</span>
+                                            <span className="font-bold text-lg">¥{calculationDetails.annualResidentTax.toLocaleString()}</span>
+                                        </div>
+                                        <div className="text-sm text-gray-600">
+                                            所得割 ¥{Math.floor(calculationDetails.taxableIncome * 0.10).toLocaleString()} + 均等割 ¥{calculationDetails.equalTax.toLocaleString()}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="bg-yellow-100 rounded-lg p-4">
+                                        <div className="flex justify-between">
+                                            <span className="text-xl font-bold">月額住民税:</span>
+                                            <span className="text-2xl font-bold text-purple-600">¥{residentTax.toLocaleString()}</span>
+                                        </div>
+                                        <div className="text-sm text-gray-600 mt-1">
+                                            ※6月から12回払い（1〜5月は¥0）
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        )}
+                            )}
+                            
+                            {/* kanri.htmlに送信 */}
+                            {residentTax > 0 && (
+                                <button
+                                    onClick={sendResultAndClose}
+                                    className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-4 rounded-lg font-bold text-lg hover:opacity-90"
+                                >
+                                    ✅ 計算結果を送信してkanri.htmlに戻る
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
             );
         };
 
-        ReactDOM.render(<DetailedSalaryCalculator />, document.getElementById('root'));
+        ReactDOM.render(<ResidentTaxCalculator />, document.getElementById('root'));
     </script>
 </body>
 </html>

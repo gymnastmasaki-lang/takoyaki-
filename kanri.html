@@ -117,6 +117,9 @@
         
         const { useState, useEffect } = React;
 
+        // 🆕 グローバル変数: 現在計算中の給与タイプ
+        window.currentSalaryCalculationType = 'hourly';
+
         // Icons
         const Icon = ({ children, ...props }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -237,6 +240,9 @@
             const [editingTime, setEditingTime] = useState(null);
             const [editingValue, setEditingValue] = useState('');
             const [editingMemo, setEditingMemo] = useState('');
+            
+            // 🆕 計算された住民税を保存（時間給・固定給別々）
+            const [calculatedResidentTaxes, setCalculatedResidentTaxes] = useState({});
             
             // レシート設定用のstate
             const [receiptSettings, setReceiptSettings] = useState({
@@ -369,6 +375,38 @@
                     setIsAdminAuthenticated(true);
                     console.log('✅ セッション復元: storeId =', window.currentStoreId, ', storeName =', storedStoreName);
                 }
+            }, []);
+
+            // 🆕 keisan-shousai-v3.htmlからのメッセージを受信
+            useEffect(() => {
+                const handleMessage = (event) => {
+                    if (event.data.type === 'residentTaxCalculated') {
+                        console.log('✅ 住民税データ受信:', event.data);
+                        
+                        const salaryTypeKey = event.data.salaryType;
+                        const key = `${event.data.employeeId}_${salaryTypeKey}`;
+                        
+                        setCalculatedResidentTaxes(prev => {
+                            const newTaxes = {
+                                ...prev,
+                                [key]: event.data.residentTax
+                            };
+                            console.log('💾 更新後の住民税:', newTaxes);
+                            return newTaxes;
+                        });
+                        
+                        const salaryTypeText = salaryTypeKey === 'hourly' ? '時間給' : '固定給';
+                        alert(
+                            `${event.data.employeeName}さんの住民税を計算しました\n\n` +
+                            `計算タイプ: ${salaryTypeText}\n` +
+                            `月額住民税: ¥${event.data.residentTax.toLocaleString()}\n\n` +
+                            `給与計算に反映されます。`
+                        );
+                    }
+                };
+                
+                window.addEventListener('message', handleMessage);
+                return () => window.removeEventListener('message', handleMessage);
             }, []);
 
             const loadAllData = async () => {
@@ -879,6 +917,7 @@
                 // ========== 時間給ベースの計算（経費を除外して計算） ==========
                 const hourlyBasePay = totalBasePay + totalOvertimePay + totalHolidayPay + totalLateNightPay + transport;
                 const hourlyGrossBeforeExpense = hourlyBasePay + totalAllowances; // 経費除外の総支給額
+                window.currentSalaryCalculationType = 'hourly'; // 🆕 時間給計算を明示
                 const hourlyDeductions = calculateDeductions(employee, hourlyGrossBeforeExpense, 0); // 経費0で計算
                 const hourlyNetPay = hourlyGrossBeforeExpense - hourlyDeductions.totalDeductions + expenseAmount; // 経費を加算
                 const hourlyTotalGross = hourlyGrossBeforeExpense + expenseAmount; // 最後に経費を加算（表示用）
@@ -900,6 +939,7 @@
                     dailyFixedRate = fixedSalary / daysInMonth;
                     fixedGrossPay = fixedSalary; // 固定給は日割りしない
                     const fixedGrossBeforeExpense = fixedGrossPay + totalAllowances; // 経費除外の総支給額
+                    window.currentSalaryCalculationType = 'fixed'; // 🆕 固定給計算を明示
                     fixedDeductions = calculateDeductions(employee, fixedGrossBeforeExpense, 0); // 経費0で計算
                     fixedNetPay = fixedGrossBeforeExpense - fixedDeductions.totalDeductions + expenseAmount; // 経費を加算
                     fixedTotalGross = fixedGrossBeforeExpense + expenseAmount; // 最後に経費を加算（表示用）
@@ -1601,10 +1641,21 @@
                     }
                 }
 
-                // 住民税計算（スイッチONの場合のみ）
+                // 🆕 住民税は外部計算（keisan-shousai-v3.html）から受信
                 let residentTax = 0;
-                if (insuranceSwitches.residentTax && taxableIncome > 0) {
-                    residentTax = Math.floor(taxableIncome * 0.10);
+                if (insuranceSwitches.residentTax) {
+                    const salaryTypeKey = window.currentSalaryCalculationType || 'hourly';
+                    const key = `${employee.id}_${salaryTypeKey}`;
+                    
+                    if (calculatedResidentTaxes[key]) {
+                        residentTax = calculatedResidentTaxes[key];
+                        console.log(`💰 住民税取得: ${employee.name} (${salaryTypeKey}) = ¥${residentTax}`);
+                    } else {
+                        if (taxableIncome > 0) {
+                            residentTax = Math.floor(taxableIncome * 0.10);
+                            console.log(`⚠️ 住民税未計算（概算）: ${employee.name} (${salaryTypeKey}) = ¥${residentTax}`);
+                        }
+                    }
                 }
 
                 // 家賃・光熱費（従業員データから取得）
@@ -3204,6 +3255,87 @@
 
                                                 {/* 累計差額 */}
                                                 <CumulativeDifferenceDisplay employeeId={selectedPayslipEmployee} />
+                                                
+                                                {/* 🆕 住民税計算ボタン */}
+                                                <div className="mt-6 grid grid-cols-2 gap-4">
+                                                    {/* 時間給用ボタン */}
+                                                    <div>
+                                                        <button
+                                                            onClick={() => {
+                                                                const url = 'keisan-shousai-v3.html';
+                                                                const width = 800;
+                                                                const height = 900;
+                                                                const left = (screen.width - width) / 2;
+                                                                const top = (screen.height - height) / 2;
+                                                                const employee = employees.find(e => e.id === selectedPayslipEmployee);
+                                                                
+                                                                const params = new URLSearchParams({
+                                                                    employeeId: selectedPayslipEmployee,
+                                                                    employeeName: employee?.name || '',
+                                                                    salaryType: 'hourly',
+                                                                    year: currentYear.toString(),
+                                                                    month: currentMonth.toString()
+                                                                });
+                                                                
+                                                                window.open(
+                                                                    `${url}?${params.toString()}`,
+                                                                    `residentTaxCalc_${selectedPayslipEmployee}_hourly`,
+                                                                    `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+                                                                );
+                                                            }}
+                                                            className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white px-4 py-3 rounded-lg font-bold hover:opacity-90 transition-all"
+                                                        >
+                                                            💰 住民税計算（時間給）
+                                                        </button>
+                                                        
+                                                        {calculatedResidentTaxes[`${selectedPayslipEmployee}_hourly`] && (
+                                                            <div className="mt-2 p-3 bg-green-50 border-2 border-green-500 rounded-lg">
+                                                                <p className="text-sm font-bold text-green-800 text-center">
+                                                                    ✅ 時間給の住民税: ¥{calculatedResidentTaxes[`${selectedPayslipEmployee}_hourly`].toLocaleString()}/月
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    
+                                                    {/* 固定給用ボタン */}
+                                                    <div>
+                                                        <button
+                                                            onClick={() => {
+                                                                const url = 'keisan-shousai-v3.html';
+                                                                const width = 800;
+                                                                const height = 900;
+                                                                const left = (screen.width - width) / 2;
+                                                                const top = (screen.height - height) / 2;
+                                                                const employee = employees.find(e => e.id === selectedPayslipEmployee);
+                                                                
+                                                                const params = new URLSearchParams({
+                                                                    employeeId: selectedPayslipEmployee,
+                                                                    employeeName: employee?.name || '',
+                                                                    salaryType: 'fixed',
+                                                                    year: currentYear.toString(),
+                                                                    month: currentMonth.toString()
+                                                                });
+                                                                
+                                                                window.open(
+                                                                    `${url}?${params.toString()}`,
+                                                                    `residentTaxCalc_${selectedPayslipEmployee}_fixed`,
+                                                                    `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+                                                                );
+                                                            }}
+                                                            className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-3 rounded-lg font-bold hover:opacity-90 transition-all"
+                                                        >
+                                                            💰 住民税計算（固定給）
+                                                        </button>
+                                                        
+                                                        {calculatedResidentTaxes[`${selectedPayslipEmployee}_fixed`] && (
+                                                            <div className="mt-2 p-3 bg-blue-50 border-2 border-blue-500 rounded-lg">
+                                                                <p className="text-sm font-bold text-blue-800 text-center">
+                                                                    ✅ 固定給の住民税: ¥{calculatedResidentTaxes[`${selectedPayslipEmployee}_fixed`].toLocaleString()}/月
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
                                             </>
                                         ) : (
                                             <>
