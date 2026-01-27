@@ -4659,33 +4659,37 @@
         
         // 🆕 redSlipsコレクションから赤伝票の税金を集計
         console.log('🔴 赤伝票の税金を集計開始');
-        const redSlipsQuery = window.query(window.getStoreCollection('redSlips'));
-        const redSlipsSnapshot = await window.getDocs(redSlipsQuery);
-        
-        redSlipsSnapshot.forEach(doc => {
-          const data = doc.data();
-          // businessDateで日付を確認
-          if (data.businessDate && dates.includes(data.businessDate)) {
-            // 各商品の税区分を確認して集計
-            if (data.items) {
-              data.items.forEach(item => {
-                const taxRate = item.taxRate || 10;
-                const itemTotal = (item.price || 0) * (item.quantity || 1);
-                
-                if (taxRate === 8) {
-                  totalRedSlipTax8 += itemTotal;
-                } else if (taxRate === 10) {
-                  totalRedSlipTax10 += itemTotal;
-                }
-              });
+        try {
+          const redSlipsQuery = window.query(window.getStoreCollection('redSlips'));
+          const redSlipsSnapshot = await window.getDocs(redSlipsQuery);
+          
+          redSlipsSnapshot.forEach(doc => {
+            const data = doc.data();
+            // businessDateで日付を確認
+            if (data.businessDate && dates.includes(data.businessDate)) {
+              // 各商品の税区分を確認して集計
+              if (data.items) {
+                data.items.forEach(item => {
+                  const taxRate = item.taxRate || 10;
+                  const itemTotal = (item.price || 0) * (item.quantity || 1);
+                  
+                  if (taxRate === 8) {
+                    totalRedSlipTax8 += itemTotal;
+                  } else if (taxRate === 10) {
+                    totalRedSlipTax10 += itemTotal;
+                  }
+                });
+              }
             }
-          }
-        });
-        
-        console.log('🔴 赤伝票の税金集計:', {
-          tax8: totalRedSlipTax8,
-          tax10: totalRedSlipTax10
-        });
+          });
+          
+          console.log('🔴 赤伝票の税金集計:', {
+            tax8: totalRedSlipTax8,
+            tax10: totalRedSlipTax10
+          });
+        } catch (e) {
+          console.error('赤伝票の税金集計エラー:', e);
+        }
         
         for (const dateStr of dates) {
           // 売上データ
@@ -5895,19 +5899,6 @@
         const tax8TotalWithTax = settlementData.tax8Total || 0;  // 8%商品合計（税込）
         const tax10TotalWithTax = settlementData.tax10Total || 0; // 10%商品合計（税込）
         
-        // 税抜価格を計算（内税なので税込価格から逆算）
-        const tax8Excluded = Math.floor(tax8TotalWithTax / 1.08);  // 8%商品合計（税抜）
-        const tax10Excluded = Math.floor(tax10TotalWithTax / 1.10); // 10%商品合計（税抜）
-        
-        // 消費税額を計算
-        const tax8Amount = tax8TotalWithTax - tax8Excluded;  // 8%の消費税
-        const tax10Amount = tax10TotalWithTax - tax10Excluded; // 10%の消費税
-        
-        // 合計
-        const totalTax = tax8Amount + tax10Amount;  // 消費税の合計
-        const taxExcludedTotal = tax8Excluded + tax10Excluded;  // 税抜合計
-        const taxIncludedTotal = tax8TotalWithTax + tax10TotalWithTax;  // 税込合計（8%と10%の合計）
-        
         // ===== ドロアオープン数 =====
         const drawerOpenCount = settlementData.drawerOpenCount || 0;
         console.log('🔓 精算時のdrawerOpenCount:', drawerOpenCount);
@@ -5981,6 +5972,8 @@
         const totalTax = tax8Amount + tax10Amount;  // 消費税の合計
         const taxExcludedTotal = tax8Excluded + tax10Excluded;  // 税抜合計
         const taxIncludedTotal = adjustedTax8TotalWithTax + adjustedTax10TotalWithTax;  // 税込合計（8%と10%の合計）
+        
+        // ===== 支出を取得 =====
         let expenseTotal = 0;
         try {
           const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
