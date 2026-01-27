@@ -1797,21 +1797,22 @@
 
         menuSnapshot.forEach(doc => {
           const data = doc.data();
-          if (!data || !data.category || !data.id) return;
-
-          const cat = data.category;
-          const itemId = data.id;
+          // 🔧 修正: idフィールドがない場合はドキュメントIDを使用
+          const itemId = data.id || doc.id;
+          const category = data.category;
+          
+          if (!category || !itemId) return;
 
           const isDineInOnly = typeof data.note === 'string' && data.note.includes('店内のみ');
           const showThisItemInThisMode = isEatIn || !isDineInOnly;
 
-          if (!categoryInfo.has(cat)) {
-            categoryInfo.set(cat, {
+          if (!categoryInfo.has(category)) {
+            categoryInfo.set(category, {
               minId: itemId,
               hasTakeoutVisibleItem: showThisItemInThisMode
             });
           } else {
-            const info = categoryInfo.get(cat);
+            const info = categoryInfo.get(category);
             if (itemId < info.minId) info.minId = itemId;
             if (showThisItemInThisMode) info.hasTakeoutVisibleItem = true;
           }
@@ -1863,19 +1864,29 @@
             return;
           }
           
+          // 🔧 修正: idフィールドがない場合はドキュメントIDを使用
           items.push({
-            id: data.id,
+          // 🔧 修正: idフィールドがない場合はドキュメントIDを使用
+          items.push({
+            id: data.id || doc.id,
             category: data.category,
             name: data.name,
             price: data.price,
             toppingsId: data.toppingsId,
             toppingSets: data.toppingSets || [], // 追加
             image: data.image || '',
-            note: note
+            note: note,
+            order: data.order || 0  // 🆕 orderフィールドを追加
           });
         });
         
+        // 🆕 改善: orderフィールドでソート（orderがない場合はid順）
         items.sort((a, b) => {
+          // orderフィールドが両方にある場合はorder順
+          if (a.order && b.order) {
+            return a.order - b.order;
+          }
+          // orderがない場合はid順（従来の動作）
           if (a.id < b.id) return -1;
           if (a.id > b.id) return 1;
           return 0;

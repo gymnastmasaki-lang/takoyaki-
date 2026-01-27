@@ -11111,8 +11111,37 @@ ${redSlipCount > 0 ? `
           console.log('⚠️ トッピングセットなし');
         }
         
+        // 🆕 既存のメニューから最大IDを取得
+        const menusSnapshot = await window.getDocs(window.getStoreCollection('menus'));
+        let maxMenuNum = 0;
+        let maxOrder = 0;
+        
+        menusSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.id) {
+            // 既存のIDフォーマットに応じて処理
+            const match = data.id.match(/\d+$/);
+            if (match) {
+              const num = parseInt(match[0]);
+              if (num > maxMenuNum) maxMenuNum = num;
+            }
+          }
+          // orderフィールドの最大値も取得
+          if (data.order && data.order > maxOrder) {
+            maxOrder = data.order;
+          }
+        });
+        
+        // 新しいIDを生成（M0001形式）
+        maxMenuNum++;
+        const productId = 'M' + String(maxMenuNum).padStart(4, '0');
+        
+        // 新しいorder値を生成
+        maxOrder++;
+        
         // Firebaseに商品を追加
         const productData = {
+          id: productId,  // 🆕 IDフィールドを追加
           name: name,
           price: price,
           category: finalCategory,
@@ -11121,6 +11150,7 @@ ${redSlipCount > 0 ? `
           note: note,
           image: image || '',
           taxRate: taxRate,  // 選択した税率を保存
+          order: maxOrder,  // 🆕 表示順フィールドを追加
           createdAt: window.Timestamp.now()
         };
         
@@ -12462,6 +12492,13 @@ ${redSlipCount > 0 ? `
           image: image || '',
           taxRate: taxRate  // 選択した税率を保存
         };
+        
+        // 🆕 既存のorderフィールドを保持（既に取得済みのドキュメントから）
+        menuSnapshot.forEach(doc => {
+          if (doc.id === docId && doc.data().order) {
+            productData.order = doc.data().order;
+          }
+        });
         
         // docIdを使用して更新（idではなく）
         await window.setDoc(window.getStoreDoc('menus', docId), productData);
