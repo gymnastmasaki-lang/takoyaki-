@@ -3666,10 +3666,41 @@
         
         const dailyData = dailySalesDoc.data();
         
-        // 注文金額と税金を取得
+        // 注文金額を取得
         const totalAmount = orderData.totalAmount || 0;
-        const tax8Total = orderData.tax8Total || 0;
-        const tax10Total = orderData.tax10Total || 0;
+        
+        // 税金を取得または再計算
+        let tax8Total = orderData.tax8Total || 0;
+        let tax10Total = orderData.tax10Total || 0;
+        
+        // 🔧 税金情報がない場合、itemsから再計算
+        if (tax8Total === 0 && tax10Total === 0 && orderData.items && Array.isArray(orderData.items)) {
+          console.log('⚠️ 税金情報がないため、itemsから再計算します（編集モーダル）');
+          
+          orderData.items.forEach(item => {
+            const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+            const taxRate = item.taxRate || 10; // デフォルトは10%
+            
+            if (taxRate === 8) {
+              tax8Total += itemTotal;
+            } else if (taxRate === 10) {
+              tax10Total += itemTotal;
+            }
+          });
+          
+          // レジ袋の税金も加算
+          if (orderData.bagNeeded && orderData.bagQuantity > 0) {
+            const bagTotal = orderData.bagQuantity * 3;
+            // レジ袋は通常10%
+            tax10Total += bagTotal;
+          }
+          
+          console.log('📊 再計算した税金:', {
+            税込合計: totalAmount,
+            '8%対象': tax8Total,
+            '10%対象': tax10Total
+          });
+        }
         
         // 支払い方法別の金額
         let cashSales = 0, emoneSales = 0, creditSales = 0;
@@ -3689,7 +3720,9 @@
         console.log('📊 dailySalesから減算:', {
           売上: totalAmount,
           客数: 1,
-          商品数: totalItems
+          商品数: totalItems,
+          '8%税金': tax8Total,
+          '10%税金': tax10Total
         });
         
         // dailySalesから減算 + 赤伝票情報を記録
@@ -3703,7 +3736,9 @@
           tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
           tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total),
           redSlipCount: (dailyData.redSlipCount || 0) + 1,  // 🆕 赤伝票件数
-          redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount  // 🆕 赤伝票金額
+          redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount,  // 🆕 赤伝票金額
+          redSlipTax8Total: (dailyData.redSlipTax8Total || 0) + tax8Total,  // 🆕 赤伝票8%税金
+          redSlipTax10Total: (dailyData.redSlipTax10Total || 0) + tax10Total  // 🆕 赤伝票10%税金
         };
         
         console.log('📊 dailySales更新:', {
@@ -4097,10 +4132,41 @@
         
         const dailyData = dailySalesDoc.data();
         
-        // 注文金額と税金を取得
+        // 注文金額を取得
         const totalAmount = orderData.totalAmount || 0;
-        const tax8Total = orderData.tax8Total || 0;
-        const tax10Total = orderData.tax10Total || 0;
+        
+        // 税金を取得または再計算
+        let tax8Total = orderData.tax8Total || 0;
+        let tax10Total = orderData.tax10Total || 0;
+        
+        // 🔧 税金情報がない場合、itemsから再計算
+        if (tax8Total === 0 && tax10Total === 0 && orderData.items && Array.isArray(orderData.items)) {
+          console.log('⚠️ 税金情報がないため、itemsから再計算します');
+          
+          orderData.items.forEach(item => {
+            const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+            const taxRate = item.taxRate || 10; // デフォルトは10%
+            
+            if (taxRate === 8) {
+              tax8Total += itemTotal;
+            } else if (taxRate === 10) {
+              tax10Total += itemTotal;
+            }
+          });
+          
+          // レジ袋の税金も加算
+          if (orderData.bagNeeded && orderData.bagQuantity > 0) {
+            const bagTotal = orderData.bagQuantity * 3;
+            // レジ袋は通常10%
+            tax10Total += bagTotal;
+          }
+          
+          console.log('📊 再計算した税金:', {
+            税込合計: totalAmount,
+            '8%対象': tax8Total,
+            '10%対象': tax10Total
+          });
+        }
         
         // 支払い方法別の金額
         let cashSales = 0, emoneSales = 0, creditSales = 0;
@@ -4123,7 +4189,9 @@
           商品数: totalItems,
           現金: cashSales,
           電子マネー: emoneSales,
-          クレジット: creditSales
+          クレジット: creditSales,
+          '8%税金': tax8Total,
+          '10%税金': tax10Total
         });
         
         // dailySalesから減算 + 赤伝票情報を記録
@@ -4137,7 +4205,9 @@
           tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
           tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total),
           redSlipCount: (dailyData.redSlipCount || 0) + 1,  // 🆕 赤伝票件数
-          redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount  // 🆕 赤伝票金額
+          redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount,  // 🆕 赤伝票金額
+          redSlipTax8Total: (dailyData.redSlipTax8Total || 0) + tax8Total,  // 🆕 赤伝票8%税金
+          redSlipTax10Total: (dailyData.redSlipTax10Total || 0) + tax10Total  // 🆕 赤伝票10%税金
         };
         
         console.log('📊 dailySales更新:', {
@@ -4619,6 +4689,8 @@
         let totalDrawerOpen = 0;
         let totalRedSlipCount = 0;  // 🆕 赤伝票件数
         let totalRedSlipAmount = 0;  // 🆕 赤伝票金額
+        let totalRedSlipTax8 = 0;  // 🆕 赤伝票8%税金
+        let totalRedSlipTax10 = 0;  // 🆕 赤伝票10%税金
         let totalExpense = 0;
         let totalLaborCost = 0;
         const itemCounts = {}; // 商品別カウント
@@ -4671,6 +4743,8 @@
             totalDrawerOpen += data.drawerOpenCount || 0;
             totalRedSlipCount += data.redSlipCount || 0;  // 🆕 赤伝票件数
             totalRedSlipAmount += data.redSlipAmount || 0;  // 🆕 赤伝票金額
+            totalRedSlipTax8 += data.redSlipTax8Total || 0;  // 🆕 赤伝票8%税金
+            totalRedSlipTax10 += data.redSlipTax10Total || 0;  // 🆕 赤伝票10%税金
           }
           
           // 支出データ
@@ -4819,7 +4893,16 @@
 値引き金額: ¥${totalDiscount.toLocaleString()}
 支出: ¥${totalExpense.toLocaleString()}
 合計売上: ¥${finalTotalSales.toLocaleString()}
+${totalRedSlipCount > 0 ? `
+-------------------------------------
+赤伝票の税金内訳（減算済み）
+-------------------------------------
+8%の赤伝票（税込）: -¥${totalRedSlipTax8.toLocaleString()}
+10%の赤伝票（税込）: -¥${totalRedSlipTax10.toLocaleString()}
+赤伝票税金合計: -¥${(totalRedSlipTax8 + totalRedSlipTax10).toLocaleString()}
 
+※ 上記の税金内訳はすでに減算済みです
+` : ''}
 -------------------------------------
 その他
 -------------------------------------
@@ -5744,7 +5827,9 @@
           tax10Total: 0,
           drawerOpenCount: 0,
           redSlipCount: 0,  // 🆕
-          redSlipAmount: 0  // 🆕
+          redSlipAmount: 0,  // 🆕
+          redSlipTax8Total: 0,  // 🆕
+          redSlipTax10Total: 0  // 🆕
         };
         
         if (salesDoc.exists()) {
@@ -5764,7 +5849,9 @@
             tax10Total: data.tax10Total || 0,
             drawerOpenCount: data.drawerOpenCount || 0,
             redSlipCount: data.redSlipCount || 0,  // 🆕
-            redSlipAmount: data.redSlipAmount || 0  // 🆕
+            redSlipAmount: data.redSlipAmount || 0,  // 🆕
+            redSlipTax8Total: data.redSlipTax8Total || 0,  // 🆕
+            redSlipTax10Total: data.redSlipTax10Total || 0  // 🆕
           };
           
           console.log('📊 settlementData:', settlementData);
@@ -5870,8 +5957,12 @@
         // ===== 🆕 赤伝票情報を取得 =====
         const redSlipCount = settlementData.redSlipCount || 0;
         const redSlipAmount = settlementData.redSlipAmount || 0;
+        const redSlipTax8Total = settlementData.redSlipTax8Total || 0;
+        const redSlipTax10Total = settlementData.redSlipTax10Total || 0;
         console.log('🔴 赤伝票件数:', redSlipCount);
         console.log('🔴 赤伝票金額:', redSlipAmount);
+        console.log('🔴 赤伝票8%税金:', redSlipTax8Total);
+        console.log('🔴 赤伝票10%税金:', redSlipTax10Total);
         
         // ===== 支出を取得 =====
         let expenseTotal = 0;
@@ -6034,7 +6125,16 @@
 値引き金額: ¥${discountTotal.toLocaleString()}
 支出: ¥${expenseTotal.toLocaleString()}
 合計売上: ¥${finalTotalSales.toLocaleString()}
+${redSlipCount > 0 ? `
+-------------------------------------
+赤伝票の税金内訳（減算済み）
+-------------------------------------
+8%の赤伝票（税込）: -¥${redSlipTax8Total.toLocaleString()}
+10%の赤伝票（税込）: -¥${redSlipTax10Total.toLocaleString()}
+赤伝票税金合計: -¥${(redSlipTax8Total + redSlipTax10Total).toLocaleString()}
 
+※ 上記の税金内訳はすでに減算済みです
+` : ''}
 -------------------------------------
 その他
 -------------------------------------
@@ -6107,6 +6207,8 @@
           drawerOpenCount: drawerOpenCount,
           redSlipCount: redSlipCount,  // 🆕 赤伝票件数
           redSlipAmount: redSlipAmount,  // 🆕 赤伝票金額
+          redSlipTax8Total: redSlipTax8Total,  // 🆕 赤伝票8%税金
+          redSlipTax10Total: redSlipTax10Total,  // 🆕 赤伝票10%税金
           staffName: staffName,
           aiComment: ""
         });
