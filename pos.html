@@ -3655,7 +3655,74 @@
         
         console.log('📅 営業日:', dateStr);
         
+        // dailySalesを取得
+        const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+        const dailySalesDoc = await window.getDoc(dailySalesRef);
+        
+        if (!dailySalesDoc.exists()) {
+          showCustomAlert('この営業日のdailySalesが見つかりません\n営業日: ' + dateStr, '⚠️ 警告', '⚠️');
+          return;
+        }
+        
+        const dailyData = dailySalesDoc.data();
+        
+        // 注文金額と税金を取得
         const totalAmount = orderData.totalAmount || 0;
+        const tax8Total = orderData.tax8Total || 0;
+        const tax10Total = orderData.tax10Total || 0;
+        
+        // 支払い方法別の金額
+        let cashSales = 0, emoneSales = 0, creditSales = 0;
+        const paymentMethod = orderData.paymentMethod || '';
+        if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
+        else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
+        else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
+        
+        // 商品数を計算
+        let totalItems = 0;
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            totalItems += item.quantity || 0;
+          });
+        }
+        
+        console.log('📊 dailySalesから減算:', {
+          売上: totalAmount,
+          客数: 1,
+          商品数: totalItems
+        });
+        
+        // dailySalesから減算 + 赤伝票情報を記録
+        const updateData = {
+          totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
+          customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+          totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
+          cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
+          emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
+          creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
+          tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
+          tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total),
+          redSlipCount: (dailyData.redSlipCount || 0) + 1,  // 🆕 赤伝票件数
+          redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount  // 🆕 赤伝票金額
+        };
+        
+        console.log('📊 dailySales更新:', {
+          更新前: { 
+            totalSales: dailyData.totalSales, 
+            customerCount: dailyData.customerCount,
+            赤伝票件数: dailyData.redSlipCount || 0,
+            赤伝票金額: dailyData.redSlipAmount || 0
+          },
+          更新後: { 
+            totalSales: updateData.totalSales, 
+            customerCount: updateData.customerCount,
+            赤伝票件数: updateData.redSlipCount,
+            赤伝票金額: updateData.redSlipAmount
+          }
+        });
+        
+        // dailySalesを更新
+        await window.updateDoc(dailySalesRef, updateData);
         
         // 🆕 redSlipsコレクションに保存（監査用）
         const redSlipData = {
@@ -3834,39 +3901,8 @@
             
             // 注文金額と税金を取得
             const totalAmount = orderData.totalAmount || 0;
-            
-            // 🆕 税金内訳を計算（注文データになければ商品から計算）
-            let tax8Total = orderData.tax8Total || 0;
-            let tax10Total = orderData.tax10Total || 0;
-            
-            console.log('📊 [deleteOrderFromHistory] 注文データの税金:', { 
-              'orderData.tax8Total': orderData.tax8Total,
-              'orderData.tax10Total': orderData.tax10Total,
-              'tax8Total (|| 0後)': tax8Total, 
-              'tax10Total (|| 0後)': tax10Total,
-              items: orderData.items ? orderData.items.length : 0
-            });
-            
-            // もし税金データがない、または不完全な場合は、商品データから計算
-            if (orderData.items && Array.isArray(orderData.items) && orderData.items.length > 0) {
-              // 税金データが全くない、または不完全な場合
-              if (!orderData.tax8Total && !orderData.tax10Total) {
-                console.log('⚠️ [deleteOrderFromHistory] 税金データがないため、商品から計算します');
-                tax8Total = 0;
-                tax10Total = 0;
-                orderData.items.forEach(item => {
-                  const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-                  if (item.taxRate === 8) {
-                    tax8Total += itemTotal;
-                  } else {
-                    tax10Total += itemTotal;
-                  }
-                });
-                console.log('📊 [deleteOrderFromHistory] 商品から計算した税金:', { tax8Total, tax10Total });
-              }
-            }
-            
-            console.log('📊 [deleteOrderFromHistory] 最終税金内訳:', { tax8Total, tax10Total });
+            const tax8Total = orderData.tax8Total || 0;
+            const tax10Total = orderData.tax10Total || 0;
             
             // 支払い方法別の金額（日本語と英語の両方に対応）
             let cashSales = 0, emoneSales = 0, creditSales = 0;
@@ -4050,7 +4086,77 @@
         
         console.log('📅 営業日:', dateStr);
         
+        // dailySalesを取得
+        const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+        const dailySalesDoc = await window.getDoc(dailySalesRef);
+        
+        if (!dailySalesDoc.exists()) {
+          showCustomAlert('この営業日のdailySalesが見つかりません\n営業日: ' + dateStr, '⚠️ 警告', '⚠️');
+          return;
+        }
+        
+        const dailyData = dailySalesDoc.data();
+        
+        // 注文金額と税金を取得
         const totalAmount = orderData.totalAmount || 0;
+        const tax8Total = orderData.tax8Total || 0;
+        const tax10Total = orderData.tax10Total || 0;
+        
+        // 支払い方法別の金額
+        let cashSales = 0, emoneSales = 0, creditSales = 0;
+        const paymentMethod = orderData.paymentMethod || '';
+        if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
+        else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
+        else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
+        
+        // 商品数を計算
+        let totalItems = 0;
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            totalItems += item.quantity || 0;
+          });
+        }
+        
+        console.log('📊 dailySalesから減算:', {
+          売上: totalAmount,
+          客数: 1,
+          商品数: totalItems,
+          現金: cashSales,
+          電子マネー: emoneSales,
+          クレジット: creditSales
+        });
+        
+        // dailySalesから減算 + 赤伝票情報を記録
+        const updateData = {
+          totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
+          customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+          totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
+          cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
+          emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
+          creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
+          tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
+          tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total),
+          redSlipCount: (dailyData.redSlipCount || 0) + 1,  // 🆕 赤伝票件数
+          redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount  // 🆕 赤伝票金額
+        };
+        
+        console.log('📊 dailySales更新:', {
+          更新前: {
+            totalSales: dailyData.totalSales,
+            customerCount: dailyData.customerCount,
+            赤伝票件数: dailyData.redSlipCount || 0,
+            赤伝票金額: dailyData.redSlipAmount || 0
+          },
+          更新後: {
+            totalSales: updateData.totalSales,
+            customerCount: updateData.customerCount,
+            赤伝票件数: updateData.redSlipCount,
+            赤伝票金額: updateData.redSlipAmount
+          }
+        });
+        
+        // dailySalesを更新
+        await window.updateDoc(dailySalesRef, updateData);
         
         // 🆕 redSlipsコレクションに保存（監査用）
         const redSlipData = {
@@ -4720,7 +4826,6 @@
 ドロアオープン数: ${totalDrawerOpen}回
 赤伝票件数: ${totalRedSlipCount}件
 赤伝票金額: ¥${totalRedSlipAmount.toLocaleString()}
-（赤伝票の税金は上記から除外済み）
 人件費: ¥${Math.round(totalLaborCost).toLocaleString()}
 
 =====================================
@@ -5623,14 +5728,9 @@
       try {
         const dateStr = document.getElementById('settlementDate').value;
         
-        console.log('📊 清算データ集計開始:', dateStr);
-        
-        // 🆕 ordersコレクションから直接集計
-        const ordersQuery = window.query(
-          window.getStoreCollection('orders'),
-          window.where('paidAt', '!=', null)
-        );
-        const ordersSnapshot = await window.getDocs(ordersQuery);
+        // 日次売上データから取得
+        const salesRef = window.getStoreDoc('dailySales', dateStr);
+        const salesDoc = await window.getDoc(salesRef);
         
         let settlementData = {
           totalSales: 0,
@@ -5643,118 +5743,32 @@
           tax8Total: 0,
           tax10Total: 0,
           drawerOpenCount: 0,
-          redSlipCount: 0,
-          redSlipAmount: 0
+          redSlipCount: 0,  // 🆕
+          redSlipAmount: 0  // 🆕
         };
         
-        console.log('📊 orders取得件数:', ordersSnapshot.size);
-        
-        // 営業日でフィルタして集計
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          
-          // 削除済みの注文はスキップ
-          if (data.deleted) {
-            console.log('🗑️ 削除済み注文をスキップ:', data.orderNumber);
-            return;
-          }
-          
-          // 会計日時から営業日を計算（3時基準）
-          if (!data.paidAt) return;
-          
-          const paidDate = data.paidAt.toDate();
-          let businessDate = new Date(paidDate);
-          if (paidDate.getHours() < 3) {
-            businessDate.setDate(businessDate.getDate() - 1);
-          }
-          
-          const orderDateStr = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
-          
-          // 指定された営業日の注文のみ集計
-          if (orderDateStr !== dateStr) return;
-          
-          console.log('✅ 注文を集計:', data.orderNumber, '金額:', data.totalAmount);
-          
-          // 売上集計
-          settlementData.totalSales += data.totalAmount || 0;
-          settlementData.customerCount += 1;
-          
-          // 商品数集計
-          if (data.items && Array.isArray(data.items)) {
-            data.items.forEach(item => {
-              settlementData.totalItems += item.quantity || 0;
-            });
-          }
-          
-          // 支払い方法別集計
-          const paymentMethod = data.paymentMethod || '';
-          if (paymentMethod === '現金' || paymentMethod === 'cash') {
-            settlementData.cashSales += data.totalAmount || 0;
-          } else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') {
-            settlementData.emoneSales += data.totalAmount || 0;
-          } else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') {
-            settlementData.creditSales += data.totalAmount || 0;
-          }
-          
-          // 税金集計
-          if (data.tax8Total) {
-            settlementData.tax8Total += data.tax8Total;
-          }
-          if (data.tax10Total) {
-            settlementData.tax10Total += data.tax10Total;
-          }
-          
-          // 税金データがない場合は商品から計算
-          if (!data.tax8Total && !data.tax10Total && data.items && Array.isArray(data.items)) {
-            data.items.forEach(item => {
-              const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-              if (item.taxRate === 8) {
-                settlementData.tax8Total += itemTotal;
-              } else {
-                settlementData.tax10Total += itemTotal;
-              }
-            });
-          }
-        });
-        
-        console.log('📊 orders集計完了:', settlementData);
-        
-        // dailySalesからドロアオープン数を取得
-        const salesRef = window.getStoreDoc('dailySales', dateStr);
-        const salesDoc = await window.getDoc(salesRef);
         if (salesDoc.exists()) {
           const data = salesDoc.data();
-          settlementData.drawerOpenCount = data.drawerOpenCount || 0;
-          settlementData.totalDiscount = data.totalDiscount || 0;
+          console.log('📊 dailySalesデータ:', data);
+          console.log('🔓 drawerOpenCount:', data.drawerOpenCount);
+          
+          settlementData = {
+            totalSales: data.totalSales || 0,
+            customerCount: data.customerCount || 0,
+            totalItems: data.totalItems || 0,
+            cashSales: data.cashSales || 0,
+            emoneSales: data.emoneSales || 0,
+            creditSales: data.creditSales || 0,
+            totalDiscount: data.totalDiscount || 0,
+            tax8Total: data.tax8Total || 0,
+            tax10Total: data.tax10Total || 0,
+            drawerOpenCount: data.drawerOpenCount || 0,
+            redSlipCount: data.redSlipCount || 0,  // 🆕
+            redSlipAmount: data.redSlipAmount || 0  // 🆕
+          };
+          
+          console.log('📊 settlementData:', settlementData);
         }
-        
-        // 🆕 redSlipsコレクションから赤伝票を集計
-        if (window.currentStoreId && window.currentStoreId !== null && window.currentStoreId !== '') {
-          try {
-            const redSlipsQuery = window.query(
-              window.collection(window.db, 'stores', window.currentStoreId, 'redSlips'),
-              window.where('businessDate', '==', dateStr)
-            );
-            const redSlipsSnapshot = await window.getDocs(redSlipsQuery);
-            
-            redSlipsSnapshot.forEach(doc => {
-              const redSlipData = doc.data();
-              settlementData.redSlipCount += 1;
-              settlementData.redSlipAmount += redSlipData.totalAmount || 0;
-              
-              console.log('🔴 赤伝票:', redSlipData.orderNumber, '金額:', redSlipData.totalAmount);
-            });
-            
-            console.log('📊 redSlips集計完了:', {
-              redSlipCount: settlementData.redSlipCount,
-              redSlipAmount: settlementData.redSlipAmount
-            });
-          } catch (e) {
-            console.error('❌ redSlips集計エラー:', e);
-          }
-        }
-        
-        console.log('📊 最終settlementData:', settlementData);
         
         // settlementDataをグローバルに保存（CSV生成で使用）
         window.currentSettlementData = settlementData;
@@ -5832,84 +5846,32 @@
         const discountTotal = settlementData.totalDiscount || 0;
         
         // ===== 税金内訳（内税） =====
-        let tax8TotalWithTax = settlementData.tax8Total || 0;
-        let tax10TotalWithTax = settlementData.tax10Total || 0;
+        const tax8TotalWithTax = settlementData.tax8Total || 0;  // 8%商品合計（税込）
+        const tax10TotalWithTax = settlementData.tax10Total || 0; // 10%商品合計（税込）
         
-        // ===== 🆕 redSlipsコレクションから赤伝票の税金を取得して補正 =====
-        try {
-          console.log('🔍 redSlipsコレクションから赤伝票の税金を確認中...');
-          
-          // 店舗IDがない場合のパス処理
-          let redSlipsQuery;
-          if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
-            console.log('⚠️ 店舗IDがないため、redSlips補正をスキップします');
-          } else {
-            redSlipsQuery = window.query(
-              window.collection(window.db, 'stores', window.currentStoreId, 'redSlips'),
-              window.where('businessDate', '==', dateStr)
-            );
-            
-            const redSlipsSnapshot = await window.getDocs(redSlipsQuery);
-            let redSlipTax8 = 0;
-            let redSlipTax10 = 0;
-            
-            redSlipsSnapshot.forEach(doc => {
-              const redSlipData = doc.data();
-              // 赤伝票の税金データがあれば取得
-              if (redSlipData.tax8Total) {
-                redSlipTax8 += redSlipData.tax8Total;
-              }
-              if (redSlipData.tax10Total) {
-                redSlipTax10 += redSlipData.tax10Total;
-              }
-              
-              // 税金データがない場合は商品から計算
-              if (!redSlipData.tax8Total && !redSlipData.tax10Total && redSlipData.items) {
-                redSlipData.items.forEach(item => {
-                  const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-                  if (item.taxRate === 8) {
-                    redSlipTax8 += itemTotal;
-                  } else {
-                    redSlipTax10 += itemTotal;
-                  }
-                });
-              }
-            });
-            
-            console.log('📊 redSlipsから集計した税金:', { redSlipTax8, redSlipTax10 });
-            
-            // dailySalesの税金から赤伝票の税金を減算（二重減算を防ぐため、既に減算されている可能性を考慮）
-            // もしdailySalesの税金が赤伝票分を含んでいる場合のみ減算
-            if (redSlipTax8 > 0 && tax8TotalWithTax >= redSlipTax8) {
-              console.log('⚠️ dailySalesに赤伝票の8%税金が含まれている可能性があるため、補正します');
-              tax8TotalWithTax -= redSlipTax8;
-            }
-            if (redSlipTax10 > 0 && tax10TotalWithTax >= redSlipTax10) {
-              console.log('⚠️ dailySalesに赤伝票の10%税金が含まれている可能性があるため、補正します');
-              tax10TotalWithTax -= redSlipTax10;
-            }
-            
-            console.log('📊 補正後の税金:', { tax8TotalWithTax, tax10TotalWithTax });
-          }
-        } catch (e) {
-          console.error('❌ redSlips税金補正エラー:', e);
-        }
+        // 税抜価格を計算（内税なので税込価格から逆算）
+        const tax8Excluded = Math.floor(tax8TotalWithTax / 1.08);  // 8%商品合計（税抜）
+        const tax10Excluded = Math.floor(tax10TotalWithTax / 1.10); // 10%商品合計（税抜）
+        
+        // 消費税額を計算
+        const tax8Amount = tax8TotalWithTax - tax8Excluded;  // 8%の消費税
+        const tax10Amount = tax10TotalWithTax - tax10Excluded; // 10%の消費税
+        
+        // 合計
+        const totalTax = tax8Amount + tax10Amount;  // 消費税の合計
+        const taxExcludedTotal = tax8Excluded + tax10Excluded;  // 税抜合計
+        const taxIncludedTotal = tax8TotalWithTax + tax10TotalWithTax;  // 税込合計（8%と10%の合計）
         
         // ===== ドロアオープン数 =====
         const drawerOpenCount = settlementData.drawerOpenCount || 0;
+        console.log('🔓 精算時のdrawerOpenCount:', drawerOpenCount);
+        console.log('📊 settlementData全体:', settlementData);
         
         // ===== 🆕 赤伝票情報を取得 =====
         const redSlipCount = settlementData.redSlipCount || 0;
         const redSlipAmount = settlementData.redSlipAmount || 0;
-        
-        // 税金計算（dailySalesには既に赤伝票が除外されている）
-        const tax8Excluded = Math.floor(tax8TotalWithTax / 1.08);
-        const tax10Excluded = Math.floor(tax10TotalWithTax / 1.10);
-        const tax8Amount = tax8TotalWithTax - tax8Excluded;
-        const tax10Amount = tax10TotalWithTax - tax10Excluded;
-        const totalTax = tax8Amount + tax10Amount;
-        const taxExcludedTotal = tax8Excluded + tax10Excluded;
-        const taxIncludedTotal = tax8TotalWithTax + tax10TotalWithTax;
+        console.log('🔴 赤伝票件数:', redSlipCount);
+        console.log('🔴 赤伝票金額:', redSlipAmount);
         
         // ===== 支出を取得 =====
         let expenseTotal = 0;
@@ -6079,7 +6041,6 @@
 ドロアオープン数: ${drawerOpenCount}回
 赤伝票件数: ${redSlipCount}件
 赤伝票金額: ¥${redSlipAmount.toLocaleString()}
-（赤伝票の税金は上記から除外済み）
 人件費: ¥${Math.round(laborCost).toLocaleString()}
 担当者: ${staffName}
 
@@ -6144,8 +6105,8 @@
           taxExcludedTotal: taxExcludedTotal,
           taxIncludedTotal: taxIncludedTotal,
           drawerOpenCount: drawerOpenCount,
-          redSlipCount: redSlipCount,
-          redSlipAmount: redSlipAmount,
+          redSlipCount: redSlipCount,  // 🆕 赤伝票件数
+          redSlipAmount: redSlipAmount,  // 🆕 赤伝票金額
           staffName: staffName,
           aiComment: ""
         });
@@ -8672,37 +8633,11 @@
         
         // 全ての注文に支払い済みフラグと担当者を設定
         for (const order of currentOrders) {
-          // この注文に対応する税金を計算
-          let orderTax8 = 0;
-          let orderTax10 = 0;
-          
-          // 注文の商品から税率別の金額を計算
-          if (order.items && Array.isArray(order.items)) {
-            order.items.forEach(item => {
-              const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-              if (item.taxRate === 8) {
-                orderTax8 += itemTotal;
-              } else {
-                orderTax10 += itemTotal;
-              }
-            });
-          }
-          
-          // レジ袋の税金を追加（レジ袋は10%）
-          if (order.bagNeeded && order.bagQuantity > 0) {
-            const bagTotal = order.bagPrice || (order.bagQuantity * 3);
-            orderTax10 += bagTotal;
-          }
-          
-          console.log(`📊 注文 #${order.orderNumber} の税金:`, { orderTax8, orderTax10 });
-          
           await window.updateDoc(window.getStoreDoc('orders', order.id), {
             paidAt: now,
             notifiedPaid: true,
             paymentMethod: selectedPaymentMethod,
-            staffName: staffName,  // 担当者名を追加
-            tax8Total: orderTax8,  // 🆕 8%税金合計を保存
-            tax10Total: orderTax10  // 🆕 10%税金合計を保存
+            staffName: staffName  // 担当者名を追加
           });
         }
         
