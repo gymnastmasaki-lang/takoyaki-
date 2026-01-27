@@ -282,6 +282,12 @@
             });
             const [showMenuSettings, setShowMenuSettings] = useState(false);
             
+            // 🆕 テーブル設定用のstate
+            const [tableSettings, setTableSettings] = useState({});
+            const [showTableSettings, setShowTableSettings] = useState(false);
+            const [selectedTable, setSelectedTable] = useState('');
+            const [availableMenuItems, setAvailableMenuItems] = useState([]);
+            
             // カスタムアラート用の状態
             const [showCustomAlert, setShowCustomAlert] = useState(false);
             const [alertMessage, setAlertMessage] = useState('');
@@ -577,6 +583,12 @@
                     
                     // アラート設定を読み込み
                     await loadAlertSettings();
+                    
+                    // 🆕 テーブル設定を読み込み
+                    await loadTableSettings();
+                    
+                    // 🆕 メニュー項目を読み込み
+                    await loadMenuItems();
                     
                 } catch (err) {
                     console.error('データ読み込みエラー:', err);
@@ -1327,6 +1339,142 @@
                 } catch (error) {
                     console.error('❌ アラート設定読み込みエラー:', error);
                 }
+            };
+
+            // 🆕 テーブル設定読み込み
+            const loadTableSettings = async () => {
+                try {
+                    const settingsSnapshot = await window.firebaseModules.getDocs(
+                        window.getStoreCollection('tableSettings')
+                    );
+                    const settings = {};
+                    settingsSnapshot.forEach(doc => {
+                        settings[doc.id] = doc.data();
+                    });
+                    setTableSettings(settings);
+                    console.log('✅ テーブル設定を読み込みました:', Object.keys(settings).length, '件');
+                } catch (e) {
+                    console.error('❌ テーブル設定読み込みエラー:', e);
+                }
+            };
+
+            // 🆕 メニュー項目読み込み
+            const loadMenuItems = async () => {
+                try {
+                    const menuDoc = await window.firebaseModules.getDoc(
+                        window.getStoreDoc('menu_settings', 'menu')
+                    );
+                    if (menuDoc.exists()) {
+                        const data = menuDoc.data();
+                        const items = [];
+                        
+                        if (data.categories) {
+                            data.categories.forEach(category => {
+                                if (category.items) {
+                                    category.items.forEach(item => {
+                                        items.push({
+                                            id: item.id || item.name,
+                                            name: item.name,
+                                            category: category.name
+                                        });
+                                    });
+                                }
+                            });
+                        }
+                        
+                        setAvailableMenuItems(items);
+                        console.log('✅ メニュー項目を読み込みました:', items.length, '件');
+                    }
+                } catch (e) {
+                    console.error('❌ メニュー項目読み込みエラー:', e);
+                }
+            };
+
+            // 🆕 デフォルトテーブル設定
+            const getDefaultTableSettings = () => ({
+                inputFields: {
+                    name: { visible: false, required: false },
+                    phone: { visible: false, required: false },
+                    postalCode: { visible: false, required: false },
+                    address: { visible: false, required: false },
+                    email: { visible: false, required: false },
+                    pickupTime: { visible: false, required: false },
+                    notes: { visible: true, required: false }
+                },
+                menuType: 'default',
+                customMenuItems: []
+            });
+
+            // 🆕 テーブル設定保存
+            const saveTableSettings = async (tableName) => {
+                try {
+                    const settings = tableSettings[tableName] || getDefaultTableSettings();
+                    
+                    await window.firebaseModules.setDoc(
+                        window.getStoreDoc('tableSettings', tableName),
+                        settings
+                    );
+                    
+                    showCustomAlertFunc('テーブル設定を保存しました', '✅ 保存完了', '✅');
+                    console.log('✅ テーブル設定を保存:', tableName);
+                } catch (e) {
+                    console.error('❌ テーブル設定保存エラー:', e);
+                    showCustomAlertFunc('保存に失敗しました: ' + e.message, '❌ エラー', '❌');
+                }
+            };
+
+            // 🆕 テーブル入力欄設定更新
+            const updateTableInputField = (tableName, fieldName, property, value) => {
+                setTableSettings(prev => {
+                    const current = prev[tableName] || getDefaultTableSettings();
+                    return {
+                        ...prev,
+                        [tableName]: {
+                            ...current,
+                            inputFields: {
+                                ...current.inputFields,
+                                [fieldName]: {
+                                    ...current.inputFields[fieldName],
+                                    [property]: value
+                                }
+                            }
+                        }
+                    };
+                });
+            };
+
+            // 🆕 テーブルメニュータイプ更新
+            const updateTableMenuType = (tableName, menuType) => {
+                setTableSettings(prev => {
+                    const current = prev[tableName] || getDefaultTableSettings();
+                    return {
+                        ...prev,
+                        [tableName]: {
+                            ...current,
+                            menuType: menuType,
+                            customMenuItems: menuType === 'default' ? [] : current.customMenuItems
+                        }
+                    };
+                });
+            };
+
+            // 🆕 カスタムメニュー項目トグル
+            const toggleCustomMenuItem = (tableName, itemId) => {
+                setTableSettings(prev => {
+                    const current = prev[tableName] || getDefaultTableSettings();
+                    const currentItems = current.customMenuItems || [];
+                    const newItems = currentItems.includes(itemId)
+                        ? currentItems.filter(id => id !== itemId)
+                        : [...currentItems, itemId];
+                    
+                    return {
+                        ...prev,
+                        [tableName]: {
+                            ...current,
+                            customMenuItems: newItems
+                        }
+                    };
+                });
             };
 
             // メニュー設定を保存
@@ -2915,6 +3063,226 @@
                                             💾 保存
                                         </button>
                                     </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 🆕 テーブル設定 */}
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                    🍽️ テーブル設定
+                                </h2>
+                                <button
+                                    onClick={() => {
+                                        setShowTableSettings(!showTableSettings);
+                                        if (!showTableSettings) {
+                                            loadTableSettings();
+                                            loadMenuItems();
+                                        }
+                                    }}
+                                    className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
+                                >
+                                    {showTableSettings ? '閉じる' : '設定を開く'}
+                                </button>
+                            </div>
+
+                            {showTableSettings && (
+                                <div>
+                                    {/* テーブル選択 */}
+                                    <div className="mb-6">
+                                        <label className="block text-lg font-medium mb-3">📍 設定するテーブルを選択</label>
+                                        <select
+                                            value={selectedTable}
+                                            onChange={(e) => {
+                                                setSelectedTable(e.target.value);
+                                                if (!tableSettings[e.target.value]) {
+                                                    setTableSettings(prev => ({
+                                                        ...prev,
+                                                        [e.target.value]: getDefaultTableSettings()
+                                                    }));
+                                                }
+                                            }}
+                                            className="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                                        >
+                                            <option value="">-- テーブルを選択 --</option>
+                                            <option value="MO">MO（モバイルオーダー）</option>
+                                            <option value="1">テーブル 1</option>
+                                            <option value="2">テーブル 2</option>
+                                            <option value="3">テーブル 3</option>
+                                            <option value="4">テーブル 4</option>
+                                            <option value="5">テーブル 5</option>
+                                            <option value="6">テーブル 6</option>
+                                            <option value="7">テーブル 7</option>
+                                            <option value="8">テーブル 8</option>
+                                            <option value="9">テーブル 9</option>
+                                            <option value="10">テーブル 10</option>
+                                        </select>
+                                    </div>
+
+                                    {selectedTable && (
+                                        <>
+                                            {/* 入力欄の表示設定 */}
+                                            <div className="border-l-4 border-blue-500 pl-4 mb-6">
+                                                <h3 className="text-lg font-bold mb-3">📋 入力欄の表示設定</h3>
+                                                <p className="text-sm text-gray-600 mb-4">
+                                                    このテーブルで表示する入力欄を選択してください
+                                                </p>
+
+                                                {[
+                                                    { key: 'name', label: '👤 お名前', description: 'お客様の名前を入力' },
+                                                    { key: 'phone', label: '📞 電話番号', description: 'お客様の電話番号を入力' },
+                                                    { key: 'pickupTime', label: '🕐 引取時間', description: '商品の引取時間を選択（30分後、1時間後など）' },
+                                                    { key: 'postalCode', label: '📮 郵便番号', description: '配送先の郵便番号を入力' },
+                                                    { key: 'address', label: '🏠 住所', description: '配送先の住所を入力' },
+                                                    { key: 'email', label: '📧 メールアドレス', description: 'お客様のメールアドレスを入力' }
+                                                ].map(field => {
+                                                    const currentSettings = tableSettings[selectedTable]?.inputFields?.[field.key] || { visible: false, required: false };
+                                                    
+                                                    return (
+                                                        <div key={field.key} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg mb-3">
+                                                            <div className="flex-1">
+                                                                <label className="block text-md font-medium mb-1">{field.label}</label>
+                                                                <p className="text-sm text-gray-600">{field.description}</p>
+                                                                {currentSettings.visible && (
+                                                                    <div className="mt-2">
+                                                                        <label className="inline-flex items-center text-sm">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={currentSettings.required}
+                                                                                onChange={(e) => updateTableInputField(selectedTable, field.key, 'required', e.target.checked)}
+                                                                                className="mr-2"
+                                                                            />
+                                                                            <span className="text-red-600 font-medium">必須項目にする</span>
+                                                                        </label>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <label className="relative inline-flex items-center cursor-pointer ml-4">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={currentSettings.visible}
+                                                                    onChange={(e) => {
+                                                                        updateTableInputField(selectedTable, field.key, 'visible', e.target.checked);
+                                                                        if (!e.target.checked) {
+                                                                            updateTableInputField(selectedTable, field.key, 'required', false);
+                                                                        }
+                                                                    }}
+                                                                    className="sr-only peer"
+                                                                />
+                                                                <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+                                                            </label>
+                                                        </div>
+                                                    );
+                                                })}
+
+                                                {/* 備考欄（常に表示） */}
+                                                <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border-2 border-blue-300">
+                                                    <div className="flex-1">
+                                                        <label className="block text-md font-medium mb-1">📝 備考・メモ欄</label>
+                                                        <p className="text-sm text-gray-600">全テーブル共通で表示されます（任意項目）</p>
+                                                    </div>
+                                                    <div className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium">
+                                                        常に表示
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* メニュー設定 */}
+                                            <div className="border-l-4 border-green-500 pl-4 mb-6">
+                                                <h3 className="text-lg font-bold mb-3">🍽️ メニュー設定</h3>
+                                                <p className="text-sm text-gray-600 mb-4">
+                                                    このテーブルで表示するメニューを選択してください
+                                                </p>
+
+                                                <div className="space-y-3 mb-4">
+                                                    <label className="flex items-center p-4 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
+                                                        <input
+                                                            type="radio"
+                                                            name={`menuType-${selectedTable}`}
+                                                            value="default"
+                                                            checked={tableSettings[selectedTable]?.menuType === 'default'}
+                                                            onChange={() => updateTableMenuType(selectedTable, 'default')}
+                                                            className="mr-3 w-5 h-5"
+                                                        />
+                                                        <div>
+                                                            <div className="font-medium">📋 デフォルト（全メニュー表示）</div>
+                                                            <div className="text-sm text-gray-600">すべてのメニューを表示します</div>
+                                                        </div>
+                                                    </label>
+
+                                                    <label className="flex items-center p-4 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
+                                                        <input
+                                                            type="radio"
+                                                            name={`menuType-${selectedTable}`}
+                                                            value="custom"
+                                                            checked={tableSettings[selectedTable]?.menuType === 'custom'}
+                                                            onChange={() => updateTableMenuType(selectedTable, 'custom')}
+                                                            className="mr-3 w-5 h-5"
+                                                        />
+                                                        <div>
+                                                            <div className="font-medium">✨ カスタムメニュー</div>
+                                                            <div className="text-sm text-gray-600">表示するメニューを個別に選択します</div>
+                                                        </div>
+                                                    </label>
+                                                </div>
+
+                                                {tableSettings[selectedTable]?.menuType === 'custom' && (
+                                                    <div className="border-2 border-green-300 rounded-lg p-4 bg-green-50">
+                                                        <h4 className="font-medium mb-3">表示するメニューを選択</h4>
+                                                        <div className="grid grid-cols-2 gap-2 max-h-96 overflow-y-auto">
+                                                            {availableMenuItems.map(item => {
+                                                                const isSelected = tableSettings[selectedTable]?.customMenuItems?.includes(item.id);
+                                                                return (
+                                                                    <label
+                                                                        key={item.id}
+                                                                        className={`flex items-center p-3 rounded-lg cursor-pointer ${
+                                                                            isSelected ? 'bg-green-200 border-2 border-green-500' : 'bg-white border-2 border-gray-300'
+                                                                        }`}
+                                                                    >
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={isSelected}
+                                                                            onChange={() => toggleCustomMenuItem(selectedTable, item.id)}
+                                                                            className="mr-2 w-5 h-5"
+                                                                        />
+                                                                        <div className="flex-1">
+                                                                            <div className="font-medium">{item.name}</div>
+                                                                            <div className="text-xs text-gray-600">{item.category}</div>
+                                                                        </div>
+                                                                    </label>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <div className="mt-3 text-sm text-gray-600">
+                                                            選択中: {tableSettings[selectedTable]?.customMenuItems?.length || 0}件
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* 保存ボタン */}
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => saveTableSettings(selectedTable)}
+                                                    className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-lg"
+                                                >
+                                                    💾 保存
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setTableSettings(prev => ({
+                                                            ...prev,
+                                                            [selectedTable]: getDefaultTableSettings()
+                                                        }));
+                                                    }}
+                                                    className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-medium"
+                                                >
+                                                    リセット
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             )}
                         </div>
