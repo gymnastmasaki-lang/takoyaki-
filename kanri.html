@@ -301,6 +301,7 @@
             // 🆕 商品管理用のstate
             const [showProductManagement, setShowProductManagement] = useState(false);
             const [showProductRegistration, setShowProductRegistration] = useState(false);
+            const [showProductEdit, setShowProductEdit] = useState(false);
             const [showProductDelete, setShowProductDelete] = useState(false);
             const [productForm, setProductForm] = useState({
                 name: '',
@@ -311,9 +312,12 @@
                 image: '',
                 taxRate: 10
             });
+            const [editingProductId, setEditingProductId] = useState(null);
             const [productToppingSets, setProductToppingSets] = useState([]);
             const [productsForDelete, setProductsForDelete] = useState([]);
+            const [productsForEdit, setProductsForEdit] = useState([]);
             const [productSearchQuery, setProductSearchQuery] = useState('');
+            const [editSearchQuery, setEditSearchQuery] = useState('');
             
             // カスタムアラート用の状態
             const [showCustomAlert, setShowCustomAlert] = useState(false);
@@ -1961,6 +1965,113 @@
                     setProductsForDelete(products);
                 } catch (error) {
                     console.error('商品リスト読み込みエラー:', error);
+                }
+            };
+
+            // 🆕 商品編集リストを読み込み
+            const loadProductsForEdit = async () => {
+                try {
+                    const menuSnapshot = await window.firebaseModules.getDocs(window.getStoreCollection('menus'));
+                    const products = [];
+                    
+                    menuSnapshot.forEach(doc => {
+                        products.push({
+                            docId: doc.id,
+                            ...doc.data()
+                        });
+                    });
+                    
+                    products.sort((a, b) => {
+                        if (a.category !== b.category) {
+                            return a.category.localeCompare(b.category);
+                        }
+                        return a.name.localeCompare(b.name);
+                    });
+                    
+                    setProductsForEdit(products);
+                } catch (error) {
+                    console.error('商品リスト読み込みエラー:', error);
+                }
+            };
+
+            // 🆕 商品編集フォームを開く
+            const openEditProduct = (product) => {
+                setEditingProductId(product.docId);
+                setProductForm({
+                    name: product.name || '',
+                    price: product.price || '',
+                    category: product.category || '',
+                    customCategory: '',
+                    note: product.note || '',
+                    image: product.image || '',
+                    taxRate: product.taxRate || 10
+                });
+                setProductToppingSets(product.toppingSets || []);
+                setShowProductEdit(true);
+            };
+
+            // 🆕 商品を更新
+            const updateProduct = async () => {
+                try {
+                    const { name, price, category, customCategory, note, image, taxRate } = productForm;
+                    
+                    if (!name.trim()) {
+                        showCustomAlertFunc('商品名を入力してください', '⚠️ 入力エラー', '⚠️');
+                        return;
+                    }
+                    
+                    if (!price || price < 0) {
+                        showCustomAlertFunc('正しい価格を入力してください', '⚠️ 入力エラー', '⚠️');
+                        return;
+                    }
+                    
+                    const finalCategory = customCategory.trim() || category;
+                    if (!finalCategory) {
+                        showCustomAlertFunc('カテゴリを選択するか、カスタムカテゴリを入力してください', '⚠️ 入力エラー', '⚠️');
+                        return;
+                    }
+                    
+                    // トッピングセットを処理
+                    const toppingSets = productToppingSets.filter(set => set.name && set.options.length > 0);
+                    
+                    const updateData = {
+                        name: name.trim(),
+                        price: parseInt(price),
+                        category: finalCategory,
+                        toppingSets: toppingSets,
+                        note: note.trim(),
+                        image: image.trim() || '',
+                        taxRate: taxRate
+                    };
+                    
+                    await window.firebaseModules.updateDoc(
+                        window.firebaseModules.doc(window.db, 'stores', window.currentStoreId, 'menus', editingProductId),
+                        updateData
+                    );
+                    
+                    showCustomAlertFunc('商品を更新しました', '✅ 更新完了', '✅');
+                    
+                    // フォームをリセット
+                    setProductForm({
+                        name: '',
+                        price: '',
+                        category: '',
+                        customCategory: '',
+                        note: '',
+                        image: '',
+                        taxRate: 10
+                    });
+                    setProductToppingSets([]);
+                    setEditingProductId(null);
+                    setShowProductEdit(false);
+                    
+                    // メニューを再読み込み
+                    await loadMenuItems();
+                    await loadProductsForEdit();
+                    
+                } catch (error) {
+                    console.error('商品更新エラー:', error);
+                    showCustomAlertFunc('商品の更新に失敗しました: ' + error.message, '❌ エラー', '❌');
                 }
             };
 
@@ -4058,7 +4169,7 @@
 
                             {showProductManagement && (
                                 <div className="space-y-4 border-t pt-4">
-                                    <div className="flex gap-3">
+                                    <div className="grid grid-cols-3 gap-3">
                                         <button
                                             onClick={() => {
                                                 setShowProductRegistration(true);
@@ -4073,16 +4184,26 @@
                                                 });
                                                 setProductToppingSets([]);
                                             }}
-                                            className="flex-1 px-6 py-4 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-bold text-lg"
+                                            className="px-6 py-4 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-bold text-lg"
                                         >
                                             📝 商品登録
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setShowProductEdit(true);
+                                                setEditingProductId(null);
+                                                loadProductsForEdit();
+                                            }}
+                                            className="px-6 py-4 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold text-lg"
+                                        >
+                                            ✏️ 商品編集
                                         </button>
                                         <button
                                             onClick={() => {
                                                 setShowProductDelete(true);
                                                 loadProductsForDelete();
                                             }}
-                                            className="flex-1 px-6 py-4 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold text-lg"
+                                            className="px-6 py-4 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold text-lg"
                                         >
                                             🗑️ 商品削除
                                         </button>
@@ -4346,6 +4467,293 @@
                                                 >
                                                     閉じる
                                                 </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* 商品編集モーダル（商品選択） */}
+                                    {showProductEdit && !editingProductId && (
+                                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                                            <div className="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+                                                <h3 className="text-2xl font-bold mb-4">商品編集 - 商品を選択</h3>
+                                                
+                                                <div className="mb-4">
+                                                    <input
+                                                        type="text"
+                                                        value={editSearchQuery}
+                                                        onChange={(e) => setEditSearchQuery(e.target.value)}
+                                                        className="w-full p-3 border-2 rounded-lg"
+                                                        placeholder="商品名で検索..."
+                                                    />
+                                                </div>
+
+                                                <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                                                    {productsForEdit
+                                                        .filter(product => 
+                                                            editSearchQuery === '' || 
+                                                            product.name.toLowerCase().includes(editSearchQuery.toLowerCase())
+                                                        )
+                                                        .map(product => (
+                                                            <div key={product.docId} className="flex justify-between items-center p-4 border-2 rounded-lg hover:bg-gray-50">
+                                                                <div>
+                                                                    <div className="font-bold text-lg">{product.name}</div>
+                                                                    <div className="text-sm text-gray-600">
+                                                                        <span className="bg-blue-100 px-2 py-1 rounded mr-2">{product.category}</span>
+                                                                        <span className="text-green-600 font-bold">¥{product.price?.toLocaleString()}</span>
+                                                                    </div>
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => openEditProduct(product)}
+                                                                    className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold"
+                                                                >
+                                                                    ✏️ 編集
+                                                                </button>
+                                                            </div>
+                                                        ))
+                                                    }
+                                                </div>
+
+                                                <button
+                                                    onClick={() => {
+                                                        setShowProductEdit(false);
+                                                        setEditSearchQuery('');
+                                                    }}
+                                                    className="w-full mt-4 px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+                                                >
+                                                    閉じる
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* 商品編集モーダル（編集フォーム） */}
+                                    {showProductEdit && editingProductId && (
+                                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                                            <div className="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+                                                <h3 className="text-2xl font-bold mb-4">商品編集</h3>
+                                                
+                                                <div className="space-y-4">
+                                                    <div>
+                                                        <label className="block font-bold mb-2">商品名</label>
+                                                        <input
+                                                            type="text"
+                                                            value={productForm.name}
+                                                            onChange={(e) => setProductForm({...productForm, name: e.target.value})}
+                                                            className="w-full p-3 border-2 rounded-lg"
+                                                            placeholder="例: たこ焼き 6個入り"
+                                                        />
+                                                    </div>
+
+                                                    <div>
+                                                        <label className="block font-bold mb-2">価格</label>
+                                                        <input
+                                                            type="number"
+                                                            value={productForm.price}
+                                                            onChange={(e) => setProductForm({...productForm, price: e.target.value})}
+                                                            className="w-full p-3 border-2 rounded-lg"
+                                                            placeholder="例: 500"
+                                                        />
+                                                    </div>
+
+                                                    <div>
+                                                        <label className="block font-bold mb-2">カテゴリ</label>
+                                                        <select
+                                                            value={productForm.category}
+                                                            onChange={(e) => setProductForm({...productForm, category: e.target.value})}
+                                                            className="w-full p-3 border-2 rounded-lg"
+                                                        >
+                                                            <option value="">選択してください</option>
+                                                            <option value="たこ焼き">たこ焼き</option>
+                                                            <option value="お好み焼き">お好み焼き</option>
+                                                            <option value="焼きそば">焼きそば</option>
+                                                            <option value="飲み物">飲み物</option>
+                                                            <option value="サイド">サイド</option>
+                                                            <option value="その他">その他</option>
+                                                        </select>
+                                                    </div>
+
+                                                    <div>
+                                                        <label className="block font-bold mb-2">カスタムカテゴリ（プルダウンにない場合）</label>
+                                                        <input
+                                                            type="text"
+                                                            value={productForm.customCategory}
+                                                            onChange={(e) => setProductForm({...productForm, customCategory: e.target.value})}
+                                                            className="w-full p-3 border-2 rounded-lg"
+                                                            placeholder="新しいカテゴリ名"
+                                                        />
+                                                    </div>
+
+                                                    <div>
+                                                        <label className="block font-bold mb-2">Note（表示制限）</label>
+                                                        <input
+                                                            type="text"
+                                                            value={productForm.note}
+                                                            onChange={(e) => setProductForm({...productForm, note: e.target.value})}
+                                                            className="w-full p-3 border-2 rounded-lg"
+                                                            placeholder="例: 店内のみ、テイクアウトのみ"
+                                                        />
+                                                        <small className="text-gray-600">「店内のみ」と入力するとテイクアウトでは非表示になります</small>
+                                                    </div>
+
+                                                    <div>
+                                                        <label className="block font-bold mb-2">消費税率</label>
+                                                        <div className="flex gap-4">
+                                                            <label className="flex items-center gap-2 p-3 border-2 rounded-lg cursor-pointer flex-1">
+                                                                <input
+                                                                    type="radio"
+                                                                    checked={productForm.taxRate === 8}
+                                                                    onChange={() => setProductForm({...productForm, taxRate: 8})}
+                                                                    className="w-5 h-5"
+                                                                />
+                                                                <span className="font-bold">8%（持ち帰り）</span>
+                                                            </label>
+                                                            <label className="flex items-center gap-2 p-3 border-2 rounded-lg cursor-pointer flex-1">
+                                                                <input
+                                                                    type="radio"
+                                                                    checked={productForm.taxRate === 10}
+                                                                    onChange={() => setProductForm({...productForm, taxRate: 10})}
+                                                                    className="w-5 h-5"
+                                                                />
+                                                                <span className="font-bold">10%（店内・包材）</span>
+                                                            </label>
+                                                        </div>
+                                                    </div>
+
+                                                    <div>
+                                                        <label className="block font-bold mb-2">画像URL</label>
+                                                        <input
+                                                            type="text"
+                                                            value={productForm.image}
+                                                            onChange={(e) => setProductForm({...productForm, image: e.target.value})}
+                                                            className="w-full p-3 border-2 rounded-lg"
+                                                            placeholder="例: https://... または takoyaki1.jpg"
+                                                        />
+                                                    </div>
+
+                                                    {/* トッピングセット */}
+                                                    <div className="bg-gray-50 p-4 rounded-lg">
+                                                        <h4 className="font-bold mb-3">トッピングセット</h4>
+                                                        <div className="space-y-3">
+                                                            {productToppingSets.map((set, setIndex) => (
+                                                                <div key={setIndex} className="bg-white p-4 rounded border-2">
+                                                                    <div className="flex justify-between items-center mb-3">
+                                                                        <h5 className="font-bold">トッピングセット {setIndex + 1}</h5>
+                                                                        <button
+                                                                            onClick={() => removeToppingSet(setIndex)}
+                                                                            className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                                                                        >
+                                                                            削除
+                                                                        </button>
+                                                                    </div>
+                                                                    
+                                                                    <div className="space-y-2">
+                                                                        <div>
+                                                                            <label className="block text-sm font-bold mb-1">セット名</label>
+                                                                            <input
+                                                                                type="text"
+                                                                                value={set.name}
+                                                                                onChange={(e) => updateToppingSetName(setIndex, e.target.value)}
+                                                                                className="w-full p-2 border rounded"
+                                                                                placeholder="例: たこ焼きの味"
+                                                                            />
+                                                                        </div>
+                                                                        
+                                                                        <div>
+                                                                            <label className="block text-sm font-bold mb-1">選択タイプ</label>
+                                                                            <select
+                                                                                value={set.type}
+                                                                                onChange={(e) => updateToppingSetType(setIndex, e.target.value)}
+                                                                                className="w-full p-2 border rounded"
+                                                                            >
+                                                                                <option value="single">単一選択（プルダウン）</option>
+                                                                                <option value="multiple">複数選択（チェックボックス）</option>
+                                                                            </select>
+                                                                        </div>
+                                                                        
+                                                                        <div>
+                                                                            <label className="block text-sm font-bold mb-1">トッピング項目</label>
+                                                                            <div className="space-y-2">
+                                                                                {set.options.map((option, optionIndex) => (
+                                                                                    <div key={optionIndex} className="flex gap-2">
+                                                                                        <input
+                                                                                            type="text"
+                                                                                            value={option.name}
+                                                                                            onChange={(e) => updateToppingOption(setIndex, optionIndex, 'name', e.target.value)}
+                                                                                            className="flex-1 p-2 border rounded"
+                                                                                            placeholder="例: ソース"
+                                                                                        />
+                                                                                        <input
+                                                                                            type="number"
+                                                                                            value={option.price}
+                                                                                            onChange={(e) => updateToppingOption(setIndex, optionIndex, 'price', parseInt(e.target.value) || 0)}
+                                                                                            className="w-24 p-2 border rounded"
+                                                                                            placeholder="価格"
+                                                                                        />
+                                                                                        <button
+                                                                                            onClick={() => removeToppingOption(setIndex, optionIndex)}
+                                                                                            className="px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                                                                                        >
+                                                                                            ×
+                                                                                        </button>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                            <button
+                                                                                onClick={() => addToppingOption(setIndex)}
+                                                                                className="mt-2 px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
+                                                                            >
+                                                                                + 項目を追加
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        <button
+                                                            onClick={addToppingSet}
+                                                            className="mt-3 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+                                                        >
+                                                            + トッピングセットを追加
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex gap-3 mt-6">
+                                                    <button
+                                                        onClick={updateProduct}
+                                                        className="flex-1 px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold"
+                                                    >
+                                                        更新
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            setEditingProductId(null);
+                                                            setProductForm({
+                                                                name: '',
+                                                                price: '',
+                                                                category: '',
+                                                                customCategory: '',
+                                                                note: '',
+                                                                image: '',
+                                                                taxRate: 10
+                                                            });
+                                                            setProductToppingSets([]);
+                                                        }}
+                                                        className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+                                                    >
+                                                        戻る
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            setShowProductEdit(false);
+                                                            setEditingProductId(null);
+                                                            setEditSearchQuery('');
+                                                        }}
+                                                        className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+                                                    >
+                                                        閉じる
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     )}
