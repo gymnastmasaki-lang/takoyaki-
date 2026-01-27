@@ -684,9 +684,19 @@
       <!-- 電話番号入力欄 -->
       <div id="phone-section" style="background: white; padding: 15px; border-radius: 15px; margin: 15px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none;">
         <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;">
-          電話番号<span id="phone-required-mark" style="color: #f44336; margin-left: 5px; display: none;">*</span>
+          📞 電話番号<span id="phone-required-mark" style="color: #f44336; margin-left: 5px; display: none;">*</span>
         </div>
         <input type="tel" id="customer-phone" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;" placeholder="090-1234-5678">
+      </div>
+      
+      <!-- 🆕 引取時間入力欄 -->
+      <div id="pickup-time-section" style="background: white; padding: 15px; border-radius: 15px; margin: 15px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none;">
+        <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;">
+          🕐 引取時間<span id="pickup-time-required-mark" style="color: #f44336; margin-left: 5px; display: none;">*</span>
+        </div>
+        <select id="customer-pickup-time" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;">
+          <option value="">-- 選択してください --</option>
+        </select>
       </div>
       
       <div class="price-display">
@@ -948,6 +958,9 @@
     let bagQuantity = 0;
     let bagNeeded = false;
     const BAG_PRICE = 3;
+    
+    // 🆕 テーブル設定
+    let tableSettings = null;
     
     // メニュー設定
     let menuSettings = {
@@ -1238,8 +1251,74 @@
       }
     }
 
+    // 🆕 テーブル設定読み込み
+    async function loadTableSettings(tableNumber) {
+      try {
+        const settingsDoc = await getDoc(doc(db, 'stores', currentStoreId, 'tableSettings', tableNumber));
+        if (settingsDoc.exists()) {
+          tableSettings = settingsDoc.data();
+          console.log('✅ テーブル設定を読み込みました:', tableSettings);
+        } else {
+          tableSettings = {
+            inputFields: {
+              name: { visible: false, required: false },
+              phone: { visible: false, required: false },
+              postalCode: { visible: false, required: false },
+              address: { visible: false, required: false },
+              email: { visible: false, required: false },
+              pickupTime: { visible: false, required: false },
+              notes: { visible: true, required: false }
+            },
+            menuType: 'default',
+            customMenuItems: []
+          };
+          console.log('ℹ️ デフォルト設定を使用します');
+        }
+      } catch (e) {
+        console.error('❌ テーブル設定読み込みエラー:', e);
+        tableSettings = {
+          inputFields: { notes: { visible: true, required: false } },
+          menuType: 'default',
+          customMenuItems: []
+        };
+      }
+    }
+    
+    // 🆕 引取時間計算
+    function getPickupTimeOptions() {
+      const now = new Date();
+      const options = [];
+      
+      const time30 = new Date(now.getTime() + 30 * 60 * 1000);
+      options.push({ value: '30min', label: `30分後（${formatTime(time30)}）`, time: formatTime(time30) });
+      
+      const time60 = new Date(now.getTime() + 60 * 60 * 1000);
+      options.push({ value: '60min', label: `1時間後（${formatTime(time60)}）`, time: formatTime(time60) });
+      
+      const time90 = new Date(now.getTime() + 90 * 60 * 1000);
+      options.push({ value: '90min', label: `1時間30分後（${formatTime(time90)}）`, time: formatTime(time90) });
+      
+      const time120 = new Date(now.getTime() + 120 * 60 * 1000);
+      options.push({ value: '120min', label: `2時間後（${formatTime(time120)}）`, time: formatTime(time120) });
+      
+      options.push({ value: 'other', label: 'その他（備考欄に記入）', time: 'その他' });
+      
+      return options;
+    }
+    
+    function formatTime(date) {
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
+
     window.onload = async function() {
       console.log('ページ読み込み開始');
+      
+      // 🆕 テーブル設定を読み込み
+      if (tableNumber) {
+        await loadTableSettings(tableNumber);
+      }
       
       // まず注文情報の復元を試みる（営業時間外でも注文番号画面は表示）
       const hasStoredOrder = localStorage.getItem('currentOrder_' + tableNumber);
@@ -1802,13 +1881,24 @@
           return 0;
         });
         
-        allMenuItems = items;
+        // 🆕 テーブル設定によるフィルタリング
+        let filteredItems = items;
+        if (tableSettings && tableSettings.menuType === 'custom' && tableSettings.customMenuItems) {
+          const allowedIds = new Set(tableSettings.customMenuItems);
+          filteredItems = items.filter(item => {
+            const itemId = item.id || item.name;
+            return allowedIds.has(itemId);
+          });
+          console.log('🎯 カスタムメニュー適用: ', filteredItems.length, '/', items.length, '件');
+        }
+        
+        allMenuItems = filteredItems;
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
         console.log('✅ メニュー読み込み完了');
-        console.log('   メニュー表示アイテム数:', items.length);
+        console.log('   メニュー表示アイテム数:', filteredItems.length);
         console.log('   店舗ID:', window.currentStoreId);
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        displayMenuItems(items);
+        displayMenuItems(filteredItems);
         await loadSoldOutItems();
       } catch (e) {
         console.error('メニュー読み込みエラー:', e);
@@ -2323,8 +2413,94 @@
       
       document.getElementById('cart-total').textContent = '¥' + finalTotal.toLocaleString();
       
-      // メモ欄は常に表示（HTMLで既に表示されている）
-      console.log('✅ カート画面: メモ欄は常時表示されています');
+      // 🆕 テーブル設定に基づいて入力欄を表示/非表示
+      if (tableSettings) {
+        const fields = tableSettings.inputFields;
+        
+        // お名前
+        const nameSection = document.getElementById('name-section');
+        const nameRequired = document.getElementById('name-required-mark');
+        if (fields.name?.visible) {
+          nameSection.style.display = 'block';
+          nameRequired.style.display = fields.name.required ? 'inline' : 'none';
+        } else {
+          nameSection.style.display = 'none';
+        }
+        
+        // 電話番号
+        const phoneSection = document.getElementById('phone-section');
+        const phoneRequired = document.getElementById('phone-required-mark');
+        if (fields.phone?.visible) {
+          phoneSection.style.display = 'block';
+          phoneRequired.style.display = fields.phone.required ? 'inline' : 'none';
+        } else {
+          phoneSection.style.display = 'none';
+        }
+        
+        // 引取時間
+        const pickupTimeSection = document.getElementById('pickup-time-section');
+        const pickupTimeRequired = document.getElementById('pickup-time-required-mark');
+        if (fields.pickupTime?.visible) {
+          pickupTimeSection.style.display = 'block';
+          pickupTimeRequired.style.display = fields.pickupTime.required ? 'inline' : 'none';
+          
+          // プルダウンを生成
+          const select = document.getElementById('customer-pickup-time');
+          select.innerHTML = '<option value="">-- 選択してください --</option>';
+          const options = getPickupTimeOptions();
+          options.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.value;
+            option.textContent = opt.label;
+            option.dataset.time = opt.time;
+            select.appendChild(option);
+          });
+        } else {
+          pickupTimeSection.style.display = 'none';
+        }
+        
+        // 郵便番号
+        const postalCodeSection = document.getElementById('postal-code-section');
+        const postalCodeRequired = document.getElementById('postal-code-required-mark');
+        if (fields.postalCode?.visible) {
+          postalCodeSection.style.display = 'block';
+          postalCodeRequired.style.display = fields.postalCode.required ? 'inline' : 'none';
+        } else {
+          postalCodeSection.style.display = 'none';
+        }
+        
+        // 住所
+        const addressSection = document.getElementById('address-section');
+        const addressRequired = document.getElementById('address-required-mark');
+        if (fields.address?.visible) {
+          addressSection.style.display = 'block';
+          addressRequired.style.display = fields.address.required ? 'inline' : 'none';
+        } else {
+          addressSection.style.display = 'none';
+        }
+        
+        // メールアドレス
+        const emailSection = document.getElementById('email-section');
+        const emailRequired = document.getElementById('email-required-mark');
+        if (fields.email?.visible) {
+          emailSection.style.display = 'block';
+          emailRequired.style.display = fields.email.required ? 'inline' : 'none';
+        } else {
+          emailSection.style.display = 'none';
+        }
+        
+        // 備考欄（常に表示）
+        document.getElementById('memo-section').style.display = 'block';
+      } else {
+        // テーブル設定がない場合はすべて非表示
+        document.getElementById('name-section').style.display = 'none';
+        document.getElementById('phone-section').style.display = 'none';
+        document.getElementById('pickup-time-section').style.display = 'none';
+        document.getElementById('postal-code-section').style.display = 'none';
+        document.getElementById('address-section').style.display = 'none';
+        document.getElementById('email-section').style.display = 'none';
+        document.getElementById('memo-section').style.display = 'block';
+      }
       
       showPage('page-cart');
     };
@@ -2433,59 +2609,136 @@
         return;
       }
       
-      // ========== 必須項目のバリデーション ==========
-      // 名前の必須チェック
-      if (menuSettings.showNameField && menuSettings.nameRequired) {
-        const customerName = document.getElementById('customer-name')?.value.trim();
-        if (!customerName) {
-          showCustomAlert('お名前を入力してください');
-          return;
+      // ========== 必須項目のバリデーション（テーブル設定） ==========
+      if (tableSettings && tableSettings.inputFields) {
+        const fields = tableSettings.inputFields;
+        
+        // お名前
+        if (fields.name?.visible && fields.name?.required) {
+          const customerName = document.getElementById('customer-name')?.value.trim();
+          if (!customerName) {
+            showCustomAlert('お名前を入力してください');
+            isOrderProcessing = false;
+            if (confirmBtn) {
+              confirmBtn.disabled = false;
+              confirmBtn.style.opacity = '1';
+              confirmBtn.style.cursor = 'pointer';
+              confirmBtn.textContent = '注文を確定する';
+            }
+            return;
+          }
+        }
+        
+        // 電話番号
+        if (fields.phone?.visible && fields.phone?.required) {
+          const customerPhone = document.getElementById('customer-phone')?.value.trim();
+          if (!customerPhone) {
+            showCustomAlert('電話番号を入力してください');
+            isOrderProcessing = false;
+            if (confirmBtn) {
+              confirmBtn.disabled = false;
+              confirmBtn.style.opacity = '1';
+              confirmBtn.style.cursor = 'pointer';
+              confirmBtn.textContent = '注文を確定する';
+            }
+            return;
+          }
+        }
+        
+        // 引取時間
+        if (fields.pickupTime?.visible && fields.pickupTime?.required) {
+          const pickupTime = document.getElementById('customer-pickup-time')?.value;
+          if (!pickupTime) {
+            showCustomAlert('引取時間を選択してください');
+            isOrderProcessing = false;
+            if (confirmBtn) {
+              confirmBtn.disabled = false;
+              confirmBtn.style.opacity = '1';
+              confirmBtn.style.cursor = 'pointer';
+              confirmBtn.textContent = '注文を確定する';
+            }
+            return;
+          }
+        }
+        
+        // 郵便番号
+        if (fields.postalCode?.visible && fields.postalCode?.required) {
+          const customerPostalCode = document.getElementById('customer-postal-code')?.value.trim();
+          if (!customerPostalCode) {
+            showCustomAlert('郵便番号を入力してください');
+            isOrderProcessing = false;
+            if (confirmBtn) {
+              confirmBtn.disabled = false;
+              confirmBtn.style.opacity = '1';
+              confirmBtn.style.cursor = 'pointer';
+              confirmBtn.textContent = '注文を確定する';
+            }
+            return;
+          }
+        }
+        
+        // 住所
+        if (fields.address?.visible && fields.address?.required) {
+          const customerAddress = document.getElementById('customer-address')?.value.trim();
+          if (!customerAddress) {
+            showCustomAlert('住所を入力してください');
+            isOrderProcessing = false;
+            if (confirmBtn) {
+              confirmBtn.disabled = false;
+              confirmBtn.style.opacity = '1';
+              confirmBtn.style.cursor = 'pointer';
+              confirmBtn.textContent = '注文を確定する';
+            }
+            return;
+          }
+        }
+        
+        // メールアドレス
+        if (fields.email?.visible && fields.email?.required) {
+          const customerEmail = document.getElementById('customer-email')?.value.trim();
+          if (!customerEmail) {
+            showCustomAlert('メールアドレスを入力してください');
+            isOrderProcessing = false;
+            if (confirmBtn) {
+              confirmBtn.disabled = false;
+              confirmBtn.style.opacity = '1';
+              confirmBtn.style.cursor = 'pointer';
+              confirmBtn.textContent = '注文を確定する';
+            }
+            return;
+          }
+          const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailPattern.test(customerEmail)) {
+            showCustomAlert('正しいメールアドレスを入力してください');
+            isOrderProcessing = false;
+            if (confirmBtn) {
+              confirmBtn.disabled = false;
+              confirmBtn.style.opacity = '1';
+              confirmBtn.style.cursor = 'pointer';
+              confirmBtn.textContent = '注文を確定する';
+            }
+            return;
+          }
+        }
+      } else {
+        // 旧バリデーション（互換性のため残す）
+        if (menuSettings.showNameField && menuSettings.nameRequired) {
+          const customerName = document.getElementById('customer-name')?.value.trim();
+          if (!customerName) {
+            showCustomAlert('お名前を入力してください');
+            isOrderProcessing = false;
+            if (confirmBtn) {
+              confirmBtn.disabled = false;
+              confirmBtn.style.opacity = '1';
+              confirmBtn.style.cursor = 'pointer';
+              confirmBtn.textContent = '注文を確定する';
+            }
+            return;
+          }
         }
       }
       
-      // 郵便番号の必須チェック
-      if (menuSettings.showPostalCodeField && menuSettings.postalCodeRequired) {
-        const customerPostalCode = document.getElementById('customer-postal-code')?.value.trim();
-        if (!customerPostalCode) {
-          showCustomAlert('郵便番号を入力してください');
-          return;
-        }
-      }
-      
-      // 住所の必須チェック
-      if (menuSettings.showAddressField && menuSettings.addressRequired) {
-        const customerAddress = document.getElementById('customer-address')?.value.trim();
-        if (!customerAddress) {
-          showCustomAlert('住所を入力してください');
-          return;
-        }
-      }
-      
-      // メールアドレスの必須チェック
-      if (menuSettings.showEmailField && menuSettings.emailRequired) {
-        const customerEmail = document.getElementById('customer-email')?.value.trim();
-        if (!customerEmail) {
-          showCustomAlert('メールアドレスを入力してください');
-          return;
-        }
-        // 簡易的なメールアドレス形式チェック
-        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailPattern.test(customerEmail)) {
-          showCustomAlert('正しいメールアドレスを入力してください');
-          return;
-        }
-      }
-      
-      // 電話番号の必須チェック
-      if (menuSettings.showPhoneField && menuSettings.phoneRequired) {
-        const customerPhone = document.getElementById('customer-phone')?.value.trim();
-        if (!customerPhone) {
-          showCustomAlert('電話番号を入力してください');
-          return;
-        }
-      }
-      
-      // 処理中フラグをON
+      // 処理中フラグをON（バリデーション通過後）
       isOrderProcessing = true;
       lastOrderTimestamp = now;
       
@@ -2604,6 +2857,14 @@
         const customerEmail = document.getElementById('customer-email') ? document.getElementById('customer-email').value.trim() : '';
         const customerPhone = document.getElementById('customer-phone') ? document.getElementById('customer-phone').value.trim() : '';
         
+        // 🆕 引取時間を取得
+        let pickupTime = '';
+        const pickupTimeSelect = document.getElementById('customer-pickup-time');
+        if (pickupTimeSelect && pickupTimeSelect.value) {
+          const selectedOption = pickupTimeSelect.options[pickupTimeSelect.selectedIndex];
+          pickupTime = selectedOption.dataset.time || '';
+        }
+        
         const orderData = {
           orderNumber: orderNumber,
           timestamp: Timestamp.fromDate(now),
@@ -2615,12 +2876,13 @@
           bagPrice: bagTotal,
           tax8Total: tax8Total,
           tax10Total: tax10Total,
-          customerMemo: customerMemo, // お客様メモ
-          customerName: customerName, // お客様名前
-          customerPostalCode: customerPostalCode, // 郵便番号
-          customerAddress: customerAddress, // 住所
-          customerEmail: customerEmail, // メールアドレス
-          customerPhone: customerPhone, // 電話番号
+          customerMemo: customerMemo,
+          customerName: customerName,
+          customerPostalCode: customerPostalCode,
+          customerAddress: customerAddress,
+          customerEmail: customerEmail,
+          customerPhone: customerPhone,
+          pickupTime: pickupTime,  // 🆕 引取時間
           status: 'pending',
           deleteAt: Timestamp.fromDate(deleteAt),
           cancelledAt: null,
