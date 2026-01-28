@@ -1093,7 +1093,7 @@
                 <input type="checkbox" 
                        id="${checkboxId}" 
                        ${isChecked ? 'checked' : ''} 
-                       onchange="toggleItemCheck('${order.id}', ${idx})"
+                       onchange="window.toggleItemCheck('${order.id}', ${idx})"
                        style="width: 24px; height: 24px; cursor: pointer; flex-shrink: 0;">
                 <div style="flex: 1; cursor: pointer;" onclick="document.getElementById('${checkboxId}').click()">
                   <div class="order-item-header">
@@ -1421,12 +1421,17 @@
     }
 
     // 商品のチェック状態を切り替える
-    window.toggleItemCheck = async function(orderId, itemIndex) {
+    // グローバルスコープで関数を定義
+    async function toggleItemCheck(orderId, itemIndex) {
+      console.log('🔄 toggleItemCheck called:', { orderId, itemIndex });
       try {
         const orderRef = window.getStoreDoc('orders', orderId);
+        console.log('📍 orderRef:', orderRef);
+        
         const orderSnap = await window.getDoc(orderRef);
         
         if (!orderSnap.exists()) {
+          console.error('❌ 注文が見つかりません:', orderId);
           showToast('注文が見つかりません');
           return;
         }
@@ -1434,8 +1439,12 @@
         const orderData = orderSnap.data();
         const itemsChecked = orderData.itemsChecked || [];
         
+        console.log('📋 現在のチェック状態:', itemsChecked);
+        
         // チェック状態を反転
         itemsChecked[itemIndex] = !itemsChecked[itemIndex];
+        
+        console.log('🔄 新しいチェック状態:', itemsChecked);
         
         // Firestoreに保存
         await window.updateDoc(orderRef, {
@@ -1443,14 +1452,18 @@
         });
         
         console.log('✅ 商品チェック状態を更新:', orderId, 'item', itemIndex, '=', itemsChecked[itemIndex]);
+        showToast(`✓ ${itemsChecked[itemIndex] ? 'チェック' : 'チェック解除'}しました`);
         
         // 注文一覧を再読み込み
         loadOrders();
       } catch (e) {
-        console.error('チェック状態更新エラー:', e);
-        showToast('エラーが発生しました');
+        console.error('❌ チェック状態更新エラー:', e);
+        showToast('エラーが発生しました: ' + e.message);
       }
-    };
+    }
+    
+    // グローバルに公開
+    window.toggleItemCheck = toggleItemCheck;
 
     async function cancelOrder(orderId, tableNumber, orderNumber) {
       try {
