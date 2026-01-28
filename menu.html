@@ -62,10 +62,12 @@
       const storeId = urlParams.get('store');
       const orderId = urlParams.get('orderId');
       const fromIndex = urlParams.get('fromIndex');
-      const mode = urlParams.get('mode'); // POSモード判定
+      const mode = urlParams.get('mode'); // POSモード/ハンディモード判定
       
       // POSモードフラグをグローバル変数に設定
       window.isPOSMode = mode === 'pos';
+      // ハンディモードフラグをグローバル変数に設定
+      window.isHandyMode = mode === 'handy';
       
       console.log('=== リダイレクトチェック ===');
       console.log('tableNumber:', tableNumber);
@@ -73,6 +75,7 @@
       console.log('orderId:', orderId);
       console.log('fromIndex:', fromIndex);
       console.log('POSモード:', window.isPOSMode);
+      console.log('ハンディモード:', window.isHandyMode);
       
       if (fromIndex) {
         const newUrl = new URL(window.location);
@@ -81,7 +84,8 @@
         console.log('→ fromIndexパラメータを削除しました');
       }
       
-      if (tableNumber && !orderId && !fromIndex) {
+      // ハンディモードの場合はリダイレクトしない
+      if (tableNumber && !orderId && !fromIndex && !window.isHandyMode) {
         // 🔧 storeパラメータを保持してリダイレクト
         let redirectUrl = 'index.html?table=' + tableNumber;
         if (storeId) {
@@ -794,7 +798,7 @@
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, deleteDoc, doc, Timestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, deleteDoc, doc, Timestamp, setDoc, query, where } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -807,6 +811,17 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
+
+    // グローバルに公開
+    window.db = db;
+    window.collection = collection;
+    window.getDocs = getDocs;
+    window.getDoc = getDoc;
+    window.addDoc = addDoc;
+    window.doc = doc;
+    window.Timestamp = Timestamp;
+    window.query = query;
+    window.where = where;
 
     // 店舗ID管理
     let currentStoreId = null;
@@ -3742,6 +3757,201 @@
       overlay.appendChild(dialog);
       document.body.appendChild(overlay);
     }
+    
+    // ========================================
+    // ハンディモード用の処理
+    // ========================================
+    
+    // ハンディモードの初期化
+    if (window.isHandyMode) {
+      console.log('📱 ハンディモードで起動しました');
+      
+      const urlParams = new URLSearchParams(window.location.search);
+      const tableParam = urlParams.get('table');
+      const storeParam = urlParams.get('store');
+      
+      console.log('  テーブル:', tableParam);
+      console.log('  店舗ID:', storeParam);
+      
+      // DOMContentLoadedイベントでUIを追加
+      document.addEventListener('DOMContentLoaded', function() {
+        // ヘッダーにテーブル名を表示
+        const header = document.querySelector('header');
+        if (header && tableParam) {
+          const tableDisplay = document.createElement('div');
+          tableDisplay.style.cssText = `
+            text-align: center;
+            padding: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+          `;
+          tableDisplay.textContent = `テーブル: ${tableParam}`;
+          header.insertBefore(tableDisplay, header.firstChild);
+        }
+        
+        // カートに「オーダー確定」ボタンを追加
+        setTimeout(() => {
+          const cartContainer = document.getElementById('cartContainer') || document.querySelector('.cart');
+          if (cartContainer) {
+            const orderButton = document.createElement('button');
+            orderButton.id = 'handyOrderButton';
+            orderButton.textContent = 'オーダー確定';
+            orderButton.style.cssText = `
+              width: 100%;
+              padding: 15px;
+              background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+              color: white;
+              border: none;
+              border-radius: 10px;
+              font-size: 18px;
+              font-weight: bold;
+              cursor: pointer;
+              margin-top: 15px;
+              box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            `;
+            orderButton.onclick = submitHandyOrder;
+            
+            cartContainer.appendChild(orderButton);
+            console.log('✅ オーダー確定ボタンを追加しました');
+          }
+        }, 1000);
+        
+        // 戻るボタンを追加
+        const backButton = document.createElement('button');
+        backButton.textContent = '← テーブル一覧に戻る';
+        backButton.style.cssText = `
+          position: fixed;
+          top: 10px;
+          left: 10px;
+          padding: 10px 15px;
+          background: #f44336;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-weight: bold;
+          cursor: pointer;
+          z-index: 10000;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        `;
+        backButton.onclick = () => {
+          const cart = window.cart || [];
+          if (cart.length === 0 || confirm('カートの内容が破棄されますがよろしいですか？')) {
+            window.location.href = 'handy.html';
+          }
+        };
+        document.body.appendChild(backButton);
+      });
+    }
+    
+    // ハンディモードのオーダー確定処理
+    async function submitHandyOrder() {
+      const cart = window.cart || [];
+      
+      if (cart.length === 0) {
+        showCustomAlert('カートに商品がありません');
+        return;
+      }
+      
+      try {
+        console.log('📝 オーダー送信開始...');
+        
+        const urlParams = new URLSearchParams(window.location.search);
+        const tableParam = urlParams.get('table');
+        const storeParam = urlParams.get('store');
+        
+        // 合計金額を計算
+        let totalAmount = 0;
+        cart.forEach(item => {
+          totalAmount += (item.price + (item.toppingPrice || 0)) * item.quantity;
+        });
+        
+        // 注文データを作成
+        const orderData = {
+          tableNumber: tableParam,
+          items: cart.map(item => ({
+            name: item.name,
+            price: item.price,
+            quantity: item.quantity,
+            toppingName: item.toppingName || null,
+            toppingPrice: item.toppingPrice || 0,
+            taxRate: item.taxRate || 10,
+            takeout: false
+          })),
+          totalAmount: totalAmount,
+          timestamp: window.Timestamp.now(),
+          paidAt: null,
+          deleted: false,
+          orderNumber: null, // 後で自動生成
+          source: 'handy' // ハンディからの注文
+        };
+        
+        console.log('📦 注文データ:', orderData);
+        
+        // 注文番号を自動生成
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        let ordersRef;
+        if (storeParam) {
+          ordersRef = window.collection(window.db, 'stores', storeParam, 'orders');
+        } else {
+          ordersRef = window.collection(window.db, 'orders');
+        }
+        
+        // 本日の注文数を取得
+        const q = window.query(
+          ordersRef,
+          window.where('timestamp', '>=', window.Timestamp.fromDate(today)),
+          window.where('timestamp', '<', window.Timestamp.fromDate(tomorrow))
+        );
+        const querySnapshot = await window.getDocs(q);
+        const orderNumber = querySnapshot.size + 1;
+        
+        orderData.orderNumber = orderNumber;
+        
+        // Firestoreに追加
+        await window.addDoc(ordersRef, orderData);
+        
+        console.log('✅ オーダー送信完了:', orderNumber);
+        
+        // カートをクリア
+        if (window.clearCart) {
+          window.clearCart();
+        } else {
+          window.cart = [];
+          // カート表示を更新
+          const event = new Event('cartUpdated');
+          window.dispatchEvent(event);
+        }
+        
+        // 成功メッセージを表示
+        showCustomConfirm({
+          title: '注文完了',
+          message: `注文を送信しました！\n\nテーブル: ${tableParam}\n注文番号: #${orderNumber}\n合計: ¥${totalAmount.toLocaleString()}\n\n続けて注文しますか？`,
+          confirmText: '続ける',
+          cancelText: 'テーブル一覧へ',
+          onConfirm: () => {
+            // 続けて注文する場合は何もしない
+            console.log('続けて注文');
+          },
+          onCancel: () => {
+            // テーブル一覧に戻る
+            window.location.href = 'handy.html';
+          }
+        });
+        
+      } catch (error) {
+        console.error('❌ オーダー送信エラー:', error);
+        showCustomAlert('オーダーの送信に失敗しました: ' + error.message);
+      }
+    }
+    
+    // グローバルに公開
+    window.submitHandyOrder = submitHandyOrder;
   </script>
 </body>
 </html>
