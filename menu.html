@@ -1306,40 +1306,40 @@
       const now = new Date();
       const options = [];
       
-      // 引取不可時間帯: 11:30〜22:30
-      const BLOCK_START_HOUR = 11;
-      const BLOCK_START_MINUTE = 30;
-      const BLOCK_END_HOUR = 22;
-      const BLOCK_END_MINUTE = 30;
+      // 引取可能時間帯: 11:30〜22:30
+      const OPEN_START_HOUR = 11;
+      const OPEN_START_MINUTE = 30;
+      const OPEN_END_HOUR = 22;
+      const OPEN_END_MINUTE = 30;
       
-      // 時刻が引取不可時間帯に含まれるかチェック
-      function isBlockedTime(date) {
+      // 時刻が営業時間内かチェック
+      function isWithinBusinessHours(date) {
         const hours = date.getHours();
         const minutes = date.getMinutes();
         const timeInMinutes = hours * 60 + minutes;
-        const blockStart = BLOCK_START_HOUR * 60 + BLOCK_START_MINUTE;
-        const blockEnd = BLOCK_END_HOUR * 60 + BLOCK_END_MINUTE;
+        const openStart = OPEN_START_HOUR * 60 + OPEN_START_MINUTE;
+        const openEnd = OPEN_END_HOUR * 60 + OPEN_END_MINUTE;
         
-        return timeInMinutes >= blockStart && timeInMinutes <= blockEnd;
+        return timeInMinutes >= openStart && timeInMinutes <= openEnd;
       }
       
       const time30 = new Date(now.getTime() + 30 * 60 * 1000);
-      if (!isBlockedTime(time30)) {
+      if (isWithinBusinessHours(time30)) {
         options.push({ value: '30min', label: `30分後（${formatTime(time30)}）`, time: formatTime(time30) });
       }
       
       const time60 = new Date(now.getTime() + 60 * 60 * 1000);
-      if (!isBlockedTime(time60)) {
+      if (isWithinBusinessHours(time60)) {
         options.push({ value: '60min', label: `1時間後（${formatTime(time60)}）`, time: formatTime(time60) });
       }
       
       const time90 = new Date(now.getTime() + 90 * 60 * 1000);
-      if (!isBlockedTime(time90)) {
+      if (isWithinBusinessHours(time90)) {
         options.push({ value: '90min', label: `1時間30分後（${formatTime(time90)}）`, time: formatTime(time90) });
       }
       
       const time120 = new Date(now.getTime() + 120 * 60 * 1000);
-      if (!isBlockedTime(time120)) {
+      if (isWithinBusinessHours(time120)) {
         options.push({ value: '120min', label: `2時間後（${formatTime(time120)}）`, time: formatTime(time120) });
       }
       
@@ -1550,6 +1550,57 @@
         onSnapshot(window.getStoreCollection('settings'), () => {
           updateTopWaitingCount().catch(e => console.error('待ち人数更新エラー:', e));
         });
+        
+        // 🆕 定期的に営業時間をチェック（1分ごと）
+        setInterval(async () => {
+          try {
+            const now = new Date();
+            const hours = now.getHours();
+            const minutes = now.getMinutes();
+            const currentTime = hours * 60 + minutes;
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            const hasTableParam = urlParams.get('table');
+            
+            // 時間外解除設定を確認
+            let timeOverrideEnabled = false;
+            try {
+              const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+              timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
+            } catch (e) {
+              console.error('時間外解除設定の読み込みエラー:', e);
+            }
+            
+            let closedStartTime, closedEndTime, operatingHours;
+            if (hasTableParam) {
+              closedStartTime = 22 * 60;
+              closedEndTime = 11 * 60;
+              operatingHours = '11:00 - 22:00';
+            } else {
+              closedStartTime = 22 * 60 + 30;
+              closedEndTime = 11 * 60;
+              operatingHours = '11:00 - 22:30';
+            }
+            
+            const isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
+            
+            if (isClosed) {
+              // 注文中の画面でなければリロード
+              const currentPage = document.querySelector('#page-menu:not([style*="display: none"])') ||
+                                document.querySelector('#page-cart:not([style*="display: none"])') ||
+                                document.querySelector('#page-topping:not([style*="display: none"])');
+              
+              if (currentPage) {
+                console.log('営業時間外になったためページをリロードします');
+                showCustomAlert(`注文可能時間外になりました。\n\n注文可能時間: ${operatingHours}`, () => {
+                  window.location.reload();
+                });
+              }
+            }
+          } catch (e) {
+            console.error('定期営業時間チェックエラー:', e);
+          }
+        }, 60000); // 1分ごとにチェック
         
         console.log('初期化完了');
         
@@ -2633,6 +2684,47 @@
     };
 
     window.confirmOrder = async function() {
+      // ========== 営業時間チェック ==========
+      // 🆕 注文確定時に再度営業時間をチェック
+      try {
+        const now = new Date();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const currentTime = hours * 60 + minutes;
+        
+        const urlParams = new URLSearchParams(window.location.search);
+        const hasTableParam = urlParams.get('table');
+        
+        // 時間外解除設定を確認
+        let timeOverrideEnabled = false;
+        try {
+          const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+          timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
+        } catch (e) {
+          console.error('時間外解除設定の読み込みエラー:', e);
+        }
+        
+        let closedStartTime, closedEndTime, operatingHours;
+        if (hasTableParam) {
+          closedStartTime = 22 * 60;
+          closedEndTime = 11 * 60;
+          operatingHours = '11:00 - 22:00';
+        } else {
+          closedStartTime = 22 * 60 + 30;
+          closedEndTime = 11 * 60;
+          operatingHours = '11:00 - 22:30';
+        }
+        
+        const isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
+        
+        if (isClosed) {
+          showCustomAlert(`申し訳ございません。\n\n現在は注文可能時間外です。\n\n注文可能時間: ${operatingHours}`);
+          return;
+        }
+      } catch (e) {
+        console.error('営業時間チェックエラー:', e);
+      }
+      
       // ========== 二重送信防止 ==========
       // 既に処理中の場合は何もしない
       if (isOrderProcessing) {
