@@ -246,10 +246,15 @@
     let currentStoreName = null;
     let storesData = {}; // 店舗データを保存
     
-    // 店舗リストを読み込み（kanri.htmlと同じ方式）
+    // 店舗リストを読み込み
     async function loadStoreList() {
       try {
-        const storesSnapshot = await window.getDocs(window.collection(window.db, 'stores'));
+        console.log('📋 店舗リストを読み込み中...');
+        const storesQuery = window.query(
+          window.collection(window.db, 'stores'),
+          window.where('isActive', '==', true)
+        );
+        const storesSnapshot = await window.getDocs(storesQuery);
         const storeSelect = document.getElementById('storeSelect');
         
         storeSelect.innerHTML = '<option value="">選択してください</option>';
@@ -258,16 +263,8 @@
         storesSnapshot.forEach(doc => {
           const storeData = doc.data();
           const storeId = doc.id;
-          
-          // kintai.htmlと同じフィールド名を使用
           const storeName = storeData.storeName || doc.id;
           const password = storeData.storePassword || '';
-          
-          // isActiveがtrueの店舗のみを表示
-          if (storeData.isActive !== true) {
-            console.log('⏭️ スキップ（非アクティブ）:', storeName);
-            return;
-          }
           
           // データを保存
           storesData[storeId] = {
@@ -285,25 +282,14 @@
           console.log('📍 店舗追加:', storeName, '(ID:', storeId, ')');
         });
         
-        // 下赤塚店も追加（旧システム用）
-        const oldStoreOption = document.createElement('option');
-        oldStoreOption.value = 'shimoakatsuka';
-        oldStoreOption.textContent = '粉もん屋 八 下赤塚店';
-        storesData['shimoakatsuka'] = {
-          storeName: '粉もん屋 八 下赤塚店',
-          password: '1111',
-          isActive: true
-        };
-        storeSelect.appendChild(oldStoreOption);
-        
-        console.log('✅ 店舗リスト読み込み完了');
+        console.log('✅ 店舗リスト読み込み完了:', Object.keys(storesData).length, '店舗');
       } catch (error) {
         console.error('❌ 店舗リスト読み込みエラー:', error);
         showError('店舗リストの読み込みに失敗しました');
       }
     }
     
-    // ログイン処理（kanri.htmlと同じ方式）
+    // ログイン処理
     window.handleLogin = async function() {
       const storeSelect = document.getElementById('storeSelect');
       const passwordInput = document.getElementById('passwordInput');
@@ -332,30 +318,14 @@
       // パスワードチェック
       if (inputPassword !== storeInfo.password) {
         console.error('❌ パスワード不一致');
-        console.log('入力:', inputPassword);
-        console.log('正解:', storeInfo.password);
         showError('パスワードが正しくありません');
         return;
       }
       
-      // 店舗が有効かチェック
-      if (!storeInfo.isActive) {
-        showError('この店舗は無効化されています');
-        return;
-      }
-      
       // ログイン成功
-      // kanri.htmlと同じ処理: shimoarekasuka または shimoakatsuka の場合は null
-      if (storeId === 'shimoarekasuka' || storeId === 'shimoakatsuka') {
-        currentStoreId = null;
-        sessionStorage.setItem('handyStoreId', '');
-        console.log('🔧 下赤塚店のIDを検出: ' + storeId + ' → null (旧パス使用)');
-      } else {
-        currentStoreId = storeId;
-        sessionStorage.setItem('handyStoreId', storeId);
-      }
-      
+      currentStoreId = storeId;
       currentStoreName = storeInfo.storeName;
+      sessionStorage.setItem('handyStoreId', storeId);
       sessionStorage.setItem('handyStoreName', currentStoreName);
       
       console.log('✅ ログイン成功:', currentStoreName);
@@ -367,16 +337,20 @@
     
     // ログアウト処理
     window.handleLogout = function() {
-      sessionStorage.removeItem('handyStoreId');
-      sessionStorage.removeItem('handyStoreName');
-      
-      currentStoreId = null;
-      currentStoreName = null;
-      
-      document.getElementById('loginScreen').classList.remove('hidden');
-      document.getElementById('tablesScreen').classList.add('hidden');
-      
-      document.getElementById('passwordInput').value = '';
+      if (confirm('ログアウトしますか？')) {
+        sessionStorage.removeItem('handyStoreId');
+        sessionStorage.removeItem('handyStoreName');
+        
+        currentStoreId = null;
+        currentStoreName = null;
+        
+        document.getElementById('loginScreen').classList.remove('hidden');
+        document.getElementById('tablesScreen').classList.add('hidden');
+        document.getElementById('tablesScreen').style.display = 'none';
+        document.getElementById('loginScreen').style.display = 'block';
+        
+        document.getElementById('passwordInput').value = '';
+      }
     };
     
     // エラーメッセージ表示
@@ -392,7 +366,8 @@
     
     // テーブル一覧画面を表示
     async function showTablesScreen() {
-      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('tablesScreen').style.display = 'block';
       document.getElementById('tablesScreen').classList.remove('hidden');
       document.getElementById('storeNameDisplay').textContent = currentStoreName;
       
@@ -402,18 +377,12 @@
     // テーブル一覧を読み込み
     async function loadTables() {
       try {
+        console.log('🔍 テーブル一覧を読み込み中...');
         const tablesGrid = document.getElementById('tablesGrid');
         tablesGrid.innerHTML = '<div class="loading">読み込み中...</div>';
         
-        let tablesRef;
-        if (currentStoreId) {
-          // 新システム: stores/{storeId}/tables
-          tablesRef = window.collection(window.db, 'stores', currentStoreId, 'tables');
-        } else {
-          // 旧システム: tables
-          tablesRef = window.collection(window.db, 'tables');
-        }
-        
+        // stores/{storeId}/tables から読み込み
+        const tablesRef = window.collection(window.db, 'stores', currentStoreId, 'tables');
         const tablesSnapshot = await window.getDocs(tablesRef);
         const tables = [];
         
@@ -423,6 +392,8 @@
             ...doc.data()
           });
         });
+        
+        console.log('📊 取得したテーブル数:', tables.length);
         
         // orderフィールドでソート
         tables.sort((a, b) => {
@@ -457,6 +428,7 @@
         console.log('✅ テーブル一覧読み込み完了:', tables.length + '件');
       } catch (error) {
         console.error('❌ テーブル読み込みエラー:', error);
+        const tablesGrid = document.getElementById('tablesGrid');
         tablesGrid.innerHTML = '<div style="color: white; text-align: center; padding: 40px;">テーブルの読み込みに失敗しました</div>';
       }
     }
@@ -465,23 +437,22 @@
     function openMenu(tableName) {
       console.log('📱 メニュー画面を開く:', tableName);
       
-      // menu.htmlに遷移（storeIdとtableをパラメータで渡す）
-      let menuUrl = `menu.html?table=${encodeURIComponent(tableName)}&mode=handy`;
-      
-      if (currentStoreId) {
-        menuUrl += `&store=${currentStoreId}`;
-      }
+      // menu.htmlに遷移（storeIdとtableとmodeをパラメータで渡す）
+      const menuUrl = `menu.html?table=${encodeURIComponent(tableName)}&store=${currentStoreId}&mode=handy`;
       
       // セッションストレージに店舗情報を保存（menu.htmlで使用）
-      sessionStorage.setItem('handyStoreId', currentStoreId || '');
+      sessionStorage.setItem('handyStoreId', currentStoreId);
       sessionStorage.setItem('handyStoreName', currentStoreName);
       sessionStorage.setItem('handyTableName', tableName);
       
+      console.log('→ 遷移先:', menuUrl);
       window.location.href = menuUrl;
     }
     
     // ページ読み込み時: Firebase初期化を待ってから実行
     window.addEventListener('DOMContentLoaded', async () => {
+      console.log('📱 ハンディシステム起動');
+      
       // Firebase初期化を待つ
       while (!window.firebaseReady || !window.db) {
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -496,8 +467,8 @@
       const savedStoreId = sessionStorage.getItem('handyStoreId');
       const savedStoreName = sessionStorage.getItem('handyStoreName');
       
-      if (savedStoreName) {
-        currentStoreId = savedStoreId === '' ? null : savedStoreId;
+      if (savedStoreId && savedStoreName && storesData[savedStoreId]) {
+        currentStoreId = savedStoreId;
         currentStoreName = savedStoreName;
         
         console.log('✅ セッションから復元:', currentStoreName);
