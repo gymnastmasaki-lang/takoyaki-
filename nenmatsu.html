@@ -413,6 +413,8 @@
             
             const snapshot = await getDocs(attRef);
             
+            console.log('🔍 勤怠データ読み込み:', snapshot.size, '件のドキュメント');
+            
             // 🔧 月別に集計
             for (let month = 0; month < 12; month++) {
                 const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
@@ -423,11 +425,71 @@
                 let monthlyTax = 0;
                 
                 snapshot.forEach(doc => {
-                    const date = doc.id; // ドキュメントIDが日付（yyyy-MM-dd形式）
+                    const docId = doc.id; // ドキュメントID（{employeeId}_{yyyy-MM-dd}形式）
+                    const data = doc.data();
                     
-                    // 対象年月のデータか確認
-                    if (date.startsWith(yearMonth)) {
-                        const data = doc.data();
+                    // 🔧 新形式: ドキュメントIDが{employeeId}_{date}形式
+                    // 例: "emp001_2023-10-15"
+                    const parts = docId.split('_');
+                    if (parts.length >= 2) {
+                        const docEmployeeId = parts[0];
+                        const docDate = parts.slice(1).join('_'); // dateが"2023-10-15"のような形式
+                        
+                        // 対象従業員かつ対象年月のデータか確認
+                        if (docEmployeeId === employeeId && docDate.startsWith(yearMonth)) {
+                            console.log('✅ マッチ:', docId, docDate);
+                            
+                            // 🔧 給与計算（時間給 or 固定給）
+                            if (employee.salaryType === '固定給') {
+                                // 固定給の場合：月給を12で割って日割り
+                                const monthlySalary = employee.monthlySalary || 0;
+                                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                                
+                                // 勤務した場合のみ日割り給与を加算
+                                if (data.clockIn || data.status === '出勤') {
+                                    monthlyIncome += Math.floor(monthlySalary / daysInMonth);
+                                }
+                            } else {
+                                // 時間給の場合：勤務時間 × 時給
+                                if (data.clockIn && data.clockOut) {
+                                    const parseTime = (timeStr) => {
+                                        const [hours, minutes] = timeStr.split(':').map(Number);
+                                        return hours + minutes / 60;
+                                    };
+                                    
+                                    let workHours = parseTime(data.clockOut) - parseTime(data.clockIn);
+                                    
+                                    // 休憩時間を引く
+                                    if (data.breakStart1 && data.breakEnd1) {
+                                        const breakHours = parseTime(data.breakEnd1) - parseTime(data.breakStart1);
+                                        workHours -= breakHours;
+                                    }
+                                    if (data.breakStart2 && data.breakEnd2) {
+                                        const breakHours = parseTime(data.breakEnd2) - parseTime(data.breakStart2);
+                                        workHours -= breakHours;
+                                    }
+                                    
+                                    workHours = Math.max(0, workHours);
+                                    monthlyHours += workHours;
+                                    
+                                    const hourlyWage = employee.hourlyWage || employee.defaultHourlyWage || employee.hourlyRate || 1000;
+                                    monthlyIncome += Math.floor(workHours * hourlyWage);
+                                }
+                            }
+                            
+                            // 🔧 社会保険料と源泉徴収税をdataから取得
+                            if (data.socialInsurance) {
+                                monthlyInsurance += data.socialInsurance;
+                            }
+                            if (data.withholdingTax) {
+                                monthlyTax += data.withholdingTax;
+                            }
+                        }
+                    }
+                    // 🔧 旧形式のフォールバック（念のため）
+                    else if (docId.startsWith(yearMonth)) {
+                        // 旧形式: ドキュメントIDが日付のみ（yyyy-MM-dd形式）
+                        const date = docId;
                         
                         // 従業員データを確認
                         if (data.employees && data.employees[employeeId]) {
