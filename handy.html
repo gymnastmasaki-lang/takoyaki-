@@ -211,7 +211,7 @@
   
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-    import { getFirestore, collection, query, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    import { getFirestore, collection, query, getDocs, doc, getDoc, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
     
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -229,6 +229,7 @@
     window.db = db;
     window.collection = collection;
     window.query = query;
+    window.where = where;
     window.getDocs = getDocs;
     window.doc = doc;
     window.getDoc = getDoc;
@@ -242,29 +243,50 @@
   <script>
     let currentStoreId = null;
     let currentStoreName = null;
+    let storesData = {}; // 店舗データを保存
     
-    // 店舗リストを読み込み
+    // 店舗リストを読み込み（kanri.htmlと同じ方式）
     async function loadStoreList() {
       try {
         const storesSnapshot = await window.getDocs(window.collection(window.db, 'stores'));
         const storeSelect = document.getElementById('storeSelect');
         
         storeSelect.innerHTML = '<option value="">選択してください</option>';
+        storesData = {};
         
         storesSnapshot.forEach(doc => {
           const storeData = doc.data();
+          const storeId = doc.id;
+          
+          // kanri.htmlと同じフィールド名を使用
+          const storeName = storeData.storeName || doc.id;
+          const password = storeData.storePassword || '';
+          
+          // データを保存
+          storesData[storeId] = {
+            storeName: storeName,
+            password: String(password),
+            isActive: storeData.isActive !== false
+          };
+          
+          // セレクトボックスに追加
           const option = document.createElement('option');
-          option.value = doc.id;
-          option.textContent = storeData.name || doc.id;
-          option.dataset.password = storeData.password || '';
+          option.value = storeId;
+          option.textContent = storeName;
           storeSelect.appendChild(option);
+          
+          console.log('📍 店舗追加:', storeName, '(ID:', storeId, ')');
         });
         
         // 下赤塚店も追加（旧システム用）
         const oldStoreOption = document.createElement('option');
         oldStoreOption.value = 'shimoakatsuka';
         oldStoreOption.textContent = '粉もん屋 八 下赤塚店';
-        oldStoreOption.dataset.password = '1111';
+        storesData['shimoakatsuka'] = {
+          storeName: '粉もん屋 八 下赤塚店',
+          password: '1111',
+          isActive: true
+        };
         storeSelect.appendChild(oldStoreOption);
         
         console.log('✅ 店舗リスト読み込み完了');
@@ -274,16 +296,15 @@
       }
     }
     
-    // ログイン処理
+    // ログイン処理（kanri.htmlと同じ方式）
     window.handleLogin = async function() {
       const storeSelect = document.getElementById('storeSelect');
       const passwordInput = document.getElementById('passwordInput');
       
-      const selectedOption = storeSelect.options[storeSelect.selectedIndex];
       const storeId = storeSelect.value;
-      const storeName = selectedOption.textContent;
-      const correctPassword = selectedOption.dataset.password;
-      const inputPassword = passwordInput.value;
+      const inputPassword = passwordInput.value.trim();
+      
+      console.log('🔐 ログイン試行:', storeId);
       
       if (!storeId) {
         showError('店舗を選択してください');
@@ -295,20 +316,43 @@
         return;
       }
       
-      if (inputPassword !== correctPassword) {
+      const storeInfo = storesData[storeId];
+      if (!storeInfo) {
+        showError('店舗情報が見つかりません');
+        return;
+      }
+      
+      // パスワードチェック
+      if (inputPassword !== storeInfo.password) {
+        console.error('❌ パスワード不一致');
+        console.log('入力:', inputPassword);
+        console.log('正解:', storeInfo.password);
         showError('パスワードが正しくありません');
         return;
       }
       
-      // ログイン成功
-      currentStoreId = storeId === 'shimoakatsuka' ? null : storeId;
-      currentStoreName = storeName;
+      // 店舗が有効かチェック
+      if (!storeInfo.isActive) {
+        showError('この店舗は無効化されています');
+        return;
+      }
       
-      // セッションに保存
-      sessionStorage.setItem('handyStoreId', currentStoreId || '');
+      // ログイン成功
+      // kanri.htmlと同じ処理: shimoarekasuka または shimoakatsuka の場合は null
+      if (storeId === 'shimoarekasuka' || storeId === 'shimoakatsuka') {
+        currentStoreId = null;
+        sessionStorage.setItem('handyStoreId', '');
+        console.log('🔧 下赤塚店のIDを検出: ' + storeId + ' → null (旧パス使用)');
+      } else {
+        currentStoreId = storeId;
+        sessionStorage.setItem('handyStoreId', storeId);
+      }
+      
+      currentStoreName = storeInfo.storeName;
       sessionStorage.setItem('handyStoreName', currentStoreName);
       
-      console.log('✅ ログイン成功:', storeName);
+      console.log('✅ ログイン成功:', currentStoreName);
+      console.log('   currentStoreId:', currentStoreId);
       
       // テーブル一覧画面を表示
       showTablesScreen();
