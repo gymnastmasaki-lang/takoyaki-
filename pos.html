@@ -11955,23 +11955,46 @@ ${redSlipCount > 0 ? `
         
         // 既存のテーブル一覧を取得
         const tablesSnapshot = await window.getDocs(window.getStoreCollection('tables'));
-        const existingTables = new Map();
+        const existingTables = new Map(); // name -> [docIds]の配列
         
         tablesSnapshot.forEach(doc => {
           const data = doc.data();
-          existingTables.set(data.name, doc.id);
+          if (!existingTables.has(data.name)) {
+            existingTables.set(data.name, []);
+          }
+          existingTables.get(data.name).push(doc.id);
         });
         
-        // ✅ 即会計テーブルが存在する場合は削除
+        console.log('📊 既存テーブル一覧:', Array.from(existingTables.keys()));
+        
+        // ✅ 即会計テーブルが存在する場合は全て削除
         if (existingTables.has('即会計')) {
-          const docId = existingTables.get('即会計');
-          await window.deleteDoc(window.getStoreDoc('tables', docId));
-          console.log('🗑️ 即会計テーブルを削除しました');
+          const docIds = existingTables.get('即会計');
+          for (const docId of docIds) {
+            await window.deleteDoc(window.getStoreDoc('tables', docId));
+          }
+          console.log(`🗑️ 即会計テーブルを${docIds.length}件削除しました`);
+        }
+        
+        // ✅ テイクアウトテーブルの重複を削除
+        if (existingTables.has('テイクアウト')) {
+          const docIds = existingTables.get('テイクアウト');
+          if (docIds.length > 1) {
+            // 重複がある場合は全て削除して再作成
+            console.log(`⚠️ テイクアウトテーブルが${docIds.length}件重複しています。全て削除して再作成します。`);
+            for (const docId of docIds) {
+              await window.deleteDoc(window.getStoreDoc('tables', docId));
+            }
+            existingTables.delete('テイクアウト');
+            console.log('🗑️ 重複したテイクアウトテーブルを削除しました');
+          }
         }
         
         // デフォルトテーブルを追加または更新
         for (const table of defaultTables) {
-          if (!existingTables.has(table.name)) {
+          const docIds = existingTables.get(table.name) || [];
+          
+          if (docIds.length === 0) {
             // 存在しない場合は追加
             await window.addDoc(window.getStoreCollection('tables'), {
               name: table.name,
@@ -11980,11 +12003,12 @@ ${redSlipCount > 0 ? `
               createdAt: window.Timestamp.now()
             });
             console.log(`✅ デフォルトテーブル「${table.name}」を登録しました（メモ機能: ${table.memoEnabled ? 'ON' : 'OFF'}）`);
-          } else {
-            // 存在する場合はmemoEnabledを更新
-            const docId = existingTables.get(table.name);
+          } else if (docIds.length === 1) {
+            // 1つだけ存在する場合はmemoEnabledを更新
+            const docId = docIds[0];
             await window.updateDoc(window.getStoreDoc('tables', docId), {
               memoEnabled: table.memoEnabled,
+              isDefault: true,
               updatedAt: window.Timestamp.now()
             });
             console.log(`✅ デフォルトテーブル「${table.name}」のメモ機能を更新しました（メモ機能: ${table.memoEnabled ? 'ON' : 'OFF'}）`);
