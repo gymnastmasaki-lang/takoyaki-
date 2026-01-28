@@ -165,6 +165,21 @@
       text-align: center;
     }
     
+    .debug-info {
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 15px;
+      font-size: 11px;
+      font-family: monospace;
+      color: #666;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    
     .loading {
       text-align: center;
       padding: 40px;
@@ -193,6 +208,9 @@
       </div>
       
       <button class="login-btn" onclick="handleLogin()">ログイン</button>
+      
+      <!-- デバッグ情報表示エリア -->
+      <div id="debugInfo" class="debug-info"></div>
     </div>
     
     <!-- テーブル一覧画面 -->
@@ -234,6 +252,7 @@
     window.getDoc = getDoc;
     
     console.log('✅ Firebase初期化完了');
+    addDebugLog('✅ Firebase初期化完了');
     
     // 店舗リストを読み込み
     loadStoreList();
@@ -242,42 +261,110 @@
   <script>
     let currentStoreId = null;
     let currentStoreName = null;
+    let storesData = {}; // 店舗の全データを保存
+    
+    // デバッグログを画面に表示
+    function addDebugLog(message) {
+      const debugDiv = document.getElementById('debugInfo');
+      const timestamp = new Date().toLocaleTimeString();
+      debugDiv.innerHTML += `[${timestamp}] ${message}\n`;
+      debugDiv.scrollTop = debugDiv.scrollHeight;
+      console.log(message);
+    }
+    
+    // オブジェクトを見やすく文字列化
+    function formatObject(obj) {
+      return JSON.stringify(obj, null, 2);
+    }
     
     // 店舗リストを読み込み
     async function loadStoreList() {
       try {
+        addDebugLog('━━━━━━━━━━━━━━━━━━');
+        addDebugLog('🔄 店舗リスト読み込み開始');
+        
         const storesSnapshot = await window.getDocs(window.collection(window.db, 'stores'));
         const storeSelect = document.getElementById('storeSelect');
         
         storeSelect.innerHTML = '<option value="">選択してください</option>';
+        storesData = {}; // データをリセット
+        
+        addDebugLog(`📦 取得した店舗数: ${storesSnapshot.size}`);
         
         storesSnapshot.forEach(doc => {
+          const storeId = doc.id;
           const storeData = doc.data();
-          const option = document.createElement('option');
-          option.value = doc.id;
-          option.textContent = storeData.name || doc.id;
-          // パスワードを文字列として保存（数値でも文字列でも対応）
-          const password = storeData.password !== undefined ? String(storeData.password) : '0000';
-          option.dataset.password = password;
-          storeSelect.appendChild(option);
           
-          console.log('📍 店舗追加:', {
-            id: doc.id,
-            name: storeData.name,
-            password: password
-          });
+          // 全フィールドをログに出力
+          addDebugLog(`\n📍 店舗ID: ${storeId}`);
+          addDebugLog(`データ構造:\n${formatObject(storeData)}`);
+          
+          // 店舗名を取得（複数のパターンに対応）
+          let storeName = storeId; // デフォルトはドキュメントID
+          
+          // 様々なフィールド名に対応
+          if (storeData.storeName) {
+            storeName = storeData.storeName;
+            addDebugLog(`  ✓ storeName使用: ${storeName}`);
+          } else if (storeData.name) {
+            storeName = storeData.name;
+            addDebugLog(`  ✓ name使用: ${storeName}`);
+          } else if (storeData.店舗名) {
+            storeName = storeData.店舗名;
+            addDebugLog(`  ✓ 店舗名使用: ${storeName}`);
+          } else if (storeData.title) {
+            storeName = storeData.title;
+            addDebugLog(`  ✓ title使用: ${storeName}`);
+          } else {
+            addDebugLog(`  ⚠ 店舗名フィールドなし、ID使用: ${storeName}`);
+          }
+          
+          // パスワードを取得（複数のパターンに対応）
+          let password = '0000'; // デフォルト
+          
+          if (storeData.password !== undefined && storeData.password !== null) {
+            password = String(storeData.password);
+            addDebugLog(`  ✓ password: ${password} (型: ${typeof storeData.password})`);
+          } else if (storeData.pass !== undefined && storeData.pass !== null) {
+            password = String(storeData.pass);
+            addDebugLog(`  ✓ pass: ${password} (型: ${typeof storeData.pass})`);
+          } else if (storeData.パスワード !== undefined && storeData.パスワード !== null) {
+            password = String(storeData.パスワード);
+            addDebugLog(`  ✓ パスワード: ${password}`);
+          } else {
+            addDebugLog(`  ⚠ パスワードフィールドなし、デフォルト使用: ${password}`);
+          }
+          
+          // データを保存
+          storesData[storeId] = {
+            name: storeName,
+            password: password,
+            rawData: storeData
+          };
+          
+          // セレクトボックスに追加
+          const option = document.createElement('option');
+          option.value = storeId;
+          option.textContent = storeName;
+          storeSelect.appendChild(option);
         });
         
         // 下赤塚店も追加（旧システム用）
         const oldStoreOption = document.createElement('option');
         oldStoreOption.value = 'shimoakatsuka';
         oldStoreOption.textContent = '粉もん屋 八 下赤塚店';
-        oldStoreOption.dataset.password = '1111';
+        storesData['shimoakatsuka'] = {
+          name: '粉もん屋 八 下赤塚店',
+          password: '1111',
+          rawData: { legacy: true }
+        };
         storeSelect.appendChild(oldStoreOption);
+        addDebugLog('\n📍 旧店舗追加: 下赤塚店 (PW: 1111)');
         
-        console.log('✅ 店舗リスト読み込み完了');
+        addDebugLog(`\n✅ 店舗リスト読み込み完了 (${Object.keys(storesData).length}店舗)`);
+        addDebugLog('━━━━━━━━━━━━━━━━━━\n');
       } catch (error) {
-        console.error('❌ 店舗リスト読み込みエラー:', error);
+        addDebugLog(`\n❌ エラー: ${error.message}\n${error.stack}`);
         showError('店舗リストの読み込みに失敗しました');
       }
     }
@@ -287,51 +374,64 @@
       const storeSelect = document.getElementById('storeSelect');
       const passwordInput = document.getElementById('passwordInput');
       
-      const selectedOption = storeSelect.options[storeSelect.selectedIndex];
       const storeId = storeSelect.value;
-      const storeName = selectedOption.textContent;
-      const correctPassword = selectedOption.dataset.password;
       const inputPassword = passwordInput.value.trim();
       
-      console.log('🔐 ログイン試行:', {
-        storeId: storeId,
-        storeName: storeName,
-        correctPassword: correctPassword,
-        inputPassword: inputPassword,
-        correctPasswordType: typeof correctPassword,
-        inputPasswordType: typeof inputPassword
-      });
+      addDebugLog('\n━━━━━━━━━━━━━━━━━━');
+      addDebugLog('🔐 ログイン試行');
       
       if (!storeId) {
+        addDebugLog('❌ 店舗未選択');
         showError('店舗を選択してください');
         return;
       }
       
       if (!inputPassword) {
+        addDebugLog('❌ パスワード未入力');
         showError('パスワードを入力してください');
         return;
       }
       
-      // 文字列として比較（両方を文字列に変換済み）
-      if (inputPassword !== correctPassword) {
-        console.error('❌ パスワード不一致:', {
-          入力: inputPassword,
-          正解: correctPassword,
-          比較結果: inputPassword === correctPassword
-        });
+      const storeInfo = storesData[storeId];
+      if (!storeInfo) {
+        addDebugLog('❌ 店舗情報が見つかりません');
+        showError('店舗情報の取得に失敗しました');
+        return;
+      }
+      
+      const storeName = storeInfo.name;
+      const correctPassword = storeInfo.password;
+      
+      addDebugLog(`店舗ID: ${storeId}`);
+      addDebugLog(`店舗名: ${storeName}`);
+      addDebugLog(`入力PW: "${inputPassword}" (${inputPassword.length}文字)`);
+      addDebugLog(`正解PW: "${correctPassword}" (${correctPassword.length}文字)`);
+      addDebugLog(`型: 入力=${typeof inputPassword}, 正解=${typeof correctPassword}`);
+      
+      // バイトレベル比較
+      const inputBytes = Array.from(inputPassword).map(c => c.charCodeAt(0));
+      const correctBytes = Array.from(correctPassword).map(c => c.charCodeAt(0));
+      addDebugLog(`入力bytes: [${inputBytes.join(', ')}]`);
+      addDebugLog(`正解bytes: [${correctBytes.join(', ')}]`);
+      
+      // 文字列として厳密に比較
+      const isMatch = inputPassword === correctPassword;
+      addDebugLog(`比較結果: ${isMatch ? '✅ 一致' : '❌ 不一致'}`);
+      
+      if (!isMatch) {
+        addDebugLog('❌ パスワード不一致');
         showError('パスワードが正しくありません');
         return;
       }
       
       // ログイン成功
+      addDebugLog('✅ ログイン成功!');
       currentStoreId = storeId === 'shimoakatsuka' ? null : storeId;
       currentStoreName = storeName;
       
       // セッションに保存
       sessionStorage.setItem('handyStoreId', currentStoreId || '');
       sessionStorage.setItem('handyStoreName', currentStoreName);
-      
-      console.log('✅ ログイン成功:', storeName);
       
       // テーブル一覧画面を表示
       showTablesScreen();
@@ -349,6 +449,7 @@
       document.getElementById('tablesScreen').classList.add('hidden');
       
       document.getElementById('passwordInput').value = '';
+      document.getElementById('debugInfo').innerHTML = '';
     };
     
     // エラーメッセージ表示
