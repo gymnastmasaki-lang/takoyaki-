@@ -3797,15 +3797,31 @@
         let tax8Total = 0;
         let tax10Total = 0;
         
+        console.log('📊 赤伝票の税率計算開始:');
+        
         if (orderData.items && Array.isArray(orderData.items)) {
           orderData.items.forEach((item, index) => {
             const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
             // 会計時に記録された税率を使用
-            const itemTaxRate = item.taxRate || (item.takeout ? 8 : 10);
+            let itemTaxRate = item.taxRate;
+            
+            // taxRateがない場合はtakeoutフラグで判定
+            if (!itemTaxRate) {
+              itemTaxRate = item.takeout ? 8 : 10;
+            }
+            
+            console.log(`  商品 ${index + 1}: ${item.name}`, {
+              price: item.price,
+              toppingPrice: item.toppingPrice || 0,
+              quantity: item.quantity,
+              itemTotal: itemTotal,
+              taxRate: itemTaxRate,
+              takeout: item.takeout
+            });
             
             if (itemTaxRate === 8) {
               tax8Total += itemTotal;
-            } else {
+            } else if (itemTaxRate === 10) {
               tax10Total += itemTotal;
             }
           });
@@ -3813,14 +3829,19 @@
           // レジ袋の税金も加算
           if (orderData.bagNeeded && orderData.bagQuantity > 0) {
             const bagTotal = orderData.bagQuantity * 3;
-            // レジ袋は通常10%
+            console.log('  レジ袋:', {
+              quantity: orderData.bagQuantity,
+              total: bagTotal,
+              taxRate: 10
+            });
             tax10Total += bagTotal;
           }
           
-          console.log('📊 会計時の税率で計算した税金:', {
+          console.log('📊 税率別合計:', {
             税込合計: totalAmount,
             '8%対象': tax8Total,
-            '10%対象': tax10Total
+            '10%対象': tax10Total,
+            '合計': tax8Total + tax10Total
           });
         }
         
@@ -8911,11 +8932,59 @@ ${redSlipCount > 0 ? `
         
         // 全ての注文に支払い済みフラグと担当者を設定
         for (const order of currentOrders) {
+          // 📝 編集された金額とtaxRateを注文データに反映
+          let orderItemIndex = 0;
+          const updatedItems = [];
+          
+          if (order.items && Array.isArray(order.items) && order.items.length > 0) {
+            // 各商品の編集された金額とtaxRateを取得
+            order.items.forEach(item => {
+              const radio = document.querySelector(`input[name="taxRate${orderItemIndex}"]:checked`);
+              const taxRate = radio ? parseInt(radio.value) : 10;
+              const editedTotalPrice = radio ? parseFloat(radio.dataset.amount) : ((item.price + (item.toppingPrice || 0)) * item.quantity);
+              
+              // 単価を計算（編集された合計金額 / 数量）
+              const editedUnitPrice = editedTotalPrice / item.quantity;
+              
+              updatedItems.push({
+                ...item,
+                price: editedUnitPrice - (item.toppingPrice || 0), // トッピング価格を引いた基本価格
+                taxRate: taxRate,
+                takeout: taxRate === 8 // 8%なら持ち帰り、10%なら店内
+              });
+              
+              orderItemIndex++;
+            });
+          }
+          
+          // 編集された合計金額を計算
+          let editedTotalAmount = 0;
+          if (order.items && Array.isArray(order.items) && order.items.length > 0) {
+            updatedItems.forEach((item, idx) => {
+              const radio = document.querySelector(`input[name="taxRate${idx}"]:checked`);
+              const editedPrice = radio ? parseFloat(radio.dataset.amount) : ((item.price + (item.toppingPrice || 0)) * item.quantity);
+              editedTotalAmount += editedPrice;
+            });
+            
+            // レジ袋も加算
+            if (order.bagNeeded && order.bagQuantity > 0) {
+              const bagRadio = document.querySelector(`input[name="taxRate${orderItemIndex}"]:checked`);
+              const bagPrice = bagRadio ? parseFloat(bagRadio.dataset.amount) : (order.bagQuantity * 3);
+              editedTotalAmount += bagPrice;
+            }
+          } else {
+            // itemsがない場合は注文全体の編集額を使用
+            const radio = document.querySelector(`input[name="taxRate0"]:checked`);
+            editedTotalAmount = radio ? parseFloat(radio.dataset.amount) : (order.totalAmount || 0);
+          }
+          
           await window.updateDoc(window.getStoreDoc('orders', order.id), {
             paidAt: now,
             notifiedPaid: true,
             paymentMethod: selectedPaymentMethod,
-            staffName: staffName  // 担当者名を追加
+            staffName: staffName,  // 担当者名を追加
+            items: updatedItems.length > 0 ? updatedItems : order.items, // 編集された商品情報を保存
+            totalAmount: editedTotalAmount // 編集された合計金額を保存
           });
         }
         
