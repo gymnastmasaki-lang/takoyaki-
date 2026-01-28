@@ -1035,6 +1035,9 @@
           const itemTotal = (itemPrice + toppingPrice) * quantity;
           grandTotal += itemTotal;
           
+          const isChecked = order.itemsChecked && order.itemsChecked[idx];
+          const checkboxId = `checkbox-${order.id}-${idx}`;
+          
           // トッピングを1行ずつ表示（toppingDetailsまたはtoppingsDataを優先）
           let toppingsHtml = '';
           if (item.toppingDetails && item.toppingDetails.length > 0) {
@@ -1082,10 +1085,19 @@
           }
           
           itemsHTML += `
-            <div class="order-item">
-              <div class="order-item-header">
-                <div class="order-item-name">${item.name} × ${quantity}</div>
-                <div class="order-item-price">¥${itemPrice.toLocaleString()}</div>
+            <div class="order-item" style="${isChecked ? 'opacity: 0.6; background: #e8f5e9;' : ''}">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                <input type="checkbox" 
+                       id="${checkboxId}" 
+                       ${isChecked ? 'checked' : ''} 
+                       onchange="toggleItemCheck('${order.id}', ${idx})"
+                       style="width: 24px; height: 24px; cursor: pointer; flex-shrink: 0;">
+                <div style="flex: 1; cursor: pointer;" onclick="document.getElementById('${checkboxId}').click()">
+                  <div class="order-item-header">
+                    <div class="order-item-name">${item.name} × ${quantity}</div>
+                    <div class="order-item-price">¥${itemPrice.toLocaleString()}</div>
+                  </div>
+                </div>
               </div>
               ${toppingsHtml}
               ${memoText ? `<div class="order-item-memo">📝 ${memoText}</div>` : ''}
@@ -1201,6 +1213,10 @@
           `;
         }
         
+        // 全商品がチェック済みかどうかを判定
+        const allItemsChecked = order.items && order.items.length > 0 && 
+          order.items.every((item, idx) => order.itemsChecked && order.itemsChecked[idx]);
+        
         card.innerHTML = `
           <div class="order-number">#${order.orderNumber}</div>
           <div class="order-table">${order.tableNumber}</div>
@@ -1212,7 +1228,7 @@
             <div class="order-total-amount">¥${grandTotal.toLocaleString()}</div>
           </div>
           <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-            <button class="control-btn btn-complete" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✓完了</button>
+            <button class="control-btn btn-complete" style="font-size:11px;${!allItemsChecked ? 'opacity:0.5;cursor:not-allowed;' : ''}" data-order-id="${order.id}" data-table="${order.tableNumber}" ${!allItemsChecked ? 'disabled' : ''}>✓完了</button>
             <button class="control-btn btn-cancel" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✕キャンセル</button>
             <button class="control-btn" style="background:linear-gradient(135deg,#9C27B0 0%,#7B1FA2 100%);font-size:11px;" data-order-id="${order.id}">📋詳細</button>
           </div>
@@ -1400,6 +1416,41 @@
         showToast('エラー: ' + e.message);
       }
     }
+
+    // 商品のチェック状態を切り替える
+    async function toggleItemCheck(orderId, itemIndex) {
+      try {
+        const orderRef = window.getStoreDoc('orders', orderId);
+        const orderSnap = await getDoc(orderRef);
+        
+        if (!orderSnap.exists()) {
+          showToast('注文が見つかりません');
+          return;
+        }
+        
+        const orderData = orderSnap.data();
+        const itemsChecked = orderData.itemsChecked || [];
+        
+        // チェック状態を反転
+        itemsChecked[itemIndex] = !itemsChecked[itemIndex];
+        
+        // Firestoreに保存
+        await updateDoc(orderRef, {
+          itemsChecked: itemsChecked
+        });
+        
+        console.log('✅ 商品チェック状態を更新:', orderId, 'item', itemIndex, '=', itemsChecked[itemIndex]);
+        
+        // 注文一覧を再読み込み
+        loadOrders();
+      } catch (e) {
+        console.error('チェック状態更新エラー:', e);
+        showToast('エラーが発生しました');
+      }
+    }
+    
+    // グローバルに公開
+    window.toggleItemCheck = toggleItemCheck;
 
     async function cancelOrder(orderId, tableNumber, orderNumber) {
       try {
