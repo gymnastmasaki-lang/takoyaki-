@@ -3626,7 +3626,10 @@
           <div id="taxRateSelectionModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;">
             <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
               <h2 style="font-size: 24px; font-weight: bold; margin-bottom: 10px; color: #333; text-align: center;">🔴 赤伝票：税率選択</h2>
-              <p style="text-align: center; color: #666; margin-bottom: 20px; font-size: 14px;">各商品の税率を選択してください</p>
+              <p style="text-align: center; color: #666; margin-bottom: 10px; font-size: 14px;">各商品の税率を選択してください</p>
+              <p style="text-align: center; color: #e74c3c; margin-bottom: 20px; font-size: 12px; background: #ffe5e5; padding: 8px; border-radius: 5px;">
+                ⚠️ 選択された税率がジャーナル出力に反映されます
+              </p>
               
               <div id="taxRateItemsList" style="margin-bottom: 20px;">
                 <!-- 商品リストがここに挿入されます -->
@@ -3658,7 +3661,8 @@
           
           orderData.items.forEach((item, index) => {
             const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-            const defaultTaxRate = item.taxRate || 10;
+            // 商品の元の税率を取得（持ち帰りは8%、店内は10%がデフォルト）
+            const defaultTaxRate = item.taxRate || (item.takeout ? 8 : 10);
             
             console.log(`  Item ${index}: ${item.name}, taxRate: ${defaultTaxRate}`);
             
@@ -3668,6 +3672,10 @@
                   <div style="flex: 1;">
                     <div style="font-weight: bold; color: #333; font-size: 16px;">${item.name}</div>
                     ${item.toppingName ? `<div style="font-size: 13px; color: #666; margin-top: 3px;">トッピング: ${item.toppingName}</div>` : ''}
+                    <div style="font-size: 13px; color: #999; margin-top: 3px;">
+                      ${item.takeout ? '🥡 持ち帰り' : '🍽️ 店内飲食'} 
+                      ${item.taxRate ? `(元の税率: ${item.taxRate}%)` : ''}
+                    </div>
                     <div style="font-size: 14px; color: #666; margin-top: 5px;">数量: ${item.quantity} × ¥${(item.price + (item.toppingPrice || 0)).toLocaleString()}</div>
                   </div>
                   <div style="font-size: 18px; font-weight: bold; color: #667eea;">
@@ -3676,11 +3684,11 @@
                 </div>
                 
                 <div style="display: flex; gap: 10px; margin-top: 10px;">
-                  <label style="flex: 1; cursor: pointer;">
+                  <label style="flex: 1; cursor: pointer; padding: 10px; border: 2px solid ${defaultTaxRate === 8 ? '#4CAF50' : '#ddd'}; border-radius: 8px; background: ${defaultTaxRate === 8 ? '#f1f8f4' : 'white'};">
                     <input type="radio" name="taxRate${index}" value="8" ${defaultTaxRate === 8 ? 'checked' : ''} style="margin-right: 5px;">
                     <span style="font-size: 15px; font-weight: bold; color: #4CAF50;">8% (軽減税率)</span>
                   </label>
-                  <label style="flex: 1; cursor: pointer;">
+                  <label style="flex: 1; cursor: pointer; padding: 10px; border: 2px solid ${defaultTaxRate === 10 ? '#667eea' : '#ddd'}; border-radius: 8px; background: ${defaultTaxRate === 10 ? '#f1f4f8' : 'white'};">
                     <input type="radio" name="taxRate${index}" value="10" ${defaultTaxRate === 10 ? 'checked' : ''} style="margin-right: 5px;">
                     <span style="font-size: 15px; font-weight: bold; color: #667eea;">10% (標準税率)</span>
                   </label>
@@ -3807,16 +3815,28 @@
         // 🆕 ユーザーが選択した税率で計算
         let tax8Total = 0;
         let tax10Total = 0;
+        const taxBreakdown = { tax8Items: [], tax10Items: [] };
         
         if (orderData.items && Array.isArray(orderData.items)) {
           orderData.items.forEach((item, index) => {
             const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
             const selectedTaxRate = taxRateSelections[index]; // ユーザーが選択した税率
+            const itemName = item.name + (item.toppingName ? ` (${item.toppingName})` : '');
             
             if (selectedTaxRate === 8) {
               tax8Total += itemTotal;
+              taxBreakdown.tax8Items.push({
+                name: itemName,
+                quantity: item.quantity,
+                amount: itemTotal
+              });
             } else if (selectedTaxRate === 10) {
               tax10Total += itemTotal;
+              taxBreakdown.tax10Items.push({
+                name: itemName,
+                quantity: item.quantity,
+                amount: itemTotal
+              });
             }
           });
           
@@ -3825,12 +3845,19 @@
             const bagTotal = orderData.bagQuantity * 3;
             // レジ袋は通常10%
             tax10Total += bagTotal;
+            taxBreakdown.tax10Items.push({
+              name: 'レジ袋',
+              quantity: orderData.bagQuantity,
+              amount: bagTotal
+            });
           }
           
           console.log('📊 選択された税率で計算した税金:', {
             税込合計: totalAmount,
             '8%対象': tax8Total,
-            '10%対象': tax10Total
+            '10%対象': tax10Total,
+            '8%対象商品': taxBreakdown.tax8Items,
+            '10%対象商品': taxBreakdown.tax10Items
           });
         }
         
@@ -3898,7 +3925,10 @@
           redSlippedBy: window.currentStoreId,
           businessDate: dateStr,
           originalOrderId: orderData.id,
-          taxRateSelections: taxRateSelections  // 選択された税率を保存
+          taxRateSelections: taxRateSelections,  // 選択された税率を保存
+          taxBreakdown: taxBreakdown,  // 詳細な税率内訳を保存
+          calculatedTax8Total: tax8Total,
+          calculatedTax10Total: tax10Total
         };
         
         const redSlipRef = window.doc(window.collection(window.db, 'stores', window.currentStoreId, 'redSlips'));
@@ -3911,8 +3941,39 @@
         
         console.log('✅ 赤伝票処理完了 - 注文を削除し、redSlipsに保存しました');
         
+        // 税率別の明細を作成
+        const tax8Items = [];
+        const tax10Items = [];
+        
+        orderData.items.forEach((item, index) => {
+          const selectedTaxRate = taxRateSelections[index];
+          const itemName = item.name + (item.toppingName ? ` (${item.toppingName})` : '');
+          const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+          
+          if (selectedTaxRate === 8) {
+            tax8Items.push(`  ${itemName} x${item.quantity}: ¥${itemTotal.toLocaleString()}`);
+          } else {
+            tax10Items.push(`  ${itemName} x${item.quantity}: ¥${itemTotal.toLocaleString()}`);
+          }
+        });
+        
+        let detailMessage = `注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n`;
+        detailMessage += `合計金額: ¥${totalAmount.toLocaleString()}\n\n`;
+        
+        if (tax8Items.length > 0) {
+          detailMessage += `【8%対象商品】¥${tax8Total.toLocaleString()}\n`;
+          detailMessage += tax8Items.join('\n') + '\n\n';
+        }
+        
+        if (tax10Items.length > 0) {
+          detailMessage += `【10%対象商品】¥${tax10Total.toLocaleString()}\n`;
+          detailMessage += tax10Items.join('\n') + '\n\n';
+        }
+        
+        detailMessage += `売上・客数から除外されました\n※ 復元不可（伝票打ち直しが必要）`;
+        
         showCustomAlert(
-          `注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n8%対象: ¥${tax8Total.toLocaleString()}\n10%対象: ¥${tax10Total.toLocaleString()}\n\n売上・客数から除外されました\n※ 復元不可（伝票打ち直しが必要）`,
+          detailMessage,
           '✅ 赤伝票完了',
           '🔴'
         );
