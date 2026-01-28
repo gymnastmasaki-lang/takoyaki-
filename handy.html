@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ハンディシステム</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    
+    /* ログイン画面 */
+    .login-screen {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    
+    .login-screen h1 {
+      text-align: center;
+      color: #667eea;
+      margin-bottom: 30px;
+      font-size: 28px;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      color: #333;
+      font-weight: bold;
+    }
+    
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    .login-btn {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    
+    .login-btn:active {
+      transform: scale(0.98);
+    }
+    
+    /* テーブル一覧画面 */
+    .tables-screen {
+      display: none;
+    }
+    
+    .header {
+      background: white;
+      border-radius: 15px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    
+    .header h2 {
+      color: #667eea;
+      margin-bottom: 10px;
+    }
+    
+    .header .store-info {
+      color: #666;
+      font-size: 14px;
+    }
+    
+    .logout-btn {
+      background: #f44336;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    
+    .tables-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 15px;
+    }
+    
+    .table-card {
+      background: white;
+      border-radius: 15px;
+      padding: 30px 20px;
+      text-align: center;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    .table-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+    }
+    
+    .table-card:active {
+      transform: translateY(-2px);
+    }
+    
+    .table-card .table-name {
+      font-size: 24px;
+      font-weight: bold;
+      color: #667eea;
+      margin-bottom: 10px;
+    }
+    
+    .table-card .table-status {
+      font-size: 12px;
+      color: #999;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+    
+    .error-message {
+      background: #ffebee;
+      color: #c62828;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: white;
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- ログイン画面 -->
+    <div class="login-screen" id="loginScreen">
+      <h1>🍽️ ハンディシステム</h1>
+      <div id="errorMessage" class="error-message hidden"></div>
+      
+      <div class="form-group">
+        <label for="storeSelect">店舗を選択</label>
+        <select id="storeSelect">
+          <option value="">選択してください</option>
+        </select>
+      </div>
+      
+      <div class="form-group">
+        <label for="passwordInput">パスワード</label>
+        <input type="password" id="passwordInput" placeholder="パスワードを入力">
+      </div>
+      
+      <button class="login-btn" onclick="handleLogin()">ログイン</button>
+    </div>
+    
+    <!-- テーブル一覧画面 -->
+    <div class="tables-screen" id="tablesScreen">
+      <div class="header">
+        <h2 id="storeNameDisplay">店舗名</h2>
+        <div class="store-info">テーブルを選択してください</div>
+        <button class="logout-btn" onclick="handleLogout()">ログアウト</button>
+      </div>
+      
+      <div class="tables-grid" id="tablesGrid">
+        <div class="loading">読み込み中...</div>
+      </div>
+    </div>
+  </div>
+  
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, query, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    
+    const firebaseConfig = {
+      apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+      authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+      projectId: "takoyaki-order-system-bacd7",
+      storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+      messagingSenderId: "104494752890",
+      appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    
+    // グローバルに公開
+    window.db = db;
+    window.collection = collection;
+    window.query = query;
+    window.getDocs = getDocs;
+    window.doc = doc;
+    window.getDoc = getDoc;
+    
+    console.log('✅ Firebase初期化完了');
+    
+    // 店舗リストを読み込み
+    loadStoreList();
+  </script>
+  
+  <script>
+    let currentStoreId = null;
+    let currentStoreName = null;
+    
+    // 店舗リストを読み込み
+    async function loadStoreList() {
+      try {
+        const storesSnapshot = await window.getDocs(window.collection(window.db, 'stores'));
+        const storeSelect = document.getElementById('storeSelect');
+        
+        storeSelect.innerHTML = '<option value="">選択してください</option>';
+        
+        storesSnapshot.forEach(doc => {
+          const storeData = doc.data();
+          const option = document.createElement('option');
+          option.value = doc.id;
+          option.textContent = storeData.name || doc.id;
+          option.dataset.password = storeData.password || '';
+          storeSelect.appendChild(option);
+        });
+        
+        // 下赤塚店も追加（旧システム用）
+        const oldStoreOption = document.createElement('option');
+        oldStoreOption.value = 'shimoakatsuka';
+        oldStoreOption.textContent = '粉もん屋 八 下赤塚店';
+        oldStoreOption.dataset.password = '1111';
+        storeSelect.appendChild(oldStoreOption);
+        
+        console.log('✅ 店舗リスト読み込み完了');
+      } catch (error) {
+        console.error('❌ 店舗リスト読み込みエラー:', error);
+        showError('店舗リストの読み込みに失敗しました');
+      }
+    }
+    
+    // ログイン処理
+    window.handleLogin = async function() {
+      const storeSelect = document.getElementById('storeSelect');
+      const passwordInput = document.getElementById('passwordInput');
+      
+      const selectedOption = storeSelect.options[storeSelect.selectedIndex];
+      const storeId = storeSelect.value;
+      const storeName = selectedOption.textContent;
+      const correctPassword = selectedOption.dataset.password;
+      const inputPassword = passwordInput.value;
+      
+      if (!storeId) {
+        showError('店舗を選択してください');
+        return;
+      }
+      
+      if (!inputPassword) {
+        showError('パスワードを入力してください');
+        return;
+      }
+      
+      if (inputPassword !== correctPassword) {
+        showError('パスワードが正しくありません');
+        return;
+      }
+      
+      // ログイン成功
+      currentStoreId = storeId === 'shimoakatsuka' ? null : storeId;
+      currentStoreName = storeName;
+      
+      // セッションに保存
+      sessionStorage.setItem('handyStoreId', currentStoreId || '');
+      sessionStorage.setItem('handyStoreName', currentStoreName);
+      
+      console.log('✅ ログイン成功:', storeName);
+      
+      // テーブル一覧画面を表示
+      showTablesScreen();
+    };
+    
+    // ログアウト処理
+    window.handleLogout = function() {
+      sessionStorage.removeItem('handyStoreId');
+      sessionStorage.removeItem('handyStoreName');
+      
+      currentStoreId = null;
+      currentStoreName = null;
+      
+      document.getElementById('loginScreen').classList.remove('hidden');
+      document.getElementById('tablesScreen').classList.add('hidden');
+      
+      document.getElementById('passwordInput').value = '';
+    };
+    
+    // エラーメッセージ表示
+    function showError(message) {
+      const errorDiv = document.getElementById('errorMessage');
+      errorDiv.textContent = message;
+      errorDiv.classList.remove('hidden');
+      
+      setTimeout(() => {
+        errorDiv.classList.add('hidden');
+      }, 3000);
+    }
+    
+    // テーブル一覧画面を表示
+    async function showTablesScreen() {
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('tablesScreen').classList.remove('hidden');
+      document.getElementById('storeNameDisplay').textContent = currentStoreName;
+      
+      await loadTables();
+    }
+    
+    // テーブル一覧を読み込み
+    async function loadTables() {
+      try {
+        const tablesGrid = document.getElementById('tablesGrid');
+        tablesGrid.innerHTML = '<div class="loading">読み込み中...</div>';
+        
+        let tablesRef;
+        if (currentStoreId) {
+          // 新システム: stores/{storeId}/tables
+          tablesRef = window.collection(window.db, 'stores', currentStoreId, 'tables');
+        } else {
+          // 旧システム: tables
+          tablesRef = window.collection(window.db, 'tables');
+        }
+        
+        const tablesSnapshot = await window.getDocs(tablesRef);
+        const tables = [];
+        
+        tablesSnapshot.forEach(doc => {
+          tables.push({
+            id: doc.id,
+            ...doc.data()
+          });
+        });
+        
+        // orderフィールドでソート
+        tables.sort((a, b) => {
+          const orderA = a.order || 0;
+          const orderB = b.order || 0;
+          if (orderA !== orderB) {
+            return orderA - orderB;
+          }
+          return a.name.localeCompare(b.name);
+        });
+        
+        if (tables.length === 0) {
+          tablesGrid.innerHTML = '<div style="color: white; text-align: center; padding: 40px;">テーブルが登録されていません</div>';
+          return;
+        }
+        
+        tablesGrid.innerHTML = '';
+        
+        tables.forEach(table => {
+          const tableCard = document.createElement('div');
+          tableCard.className = 'table-card';
+          tableCard.onclick = () => openMenu(table.name);
+          
+          tableCard.innerHTML = `
+            <div class="table-name">${table.name}</div>
+            <div class="table-status">タップして注文</div>
+          `;
+          
+          tablesGrid.appendChild(tableCard);
+        });
+        
+        console.log('✅ テーブル一覧読み込み完了:', tables.length + '件');
+      } catch (error) {
+        console.error('❌ テーブル読み込みエラー:', error);
+        tablesGrid.innerHTML = '<div style="color: white; text-align: center; padding: 40px;">テーブルの読み込みに失敗しました</div>';
+      }
+    }
+    
+    // メニュー画面を開く
+    function openMenu(tableName) {
+      console.log('📱 メニュー画面を開く:', tableName);
+      
+      // menu.htmlに遷移（storeIdとtableをパラメータで渡す）
+      let menuUrl = `menu.html?table=${encodeURIComponent(tableName)}&mode=handy`;
+      
+      if (currentStoreId) {
+        menuUrl += `&store=${currentStoreId}`;
+      }
+      
+      // セッションストレージに店舗情報を保存（menu.htmlで使用）
+      sessionStorage.setItem('handyStoreId', currentStoreId || '');
+      sessionStorage.setItem('handyStoreName', currentStoreName);
+      sessionStorage.setItem('handyTableName', tableName);
+      
+      window.location.href = menuUrl;
+    }
+    
+    // ページ読み込み時: セッションから復元
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedStoreId = sessionStorage.getItem('handyStoreId');
+      const savedStoreName = sessionStorage.getItem('handyStoreName');
+      
+      if (savedStoreName) {
+        currentStoreId = savedStoreId === '' ? null : savedStoreId;
+        currentStoreName = savedStoreName;
+        
+        console.log('✅ セッションから復元:', currentStoreName);
+        showTablesScreen();
+      }
+    });
+  </script>
+</body>
+</html>
