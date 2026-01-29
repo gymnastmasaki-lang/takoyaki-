@@ -1331,12 +1331,18 @@
     }
     
     async function completePayment() {
+      console.log('🔍 completePayment 呼び出し');
+      console.log('選択された支払い方法:', selectedPaymentMethod);
+      console.log('現在の注文:', currentPaymentOrders);
+      console.log('店舗ID:', currentStoreId);
+      
       if (!selectedPaymentMethod) {
         alert('支払い方法を選択してください');
         return;
       }
       
       const totalAmount = currentPaymentOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+      console.log('合計金額:', totalAmount);
       
       if (selectedPaymentMethod === 'cash') {
         const received = parseInt(document.getElementById('cashReceived').value) || 0;
@@ -1356,6 +1362,7 @@
           btnClass: 'modal-btn-success'
         });
         
+        console.log('確認結果:', confirmed);
         if (!confirmed) return;
       } else {
         const methodName = selectedPaymentMethod === 'card' ? 'クレジットカード' : '電子マネー';
@@ -1368,41 +1375,58 @@
           btnClass: 'modal-btn-success'
         });
         
+        console.log('確認結果:', confirmed);
         if (!confirmed) return;
       }
       
       try {
         const now = window.Timestamp.now();
+        console.log('⏰ タイムスタンプ:', now);
         
         for (const order of currentPaymentOrders) {
-          const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+          const path = `stores/${currentStoreId}/orders/${order.id}`;
+          console.log('📝 更新するパス:', path);
           
-          await window.updateDoc(orderRef, {
+          const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+          console.log('📝 orderRef:', orderRef);
+          
+          const updateData = {
             paidAt: now,
+            completedAt: now, // 🔧 追加: 完了フラグも同時に設定
             paymentMethod: selectedPaymentMethod
-          });
+          };
+          console.log('📝 更新データ:', updateData);
+          
+          await window.updateDoc(orderRef, updateData);
+          console.log('✅ 更新成功:', order.id);
         }
         
-        console.log('✅ 会計完了:', currentPaymentOrders.length, '件');
+        console.log('✅ 全注文の会計完了');
         
         closePaymentModal();
         
         await showCustomModal({
           icon: '✅',
           title: '会計完了',
-          message: `会計が完了しました`,
+          message: `会計が完了しました\n\n${currentPaymentOrders.length}件の注文を処理しました`,
           btnText: 'OK',
           btnClass: 'modal-btn-success'
         });
         
       } catch (error) {
         console.error('❌ 会計エラー:', error);
+        console.error('❌ エラーメッセージ:', error.message);
+        console.error('❌ エラースタック:', error.stack);
         alert('会計処理でエラーが発生しました: ' + error.message);
       }
     }
     
     async function markOrderComplete() {
+      console.log('🔍 markOrderComplete 呼び出し');
+      console.log('チェック状態:', itemCheckStatus);
+      
       const allChecked = Object.values(itemCheckStatus).every(v => v);
+      console.log('全チェック済み:', allChecked);
       
       if (!allChecked) {
         alert('全ての商品を提供してからチェックしてください');
@@ -1417,12 +1441,17 @@
         btnClass: 'modal-btn-success'
       });
       
+      console.log('確認結果:', confirmed);
       if (!confirmed) return;
       
       try {
         const now = window.Timestamp.now();
+        console.log('⏰ タイムスタンプ:', now);
         
         for (const order of currentPaymentOrders) {
+          const path = `stores/${currentStoreId}/orders/${order.id}`;
+          console.log('📝 更新するパス:', path);
+          
           const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
           
           // 商品にservedフラグを追加
@@ -1430,11 +1459,16 @@
             ...item,
             served: true
           }));
+          console.log('📝 更新後の商品:', updatedItems);
           
-          await window.updateDoc(orderRef, {
+          const updateData = {
             completedAt: now,
             items: updatedItems
-          });
+          };
+          console.log('📝 更新データ:', updateData);
+          
+          await window.updateDoc(orderRef, updateData);
+          console.log('✅ 更新成功:', order.id);
         }
         
         console.log('✅ 注文完了:', currentPaymentOrders.length, '件');
@@ -1451,6 +1485,8 @@
         
       } catch (error) {
         console.error('❌ 完了エラー:', error);
+        console.error('❌ エラーメッセージ:', error.message);
+        console.error('❌ エラースタック:', error.stack);
         alert('完了処理でエラーが発生しました: ' + error.message);
       }
     }
