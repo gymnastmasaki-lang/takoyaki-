@@ -233,6 +233,7 @@
     .order-item {
       display: flex;
       justify-content: space-between;
+      align-items: center;
       padding: 10px 0;
       border-bottom: 1px solid #ddd;
     }
@@ -255,10 +256,88 @@
       font-size: 14px;
     }
     
+    .item-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    
     .item-price {
       font-weight: bold;
       color: #667eea;
       font-size: 18px;
+      margin-right: 10px;
+    }
+    
+    .edit-price-btn {
+      background: #2196F3;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    
+    /* 金額変更モーダル */
+    .price-edit-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.9);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .price-edit-content {
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      max-width: 400px;
+      width: 90%;
+    }
+    
+    .price-edit-content h3 {
+      color: #2196F3;
+      margin-bottom: 20px;
+    }
+    
+    .price-edit-input {
+      width: 100%;
+      padding: 15px;
+      font-size: 24px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    
+    .price-edit-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    
+    .price-edit-buttons button {
+      padding: 15px;
+      border: none;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    
+    .price-edit-buttons .confirm {
+      background: #4CAF50;
+      color: white;
+    }
+    
+    .price-edit-buttons .cancel {
+      background: #f44336;
+      color: white;
     }
     
     /* 合計金額 */
@@ -378,6 +457,51 @@
     
     .payment-btn-icon {
       font-size: 24px;
+    }
+    
+    /* 現金払いおつり計算 */
+    .cash-payment-section {
+      display: none;
+      background: #e8f5e9;
+      border: 2px solid #4CAF50;
+      border-radius: 10px;
+      padding: 15px;
+      margin-top: 15px;
+    }
+    
+    .cash-payment-section h4 {
+      color: #2e7d32;
+      margin-bottom: 10px;
+    }
+    
+    .cash-input-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    
+    .cash-input-group input {
+      flex: 1;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 18px;
+    }
+    
+    .change-display {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+      font-size: 20px;
+      font-weight: bold;
+      color: #2e7d32;
+    }
+    
+    .change-display .label {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 5px;
     }
     
     /* アクションボタン */
@@ -564,6 +688,18 @@
             <span>クレジット</span>
           </button>
         </div>
+        
+        <!-- 現金払いおつり計算 -->
+        <div class="cash-payment-section" id="cashPaymentSection">
+          <h4>💴 お預かり金額</h4>
+          <div class="cash-input-group">
+            <input type="number" id="receivedAmount" placeholder="お預かり金額を入力" min="0" oninput="updateChange()">
+          </div>
+          <div class="change-display">
+            <div class="label">おつり</div>
+            <div id="changeAmount">¥0</div>
+          </div>
+        </div>
       </div>
       
       <!-- アクションボタン -->
@@ -577,6 +713,22 @@
         <button class="action-btn delete" onclick="deleteOrder()">
           🗑️ 削除
         </button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 金額変更モーダル -->
+  <div class="price-edit-modal" id="priceEditModal">
+    <div class="price-edit-content">
+      <h3>💰 金額変更</h3>
+      <div style="margin-bottom: 15px;">
+        <div style="font-weight: bold; color: #333;">商品名: <span id="editItemName"></span></div>
+        <div style="color: #666; font-size: 14px;">元の金額: ¥<span id="editOriginalPrice"></span></div>
+      </div>
+      <input type="number" id="newPriceInput" class="price-edit-input" placeholder="新しい金額を入力" min="0">
+      <div class="price-edit-buttons">
+        <button class="confirm" onclick="confirmPriceEdit()">変更</button>
+        <button class="cancel" onclick="closePriceEditModal()">キャンセル</button>
       </div>
     </div>
   </div>
@@ -627,6 +779,7 @@
     let currentOrderData = null;
     let currentDiscount = 0;
     let selectedPaymentMethod = null;
+    let editingItemIndex = null;
     
     // 店舗リストを読み込み
     async function loadStoreList() {
@@ -856,6 +1009,11 @@
         btn.classList.remove('selected');
       });
       
+      // 現金払いセクションを非表示
+      document.getElementById('cashPaymentSection').style.display = 'none';
+      document.getElementById('receivedAmount').value = '';
+      document.getElementById('changeAmount').textContent = '¥0';
+      
       // 注文データを読み込み
       await loadOrderData(tableName);
     };
@@ -867,11 +1025,14 @@
       currentOrderData = null;
     };
     
-    // 注文データを読み込み
+    // 注文データを読み込み（POSと同じパスで読み込む）
     async function loadOrderData(tableName) {
       try {
         console.log('📋 注文データを読み込み中:', tableName);
+        console.log('   店舗ID:', currentStoreId);
+        console.log('   パス: stores/' + currentStoreId + '/orders');
         
+        // POSと同じパスで注文を検索
         const ordersRef = window.collection(window.db, 'stores', currentStoreId, 'orders');
         const q = window.query(
           ordersRef,
@@ -880,9 +1041,11 @@
         );
         
         const querySnapshot = await window.getDocs(q);
+        console.log('   検索結果件数:', querySnapshot.size);
         
         if (querySnapshot.empty) {
-          document.getElementById('orderDetails').innerHTML = '<div style="color: #666; text-align: center;">注文がありません</div>';
+          console.log('⚠️ 注文が見つかりません');
+          document.getElementById('orderDetails').innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">注文がありません</div>';
           updateTotalDisplay(0, 0);
           return;
         }
@@ -891,23 +1054,24 @@
         let orderDoc = null;
         querySnapshot.forEach(doc => {
           orderDoc = { id: doc.id, ...doc.data() };
+          console.log('   注文データ:', orderDoc);
         });
         
         if (!orderDoc) {
-          document.getElementById('orderDetails').innerHTML = '<div style="color: #666; text-align: center;">注文がありません</div>';
+          document.getElementById('orderDetails').innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">注文がありません</div>';
           updateTotalDisplay(0, 0);
           return;
         }
         
         currentOrderData = orderDoc;
-        console.log('✅ 注文データ取得:', orderDoc);
+        console.log('✅ 注文データ取得成功');
         
         // 注文明細を表示
         displayOrderDetails(orderDoc);
         
       } catch (error) {
         console.error('❌ 注文データ読み込みエラー:', error);
-        document.getElementById('orderDetails').innerHTML = '<div style="color: #f44336; text-align: center;">エラーが発生しました</div>';
+        document.getElementById('orderDetails').innerHTML = '<div style="color: #f44336; text-align: center; padding: 20px;">エラーが発生しました<br>' + error.message + '</div>';
       }
     }
     
@@ -917,14 +1081,14 @@
       orderDetails.innerHTML = '';
       
       if (!orderData.items || orderData.items.length === 0) {
-        orderDetails.innerHTML = '<div style="color: #666; text-align: center;">注文がありません</div>';
+        orderDetails.innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">注文がありません</div>';
         updateTotalDisplay(0, 0);
         return;
       }
       
       let subtotal = 0;
       
-      orderData.items.forEach(item => {
+      orderData.items.forEach((item, index) => {
         const itemDiv = document.createElement('div');
         itemDiv.className = 'order-item';
         
@@ -934,9 +1098,12 @@
         itemDiv.innerHTML = `
           <div class="item-info">
             <div class="item-name">${item.name}</div>
-            <div class="item-quantity">数量: ${item.quantity}</div>
+            <div class="item-quantity">数量: ${item.quantity} × ¥${item.price.toLocaleString()}</div>
           </div>
-          <div class="item-price">¥${itemPrice.toLocaleString()}</div>
+          <div class="item-actions">
+            <div class="item-price">¥${itemPrice.toLocaleString()}</div>
+            <button class="edit-price-btn" onclick="openPriceEdit(${index})">変更</button>
+          </div>
         `;
         
         orderDetails.appendChild(itemDiv);
@@ -952,6 +1119,11 @@
       document.getElementById('subtotalAmount').textContent = `¥${subtotal.toLocaleString()}`;
       document.getElementById('discountDisplay').textContent = `-¥${discount.toLocaleString()}`;
       document.getElementById('totalAmount').textContent = `¥${total.toLocaleString()}`;
+      
+      // おつり計算を更新
+      if (selectedPaymentMethod === 'cash') {
+        updateChange();
+      }
     }
     
     // 値引きを適用
@@ -991,6 +1163,14 @@
       // クリックされたボタンを選択状態にする
       event.target.closest('.payment-btn').classList.add('selected');
       
+      // 現金払いの場合はおつり計算セクションを表示
+      const cashSection = document.getElementById('cashPaymentSection');
+      if (method === 'cash') {
+        cashSection.style.display = 'block';
+      } else {
+        cashSection.style.display = 'none';
+      }
+      
       const methodNames = {
         'cash': '現金',
         'emoney': '電子マネー',
@@ -998,6 +1178,86 @@
       };
       
       console.log('💳 支払い方法選択:', methodNames[method]);
+    };
+    
+    // おつり計算を更新
+    window.updateChange = function() {
+      const receivedInput = document.getElementById('receivedAmount');
+      const receivedAmount = parseInt(receivedInput.value) || 0;
+      
+      // 合計金額を取得
+      const totalText = document.getElementById('totalAmount').textContent;
+      const totalAmount = parseInt(totalText.replace(/[^0-9]/g, '')) || 0;
+      
+      const change = receivedAmount - totalAmount;
+      
+      const changeDisplay = document.getElementById('changeAmount');
+      if (change >= 0) {
+        changeDisplay.textContent = `¥${change.toLocaleString()}`;
+        changeDisplay.style.color = '#2e7d32';
+      } else {
+        changeDisplay.textContent = `不足: ¥${Math.abs(change).toLocaleString()}`;
+        changeDisplay.style.color = '#f44336';
+      }
+    };
+    
+    // 金額変更モーダルを開く
+    window.openPriceEdit = function(itemIndex) {
+      if (!currentOrderData || !currentOrderData.items || !currentOrderData.items[itemIndex]) {
+        return;
+      }
+      
+      editingItemIndex = itemIndex;
+      const item = currentOrderData.items[itemIndex];
+      
+      document.getElementById('editItemName').textContent = item.name;
+      document.getElementById('editOriginalPrice').textContent = item.price.toLocaleString();
+      document.getElementById('newPriceInput').value = item.price;
+      
+      document.getElementById('priceEditModal').style.display = 'flex';
+    };
+    
+    // 金額変更モーダルを閉じる
+    window.closePriceEditModal = function() {
+      document.getElementById('priceEditModal').style.display = 'none';
+      editingItemIndex = null;
+    };
+    
+    // 金額変更を確定
+    window.confirmPriceEdit = async function() {
+      if (editingItemIndex === null || !currentOrderData) {
+        return;
+      }
+      
+      const newPrice = parseInt(document.getElementById('newPriceInput').value) || 0;
+      
+      if (newPrice < 0) {
+        alert('金額は0以上で入力してください');
+        return;
+      }
+      
+      try {
+        // 注文データを更新
+        currentOrderData.items[editingItemIndex].price = newPrice;
+        
+        // Firestoreに保存
+        const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', currentOrderData.id);
+        await window.updateDoc(orderRef, {
+          items: currentOrderData.items
+        });
+        
+        console.log('✅ 金額を変更しました');
+        showCheckoutMessage(`金額を ¥${newPrice.toLocaleString()} に変更しました`, 'success');
+        
+        // 表示を更新
+        displayOrderDetails(currentOrderData);
+        
+        closePriceEditModal();
+        
+      } catch (error) {
+        console.error('❌ 金額変更エラー:', error);
+        alert('金額の変更に失敗しました');
+      }
     };
     
     // 会計完了
@@ -1010,6 +1270,18 @@
       if (!selectedPaymentMethod) {
         showCheckoutMessage('支払い方法を選択してください', 'error');
         return;
+      }
+      
+      // 現金払いの場合はおつりチェック
+      if (selectedPaymentMethod === 'cash') {
+        const receivedAmount = parseInt(document.getElementById('receivedAmount').value) || 0;
+        const totalText = document.getElementById('totalAmount').textContent;
+        const totalAmount = parseInt(totalText.replace(/[^0-9]/g, '')) || 0;
+        
+        if (receivedAmount < totalAmount) {
+          showCheckoutMessage('お預かり金額が不足しています', 'error');
+          return;
+        }
       }
       
       try {
