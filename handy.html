@@ -162,6 +162,31 @@
       font-weight: bold;
     }
     
+    .status-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      font-size: 10px;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-weight: bold;
+    }
+    
+    .unpaid-badge {
+      background: #f57c00;
+      color: white;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.7;
+      }
+    }
+    
     .table-card .table-name {
       font-size: 24px;
       font-weight: bold;
@@ -795,28 +820,50 @@
     }
     
     function updateTableStatus(ordersSnapshot) {
-      const pendingTables = new Set();
+      const unpaidTables = new Set();  // 注文あり（未会計）
+      const completedUnpaidTables = new Set();  // 完了済みだが未会計
+      
       ordersSnapshot.forEach(doc => {
         const order = doc.data();
-        if (order.tableNumber && !order.deleted && !order.cancelledAt && !order.paidAt) {
-          pendingTables.add(order.tableNumber);
+        if (order.tableNumber && !order.deleted && !order.cancelledAt) {
+          // 会計済みでない注文
+          if (!order.paidAt) {
+            unpaidTables.add(order.tableNumber);
+            // 完了済みだが未会計
+            if (order.completedAt) {
+              completedUnpaidTables.add(order.tableNumber);
+            }
+          }
         }
       });
       
       document.querySelectorAll('.table-card').forEach(card => {
         const tableName = card.getAttribute('data-table-name');
-        if (pendingTables.has(tableName)) {
+        
+        // 既存のバッジを削除
+        const oldBadge = card.querySelector('.pending-badge');
+        if (oldBadge) oldBadge.remove();
+        
+        const oldStatusBadge = card.querySelector('.status-badge');
+        if (oldStatusBadge) oldStatusBadge.remove();
+        
+        if (completedUnpaidTables.has(tableName)) {
+          // 完了済みだが未会計 → 未会計バッジ（オレンジ）
           card.classList.add('has-pending-orders');
-          if (!card.querySelector('.pending-badge')) {
-            const badge = document.createElement('div');
-            badge.className = 'pending-badge';
-            badge.textContent = '注文あり';
-            card.appendChild(badge);
-          }
+          const badge = document.createElement('div');
+          badge.className = 'status-badge unpaid-badge';
+          badge.textContent = '未会計';
+          card.appendChild(badge);
+        } else if (unpaidTables.has(tableName)) {
+          // 注文あり（未会計） → 注文ありバッジ（オレンジ）
+          card.classList.add('has-pending-orders');
+          const badge = document.createElement('div');
+          badge.className = 'pending-badge';
+          badge.textContent = '注文あり';
+          card.appendChild(badge);
         } else {
+          // 空席 → バッジなし
           card.classList.remove('has-pending-orders');
-          const badge = card.querySelector('.pending-badge');
-          if (badge) badge.remove();
         }
       });
     }
@@ -1166,6 +1213,9 @@
         // window.ordersToCheckoutから会計対象の注文を取得
         const ordersToProcess = window.ordersToCheckout || currentOrders;
         
+        // 値引き金額を取得
+        const discountAmount = parseInt(document.getElementById('discountAmount').value) || 0;
+        
         // 税率別集計
         let tax8Total = 0;
         let tax10Total = 0;
@@ -1179,6 +1229,9 @@
             tax10Total += amount;
           }
         });
+        
+        // 値引き後の金額（totalAmountToPayは既に値引き後）
+        const totalBeforeDiscount = tax8Total + tax10Total;
         
         // 商品点数を計算
         let itemCount = 0;
@@ -1194,6 +1247,9 @@
         
         console.log('💰 会計処理開始:', {
           totalAmount: totalAmountToPay,
+          値引き前金額: totalBeforeDiscount,
+          値引き金額: discountAmount,
+          値引き後金額: totalAmountToPay,
           paymentMethod: selectedPaymentMethod,
           itemCount: itemCount,
           tax8Total: tax8Total,
@@ -1208,18 +1264,21 @@
         if (selectedPaymentMethod === 'emoney') paymentMethodJP = '電子マネー';
         else if (selectedPaymentMethod === 'credit') paymentMethodJP = 'クレジットカード';
         
-        // Firestoreの注文にpaidAtとcompletedAtフラグを設定
+        // Firestoreの注文にpaidAt、completedAt、deletedフラグを設定（会計完了で削除）
         for (const order of ordersToProcess) {
           const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
           await window.updateDoc(orderRef, {
             paidAt: now,
             completedAt: now,
+            deleted: true,  // 会計完了で削除
+            deletedAt: now,
             paymentMethod: paymentMethodJP,
+            discountAmount: discountAmount,  // 値引き金額を保存
             notifiedPaid: true,
             tax8Total: tax8Total,
             tax10Total: tax10Total
           });
-          console.log('✅ 注文を会計済みに更新:', order.id);
+          console.log('✅ 注文を会計済み＆削除:', order.id);
         }
         
         // 売上をPOSに反映
@@ -1237,7 +1296,8 @@
           emoneSales: 0,
           creditSales: 0,
           tax8Total: 0,
-          tax10Total: 0
+          tax10Total: 0,
+          totalDiscount: 0  // 値引き合計
         };
         
         console.log('📊 現在のdailySales:', currentData);
@@ -1251,6 +1311,7 @@
           creditSales: (currentData.creditSales || 0) + (selectedPaymentMethod === 'credit' ? totalAmountToPay : 0),
           tax8Total: (currentData.tax8Total || 0) + tax8Total,
           tax10Total: (currentData.tax10Total || 0) + tax10Total,
+          totalDiscount: (currentData.totalDiscount || 0) + discountAmount,  // 値引き合計に加算
           updatedAt: now
         };
         
@@ -1258,13 +1319,19 @@
         
         await window.setDoc(dailySalesRef, updateData, { merge: true });
         
-        console.log('✅ 売上をPOSに反映しました');
+        console.log('✅ 売上をPOSに反映しました（値引き: ¥' + discountAmount.toLocaleString() + '）');
         
         // 成功メッセージを表示
+        let message = `会計が完了しました。\n\n売上: ¥${totalAmountToPay.toLocaleString()}`;
+        if (discountAmount > 0) {
+          message += `\n値引き: ¥${discountAmount.toLocaleString()}`;
+        }
+        message += `\n客数: +1\n\n注文は自動的に削除されました。`;
+        
         await showCustomAlert({ 
           icon: '🎉', 
           title: '会計完了', 
-          message: `会計が完了しました。\n\n売上: ¥${totalAmountToPay.toLocaleString()}\n客数: +1\n\n注文は自動的に完了になりました。`, 
+          message: message, 
           btnClass: 'modal-btn-success' 
         });
         
