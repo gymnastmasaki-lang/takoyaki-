@@ -595,16 +595,16 @@
       startOrdersListener();
     }
     
-    // 🆕 注文のリアルタイム監視を開始
+    // 🆕 注文のリアルタイム監視を開始（POSと同じロジック）
     function startOrdersListener() {
       if (ordersListener) {
         ordersListener();
       }
       
       const ordersRef = window.collection(window.db, 'stores', currentStoreId, 'orders');
-      const ordersQuery = window.query(ordersRef, window.where('status', '==', 'pending'));
       
-      ordersListener = window.onSnapshot(ordersQuery, (snapshot) => {
+      // POSと同じ: 全注文を監視（フィルタなし）
+      ordersListener = window.onSnapshot(ordersRef, (snapshot) => {
         console.log('📡 注文データ更新検知');
         updateTableStatus(snapshot);
       });
@@ -616,8 +616,9 @@
       
       ordersSnapshot.forEach(doc => {
         const order = doc.data();
-        if (order.table) {
-          pendingTables.add(order.table);
+        // POSと同じ条件: 削除されておらず、キャンセルも支払いもされていない注文
+        if (order.tableNumber && !order.deleted && !order.cancelledAt && !order.paidAt) {
+          pendingTables.add(order.tableNumber);
         }
       });
       
@@ -740,21 +741,32 @@
       window.location.href = menuUrl;
     }
     
-    // 🆕 会計画面を開く（POSのロジックをコピー）
+    // 🆕 会計画面を開く（POSのロジックを完全コピー）
     async function openCheckoutForTable(tableName) {
       try {
         console.log('💰 会計画面を開く:', tableName);
         
-        // 該当テーブルのpending注文を取得
+        // POSと同じクエリ: tableNumberで検索、statusは使わない
         const ordersRef = window.collection(window.db, 'stores', currentStoreId, 'orders');
         const ordersQuery = window.query(
           ordersRef,
-          window.where('table', '==', tableName),
-          window.where('status', '==', 'pending')
+          window.where('tableNumber', '==', String(tableName))
         );
         const ordersSnapshot = await window.getDocs(ordersQuery);
         
-        if (ordersSnapshot.empty) {
+        // 注文をcurrentOrdersに格納（未払い注文のみ）
+        currentOrders = [];
+        ordersSnapshot.forEach(doc => {
+          const order = { id: doc.id, ...doc.data() };
+          // POSと同じ条件: 削除されておらず、キャンセルも支払いもされていない注文
+          if (!order.deleted && !order.cancelledAt && !order.paidAt) {
+            currentOrders.push(order);
+          }
+        });
+        
+        console.log('📦 取得した注文:', currentOrders.length, '件');
+        
+        if (currentOrders.length === 0) {
           await showCustomConfirm({
             icon: '📋',
             title: '注文なし',
@@ -764,17 +776,6 @@
           });
           return;
         }
-        
-        // 注文をcurrentOrdersに格納
-        currentOrders = [];
-        ordersSnapshot.forEach(doc => {
-          currentOrders.push({
-            id: doc.id,
-            ...doc.data()
-          });
-        });
-        
-        console.log('📦 取得した注文:', currentOrders.length, '件');
         
         // 会計処理メニューを表示
         showCheckoutMenu(tableName);
@@ -829,7 +830,7 @@
       modal.style.display = 'flex';
     }
     
-    // 🆕 注文完了（POSからコピー）
+    // 🆕 注文完了（POSと完全に同じロジック）
     window.completeOrdersForTable = async function() {
       closeCustomModal();
       
@@ -846,9 +847,11 @@
       try {
         for (const order of currentOrders) {
           const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+          // POSと同じ: completedAtとpaidAtを設定（statusは使わない）
           await window.updateDoc(orderRef, {
-            status: 'completed',
-            completedAt: window.Timestamp.now()
+            completedAt: window.Timestamp.now(),
+            paidAt: window.Timestamp.now(),
+            paymentMethod: 'cash' // デフォルトで現金
           });
         }
         
@@ -874,7 +877,7 @@
       }
     };
     
-    // 🆕 注文キャンセル（POSからコピー）
+    // 🆕 注文キャンセル（POSと完全に同じロジック）
     window.cancelOrdersForTable = async function() {
       closeCustomModal();
       
@@ -891,8 +894,8 @@
       try {
         for (const order of currentOrders) {
           const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+          // POSと同じ: cancelledAtを設定（statusは使わない）
           await window.updateDoc(orderRef, {
-            status: 'cancelled',
             cancelledAt: window.Timestamp.now()
           });
         }
@@ -919,7 +922,7 @@
       }
     };
     
-    // 🆕 注文削除（POSからコピー）
+    // 🆕 注文削除（POSと完全に同じロジック）
     window.deleteOrdersForTable = async function() {
       closeCustomModal();
       
@@ -936,7 +939,11 @@
       try {
         for (const order of currentOrders) {
           const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
-          await window.deleteDoc(orderRef);
+          // POSと同じ: deletedフラグを立てる（物理削除はしない）
+          await window.updateDoc(orderRef, {
+            deleted: true,
+            deletedAt: window.Timestamp.now()
+          });
         }
         
         await showCustomConfirm({
