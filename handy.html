@@ -432,6 +432,29 @@
       color: #4CAF50;
       font-size: 20px;
     }
+    
+    .order-selection-btn {
+      width: 100%;
+      padding: 20px;
+      margin-bottom: 15px;
+      background: white;
+      border: 2px solid #ddd;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-align: left;
+    }
+    
+    .order-selection-btn:hover {
+      border-color: #667eea;
+      background: #f8f9ff;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    
+    .order-selection-btn:active {
+      transform: translateY(0);
+    }
   </style>
 </head>
 <body>
@@ -476,6 +499,18 @@
       <div class="modal-buttons">
         <button class="modal-btn modal-btn-cancel" onclick="closeCustomModal()">キャンセル</button>
         <button class="modal-btn modal-btn-danger" id="modalConfirmBtn" onclick="confirmCustomModal()">実行</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 注文選択モーダル -->
+  <div id="orderSelectionModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>📋 注文を選択</h3>
+      <p id="orderSelectionTableName" style="color: #666; margin-bottom: 20px; text-align: center; font-size: 18px; font-weight: bold;">テーブル</p>
+      <div id="ordersList" style="max-height: 60vh; overflow-y: auto;"></div>
+      <div style="margin-top: 20px;">
+        <button class="btn btn-secondary" style="width: 100%;" onclick="closeOrderSelectionModal()">閉じる</button>
       </div>
     </div>
   </div>
@@ -859,24 +894,100 @@
           }
         });
         
+        // 注文番号でソート
+        currentOrders.sort((a, b) => (a.orderNumber || 0) - (b.orderNumber || 0));
+        
         if (currentOrders.length === 0) {
           await showCustomAlert({ icon: '📋', title: '注文なし', message: `${tableName}\nこのテーブルには注文がありません`, btnClass: 'modal-btn-success' });
           return;
         }
         
-        showCheckoutMenu(tableName);
+        // 複数注文がある場合は選択画面を表示
+        if (currentOrders.length > 1) {
+          showOrderSelectionModal(tableName);
+        } else {
+          showCheckoutMenu(tableName, [currentOrders[0]]);
+        }
       } catch (error) {
         console.error('❌ 会計画面表示エラー:', error);
       }
     }
     
-    function showCheckoutMenu(tableName) {
-      totalAmountToPay = currentOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+    // 注文選択モーダルを表示
+    function showOrderSelectionModal(tableName) {
+      const modal = document.getElementById('orderSelectionModal');
+      document.getElementById('orderSelectionTableName').textContent = `テーブル ${tableName}`;
+      
+      const ordersList = document.getElementById('ordersList');
+      ordersList.innerHTML = '';
+      
+      // 全注文まとめて会計ボタン
+      const allOrdersBtn = document.createElement('button');
+      allOrdersBtn.className = 'order-selection-btn';
+      allOrdersBtn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+      allOrdersBtn.style.color = 'white';
+      allOrdersBtn.style.fontWeight = 'bold';
+      allOrdersBtn.innerHTML = `
+        <div style="font-size: 20px; margin-bottom: 8px;">📋 全注文まとめて会計</div>
+        <div style="font-size: 16px;">合計 ${currentOrders.length} 件 - ¥${currentOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0).toLocaleString()}</div>
+      `;
+      allOrdersBtn.onclick = () => {
+        modal.classList.add('hidden');
+        showCheckoutMenu(tableName, currentOrders);
+      };
+      ordersList.appendChild(allOrdersBtn);
+      
+      // 個別注文ボタン
+      currentOrders.forEach((order, index) => {
+        const orderBtn = document.createElement('button');
+        orderBtn.className = 'order-selection-btn';
+        
+        const itemsText = order.items && Array.isArray(order.items)
+          ? order.items.map(item => `${item.name} x${item.quantity || 1}`).join(', ')
+          : '注文内容なし';
+        
+        orderBtn.innerHTML = `
+          <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">注文 #${order.orderNumber || (index + 1)}</div>
+          <div style="font-size: 14px; color: #666; margin-bottom: 8px;">${itemsText}</div>
+          <div style="font-size: 16px; color: #4CAF50; font-weight: bold;">¥${(order.totalAmount || 0).toLocaleString()}</div>
+        `;
+        orderBtn.onclick = () => {
+          modal.classList.add('hidden');
+          showCheckoutMenu(tableName, [order]);
+        };
+        ordersList.appendChild(orderBtn);
+      });
+      
+      modal.classList.remove('hidden');
+    }
+    
+    window.closeOrderSelectionModal = function() {
+      document.getElementById('orderSelectionModal').classList.add('hidden');
+    };
+    
+    function showCheckoutMenu(tableName, selectedOrders = null) {
+      // selectedOrdersが指定されていればそれを使用、なければcurrentOrders全て
+      const ordersToCheckout = selectedOrders || currentOrders;
+      
+      totalAmountToPay = ordersToCheckout.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
       const paymentModal = document.getElementById('paymentModal');
       paymentModal.classList.remove('hidden');
       
-      document.getElementById('selectedTableLabel2').textContent = `テーブル ${tableName}`;
-      generateTaxRateItems();
+      // 注文番号を表示
+      let orderNumbersText = '';
+      if (ordersToCheckout.length === 1) {
+        orderNumbersText = ` - 注文 #${ordersToCheckout[0].orderNumber || '1'}`;
+      } else if (ordersToCheckout.length > 1) {
+        const orderNums = ordersToCheckout.map(o => `#${o.orderNumber || '?'}`).join(', ');
+        orderNumbersText = ` - ${orderNums}`;
+      }
+      
+      document.getElementById('selectedTableLabel2').textContent = `テーブル ${tableName}${orderNumbersText}`;
+      
+      // 選択された注文をグローバル変数に保存（会計処理で使用）
+      window.ordersToCheckout = ordersToCheckout;
+      
+      generateTaxRateItems(ordersToCheckout);
       document.getElementById('discountAmount').value = 0;
       updatePaymentTotal();
       
@@ -893,12 +1004,14 @@
       document.getElementById('paymentModal').classList.add('hidden');
     };
     
-    function generateTaxRateItems() {
+    function generateTaxRateItems(ordersToProcess = null) {
       const container = document.getElementById('taxRateItemsList');
       container.innerHTML = '';
       let itemIndex = 0;
       
-      currentOrders.forEach(order => {
+      const orders = ordersToProcess || currentOrders;
+      
+      orders.forEach(order => {
         if (!order.items || order.items.length === 0) {
           addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, order.totalAmount || 0, itemIndex, 10);
           itemIndex++;
@@ -1041,7 +1154,7 @@
       });
     }
 
-    // 会計処理（売上・客数をPOSに反映）
+    // 会計処理（売上・客数をPOSに反映）- ワンタップで完結
     window.processPayment = async function() {
       if (!selectedPaymentMethod) {
         await showCustomAlert({ icon: '⚠️', title: 'エラー', message: '支払い方法を選択してください', btnClass: 'modal-btn-danger' });
@@ -1055,6 +1168,9 @@
       
       try {
         const now = window.Timestamp.now();
+        
+        // window.ordersToCheckoutから会計対象の注文を取得
+        const ordersToProcess = window.ordersToCheckout || currentOrders;
         
         // 税率別集計
         let tax8Total = 0;
@@ -1073,7 +1189,7 @@
         // 商品点数を計算
         let itemCount = 0;
         const allItems = [];
-        currentOrders.forEach(order => {
+        ordersToProcess.forEach(order => {
           if (order.items && Array.isArray(order.items)) {
             order.items.forEach(item => {
               itemCount += item.quantity || 0;
@@ -1093,13 +1209,15 @@
           itemCount: itemCount,
           tax8Total: tax8Total,
           tax10Total: tax10Total,
-          customerCount: 1
+          customerCount: 1,
+          ordersCount: ordersToProcess.length
         });
         
-        // Firestoreの注文にpaidAtフラグを設定
-        for (const order of currentOrders) {
+        // Firestoreの注文にpaidAtとcompletedAtフラグを設定（ワンタップで完結）
+        for (const order of ordersToProcess) {
           await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), {
             paidAt: now,
+            completedAt: now,  // 会計と同時に完了にする
             paymentMethod: selectedPaymentMethod,
             notifiedPaid: true
           });
@@ -1140,7 +1258,7 @@
         await showCustomAlert({ 
           icon: '🎉', 
           title: '会計完了', 
-          message: `会計を完了しました。\n\n売上: ¥${totalAmountToPay.toLocaleString()}\n客数: +1`, 
+          message: `会計が完了しました。\n\n売上: ¥${totalAmountToPay.toLocaleString()}\n客数: +1\n\n注文は自動的に完了になりました。`, 
           btnClass: 'modal-btn-success' 
         });
         
