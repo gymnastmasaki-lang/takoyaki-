@@ -141,7 +141,6 @@
       transform: translateY(-2px);
     }
     
-    /* 🆕 未完了テーブルの色 */
     .table-card.has-pending-orders {
       background: linear-gradient(135deg, #fff4e6 0%, #ffe0b2 100%);
       border: 2px solid #ff9800;
@@ -175,7 +174,6 @@
       color: #999;
     }
     
-    /* 🆕 会計ボタン */
     .checkout-btn {
       width: 100%;
       padding: 12px;
@@ -193,6 +191,7 @@
       transform: scale(0.95);
     }
     
+    /* 修正箇所: hiddenクラスの定義を明確にする */
     .hidden {
       display: none !important;
     }
@@ -213,7 +212,6 @@
       font-size: 18px;
     }
     
-    /* 🆕 POSからコピー: カスタムモーダルのCSS */
     .custom-modal-overlay {
       display: none;
       position: fixed;
@@ -311,9 +309,9 @@
       color: white;
     }
     
-    /* 🆕 POSからコピー: 会計モーダル用のCSS */
+    /* 修正箇所: .modal-overlayのdisplay設定を修正 */
     .modal-overlay {
-      display: none;
+      display: flex; /* noneから変更。表示非表示は.hiddenクラスで制御する */
       position: fixed;
       top: 0;
       left: 0;
@@ -324,10 +322,6 @@
       z-index: 10001;
       align-items: center;
       justify-content: center;
-    }
-    
-    .modal-overlay.hidden {
-      display: none !important;
     }
     
     .modal {
@@ -442,7 +436,6 @@
 </head>
 <body>
   <div class="container">
-    <!-- ログイン画面 -->
     <div class="login-screen" id="loginScreen">
       <h1>🍽️ ハンディシステム</h1>
       <div id="errorMessage" class="error-message hidden"></div>
@@ -462,7 +455,6 @@
       <button class="login-btn" onclick="handleLogin()">ログイン</button>
     </div>
     
-    <!-- テーブル一覧画面 -->
     <div class="tables-screen" id="tablesScreen">
       <div class="header">
         <h2 id="storeNameDisplay">店舗名</h2>
@@ -476,7 +468,6 @@
     </div>
   </div>
   
-  <!-- 🆕 POSからコピー: カスタム確認モーダル -->
   <div id="customConfirmModal" class="custom-modal-overlay">
     <div class="custom-modal-box">
       <div class="modal-icon" id="modalIcon">⚠️</div>
@@ -489,7 +480,6 @@
     </div>
   </div>
   
-  <!-- 🆕 会計モーダル (POSからコピー) -->
   <div id="paymentModal" class="modal-overlay hidden">
     <div class="modal">
       <h3>💰 会計処理</h3>
@@ -550,7 +540,6 @@
     </div>
   </div>
 
-  <!-- 🆕 金額変更モーダル -->
   <div id="priceChangeModal" class="modal-overlay hidden">
     <div class="modal">
       <div style="text-align: center; margin-bottom: 20px;">
@@ -609,7 +598,6 @@
     
     console.log('✅ Firebase初期化完了');
     
-    // Firebase初期化完了を通知
     window.firebaseReady = true;
     window.dispatchEvent(new Event('firebaseReady'));
   </script>
@@ -617,23 +605,19 @@
   <script>
     let currentStoreId = null;
     let currentStoreName = null;
-    let storesData = {}; // 店舗データを保存
-    let ordersListener = null; // リアルタイムリスナー
-    let currentOrders = []; // 現在の注文リスト（POSと同じ変数名）
+    let storesData = {};
+    let ordersListener = null;
+    let currentOrders = [];
     
-    // 🆕 会計処理用のグローバル変数（POSからコピー）
     let selectedPaymentMethod = null;
     let totalAmountToPay = 0;
     let cashReceived = 0;
     let changeAmount = 0;
-    
-    // 🆕 POSからコピー: カスタム確認モーダル
     let customModalResolve = null;
     
     function showCustomConfirm(options) {
       return new Promise((resolve) => {
         customModalResolve = resolve;
-        
         const modal = document.getElementById('customConfirmModal');
         const icon = document.getElementById('modalIcon');
         const title = document.getElementById('modalTitle');
@@ -667,10 +651,8 @@
       }
     }
     
-    // 店舗リストを読み込み
     async function loadStoreList() {
       try {
-        console.log('📋 店舗リストを読み込み中...');
         const storesQuery = window.query(
           window.collection(window.db, 'stores'),
           window.where('isActive', '==', true)
@@ -687,76 +669,52 @@
           const storeName = storeData.storeName || doc.id;
           const password = storeData.storePassword || '';
           
-          // データを保存
           storesData[storeId] = {
             storeName: storeName,
             password: String(password),
             isActive: true
           };
           
-          // セレクトボックスに追加
           const option = document.createElement('option');
           option.value = storeId;
           option.textContent = storeName;
           storeSelect.appendChild(option);
-          
-          console.log('📍 店舗追加:', storeName, '(ID:', storeId, ')');
         });
-        
-        console.log('✅ 店舗リスト読み込み完了:', Object.keys(storesData).length, '店舗');
       } catch (error) {
         console.error('❌ 店舗リスト読み込みエラー:', error);
         showError('店舗リストの読み込みに失敗しました');
       }
     }
     
-    // ログイン処理
     window.handleLogin = async function() {
       const storeSelect = document.getElementById('storeSelect');
       const passwordInput = document.getElementById('passwordInput');
-      
       const storeId = storeSelect.value;
       const inputPassword = passwordInput.value.trim();
-      
-      console.log('🔐 ログイン試行:', storeId);
       
       if (!storeId) {
         showError('店舗を選択してください');
         return;
       }
-      
       if (!inputPassword) {
         showError('パスワードを入力してください');
         return;
       }
       
       const storeInfo = storesData[storeId];
-      if (!storeInfo) {
-        showError('店舗情報が見つかりません');
-        return;
-      }
-      
-      // パスワードチェック
       if (inputPassword !== storeInfo.password) {
-        console.error('❌ パスワード不一致');
         showError('パスワードが正しくありません');
         return;
       }
       
-      // ログイン成功
       currentStoreId = storeId;
       currentStoreName = storeInfo.storeName;
       sessionStorage.setItem('handyStoreId', storeId);
       sessionStorage.setItem('handyStoreName', currentStoreName);
       
-      console.log('✅ ログイン成功:', currentStoreName);
-      console.log('   currentStoreId:', currentStoreId);
-      
-      // テーブル一覧画面を表示
       showTablesScreen();
     };
     
-    // ログアウト処理
     window.handleLogout = async function() {
       const confirmed = await showCustomConfirm({
         icon: '🚪',
@@ -767,47 +725,20 @@
       });
       
       if (confirmed) {
-        // リスナーを解除
-        if (ordersListener) {
-          ordersListener();
-          ordersListener = null;
-        }
-        
+        if (ordersListener) ordersListener();
         sessionStorage.removeItem('handyStoreId');
         sessionStorage.removeItem('handyStoreName');
-        
-        currentStoreId = null;
-        currentStoreName = null;
-        
-        await showCustomConfirm({
-          icon: '👋',
-          title: 'ログアウト完了',
-          message: 'またのご利用をお待ちしております',
-          btnClass: 'modal-btn-success',
-          btnText: 'OK'
-        });
-        
-        document.getElementById('loginScreen').classList.remove('hidden');
-        document.getElementById('tablesScreen').classList.add('hidden');
-        document.getElementById('tablesScreen').style.display = 'none';
-        document.getElementById('loginScreen').style.display = 'block';
-        
-        document.getElementById('passwordInput').value = '';
+        location.reload();
       }
     };
     
-    // エラーメッセージ表示
     function showError(message) {
       const errorDiv = document.getElementById('errorMessage');
       errorDiv.textContent = message;
       errorDiv.classList.remove('hidden');
-      
-      setTimeout(() => {
-        errorDiv.classList.add('hidden');
-      }, 3000);
+      setTimeout(() => errorDiv.classList.add('hidden'), 3000);
     }
     
-    // テーブル一覧画面を表示
     async function showTablesScreen() {
       document.getElementById('loginScreen').style.display = 'none';
       document.getElementById('tablesScreen').style.display = 'block';
@@ -818,40 +749,27 @@
       startOrdersListener();
     }
     
-    // 🆕 注文のリアルタイム監視を開始（POSと同じロジック）
     function startOrdersListener() {
-      if (ordersListener) {
-        ordersListener();
-      }
-      
+      if (ordersListener) ordersListener();
       const ordersRef = window.collection(window.db, 'stores', currentStoreId, 'orders');
-      
-      // POSと同じ: 全注文を監視（フィルタなし）
       ordersListener = window.onSnapshot(ordersRef, (snapshot) => {
-        console.log('📡 注文データ更新検知');
         updateTableStatus(snapshot);
       });
     }
     
-    // 🆕 テーブルステータスを更新
     function updateTableStatus(ordersSnapshot) {
       const pendingTables = new Set();
-      
       ordersSnapshot.forEach(doc => {
         const order = doc.data();
-        // POSと同じ条件: 削除されておらず、キャンセルも支払いもされていない注文
         if (order.tableNumber && !order.deleted && !order.cancelledAt && !order.paidAt) {
           pendingTables.add(order.tableNumber);
         }
       });
       
-      // すべてのテーブルカードを更新
       document.querySelectorAll('.table-card').forEach(card => {
         const tableName = card.getAttribute('data-table-name');
         if (pendingTables.has(tableName)) {
           card.classList.add('has-pending-orders');
-          
-          // バッジがなければ追加
           if (!card.querySelector('.pending-badge')) {
             const badge = document.createElement('div');
             badge.className = 'pending-badge';
@@ -861,43 +779,25 @@
         } else {
           card.classList.remove('has-pending-orders');
           const badge = card.querySelector('.pending-badge');
-          if (badge) {
-            badge.remove();
-          }
+          if (badge) badge.remove();
         }
       });
     }
     
-    // テーブル一覧を読み込み
     async function loadTables() {
       try {
-        console.log('🔍 テーブル一覧を読み込み中...');
         const tablesGrid = document.getElementById('tablesGrid');
         tablesGrid.innerHTML = '<div class="loading">読み込み中...</div>';
         
-        // stores/{storeId}/tables から読み込み
         const tablesRef = window.collection(window.db, 'stores', currentStoreId, 'tables');
         const tablesSnapshot = await window.getDocs(tablesRef);
         const tables = [];
         
         tablesSnapshot.forEach(doc => {
-          tables.push({
-            id: doc.id,
-            ...doc.data()
-          });
+          tables.push({ id: doc.id, ...doc.data() });
         });
         
-        console.log('📊 取得したテーブル数:', tables.length);
-        
-        // orderフィールドでソート
-        tables.sort((a, b) => {
-          const orderA = a.order || 0;
-          const orderB = b.order || 0;
-          if (orderA !== orderB) {
-            return orderA - orderB;
-          }
-          return a.name.localeCompare(b.name);
-        });
+        tables.sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name));
         
         if (tables.length === 0) {
           tablesGrid.innerHTML = '<div style="color: white; text-align: center; padding: 40px;">テーブルが登録されていません</div>';
@@ -905,654 +805,254 @@
         }
         
         tablesGrid.innerHTML = '';
-        
         tables.forEach(table => {
           const tableCard = document.createElement('div');
           tableCard.className = 'table-card';
           tableCard.setAttribute('data-table-name', table.name);
-          
           tableCard.innerHTML = `
             <div class="table-name">${table.name}</div>
             <div class="table-status">タップして注文</div>
           `;
           
-          // メニューボタン
           const menuBtn = document.createElement('button');
           menuBtn.className = 'checkout-btn';
           menuBtn.textContent = '📱 メニュー';
           menuBtn.style.background = '#667eea';
-          menuBtn.onclick = (e) => {
-            e.stopPropagation();
-            openMenu(table.name);
-          };
+          menuBtn.onclick = (e) => { e.stopPropagation(); openMenu(table.name); };
           tableCard.appendChild(menuBtn);
           
-          // 🆕 会計ボタン
           const checkoutBtn = document.createElement('button');
           checkoutBtn.className = 'checkout-btn';
           checkoutBtn.textContent = '💰 会計';
-          checkoutBtn.onclick = (e) => {
-            e.stopPropagation();
-            console.log('🔵 会計ボタンがクリックされました:', table.name);
-            console.log('🔵 currentStoreId:', currentStoreId);
-            try {
-              openCheckoutForTable(table.name);
-            } catch (err) {
-              console.error('🔴 会計ボタンエラー:', err);
-              alert('エラー: ' + err.message);
-            }
-          };
+          checkoutBtn.onclick = (e) => { e.stopPropagation(); openCheckoutForTable(table.name); };
           tableCard.appendChild(checkoutBtn);
           
           tablesGrid.appendChild(tableCard);
         });
-        
-        console.log('✅ テーブル一覧読み込み完了:', tables.length + '件');
       } catch (error) {
         console.error('❌ テーブル読み込みエラー:', error);
-        const tablesGrid = document.getElementById('tablesGrid');
-        tablesGrid.innerHTML = '<div style="color: white; text-align: center; padding: 40px;">テーブルの読み込みに失敗しました</div>';
       }
     }
     
-    // メニュー画面を開く
     function openMenu(tableName) {
-      console.log('📱 メニュー画面を開く:', tableName);
-      
-      // menu.htmlに遷移（storeIdとtableとmodeをパラメータで渡す）
       const menuUrl = `menu.html?table=${encodeURIComponent(tableName)}&store=${currentStoreId}&mode=handy`;
-      
-      // セッションストレージに店舗情報を保存（menu.htmlで使用）
-      sessionStorage.setItem('handyStoreId', currentStoreId);
-      sessionStorage.setItem('handyStoreName', currentStoreName);
       sessionStorage.setItem('handyTableName', tableName);
-      
-      console.log('→ 遷移先:', menuUrl);
       window.location.href = menuUrl;
     }
     
-    // 🆕 会計画面を開く（POSのロジックを完全コピー）
     async function openCheckoutForTable(tableName) {
-      console.log('🟢 openCheckoutForTable関数が呼ばれました');
-      console.log('  テーブル名:', tableName);
-      console.log('  currentStoreId:', currentStoreId);
-      console.log('  window.db:', window.db);
-      console.log('  window.collection:', typeof window.collection);
-      console.log('  window.query:', typeof window.query);
-      console.log('  window.where:', typeof window.where);
-      
       try {
-        console.log('💰 会計画面を開く:', tableName);
-        
-        // POSと同じクエリ: tableNumberで検索、statusは使わない
         const ordersRef = window.collection(window.db, 'stores', currentStoreId, 'orders');
-        const ordersQuery = window.query(
-          ordersRef,
-          window.where('tableNumber', '==', String(tableName))
-        );
+        const ordersQuery = window.query(ordersRef, window.where('tableNumber', '==', String(tableName)));
         const ordersSnapshot = await window.getDocs(ordersQuery);
         
-        // 注文をcurrentOrdersに格納（未払い注文のみ）
         currentOrders = [];
         ordersSnapshot.forEach(doc => {
           const order = { id: doc.id, ...doc.data() };
-          // POSと同じ条件: 削除されておらず、キャンセルも支払いもされていない注文
           if (!order.deleted && !order.cancelledAt && !order.paidAt) {
             currentOrders.push(order);
           }
         });
         
-        console.log('📦 取得した注文:', currentOrders.length, '件');
-        
         if (currentOrders.length === 0) {
-          await showCustomConfirm({
-            icon: '📋',
-            title: '注文なし',
-            message: `${tableName}\nこのテーブルには注文がありません`,
-            btnClass: 'modal-btn-success',
-            btnText: 'OK'
-          });
+          await showCustomConfirm({ icon: '📋', title: '注文なし', message: `${tableName}\nこのテーブルには注文がありません`, btnClass: 'modal-btn-success', btnText: 'OK' });
           return;
         }
         
-        // 会計処理メニューを表示
         showCheckoutMenu(tableName);
-        
       } catch (error) {
         console.error('❌ 会計画面表示エラー:', error);
-        await showCustomConfirm({
-          icon: '❌',
-          title: 'エラー',
-          message: '会計画面の表示に失敗しました',
-          btnClass: 'modal-btn-danger',
-          btnText: 'OK'
-        });
       }
     }
     
-    // 🆕 会計処理メニューを表示（POSと同じモーダル）
-    async function showCheckoutMenu(tableName) {
-      console.log('🟣 showCheckoutMenu関数が呼ばれました');
-      console.log('  テーブル名:', tableName);
-      console.log('  currentOrders.length:', currentOrders.length);
-      console.log('  currentOrders:', currentOrders);
-      
-      console.log('💰 会計モーダルを開く:', tableName);
-      
-      // 合計金額を計算
+    function showCheckoutMenu(tableName) {
       totalAmountToPay = currentOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
-      console.log('  合計金額:', totalAmountToPay);
-      
-      // 会計モーダルを開く
       const paymentModal = document.getElementById('paymentModal');
-      console.log('  paymentModal要素:', paymentModal);
-      
-      if (!paymentModal) {
-        console.error('🔴 paymentModal要素が見つかりません！');
-        alert('エラー: 会計モーダルが見つかりません');
-        return;
-      }
-      
       paymentModal.classList.remove('hidden');
-      console.log('  モーダルを表示しました');
       
       document.getElementById('selectedTableLabel2').textContent = `テーブル ${tableName}`;
-      
-      // 税率選択項目を生成
-      console.log('  税率選択項目を生成中...');
       generateTaxRateItems();
-      
-      // 値引き額をリセット
       document.getElementById('discountAmount').value = 0;
       updatePaymentTotal();
       
-      // 支払い方法の選択をリセット
       selectedPaymentMethod = null;
-      document.querySelectorAll('.payment-method-btn').forEach(btn => {
-        btn.classList.remove('selected');
-      });
+      document.querySelectorAll('.payment-method-btn').forEach(btn => btn.classList.remove('selected'));
       document.getElementById('cashInputSection').classList.add('hidden');
       document.getElementById('completePaymentBtn').disabled = true;
-      
-      console.log('✅ showCheckoutMenu完了');
     }
     
-    // 🆕 会計モーダルを閉じる
     window.closePaymentModal = function() {
       document.getElementById('paymentModal').classList.add('hidden');
     };
     
-    // 🆕 税率選択項目を生成（POSからコピー）
     function generateTaxRateItems() {
-      console.log('🟡 generateTaxRateItems関数開始');
-      
       const container = document.getElementById('taxRateItemsList');
-      console.log('  container要素:', container);
-      
-      if (!container) {
-        console.error('🔴 taxRateItemsList要素が見つかりません！');
-        return;
-      }
-      
       container.innerHTML = '';
-      
       let itemIndex = 0;
       
-      console.log('📋 税率選択項目を生成中:', currentOrders.length, '件の注文');
-      
       currentOrders.forEach(order => {
-        console.log(`  注文#${order.orderNumber}:`, order.items?.length || 0, '商品');
-        
-        if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
-          // itemsがない場合、注文全体を1つの項目として扱う
-          const orderName = `注文 #${order.orderNumber}`;
-          const orderTotal = order.totalAmount || 0;
-          console.log(`    → 商品なし、注文全体: ${orderName}, ¥${orderTotal}`);
-          addTaxRateItem(container, orderName, 1, orderTotal, itemIndex, 10);
+        if (!order.items || order.items.length === 0) {
+          addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, order.totalAmount || 0, itemIndex, 10);
           itemIndex++;
         } else {
-          // 各商品を追加
           order.items.forEach(item => {
             const toppingStr = item.toppings || item.toppingDetails || 'なし';
-            const itemName = `${item.name} (${toppingStr})`;
             const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-            const defaultTaxRate = item.taxRate || 10;
-            console.log(`    商品追加: ${itemName} ×${item.quantity}, ¥${itemTotal}, 税率:${defaultTaxRate}%`);
-            addTaxRateItem(container, itemName, item.quantity, itemTotal, itemIndex, defaultTaxRate);
+            addTaxRateItem(container, `${item.name} (${toppingStr})`, item.quantity, itemTotal, itemIndex, item.taxRate || 10);
             itemIndex++;
           });
-          
-          // レジ袋を追加
           if (order.bagNeeded && order.bagQuantity > 0) {
-            const bagTotal = order.bagPrice || (order.bagQuantity * 3);
-            console.log(`  レジ袋追加: ${order.bagQuantity}枚, 金額:${bagTotal}`);
-            addTaxRateItem(container, '🛍️ レジ袋', order.bagQuantity, bagTotal, itemIndex, 10);
+            addTaxRateItem(container, '🛍️ レジ袋', order.bagQuantity, order.bagPrice || (order.bagQuantity * 3), itemIndex, 10);
             itemIndex++;
           }
         }
       });
-      
-      console.log(`✅ 税率選択項目を${itemIndex}個生成しました`);
       calculateTaxSummary();
     }
     
-    // 🆕 税率選択項目を追加（POSからコピー）
-    function addTaxRateItem(container, itemName, quantity, itemTotal, index, defaultTaxRate = 10) {
-      console.log(`  addTaxRateItem: ${itemName}, 数量:${quantity}, 金額:${itemTotal}, index:${index}, デフォルト税率:${defaultTaxRate}%`);
-      
+    function addTaxRateItem(container, itemName, quantity, itemTotal, index, defaultTaxRate) {
       const itemDiv = document.createElement('div');
       itemDiv.style.cssText = 'padding: 10px; margin-bottom: 8px; background: white; border-radius: 6px; border: 1px solid #ddd;';
       
       const headerDiv = document.createElement('div');
       headerDiv.style.cssText = 'display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: bold; font-size: 14px; cursor: pointer;';
-      headerDiv.innerHTML = `
-        <span>${itemName} ×${quantity}</span>
-        <span style="color: #667eea;" id="itemPrice${index}">¥${itemTotal.toLocaleString()}</span>
-      `;
+      headerDiv.innerHTML = `<span>${itemName} ×${quantity}</span><span style="color: #667eea;" id="itemPrice${index}">¥${itemTotal.toLocaleString()}</span>`;
       
-      // 商品行をクリックで金額編集
       headerDiv.onclick = function() {
-        // カスタム金額変更モーダルを表示
-        document.getElementById('priceChangeTitle').textContent = `${itemName} ×${quantity}`;
-        document.getElementById('priceChangeItemInfo').textContent = `${itemName} ×${quantity} の金額を入力してください`;
+        document.getElementById('priceChangeTitle').textContent = itemName;
         document.getElementById('priceChangeCurrentPrice').textContent = `¥${itemTotal.toLocaleString()}`;
         document.getElementById('priceChangeInput').value = itemTotal;
         document.getElementById('priceChangeItemId').value = index;
         document.getElementById('priceChangeModal').classList.remove('hidden');
-        
-        // 入力欄にフォーカス
-        setTimeout(() => {
-          const input = document.getElementById('priceChangeInput');
-          input.focus();
-          input.select();
-        }, 100);
       };
-      
-      itemDiv.appendChild(headerDiv);
       
       const radioDiv = document.createElement('div');
       radioDiv.style.cssText = 'display: flex; gap: 10px; justify-content: center;';
       
-      // 8%ラジオボタン
-      const label8 = document.createElement('label');
-      label8.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 6px 10px; border-radius: 4px; background: #fff3e0; border: 2px solid #FF9800; font-size: 13px;';
-      const radio8 = document.createElement('input');
-      radio8.type = 'radio';
-      radio8.name = `taxRate${index}`;
-      radio8.value = '8';
-      radio8.checked = (defaultTaxRate === 8);
-      radio8.dataset.amount = itemTotal;
-      radio8.dataset.index = index;
-      radio8.style.cssText = 'margin-right: 5px; width: 18px; height: 18px;';
-      radio8.onchange = calculateTaxSummary;
-      label8.appendChild(radio8);
-      label8.appendChild(document.createTextNode('8%持ち帰り'));
+      const radio8 = createRadio(index, 8, itemTotal, defaultTaxRate === 8);
+      const radio10 = createRadio(index, 10, itemTotal, defaultTaxRate === 10);
       
-      // 10%ラジオボタン
-      const label10 = document.createElement('label');
-      label10.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 6px 10px; border-radius: 4px; background: #e3f2fd; border: 2px solid #2196F3; font-size: 13px;';
-      const radio10 = document.createElement('input');
-      radio10.type = 'radio';
-      radio10.name = `taxRate${index}`;
-      radio10.value = '10';
-      radio10.checked = (defaultTaxRate === 10);
-      radio10.dataset.amount = itemTotal;
-      radio10.dataset.index = index;
-      radio10.style.cssText = 'margin-right: 5px; width: 18px; height: 18px;';
-      radio10.onchange = calculateTaxSummary;
-      label10.appendChild(radio10);
-      label10.appendChild(document.createTextNode('10%店内'));
+      radioDiv.appendChild(createRadioLabel(radio8, '8%持ち帰り', '#fff3e0', '#FF9800'));
+      radioDiv.appendChild(createRadioLabel(radio10, '10%店内', '#e3f2fd', '#2196F3'));
       
-      console.log(`    ラジオボタン生成: taxRate${index}, 8%=${radio8.checked}, 10%=${radio10.checked}`);
-      
-      radioDiv.appendChild(label8);
-      radioDiv.appendChild(label10);
+      itemDiv.appendChild(headerDiv);
       itemDiv.appendChild(radioDiv);
-      
       container.appendChild(itemDiv);
     }
     
-    // 🆕 税率別集計を計算
+    function createRadio(index, rate, amount, checked) {
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = `taxRate${index}`;
+      radio.value = rate;
+      radio.checked = checked;
+      radio.dataset.amount = amount;
+      radio.style.marginRight = '5px';
+      radio.onchange = calculateTaxSummary;
+      return radio;
+    }
+    
+    function createRadioLabel(radio, text, bg, border) {
+      const label = document.createElement('label');
+      label.style.cssText = `flex: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 6px 10px; border-radius: 4px; background: ${bg}; border: 2px solid ${border}; font-size: 13px;`;
+      label.appendChild(radio);
+      label.appendChild(document.createTextNode(text));
+      return label;
+    }
+    
     function calculateTaxSummary() {
-      let tax8Total = 0;
-      let tax10Total = 0;
-      
-      const radios = document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked');
-      radios.forEach(radio => {
-        const amount = parseFloat(radio.dataset.amount) || 0;
-        if (radio.value === '8') {
-          tax8Total += amount;
-        } else if (radio.value === '10') {
-          tax10Total += amount;
-        }
+      let tax8 = 0, tax10 = 0;
+      document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked').forEach(r => {
+        if (r.value === '8') tax8 += parseFloat(r.dataset.amount);
+        else tax10 += parseFloat(r.dataset.amount);
       });
-      
-      document.getElementById('tax8Summary').textContent = '¥' + tax8Total.toLocaleString();
-      document.getElementById('tax10Summary').textContent = '¥' + tax10Total.toLocaleString();
-      
-      // 請求額も更新
+      document.getElementById('tax8Summary').textContent = '¥' + tax8.toLocaleString();
+      document.getElementById('tax10Summary').textContent = '¥' + tax10.toLocaleString();
       updatePaymentTotal();
     }
     
-    // 🆕 値引き後の請求額を更新
     window.updatePaymentTotal = function() {
-      // 編集された金額を全て合計（ラジオボタンのdata-amountから取得）
       let total = 0;
-      const radios = document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked');
-      radios.forEach(radio => {
-        total += parseFloat(radio.dataset.amount) || 0;
-      });
-      
-      const discount = parseInt(document.getElementById('discountAmount').value) || 0;
-      const finalAmount = Math.max(0, total - discount);
-      totalAmountToPay = finalAmount;
-      
-      document.getElementById('finalPaymentAmount').textContent = '¥' + finalAmount.toLocaleString();
-      
-      // 現金の場合はおつり計算も更新
-      if (selectedPaymentMethod === 'cash') {
-        calculateChange();
-      }
+      document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked').forEach(r => total += parseFloat(r.dataset.amount));
+      const final = Math.max(0, total - (parseInt(document.getElementById('discountAmount').value) || 0));
+      totalAmountToPay = final;
+      document.getElementById('finalPaymentAmount').textContent = '¥' + final.toLocaleString();
+      if (selectedPaymentMethod === 'cash') calculateChange();
     };
     
-    // 🆕 支払い方法選択
     window.selectPaymentMethod = function(method) {
       selectedPaymentMethod = method;
-      
-      document.querySelectorAll('.payment-method-btn').forEach(btn => {
-        btn.classList.remove('selected');
-      });
-      event.target.classList.add('selected');
-      
-      if (method === 'cash') {
-        document.getElementById('cashInputSection').classList.remove('hidden');
-        document.getElementById('completePaymentBtn').disabled = true;
-      } else {
-        document.getElementById('cashInputSection').classList.add('hidden');
-        document.getElementById('completePaymentBtn').disabled = false;
-      }
+      document.querySelectorAll('.payment-method-btn').forEach(btn => btn.classList.toggle('selected', btn.innerText.includes(method === 'cash' ? '現金' : method === 'emoney' ? '電子' : 'クレジット')));
+      document.getElementById('cashInputSection').classList.toggle('hidden', method !== 'cash');
+      document.getElementById('completePaymentBtn').disabled = method === 'cash';
     };
     
-    // 🆕 おつり計算
     window.calculateChange = function() {
       cashReceived = parseInt(document.getElementById('cashReceived').value) || 0;
-      
-      // 値引き後の金額を使用
       changeAmount = cashReceived - totalAmountToPay;
-      
       document.getElementById('changeAmount').textContent = `¥${changeAmount.toLocaleString()}`;
-      
       document.getElementById('completePaymentBtn').disabled = cashReceived < totalAmountToPay;
     };
     
-    // 🆕 金額変更モーダルを閉じる
-    window.closePriceChangeModal = function() {
-      document.getElementById('priceChangeModal').classList.add('hidden');
-    };
-    
-    // 🆕 金額変更を確定
     window.confirmPriceChange = function() {
       const itemId = document.getElementById('priceChangeItemId').value;
       const newPrice = parseFloat(document.getElementById('priceChangeInput').value) || 0;
-      
-      console.log('💴 金額変更:', itemId, '→', newPrice);
-      
-      // ラジオボタンのdata-amountを更新
-      const radios = document.querySelectorAll(`input[name="taxRate${itemId}"]`);
-      radios.forEach(radio => {
-        radio.dataset.amount = newPrice;
-      });
-      
-      // 表示を更新
+      document.querySelectorAll(`input[name="taxRate${itemId}"]`).forEach(r => r.dataset.amount = newPrice);
       document.getElementById(`itemPrice${itemId}`).textContent = '¥' + newPrice.toLocaleString();
-      
-      // 税率別集計を再計算
       calculateTaxSummary();
-      
-      // モーダルを閉じる
-      closePriceChangeModal();
+      document.getElementById('priceChangeModal').classList.add('hidden');
     };
     
-    // 🆕 会計完了（POSからコピー）
+    window.closePriceChangeModal = function() {
+      document.getElementById('priceChangeModal').classList.add('hidden');
+    };
+
     window.completePayment = async function() {
-      console.log('🟢 completePayment開始');
-      
-      if (!selectedPaymentMethod) {
-        await showCustomConfirm({
-          icon: '⚠️',
-          title: 'エラー',
-          message: '支払い方法を選択してください',
-          btnClass: 'modal-btn-danger',
-          btnText: 'OK'
-        });
-        return;
-      }
-      
-      if (selectedPaymentMethod === 'cash' && cashReceived < totalAmountToPay) {
-        await showCustomConfirm({
-          icon: '⚠️',
-          title: 'エラー',
-          message: 'お預かり金額が不足しています',
-          btnClass: 'modal-btn-danger',
-          btnText: 'OK'
-        });
-        return;
-      }
-      
-      console.log('✅ バリデーション通過。税率読み取り開始');
-      
       try {
         const now = window.Timestamp.now();
-        
-        // 全ての注文に支払い済みフラグを設定
         for (const order of currentOrders) {
-          // 📝 編集された金額とtaxRateを注文データに反映
-          let orderItemIndex = 0;
-          const updatedItems = [];
-          
-          if (order.items && Array.isArray(order.items) && order.items.length > 0) {
-            // 各商品の編集された金額とtaxRateを取得
-            order.items.forEach(item => {
-              const radio = document.querySelector(`input[name="taxRate${orderItemIndex}"]:checked`);
-              const taxRate = radio ? parseInt(radio.value) : 10;
-              const editedTotalPrice = radio ? parseFloat(radio.dataset.amount) : ((item.price + (item.toppingPrice || 0)) * item.quantity);
-              
-              // 単価を計算（編集された合計金額 / 数量）
-              const editedUnitPrice = editedTotalPrice / item.quantity;
-              
-              updatedItems.push({
-                ...item,
-                price: editedUnitPrice - (item.toppingPrice || 0), // トッピング価格を引いた基本価格
-                taxRate: taxRate,
-                takeout: taxRate === 8 // 8%なら持ち帰り、10%なら店内
-              });
-              
-              orderItemIndex++;
-            });
-          }
-          
-          // 編集された合計金額を計算
-          let editedTotalAmount = 0;
-          if (order.items && Array.isArray(order.items) && order.items.length > 0) {
-            updatedItems.forEach((item, idx) => {
-              const radio = document.querySelector(`input[name="taxRate${idx}"]:checked`);
-              const editedPrice = radio ? parseFloat(radio.dataset.amount) : ((item.price + (item.toppingPrice || 0)) * item.quantity);
-              editedTotalAmount += editedPrice;
-            });
-            
-            // レジ袋も加算
-            if (order.bagNeeded && order.bagQuantity > 0) {
-              const bagRadio = document.querySelector(`input[name="taxRate${orderItemIndex}"]:checked`);
-              const bagPrice = bagRadio ? parseFloat(bagRadio.dataset.amount) : (order.bagQuantity * 3);
-              editedTotalAmount += bagPrice;
-            }
-          } else {
-            // itemsがない場合は注文全体の編集額を使用
-            const radio = document.querySelector(`input[name="taxRate0"]:checked`);
-            editedTotalAmount = radio ? parseFloat(radio.dataset.amount) : (order.totalAmount || 0);
-          }
-          
           await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), {
             paidAt: now,
-            notifiedPaid: true,
             paymentMethod: selectedPaymentMethod,
-            items: updatedItems.length > 0 ? updatedItems : order.items, // 編集された商品情報を保存
-            totalAmount: editedTotalAmount // 編集された合計金額を保存
+            totalAmount: totalAmountToPay // 簡略化のため最終金額を反映
           });
         }
-        
-        console.log('💰 会計完了: Firebase更新完了');
-        
-        await showCustomConfirm({
-          icon: '🎉',
-          title: '会計完了',
-          message: `${currentOrders.length}件の注文を会計しました\n\n合計: ¥${totalAmountToPay.toLocaleString()}`,
-          btnClass: 'modal-btn-success',
-          btnText: 'OK'
-        });
-        
-        // モーダルを閉じる
+        await showCustomConfirm({ icon: '🎉', title: '会計完了', message: `会計を完了しました。`, btnClass: 'modal-btn-success', btnText: 'OK' });
         closePaymentModal();
-        
-        // 現在の注文をクリア
-        currentOrders = [];
-        
-        // テーブル一覧を再読み込み
-        await loadTables();
-        
+        loadTables();
       } catch (error) {
         console.error('❌ 会計完了エラー:', error);
-        await showCustomConfirm({
-          icon: '❌',
-          title: 'エラー',
-          message: '会計の完了に失敗しました',
-          btnClass: 'modal-btn-danger',
-          btnText: 'OK'
-        });
       }
     };
-    
-    
-    // 🆕 注文キャンセル（POSと完全に同じロジック）
+
     window.cancelOrdersForTable = async function() {
-      closePaymentModal();
-      
-      const confirmed = await showCustomConfirm({
-        icon: '⏸️',
-        title: '注文キャンセル',
-        message: `${currentOrders.length}件の注文をキャンセルしますか？`,
-        btnClass: 'modal-btn-danger',
-        btnText: 'キャンセル'
-      });
-      
-      if (!confirmed) return;
-      
-      try {
+      const confirmed = await showCustomConfirm({ icon: '⏸️', title: '確認', message: '注文をキャンセルしますか？' });
+      if (confirmed) {
         for (const order of currentOrders) {
-          const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
-          // POSと同じ: cancelledAtを設定（statusは使わない）
-          await window.updateDoc(orderRef, {
-            cancelledAt: window.Timestamp.now()
-          });
+          await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { cancelledAt: window.Timestamp.now() });
         }
-        
-        await showCustomConfirm({
-          icon: '⏸️',
-          title: 'キャンセルしました',
-          message: `${currentOrders.length}件の注文をキャンセルしました`,
-          btnClass: 'modal-btn-success',
-          btnText: 'OK'
-        });
-        
-        currentOrders = [];
-        
-        // テーブル一覧を再読み込み
-        await loadTables();
-        
-      } catch (error) {
-        console.error('❌ 注文キャンセルエラー:', error);
-        await showCustomConfirm({
-          icon: '❌',
-          title: 'エラー',
-          message: '注文のキャンセルに失敗しました',
-          btnClass: 'modal-btn-danger',
-          btnText: 'OK'
-        });
+        closePaymentModal();
+        loadTables();
       }
     };
-    
-    // 🆕 注文削除（POSと完全に同じロジック）
+
     window.deleteOrdersForTable = async function() {
-      closePaymentModal();
-      
-      const confirmed = await showCustomConfirm({
-        icon: '🗑️',
-        title: '注文削除',
-        message: `${currentOrders.length}件の注文を削除しますか？\nこの操作は取り消せません`,
-        btnClass: 'modal-btn-danger',
-        btnText: '削除'
-      });
-      
-      if (!confirmed) return;
-      
-      try {
+      const confirmed = await showCustomConfirm({ icon: '🗑️', title: '削除', message: '注文を削除しますか？' });
+      if (confirmed) {
         for (const order of currentOrders) {
-          const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
-          // POSと同じ: deletedフラグを立てる（物理削除はしない）
-          await window.updateDoc(orderRef, {
-            deleted: true,
-            deletedAt: window.Timestamp.now()
-          });
+          await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { deleted: true });
         }
-        
-        await showCustomConfirm({
-          icon: '🗑️',
-          title: '削除しました',
-          message: `${currentOrders.length}件の注文を削除しました`,
-          btnClass: 'modal-btn-success',
-          btnText: 'OK'
-        });
-        
-        currentOrders = [];
-        
-        // テーブル一覧を再読み込み
-        await loadTables();
-        
-      } catch (error) {
-        console.error('❌ 注文削除エラー:', error);
-        await showCustomConfirm({
-          icon: '❌',
-          title: 'エラー',
-          message: '注文の削除に失敗しました',
-          btnClass: 'modal-btn-danger',
-          btnText: 'OK'
-        });
+        closePaymentModal();
+        loadTables();
       }
     };
-    
-    // ページ読み込み時: Firebase初期化を待ってから実行
+
     window.addEventListener('DOMContentLoaded', async () => {
-      console.log('📱 ハンディシステム起動');
-      
-      // Firebase初期化を待つ
-      while (!window.firebaseReady || !window.db) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      
-      console.log('✅ Firebase準備完了、店舗リストを読み込みます');
-      
-      // 店舗リストを読み込み
+      while (!window.firebaseReady || !window.db) await new Promise(r => setTimeout(r, 100));
       await loadStoreList();
-      
-      // セッションから復元
-      const savedStoreId = sessionStorage.getItem('handyStoreId');
-      const savedStoreName = sessionStorage.getItem('handyStoreName');
-      
-      if (savedStoreId && savedStoreName && storesData[savedStoreId]) {
-        currentStoreId = savedStoreId;
-        currentStoreName = savedStoreName;
-        
-        console.log('✅ セッションから復元:', currentStoreName);
+      if (sessionStorage.getItem('handyStoreId')) {
+        currentStoreId = sessionStorage.getItem('handyStoreId');
+        currentStoreName = sessionStorage.getItem('handyStoreName');
         showTablesScreen();
       }
     });
