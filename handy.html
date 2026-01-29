@@ -569,11 +569,8 @@
         <button class="btn" style="flex: 1; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white;" onclick="cancelOrdersForTable()">⏸️ キャンセル</button>
       </div>
       
-      <div style="display: flex; gap: 10px; margin-top: 10px;" id="deleteButtonContainer" class="hidden">
-        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrdersForTable()">🗑️ 削除</button>
-      </div>
-      
       <div style="display: flex; gap: 10px; margin-top: 10px;">
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrdersForTable()">🗑️ 削除</button>
         <button class="btn btn-secondary" style="flex: 1;" onclick="closePaymentModal()">閉じる</button>
       </div>
     </div>
@@ -995,9 +992,6 @@
       document.querySelectorAll('.payment-method-btn').forEach(btn => btn.classList.remove('selected'));
       document.getElementById('cashInputSection').classList.add('hidden');
       document.getElementById('paymentBtn').disabled = true;
-      
-      // 削除ボタンを非表示にする（完了/キャンセル後に表示）
-      document.getElementById('deleteButtonContainer').classList.add('hidden');
     }
     
     window.closePaymentModal = function() {
@@ -1188,43 +1182,50 @@
         
         // 商品点数を計算
         let itemCount = 0;
-        const allItems = [];
         ordersToProcess.forEach(order => {
           if (order.items && Array.isArray(order.items)) {
             order.items.forEach(item => {
               itemCount += item.quantity || 0;
-              allItems.push({
-                name: item.name,
-                quantity: item.quantity || 1
-              });
             });
           } else {
             itemCount += 1;
           }
         });
         
-        console.log('💰 会計処理:', {
+        console.log('💰 会計処理開始:', {
           totalAmount: totalAmountToPay,
           paymentMethod: selectedPaymentMethod,
           itemCount: itemCount,
           tax8Total: tax8Total,
           tax10Total: tax10Total,
           customerCount: 1,
-          ordersCount: ordersToProcess.length
+          ordersCount: ordersToProcess.length,
+          storeId: currentStoreId
         });
         
-        // Firestoreの注文にpaidAtとcompletedAtフラグを設定（ワンタップで完結）
+        // 支払い方法を日本語に変換
+        let paymentMethodJP = '現金';
+        if (selectedPaymentMethod === 'emoney') paymentMethodJP = '電子マネー';
+        else if (selectedPaymentMethod === 'credit') paymentMethodJP = 'クレジットカード';
+        
+        // Firestoreの注文にpaidAtとcompletedAtフラグを設定
         for (const order of ordersToProcess) {
-          await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), {
+          const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+          await window.updateDoc(orderRef, {
             paidAt: now,
-            completedAt: now,  // 会計と同時に完了にする
-            paymentMethod: selectedPaymentMethod,
-            notifiedPaid: true
+            completedAt: now,
+            paymentMethod: paymentMethodJP,
+            notifiedPaid: true,
+            tax8Total: tax8Total,
+            tax10Total: tax10Total
           });
+          console.log('✅ 注文を会計済みに更新:', order.id);
         }
         
-        // 売上をPOSに反映（updateDailySales相当の処理）
+        // 売上をPOSに反映
         const dateStr = getBusinessDateStr();
+        console.log('📅 営業日:', dateStr);
+        
         const dailySalesRef = window.doc(window.db, 'stores', currentStoreId, 'daily_sales', dateStr);
         const dailySalesDoc = await window.getDoc(dailySalesRef);
         
@@ -1239,6 +1240,8 @@
           tax10Total: 0
         };
         
+        console.log('📊 現在のdaily_sales:', currentData);
+        
         const updateData = {
           totalSales: (currentData.totalSales || 0) + totalAmountToPay,
           customerCount: (currentData.customerCount || 0) + 1,
@@ -1251,10 +1254,16 @@
           updatedAt: now
         };
         
+        console.log('📊 更新するdaily_sales:', updateData);
+        
         await window.setDoc(dailySalesRef, updateData, { merge: true });
         
-        console.log('✅ 売上をPOSに反映しました:', updateData);
+        console.log('✅ 売上をPOSに反映しました');
         
+        // モーダルを先に閉じる
+        closePaymentModal();
+        
+        // 成功メッセージを表示
         await showCustomAlert({ 
           icon: '🎉', 
           title: '会計完了', 
@@ -1262,8 +1271,8 @@
           btnClass: 'modal-btn-success' 
         });
         
-        closePaymentModal();
-        loadTables();
+        // テーブル一覧を更新
+        await loadTables();
       } catch (error) {
         console.error('❌ 会計処理エラー:', error);
         await showCustomAlert({ 
@@ -1292,14 +1301,25 @@
     window.completeOrdersForTable = async function() {
       try {
         const now = window.Timestamp.now();
-        for (const order of currentOrders) {
-          await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { 
+        
+        // window.ordersToCheckoutから完了対象の注文を取得（なければcurrentOrders）
+        const ordersToComplete = window.ordersToCheckout || currentOrders;
+        
+        console.log('✅ 完了処理開始:', {
+          ordersCount: ordersToComplete.length,
+          orderIds: ordersToComplete.map(o => o.id)
+        });
+        
+        for (const order of ordersToComplete) {
+          const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+          await window.updateDoc(orderRef, { 
             completedAt: now
           });
+          console.log('✅ 注文を完了:', order.id);
         }
         
-        // 削除ボタンを表示
-        document.getElementById('deleteButtonContainer').classList.remove('hidden');
+        // モーダルを先に閉じる
+        closePaymentModal();
         
         await showCustomAlert({ 
           icon: '✅', 
@@ -1308,7 +1328,8 @@
           btnClass: 'modal-btn-success' 
         });
         
-        loadTables();
+        // テーブル一覧を更新
+        await loadTables();
       } catch (error) {
         console.error('❌ 完了処理エラー:', error);
         await showCustomAlert({ 
@@ -1333,14 +1354,25 @@
       if (confirmed) {
         try {
           const now = window.Timestamp.now();
-          for (const order of currentOrders) {
-            await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { 
+          
+          // window.ordersToCheckoutからキャンセル対象の注文を取得（なければcurrentOrders）
+          const ordersToCancel = window.ordersToCheckout || currentOrders;
+          
+          console.log('⏸️ キャンセル処理開始:', {
+            ordersCount: ordersToCancel.length,
+            orderIds: ordersToCancel.map(o => o.id)
+          });
+          
+          for (const order of ordersToCancel) {
+            const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+            await window.updateDoc(orderRef, { 
               cancelledAt: now
             });
+            console.log('✅ 注文をキャンセル:', order.id);
           }
           
-          // 削除ボタンを表示
-          document.getElementById('deleteButtonContainer').classList.remove('hidden');
+          // モーダルを先に閉じる
+          closePaymentModal();
           
           await showCustomAlert({ 
             icon: '⏸️', 
@@ -1349,7 +1381,8 @@
             btnClass: 'modal-btn-success' 
           });
           
-          loadTables();
+          // テーブル一覧を更新
+          await loadTables();
         } catch (error) {
           console.error('❌ キャンセル処理エラー:', error);
           await showCustomAlert({ 
@@ -1362,7 +1395,7 @@
       }
     };
 
-    // 削除処理
+    // 削除処理 - ワンタップで完結
     window.deleteOrdersForTable = async function() {
       const confirmed = await showCustomConfirm({ 
         icon: '🗑️', 
@@ -1375,22 +1408,36 @@
       if (confirmed) {
         try {
           const now = window.Timestamp.now();
-          for (const order of currentOrders) {
-            await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { 
+          
+          // window.ordersToCheckoutから削除対象の注文を取得（なければcurrentOrders）
+          const ordersToDelete = window.ordersToCheckout || currentOrders;
+          
+          console.log('🗑️ 削除処理開始:', {
+            ordersCount: ordersToDelete.length,
+            orderIds: ordersToDelete.map(o => o.id)
+          });
+          
+          for (const order of ordersToDelete) {
+            const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+            await window.updateDoc(orderRef, { 
               deleted: true,
               deletedAt: now
             });
+            console.log('✅ 注文を削除:', order.id);
           }
+          
+          // モーダルを先に閉じる
+          closePaymentModal();
           
           await showCustomAlert({ 
             icon: '✅', 
             title: '削除完了', 
-            message: '注文を削除しました。', 
+            message: '注文を削除しました。\nPOSからも削除されます。', 
             btnClass: 'modal-btn-success' 
           });
           
-          closePaymentModal();
-          loadTables();
+          // テーブル一覧を更新
+          await loadTables();
         } catch (error) {
           console.error('❌ 削除エラー:', error);
           await showCustomAlert({ 
