@@ -573,7 +573,7 @@
   
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-    import { getFirestore, collection, query, getDocs, doc, getDoc, where, onSnapshot, updateDoc, deleteDoc, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    import { getFirestore, collection, query, getDocs, doc, getDoc, setDoc, where, onSnapshot, updateDoc, deleteDoc, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
     
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -595,6 +595,7 @@
     window.getDocs = getDocs;
     window.doc = doc;
     window.getDoc = getDoc;
+    window.setDoc = setDoc;
     window.onSnapshot = onSnapshot;
     window.updateDoc = updateDoc;
     window.deleteDoc = deleteDoc;
@@ -859,7 +860,7 @@
         });
         
         if (currentOrders.length === 0) {
-          await showCustomConfirm({ icon: '📋', title: '注文なし', message: `${tableName}\nこのテーブルには注文がありません`, btnClass: 'modal-btn-success', btnText: 'OK' });
+          await showCustomAlert({ icon: '📋', title: '注文なし', message: `${tableName}\nこのテーブルには注文がありません`, btnClass: 'modal-btn-success' });
           return;
         }
         
@@ -1014,15 +1015,41 @@
       document.getElementById('priceChangeModal').classList.add('hidden');
     };
 
+    // カスタムアラート（OK ボタンのみ）
+    function showCustomAlert(options) {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('customConfirmModal');
+        const icon = document.getElementById('modalIcon');
+        const title = document.getElementById('modalTitle');
+        const message = document.getElementById('modalMessage');
+        const buttonsContainer = document.querySelector('.modal-buttons');
+        
+        icon.textContent = options.icon || 'ℹ️';
+        title.textContent = options.title || 'お知らせ';
+        message.textContent = options.message || '';
+        
+        buttonsContainer.innerHTML = `
+          <button class="modal-btn ${options.btnClass || 'modal-btn-primary'}" onclick="closeCustomAlert()">${options.btnText || 'OK'}</button>
+        `;
+        
+        window.closeCustomAlert = function() {
+          modal.style.display = 'none';
+          resolve(true);
+        };
+        
+        modal.style.display = 'flex';
+      });
+    }
+
     // 会計処理（売上・客数をPOSに反映）
     window.processPayment = async function() {
       if (!selectedPaymentMethod) {
-        alert('支払い方法を選択してください');
+        await showCustomAlert({ icon: '⚠️', title: 'エラー', message: '支払い方法を選択してください', btnClass: 'modal-btn-danger' });
         return;
       }
       
       if (selectedPaymentMethod === 'cash' && cashReceived < totalAmountToPay) {
-        alert('お預かり金額が不足しています');
+        await showCustomAlert({ icon: '⚠️', title: 'エラー', message: 'お預かり金額が不足しています', btnClass: 'modal-btn-danger' });
         return;
       }
       
@@ -1110,12 +1137,23 @@
         
         console.log('✅ 売上をPOSに反映しました:', updateData);
         
-        await showCustomConfirm({ icon: '🎉', title: '会計完了', message: `会計を完了しました。\n\n売上: ¥${totalAmountToPay.toLocaleString()}\n客数: +1`, btnClass: 'modal-btn-success', btnText: 'OK' });
+        await showCustomAlert({ 
+          icon: '🎉', 
+          title: '会計完了', 
+          message: `会計を完了しました。\n\n売上: ¥${totalAmountToPay.toLocaleString()}\n客数: +1`, 
+          btnClass: 'modal-btn-success' 
+        });
+        
         closePaymentModal();
         loadTables();
       } catch (error) {
         console.error('❌ 会計処理エラー:', error);
-        alert('会計処理に失敗しました: ' + error.message);
+        await showCustomAlert({ 
+          icon: '❌', 
+          title: 'エラー', 
+          message: '会計処理に失敗しました\n\n' + error.message, 
+          btnClass: 'modal-btn-danger' 
+        });
       }
     };
     
@@ -1132,32 +1170,48 @@
       return `${year}-${month}-${day}`;
     }
     
-    // 完了処理（POSのcompletedAtに合わせる）
+    // 完了処理（POSのcompletedAtに合わせる）- ワンタップで完結
     window.completeOrdersForTable = async function() {
-      const confirmed = await showCustomConfirm({ icon: '✅', title: '確認', message: '注文を完了にしますか？\n（完了後、削除ボタンが表示されます）' });
-      if (confirmed) {
-        try {
-          const now = window.Timestamp.now();
-          for (const order of currentOrders) {
-            await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { 
-              completedAt: now
-            });
-          }
-          
-          // 削除ボタンを表示
-          document.getElementById('deleteButtonContainer').classList.remove('hidden');
-          
-          await showCustomConfirm({ icon: '✅', title: '完了', message: '注文を完了にしました。', btnClass: 'modal-btn-success', btnText: 'OK' });
-          loadTables();
-        } catch (error) {
-          console.error('❌ 完了処理エラー:', error);
-          alert('完了処理に失敗しました: ' + error.message);
+      try {
+        const now = window.Timestamp.now();
+        for (const order of currentOrders) {
+          await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { 
+            completedAt: now
+          });
         }
+        
+        // 削除ボタンを表示
+        document.getElementById('deleteButtonContainer').classList.remove('hidden');
+        
+        await showCustomAlert({ 
+          icon: '✅', 
+          title: '完了', 
+          message: '注文を完了にしました。', 
+          btnClass: 'modal-btn-success' 
+        });
+        
+        loadTables();
+      } catch (error) {
+        console.error('❌ 完了処理エラー:', error);
+        await showCustomAlert({ 
+          icon: '❌', 
+          title: 'エラー', 
+          message: '完了処理に失敗しました\n\n' + error.message, 
+          btnClass: 'modal-btn-danger' 
+        });
       }
     };
 
+    // キャンセル処理 - ワンタップで完結
     window.cancelOrdersForTable = async function() {
-      const confirmed = await showCustomConfirm({ icon: '⏸️', title: '確認', message: '注文をキャンセルしますか？\n（キャンセル後、削除ボタンが表示されます）' });
+      const confirmed = await showCustomConfirm({ 
+        icon: '⏸️', 
+        title: '確認', 
+        message: '注文をキャンセルしますか？', 
+        btnText: 'キャンセルする',
+        btnClass: 'modal-btn-warning' 
+      });
+      
       if (confirmed) {
         try {
           const now = window.Timestamp.now();
@@ -1170,17 +1224,36 @@
           // 削除ボタンを表示
           document.getElementById('deleteButtonContainer').classList.remove('hidden');
           
-          await showCustomConfirm({ icon: '⏸️', title: 'キャンセル', message: '注文をキャンセルしました。', btnClass: 'modal-btn-success', btnText: 'OK' });
+          await showCustomAlert({ 
+            icon: '⏸️', 
+            title: 'キャンセル完了', 
+            message: '注文をキャンセルしました。', 
+            btnClass: 'modal-btn-success' 
+          });
+          
           loadTables();
         } catch (error) {
           console.error('❌ キャンセル処理エラー:', error);
-          alert('キャンセル処理に失敗しました: ' + error.message);
+          await showCustomAlert({ 
+            icon: '❌', 
+            title: 'エラー', 
+            message: 'キャンセル処理に失敗しました\n\n' + error.message, 
+            btnClass: 'modal-btn-danger' 
+          });
         }
       }
     };
 
+    // 削除処理
     window.deleteOrdersForTable = async function() {
-      const confirmed = await showCustomConfirm({ icon: '🗑️', title: '削除', message: '注文を削除しますか？\n（POSからも削除されます）' });
+      const confirmed = await showCustomConfirm({ 
+        icon: '🗑️', 
+        title: '削除確認', 
+        message: '注文を削除しますか？\n（POSからも削除されます）',
+        btnText: '削除する',
+        btnClass: 'modal-btn-danger'
+      });
+      
       if (confirmed) {
         try {
           const now = window.Timestamp.now();
@@ -1190,12 +1263,24 @@
               deletedAt: now
             });
           }
-          await showCustomConfirm({ icon: '🗑️', title: '削除完了', message: '注文を削除しました。', btnClass: 'modal-btn-success', btnText: 'OK' });
+          
+          await showCustomAlert({ 
+            icon: '✅', 
+            title: '削除完了', 
+            message: '注文を削除しました。', 
+            btnClass: 'modal-btn-success' 
+          });
+          
           closePaymentModal();
           loadTables();
         } catch (error) {
           console.error('❌ 削除エラー:', error);
-          alert('削除に失敗しました: ' + error.message);
+          await showCustomAlert({ 
+            icon: '❌', 
+            title: 'エラー', 
+            message: '削除に失敗しました\n\n' + error.message, 
+            btnClass: 'modal-btn-danger' 
+          });
         }
       }
     };
