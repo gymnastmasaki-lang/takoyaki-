@@ -528,14 +528,18 @@
         </div>
       </div>
       
-      <div style="display: flex; gap: 10px; margin-top: 20px;">
-        <button class="btn btn-secondary" style="flex: 1;" onclick="closePaymentModal()">キャンセル</button>
-        <button class="btn" style="flex: 2; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="completePayment()" id="completePaymentBtn" disabled>✅ 会計完了</button>
+      <div style="display: flex; gap: 10px; margin-top: 20px;" id="mainButtons">
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="processPayment()" id="paymentBtn" disabled>💰 会計</button>
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;" onclick="completeOrdersForTable()">✅ 完了</button>
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white;" onclick="cancelOrdersForTable()">⏸️ キャンセル</button>
+      </div>
+      
+      <div style="display: flex; gap: 10px; margin-top: 10px;" id="deleteButtonContainer" class="hidden">
+        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrdersForTable()">🗑️ 削除</button>
       </div>
       
       <div style="display: flex; gap: 10px; margin-top: 10px;">
-        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white;" onclick="cancelOrdersForTable()">⏸️ キャンセル</button>
-        <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrdersForTable()">🗑️ 削除</button>
+        <button class="btn btn-secondary" style="flex: 1;" onclick="closePaymentModal()">閉じる</button>
       </div>
     </div>
   </div>
@@ -878,7 +882,10 @@
       selectedPaymentMethod = null;
       document.querySelectorAll('.payment-method-btn').forEach(btn => btn.classList.remove('selected'));
       document.getElementById('cashInputSection').classList.add('hidden');
-      document.getElementById('completePaymentBtn').disabled = true;
+      document.getElementById('paymentBtn').disabled = true;
+      
+      // 削除ボタンを非表示にする（完了/キャンセル後に表示）
+      document.getElementById('deleteButtonContainer').classList.add('hidden');
     }
     
     window.closePaymentModal = function() {
@@ -984,14 +991,14 @@
       selectedPaymentMethod = method;
       document.querySelectorAll('.payment-method-btn').forEach(btn => btn.classList.toggle('selected', btn.innerText.includes(method === 'cash' ? '現金' : method === 'emoney' ? '電子' : 'クレジット')));
       document.getElementById('cashInputSection').classList.toggle('hidden', method !== 'cash');
-      document.getElementById('completePaymentBtn').disabled = method === 'cash';
+      document.getElementById('paymentBtn').disabled = method === 'cash';
     };
     
     window.calculateChange = function() {
       cashReceived = parseInt(document.getElementById('cashReceived').value) || 0;
       changeAmount = cashReceived - totalAmountToPay;
       document.getElementById('changeAmount').textContent = `¥${changeAmount.toLocaleString()}`;
-      document.getElementById('completePaymentBtn').disabled = cashReceived < totalAmountToPay;
+      document.getElementById('paymentBtn').disabled = cashReceived < totalAmountToPay;
     };
     
     window.confirmPriceChange = function() {
@@ -1007,43 +1014,189 @@
       document.getElementById('priceChangeModal').classList.add('hidden');
     };
 
-    window.completePayment = async function() {
+    // 会計処理（売上・客数をPOSに反映）
+    window.processPayment = async function() {
+      if (!selectedPaymentMethod) {
+        alert('支払い方法を選択してください');
+        return;
+      }
+      
+      if (selectedPaymentMethod === 'cash' && cashReceived < totalAmountToPay) {
+        alert('お預かり金額が不足しています');
+        return;
+      }
+      
       try {
         const now = window.Timestamp.now();
+        
+        // 税率別集計
+        let tax8Total = 0;
+        let tax10Total = 0;
+        const radios = document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked');
+        radios.forEach(radio => {
+          const amount = parseFloat(radio.dataset.amount) || 0;
+          const taxRate = radio.value;
+          if (taxRate === '8') {
+            tax8Total += amount;
+          } else if (taxRate === '10') {
+            tax10Total += amount;
+          }
+        });
+        
+        // 商品点数を計算
+        let itemCount = 0;
+        const allItems = [];
+        currentOrders.forEach(order => {
+          if (order.items && Array.isArray(order.items)) {
+            order.items.forEach(item => {
+              itemCount += item.quantity || 0;
+              allItems.push({
+                name: item.name,
+                quantity: item.quantity || 1
+              });
+            });
+          } else {
+            itemCount += 1;
+          }
+        });
+        
+        console.log('💰 会計処理:', {
+          totalAmount: totalAmountToPay,
+          paymentMethod: selectedPaymentMethod,
+          itemCount: itemCount,
+          tax8Total: tax8Total,
+          tax10Total: tax10Total,
+          customerCount: 1
+        });
+        
+        // Firestoreの注文にpaidAtフラグを設定
         for (const order of currentOrders) {
           await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), {
             paidAt: now,
             paymentMethod: selectedPaymentMethod,
-            totalAmount: totalAmountToPay // 簡略化のため最終金額を反映
+            notifiedPaid: true
           });
         }
-        await showCustomConfirm({ icon: '🎉', title: '会計完了', message: `会計を完了しました。`, btnClass: 'modal-btn-success', btnText: 'OK' });
+        
+        // 売上をPOSに反映（updateDailySales相当の処理）
+        const dateStr = getBusinessDateStr();
+        const dailySalesRef = window.doc(window.db, 'stores', currentStoreId, 'daily_sales', dateStr);
+        const dailySalesDoc = await window.getDoc(dailySalesRef);
+        
+        const currentData = dailySalesDoc.exists() ? dailySalesDoc.data() : {
+          totalSales: 0,
+          customerCount: 0,
+          totalItems: 0,
+          cashSales: 0,
+          emoneSales: 0,
+          creditSales: 0,
+          tax8Total: 0,
+          tax10Total: 0
+        };
+        
+        const updateData = {
+          totalSales: (currentData.totalSales || 0) + totalAmountToPay,
+          customerCount: (currentData.customerCount || 0) + 1,
+          totalItems: (currentData.totalItems || 0) + itemCount,
+          cashSales: (currentData.cashSales || 0) + (selectedPaymentMethod === 'cash' ? totalAmountToPay : 0),
+          emoneSales: (currentData.emoneSales || 0) + (selectedPaymentMethod === 'emoney' ? totalAmountToPay : 0),
+          creditSales: (currentData.creditSales || 0) + (selectedPaymentMethod === 'credit' ? totalAmountToPay : 0),
+          tax8Total: (currentData.tax8Total || 0) + tax8Total,
+          tax10Total: (currentData.tax10Total || 0) + tax10Total,
+          updatedAt: now
+        };
+        
+        await window.setDoc(dailySalesRef, updateData, { merge: true });
+        
+        console.log('✅ 売上をPOSに反映しました:', updateData);
+        
+        await showCustomConfirm({ icon: '🎉', title: '会計完了', message: `会計を完了しました。\n\n売上: ¥${totalAmountToPay.toLocaleString()}\n客数: +1`, btnClass: 'modal-btn-success', btnText: 'OK' });
         closePaymentModal();
         loadTables();
       } catch (error) {
-        console.error('❌ 会計完了エラー:', error);
+        console.error('❌ 会計処理エラー:', error);
+        alert('会計処理に失敗しました: ' + error.message);
+      }
+    };
+    
+    // 営業日の日付文字列を取得（3時基準）
+    function getBusinessDateStr() {
+      const now = new Date();
+      const adjustedDate = new Date(now);
+      if (now.getHours() < 3) {
+        adjustedDate.setDate(adjustedDate.getDate() - 1);
+      }
+      const year = adjustedDate.getFullYear();
+      const month = String(adjustedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(adjustedDate.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    
+    // 完了処理（POSのcompletedAtに合わせる）
+    window.completeOrdersForTable = async function() {
+      const confirmed = await showCustomConfirm({ icon: '✅', title: '確認', message: '注文を完了にしますか？\n（完了後、削除ボタンが表示されます）' });
+      if (confirmed) {
+        try {
+          const now = window.Timestamp.now();
+          for (const order of currentOrders) {
+            await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { 
+              completedAt: now
+            });
+          }
+          
+          // 削除ボタンを表示
+          document.getElementById('deleteButtonContainer').classList.remove('hidden');
+          
+          await showCustomConfirm({ icon: '✅', title: '完了', message: '注文を完了にしました。', btnClass: 'modal-btn-success', btnText: 'OK' });
+          loadTables();
+        } catch (error) {
+          console.error('❌ 完了処理エラー:', error);
+          alert('完了処理に失敗しました: ' + error.message);
+        }
       }
     };
 
     window.cancelOrdersForTable = async function() {
-      const confirmed = await showCustomConfirm({ icon: '⏸️', title: '確認', message: '注文をキャンセルしますか？' });
+      const confirmed = await showCustomConfirm({ icon: '⏸️', title: '確認', message: '注文をキャンセルしますか？\n（キャンセル後、削除ボタンが表示されます）' });
       if (confirmed) {
-        for (const order of currentOrders) {
-          await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { cancelledAt: window.Timestamp.now() });
+        try {
+          const now = window.Timestamp.now();
+          for (const order of currentOrders) {
+            await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { 
+              cancelledAt: now
+            });
+          }
+          
+          // 削除ボタンを表示
+          document.getElementById('deleteButtonContainer').classList.remove('hidden');
+          
+          await showCustomConfirm({ icon: '⏸️', title: 'キャンセル', message: '注文をキャンセルしました。', btnClass: 'modal-btn-success', btnText: 'OK' });
+          loadTables();
+        } catch (error) {
+          console.error('❌ キャンセル処理エラー:', error);
+          alert('キャンセル処理に失敗しました: ' + error.message);
         }
-        closePaymentModal();
-        loadTables();
       }
     };
 
     window.deleteOrdersForTable = async function() {
-      const confirmed = await showCustomConfirm({ icon: '🗑️', title: '削除', message: '注文を削除しますか？' });
+      const confirmed = await showCustomConfirm({ icon: '🗑️', title: '削除', message: '注文を削除しますか？\n（POSからも削除されます）' });
       if (confirmed) {
-        for (const order of currentOrders) {
-          await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { deleted: true });
+        try {
+          const now = window.Timestamp.now();
+          for (const order of currentOrders) {
+            await window.updateDoc(window.doc(window.db, 'stores', currentStoreId, 'orders', order.id), { 
+              deleted: true,
+              deletedAt: now
+            });
+          }
+          await showCustomConfirm({ icon: '🗑️', title: '削除完了', message: '注文を削除しました。', btnClass: 'modal-btn-success', btnText: 'OK' });
+          closePaymentModal();
+          loadTables();
+        } catch (error) {
+          console.error('❌ 削除エラー:', error);
+          alert('削除に失敗しました: ' + error.message);
         }
-        closePaymentModal();
-        loadTables();
       }
     };
 
