@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ハンディシステム（注文機能維持＋POS会計完全同期）</title>
+  <title>ハンディシステム (注文維持・POS会計完全同期版)</title>
   <style>
-    /* デザインは提供されたhandy.htmlを維持 */
+    /* ユーザー様のhandy.htmlのスタイルを継承 */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
     .container { max-width: 600px; margin: 0 auto; }
@@ -18,30 +18,30 @@
     .btn-warning { background: #FF9800; color: white; }
     .btn-secondary { background: #e0e0e0; color: #333; }
     .tables-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 15px; }
-    .table-card { background: white; border-radius: 15px; padding: 20px 10px; text-align: center; border: 2px solid transparent; }
+    .table-card { background: white; border-radius: 15px; padding: 20px 10px; text-align: center; border: 2px solid transparent; cursor: pointer; }
     .table-card.active { border-color: #FF9800; background: #fff3e0; }
     .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-    .menu-item { background: white; padding: 15px; border-radius: 12px; text-align: center; border: 1px solid #eee; }
-    /* 会計モーダル用 */
+    .menu-item { background: white; padding: 15px; border-radius: 12px; text-align: center; border: 1px solid #eee; cursor: pointer; }
+    
+    /* 会計モーダル */
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 10px; }
     .modal { background: white; width: 100%; max-width: 450px; border-radius: 20px; padding: 20px; max-height: 90vh; overflow-y: auto; }
-    .item-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
-    .payment-summary { background: #f8f9fa; padding: 15px; border-radius: 12px; text-align: center; margin: 15px 0; }
-    .total-amount { font-size: 28px; font-weight: bold; color: #d32f2f; }
+    .summary-box { background: #f8f9fa; padding: 15px; border-radius: 12px; text-align: center; margin: 15px 0; }
+    .total-price { font-size: 32px; font-weight: bold; color: #d32f2f; }
   </style>
 </head>
 <body>
 
 <div class="container">
   <div id="loginScreen" class="card">
-    <h1 style="text-align:center; color:#667eea;">ハンディシステム</h1>
-    <select id="storeSelect" class="btn" style="background:#f0f0f0; margin-top:20px;"></select>
+    <h1 style="text-align:center; color:#667eea; margin-bottom:20px;">ハンディログイン</h1>
+    <select id="storeSelect" class="btn" style="background:#f0f0f0;"></select>
     <input type="password" id="passwordInput" class="btn" style="background:#f0f0f0;" placeholder="パスワード">
     <button class="btn btn-primary" onclick="handleLogin()">ログイン</button>
   </div>
 
   <div id="tablesScreen" class="hidden">
-    <h2 id="displayStoreName" style="color:white; margin-bottom:15px;"></h2>
+    <h2 id="displayStoreName" style="color:white; margin-bottom:15px; text-align:center;"></h2>
     <div id="tablesGrid" class="tables-grid"></div>
   </div>
 
@@ -49,12 +49,12 @@
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
       <button class="btn btn-secondary" style="width:auto; margin:0;" onclick="showTables()">← 戻る</button>
       <h2 id="targetTableName" style="color:white;"></h2>
-      <button class="btn btn-warning" style="width:auto; margin:0;" onclick="openPaymentModal()">会計・管理</button>
+      <button class="btn btn-warning" style="width:auto; margin:0;" onclick="openPaymentModal()">会計/管理</button>
     </div>
     
     <div id="menuContainer" class="menu-grid"></div>
     
-    <div id="cartBar" class="hidden" style="position:fixed; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.9); color:white; padding:15px; display:flex; justify-content:space-between; align-items:center;">
+    <div id="cartBar" class="hidden" style="position:fixed; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.9); color:white; padding:15px; display:flex; justify-content:space-between; align-items:center; z-index:500;">
       <div id="cartCount">0点選択中</div>
       <button class="btn btn-success" style="width:auto; margin:0;" onclick="sendOrder()">注文を送信</button>
     </div>
@@ -63,38 +63,40 @@
 
 <div id="paymentModal" class="modal-overlay hidden">
   <div class="modal">
-    <h2 style="text-align:center; margin-bottom:10px;">会計管理</h2>
-    <div id="paymentItemsList" style="max-height:200px; overflow-y:auto; margin-bottom:10px;"></div>
+    <h2 style="text-align:center;">会計管理</h2>
+    <div id="paymentItemsList" style="margin:15px 0; border:1px solid #eee; border-radius:10px; max-height:180px; overflow-y:auto; padding:10px;"></div>
     
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
       <span>値引き:</span>
-      <input type="number" id="discountInput" style="width:100px; text-align:right;" value="0" oninput="updatePaymentDisplay()">
+      <input type="number" id="discountInput" style="width:100px; text-align:right; padding:5px;" value="0" oninput="updateTotalDisplay()">
     </div>
 
-    <div class="payment-summary">
-      <div id="totalDisplay" class="total-amount">¥0</div>
+    <div class="summary-box">
+      <div style="font-size:14px;">最終お支払い額</div>
+      <div id="totalDisplay" class="total-price">¥0</div>
     </div>
 
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px; margin-bottom:15px;">
-      <button class="btn btn-secondary" id="btn-cash" onclick="setPaymentMethod('cash')">現金</button>
-      <button class="btn btn-secondary" id="btn-credit" onclick="setPaymentMethod('credit')">カード</button>
-      <button class="btn btn-secondary" id="btn-emoney" onclick="setPaymentMethod('emoney')">電子</button>
+      <button class="btn btn-secondary" id="m-cash" onclick="setMethod('cash')">現金</button>
+      <button class="btn btn-secondary" id="m-emoney" onclick="setMethod('emoney')">電子</button>
+      <button class="btn btn-secondary" id="m-credit" onclick="setMethod('credit')">カード</button>
     </div>
 
-    <div id="cashArea" class="hidden" style="background:#e8f5e9; padding:10px; border-radius:10px; margin-bottom:15px;">
-      <input type="number" id="cashReceived" style="width:100%; font-size:20px; text-align:right;" placeholder="お預かり金額" oninput="calcChange()">
-      <div style="text-align:right; margin-top:5px; font-weight:bold;">おつり: <span id="changeDisplay">¥0</span></div>
+    <div id="cashInputArea" class="hidden" style="background:#e8f5e9; padding:15px; border-radius:10px; margin-bottom:15px;">
+      <label>お預かり金額</label>
+      <input type="number" id="cashReceived" style="width:100%; font-size:24px; text-align:right;" oninput="calcChange()">
+      <div style="text-align:right; margin-top:10px; font-weight:bold;">おつり: <span id="changeDisplay">¥0</span></div>
     </div>
 
-    <button id="btnExecute" class="btn btn-success" disabled onclick="executePaymentAndSync()">会計を完了して削除</button>
-    <button class="btn btn-danger" onclick="deleteOrdersWithoutSales()">売上に含めず注文削除</button>
+    <button id="btnComplete" class="btn btn-success" disabled onclick="executeCheckout()">会計を完了してデータを削除</button>
+    <button class="btn btn-danger" onclick="statusUpdate('deleted')">売上に含めず注文削除</button>
     <button class="btn btn-secondary" onclick="closePaymentModal()">戻る</button>
   </div>
 </div>
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-  import { getFirestore, collection, query, where, getDocs, doc, updateDoc, setDoc, getDoc, serverTimestamp, onSnapshot, increment, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+  import { getFirestore, collection, query, where, getDocs, doc, updateDoc, setDoc, getDoc, serverTimestamp, onSnapshot, increment } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -108,10 +110,10 @@
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
-  let currentStoreId, currentTable = '', cart = [], activeOrders = [], paymentMethod = '', rawTotal = 0;
+  let currentStoreId, currentTable = '', cart = [], activeOrders = [], selectedMethod = '', rawBaseTotal = 0;
   const storesData = {};
 
-  // --- 初期読込・ログイン ---
+  // 初期ロード
   window.onload = async () => {
     const snap = await getDocs(query(collection(db, 'stores'), where('isActive', '==', true)));
     const sel = document.getElementById('storeSelect');
@@ -134,8 +136,8 @@
     } else alert('パスワードが違います');
   };
 
-  // --- テーブル管理 ---
-  function showTables() {
+  // テーブル一覧 (リアルタイム更新)
+  window.showTables = () => {
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('orderScreen').classList.add('hidden');
     document.getElementById('tablesScreen').classList.remove('hidden');
@@ -143,20 +145,23 @@
     
     onSnapshot(collection(db, 'stores', currentStoreId, 'orders'), async (snap) => {
       const occupied = new Set();
-      snap.forEach(d => { if(!d.data().paidAt && !d.data().deleted && !d.data().cancelledAt) occupied.add(String(d.data().tableNumber)); });
+      snap.forEach(d => {
+        const data = d.data();
+        if(!data.paidAt && !data.deleted && !data.cancelledAt) occupied.add(String(data.tableNumber));
+      });
       const tSnap = await getDocs(collection(db, 'stores', currentStoreId, 'tables'));
       const grid = document.getElementById('tablesGrid');
       grid.innerHTML = '';
       tSnap.docs.map(d => d.data()).sort((a,b)=>(a.order||0)-(b.order||0)).forEach(t => {
-        const active = occupied.has(t.name);
-        grid.innerHTML += `<div class="table-card ${active?'active':''}" onclick="openOrderScreen('${t.name}')">
-          <b>${t.name}</b><br><small>${active?'注文あり':'空席'}</small>
+        const hasOrder = occupied.has(t.name);
+        grid.innerHTML += `<div class="table-card ${hasOrder?'active':''}" onclick="openOrderScreen('${t.name}')">
+          <b>${t.name}</b><br><small>${hasOrder?'注文あり':'空席'}</small>
         </div>`;
       });
     });
-  }
+  };
 
-  // --- 【注文機能】(維持されています) ---
+  // --- 注文機能 (復元コードベース) ---
   window.openOrderScreen = async (tName) => {
     currentTable = tName;
     document.getElementById('tablesScreen').classList.add('hidden');
@@ -176,13 +181,13 @@
       div.innerHTML = `<b>${item.name}</b><br>¥${item.price}`;
       div.onclick = () => {
         cart.push({ name: item.name, price: item.price, taxRate: item.taxRate||10, quantity: 1 });
-        updateCartBar();
+        updateCartUI();
       };
       cont.appendChild(div);
     });
   }
 
-  function updateCartBar() {
+  function updateCartUI() {
     const bar = document.getElementById('cartBar');
     if(cart.length > 0) {
       bar.classList.remove('hidden');
@@ -201,10 +206,10 @@
     await setDoc(doc(collection(db, 'stores', currentStoreId, 'orders')), orderData);
     alert('注文を送信しました');
     cart = [];
-    updateCartBar();
+    updateCartUI();
   };
 
-  // --- 【会計機能】(POS.htmlから完全移植) ---
+  // --- 会計機能 (POS.htmlから完全移植) ---
   window.openPaymentModal = async () => {
     const q = query(collection(db, 'stores', currentStoreId, 'orders'), where('tableNumber', '==', currentTable));
     const snap = await getDocs(q);
@@ -214,31 +219,35 @@
     
     const list = document.getElementById('paymentItemsList');
     list.innerHTML = '';
-    rawTotal = 0;
+    rawBaseTotal = 0;
     activeOrders.forEach(o => {
       o.items.forEach(i => {
-        rawTotal += i.price * i.quantity;
-        list.innerHTML += `<div class="item-row"><span>${i.name} x${i.quantity}</span><span>¥${(i.price * i.quantity).toLocaleString()}</span></div>`;
+        const sub = i.price * i.quantity;
+        rawBaseTotal += sub;
+        list.innerHTML += `<div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+          <span>${i.name} x${i.quantity}</span><span>¥${sub.toLocaleString()}</span>
+        </div>`;
       });
     });
-    updatePaymentDisplay();
+    updateTotalDisplay();
     document.getElementById('paymentModal').classList.remove('hidden');
   };
 
-  window.updatePaymentDisplay = () => {
-    const dis = parseInt(document.getElementById('discountInput').value) || 0;
-    const final = Math.max(0, rawTotal - dis);
+  window.updateTotalDisplay = () => {
+    const discount = parseInt(document.getElementById('discountInput').value) || 0;
+    const final = Math.max(0, rawBaseTotal - discount);
     document.getElementById('totalDisplay').textContent = `¥${final.toLocaleString()}`;
     document.getElementById('totalDisplay').dataset.value = final;
-    if(paymentMethod === 'cash') calcChange();
+    if(selectedMethod === 'cash') calcChange();
   };
 
-  window.setPaymentMethod = (m) => {
-    paymentMethod = m;
-    ['cash','credit','emoney'].forEach(id => document.getElementById(`btn-${id}`).classList.remove('btn-primary'));
-    document.getElementById(`btn-${m}`).classList.add('btn-primary');
-    document.getElementById('cashArea').classList.toggle('hidden', m !== 'cash');
-    document.getElementById('btnExecute').disabled = (m === 'cash');
+  window.setMethod = (m) => {
+    selectedMethod = m;
+    ['cash','emoney','credit'].forEach(id => document.getElementById(`m-${id}`).style.background = '#e0e0e0');
+    document.getElementById(`m-${m}`).style.background = '#667eea';
+    document.getElementById(`m-${m}`).style.color = 'white';
+    document.getElementById('cashInputArea').classList.toggle('hidden', m !== 'cash');
+    document.getElementById('btnComplete').disabled = (m === 'cash');
   };
 
   window.calcChange = () => {
@@ -246,19 +255,19 @@
     const rec = parseInt(document.getElementById('cashReceived').value) || 0;
     const diff = rec - tot;
     document.getElementById('changeDisplay').textContent = `¥${diff.toLocaleString()}`;
-    document.getElementById('btnExecute').disabled = (diff < 0);
+    document.getElementById('btnComplete').disabled = (diff < 0);
   };
 
-  // 会計完了（POSと完全に同期：売上加算 ＋ データ削除）
-  window.executePaymentAndSync = async () => {
+  // POS同期の会計実行
+  window.executeCheckout = async () => {
     try {
       const finalAmt = parseInt(document.getElementById('totalDisplay').dataset.value);
       const now = new Date();
-      // POSと同一の3時区切り営業日計算
+      // POSと共通の営業日計算（3時区切り）
       const bizDate = new Date(now); if(bizDate.getHours() < 3) bizDate.setDate(bizDate.getDate() - 1);
       const dStr = `${bizDate.getFullYear()}-${String(bizDate.getMonth()+1).padStart(2,'0')}-${String(bizDate.getDate()).padStart(2,'0')}`;
 
-      // 1. 売上反映 (POSのdailySalesロジック)
+      // POSと同じ売上集計ロジック
       const sRef = doc(db, 'stores', currentStoreId, 'dailySales', dStr);
       let t8 = 0, t10 = 0, tItems = 0;
       activeOrders.forEach(o => o.items.forEach(i => {
@@ -267,7 +276,7 @@
         tItems += i.quantity;
       }));
 
-      const up = {
+      const upData = {
         totalSales: increment(finalAmt),
         customerCount: increment(1),
         totalItems: increment(tItems),
@@ -275,47 +284,44 @@
         tax10Total: increment(t10),
         updatedAt: serverTimestamp()
       };
-      if(paymentMethod === 'cash') up.cashSales = increment(finalAmt);
-      else if(paymentMethod === 'credit') up.creditSales = increment(finalAmt);
-      else up.emoneSales = increment(finalAmt);
+      if(selectedMethod === 'cash') upData.cashSales = increment(finalAmt);
+      else if(selectedMethod === 'credit') upData.creditSales = increment(finalAmt);
+      else upData.emoneSales = increment(finalAmt);
 
       const sDoc = await getDoc(sRef);
-      if(sDoc.exists()) await updateDoc(sRef, up); else await setDoc(sRef, { date: dStr, ...up, createdAt: serverTimestamp() });
+      if(sDoc.exists()) await updateDoc(sRef, upData); else await setDoc(sRef, { date: dStr, ...upData, createdAt: serverTimestamp() });
 
-      // 2. 注文を完了させて削除 (POS側の画面からも消える)
+      // 注文データを更新し「削除」扱いにする（POS側の画面からも即座に消えます）
       for(const o of activeOrders) {
         await updateDoc(doc(db, 'stores', currentStoreId, 'orders', o.id), { 
           paidAt: serverTimestamp(), 
-          paymentMethod,
+          paymentMethod: selectedMethod,
           deleted: true 
         });
       }
 
-      // 3. 完了通知と画面遷移
       alert('削除しました');
       closePaymentModal();
-      showTables();
-
-    } catch(e) { alert('エラー: ' + e.message); }
+      window.showTables();
+    } catch(e) { alert(e.message); }
   };
 
-  window.deleteOrdersWithoutSales = async () => {
-    if(!confirm('売上に含めず注文を削除しますか？')) return;
-    for(const o of activeOrders) {
-      await updateDoc(doc(db, 'stores', currentStoreId, 'orders', o.id), { deleted: true });
+  window.statusUpdate = async (field) => {
+    if(confirm('実行しますか？')) {
+      for(const o of activeOrders) {
+        await updateDoc(doc(db, 'stores', currentStoreId, 'orders', o.id), { [field]: field === 'deleted' ? true : serverTimestamp() });
+      }
+      closePaymentModal();
+      window.showTables();
     }
-    alert('削除しました');
-    closePaymentModal();
-    showTables();
   };
 
   window.closePaymentModal = () => {
     document.getElementById('paymentModal').classList.add('hidden');
-    paymentMethod = '';
+    selectedMethod = '';
     document.getElementById('discountInput').value = 0;
     document.getElementById('cashReceived').value = '';
   };
-  window.showTables = showTables;
 
 </script>
 </body>
