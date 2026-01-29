@@ -722,6 +722,16 @@
           </div>
         </div>
         
+        <!-- 🆕 金額調整ボタン -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+          <button onclick="openAmountEditModal()" style="padding: 12px; background: #FF9800; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
+            💴 金額修正
+          </button>
+          <button onclick="openDiscountModal()" style="padding: 12px; background: #FF9800; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
+            🎫 値引き
+          </button>
+        </div>
+        
         <!-- 支払い方法選択 -->
         <div class="payment-method-group">
           <label>支払い方法</label>
@@ -757,6 +767,63 @@
         <div class="modal-buttons">
           <button class="modal-btn modal-btn-cancel" onclick="closePaymentModal()">閉じる</button>
           <button class="modal-btn modal-btn-success" id="paymentCompleteBtn" onclick="completePayment()">会計完了</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 🆕 金額修正モーダル -->
+  <div id="amountEditModal" class="custom-modal-overlay">
+    <div class="custom-modal-box">
+      <div style="padding: 20px;">
+        <div class="modal-title">💴 金額修正</div>
+        <div id="amountEditList" style="margin-bottom: 20px;"></div>
+        <div style="background: #f5f5f5; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; padding: 8px 0;">
+            <span>元の合計:</span>
+            <span id="editOriginalTotal">¥0</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 8px 0; border-top: 2px solid #4CAF50; margin-top: 10px; font-size: 18px; font-weight: bold; color: #4CAF50;">
+            <span>修正後合計:</span>
+            <span id="editNewTotal">¥0</span>
+          </div>
+        </div>
+        <div class="modal-buttons">
+          <button class="modal-btn modal-btn-cancel" onclick="closeAmountEditModal()">キャンセル</button>
+          <button class="modal-btn modal-btn-success" onclick="applyAmountEdit()">適用</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 🆕 値引きモーダル -->
+  <div id="discountModal" class="custom-modal-overlay">
+    <div class="custom-modal-box">
+      <div style="padding: 20px;">
+        <div class="modal-title">🎫 値引き</div>
+        
+        <div class="payment-summary">
+          <div class="payment-summary-row">
+            <span>現在の合計:</span>
+            <span id="discountCurrentTotal">¥0</span>
+          </div>
+        </div>
+        
+        <div class="payment-input-group">
+          <label>値引き金額</label>
+          <input type="number" id="discountAmount" placeholder="0" inputmode="numeric" oninput="calculateDiscountTotal()">
+        </div>
+        
+        <div class="payment-summary">
+          <div class="payment-summary-row total">
+            <span>値引き後:</span>
+            <span id="discountNewTotal">¥0</span>
+          </div>
+        </div>
+        
+        <div class="modal-buttons">
+          <button class="modal-btn modal-btn-cancel" onclick="closeDiscountModal()">キャンセル</button>
+          <button class="modal-btn modal-btn-success" onclick="applyDiscount()">適用</button>
         </div>
       </div>
     </div>
@@ -1374,12 +1441,14 @@
       try {
         const now = window.Timestamp.now();
         
+        // 各注文にpaidAtとpaymentMethodを設定
         for (const order of currentPaymentOrders) {
           const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
           
           await window.updateDoc(orderRef, {
             paidAt: now,
-            paymentMethod: selectedPaymentMethod
+            paymentMethod: selectedPaymentMethod,
+            completedAt: now  // 会計完了時に注文も完了とする
           });
         }
         
@@ -1452,6 +1521,193 @@
       } catch (error) {
         console.error('❌ 完了エラー:', error);
         alert('完了処理でエラーが発生しました: ' + error.message);
+      }
+    }
+    
+    // 🆕 金額修正モーダルを開く
+    function openAmountEditModal() {
+      const list = document.getElementById('amountEditList');
+      list.innerHTML = '';
+      
+      let originalTotal = 0;
+      
+      currentPaymentOrders.forEach(order => {
+        order.items.forEach((item, index) => {
+          originalTotal += item.price * item.quantity;
+          
+          const itemDiv = document.createElement('div');
+          itemDiv.style.cssText = 'padding: 15px; background: #f5f5f5; border-radius: 8px; margin-bottom: 10px;';
+          itemDiv.innerHTML = `
+            <div style="font-weight: bold; margin-bottom: 10px;">${item.name} x ${item.quantity}</div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <label style="flex-shrink: 0;">単価:</label>
+              <input type="number" 
+                id="editPrice_${order.id}_${index}" 
+                value="${item.price}" 
+                style="flex: 1; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; font-weight: bold;"
+                oninput="updateEditTotal()">
+            </div>
+          `;
+          list.appendChild(itemDiv);
+        });
+      });
+      
+      document.getElementById('editOriginalTotal').textContent = '¥' + originalTotal.toLocaleString();
+      document.getElementById('editNewTotal').textContent = '¥' + originalTotal.toLocaleString();
+      document.getElementById('amountEditModal').style.display = 'flex';
+    }
+    
+    function closeAmountEditModal() {
+      document.getElementById('amountEditModal').style.display = 'none';
+    }
+    
+    function updateEditTotal() {
+      let newTotal = 0;
+      
+      currentPaymentOrders.forEach(order => {
+        order.items.forEach((item, index) => {
+          const input = document.getElementById(`editPrice_${order.id}_${index}`);
+          const price = parseInt(input.value) || 0;
+          newTotal += price * item.quantity;
+        });
+      });
+      
+      document.getElementById('editNewTotal').textContent = '¥' + newTotal.toLocaleString();
+    }
+    
+    async function applyAmountEdit() {
+      const confirmed = await showCustomModal({
+        icon: '💴',
+        title: '金額修正',
+        message: '修正した金額を適用しますか？',
+        btnText: '適用',
+        btnClass: 'modal-btn-success'
+      });
+      
+      if (!confirmed) return;
+      
+      try {
+        // 各注文の商品価格を更新
+        for (const order of currentPaymentOrders) {
+          const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+          
+          const updatedItems = order.items.map((item, index) => {
+            const input = document.getElementById(`editPrice_${order.id}_${index}`);
+            const newPrice = parseInt(input.value) || item.price;
+            return {
+              ...item,
+              price: newPrice
+            };
+          });
+          
+          const newTotal = updatedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+          
+          await window.updateDoc(orderRef, {
+            items: updatedItems,
+            totalAmount: newTotal
+          });
+          
+          // ローカルのデータも更新
+          order.items = updatedItems;
+          order.totalAmount = newTotal;
+        }
+        
+        closeAmountEditModal();
+        
+        // 会計モーダルの金額を更新
+        const newTotalAmount = currentPaymentOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+        document.getElementById('paymentTotalAmount').textContent = '¥' + newTotalAmount.toLocaleString();
+        
+        await showCustomModal({
+          icon: '✅',
+          title: '金額修正完了',
+          message: '金額を修正しました',
+          btnText: 'OK',
+          btnClass: 'modal-btn-success'
+        });
+        
+      } catch (error) {
+        console.error('❌ 金額修正エラー:', error);
+        alert('金額修正でエラーが発生しました: ' + error.message);
+      }
+    }
+    
+    // 🆕 値引きモーダルを開く
+    function openDiscountModal() {
+      const currentTotal = currentPaymentOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+      
+      document.getElementById('discountCurrentTotal').textContent = '¥' + currentTotal.toLocaleString();
+      document.getElementById('discountNewTotal').textContent = '¥' + currentTotal.toLocaleString();
+      document.getElementById('discountAmount').value = '';
+      document.getElementById('discountModal').style.display = 'flex';
+    }
+    
+    function closeDiscountModal() {
+      document.getElementById('discountModal').style.display = 'none';
+    }
+    
+    function calculateDiscountTotal() {
+      const currentTotal = currentPaymentOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+      const discount = parseInt(document.getElementById('discountAmount').value) || 0;
+      const newTotal = Math.max(0, currentTotal - discount);
+      
+      document.getElementById('discountNewTotal').textContent = '¥' + newTotal.toLocaleString();
+    }
+    
+    async function applyDiscount() {
+      const discount = parseInt(document.getElementById('discountAmount').value) || 0;
+      
+      if (discount <= 0) {
+        alert('値引き金額を入力してください');
+        return;
+      }
+      
+      const currentTotal = currentPaymentOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+      const newTotal = Math.max(0, currentTotal - discount);
+      
+      const confirmed = await showCustomModal({
+        icon: '🎫',
+        title: '値引き適用',
+        message: `値引き金額: ¥${discount.toLocaleString()}\n値引き後: ¥${newTotal.toLocaleString()}\n\n値引きを適用しますか？`,
+        btnText: '適用',
+        btnClass: 'modal-btn-success'
+      });
+      
+      if (!confirmed) return;
+      
+      try {
+        // 最初の注文に値引きを適用
+        const firstOrder = currentPaymentOrders[0];
+        const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', firstOrder.id);
+        
+        const discountedTotal = Math.max(0, firstOrder.totalAmount - discount);
+        
+        await window.updateDoc(orderRef, {
+          totalAmount: discountedTotal,
+          discount: discount,
+          originalAmount: firstOrder.totalAmount
+        });
+        
+        // ローカルのデータも更新
+        firstOrder.totalAmount = discountedTotal;
+        
+        closeDiscountModal();
+        
+        // 会計モーダルの金額を更新
+        const updatedTotal = currentPaymentOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+        document.getElementById('paymentTotalAmount').textContent = '¥' + updatedTotal.toLocaleString();
+        
+        await showCustomModal({
+          icon: '✅',
+          title: '値引き完了',
+          message: `¥${discount.toLocaleString()} の値引きを適用しました`,
+          btnText: 'OK',
+          btnClass: 'modal-btn-success'
+        });
+        
+      } catch (error) {
+        console.error('❌ 値引きエラー:', error);
+        alert('値引き処理でエラーが発生しました: ' + error.message);
       }
     }
     
