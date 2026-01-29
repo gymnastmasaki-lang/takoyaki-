@@ -5,29 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ハンディシステム - 修正版</title>
   <style>
-    /* CSSは前回提供したものをベースに、必要な箇所のみ維持 */
+    /* ... (中略: 元のスタイルのまま) ... */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
     .container { max-width: 600px; margin: 0 auto; }
-    .login-screen, .header, .table-card, .modal { background: white; border-radius: 15px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    .login-screen, .header, .table-card, .modal { background: white; border-radius: 15px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 20px;}
     .hidden { display: none !important; }
     .tables-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; }
     .table-card { text-align: center; cursor: pointer; position: relative; }
     .table-card.has-pending-orders { background: #fff4e6; border: 2px solid #ff9800; }
-    .checkout-btn { width: 100%; padding: 10px; margin-top: 8px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: white; }
-    
-    /* モーダル関連 */
-    .modal-overlay, .custom-modal-overlay {
-      display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); z-index: 1000;
-      align-items: center; justify-content: center;
-    }
-    .modal { width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
-    .btn { padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-    .btn-primary { background: #667eea; color: white; }
-    .btn-secondary { background: #e0e0e0; }
-    .btn-danger { background: #f44336; color: white; }
-    .btn-success { background: #4CAF50; color: white; }
+    .checkout-btn { width: 100%; padding: 10px; margin-top: 8px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: white; background: #4CAF50;}
+    .modal-overlay { display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); z-index: 1000; align-items: center; justify-content: center; }
+    .modal { width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; background: white; border-radius: 20px; padding: 20px; }
+    .btn { padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+    .btn:active { transform: scale(0.95); }
   </style>
 </head>
 <body>
@@ -36,13 +27,13 @@
       <h1 style="text-align:center; color:#667eea; margin-bottom:20px;">🍽️ ハンディ</h1>
       <select id="storeSelect" style="width:100%; padding:12px; margin-bottom:15px;"></select>
       <input type="password" id="passwordInput" placeholder="パスワード" style="width:100%; padding:12px; margin-bottom:15px;">
-      <button class="btn-primary" style="width:100%; padding:15px;" onclick="handleLogin()">ログイン</button>
+      <button class="btn" style="width:100%; background:#667eea; color:white;" onclick="handleLogin()">ログイン</button>
     </div>
 
     <div id="tablesScreen" class="hidden">
-      <div class="header" style="margin-bottom:20px;">
+      <div class="header">
         <h2 id="storeNameDisplay">店舗名</h2>
-        <button class="btn-danger" onclick="handleLogout()" style="margin-top:10px;">ログアウト</button>
+        <button class="btn" onclick="handleLogout()" style="background:#f44336; color:white; margin-top:10px;">ログアウト</button>
       </div>
       <div id="tablesGrid" class="tables-grid"></div>
     </div>
@@ -51,41 +42,46 @@
   <div id="paymentModal" class="modal-overlay hidden">
     <div class="modal">
       <h3 style="text-align:center; margin-bottom:15px;">💰 会計・注文管理</h3>
-      <p id="targetTableLabel" style="font-weight:bold; text-align:center; margin-bottom:15px;"></p>
+      <p id="selectedTableLabel2" style="text-align:center; font-weight:bold;"></p>
       
-      <div style="background:#f9f9f9; padding:15px; border-radius:10px; margin-bottom:15px;">
-        <div id="orderItemsSummary" style="font-size:14px; margin-bottom:10px;"></div>
-        <div style="border-top:1px solid #ddd; padding-top:10px; font-weight:bold; text-align:right;">
-          合計: <span id="finalTotalLabel" style="font-size:18px; color:#4CAF50;">¥0</span>
+      <div id="taxRateSection" style="margin: 15px 0; padding: 15px; background: #e8f5e9; border-radius: 10px;">
+        <div id="taxRateItemsList"></div>
+      </div>
+
+      <div style="margin: 15px 0; padding: 15px; background: #fff3cd; border-radius: 10px;">
+        <div style="display:flex; justify-content: space-between; font-weight:bold;">
+          <span>請求合計:</span>
+          <span id="finalPaymentAmount" style="color:#d32f2f; font-size:20px;">¥0</span>
         </div>
       </div>
 
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-        <button class="btn btn-success" onclick="completePayment('cash')">✅ 現金会計</button>
-        <button class="btn btn-primary" onclick="completePayment('credit')">💳 ｶｰﾄﾞ/電子</button>
-        <button class="btn btn-secondary" onclick="cancelOrders()">⏸️ ｷｬﾝｾﾙ</button>
-        <button class="btn btn-danger" onclick="deleteOrders()">🗑️ 削除</button>
+        <button class="btn" style="background:#4CAF50; color:white;" onclick="completePayment('cash')">現金会計</button>
+        <button class="btn" style="background:#2196F3; color:white;" onclick="completePayment('credit')">その他会計</button>
+        <button class="btn" style="background:#FF9800; color:white;" onclick="cancelOrdersForTable()">キャンセル</button>
+        <button class="btn" style="background:#f44336; color:white;" onclick="deleteOrdersForTable()">注文削除</button>
       </div>
-      <button class="btn btn-secondary" style="width:100%; margin-top:15px;" onclick="closePaymentModal()">戻る</button>
+      <button class="btn" style="width:100%; margin-top:10px; background:#ddd;" onclick="closePaymentModal()">戻る</button>
     </div>
   </div>
 
-  <div id="customConfirmModal" class="custom-modal-overlay hidden">
+  <div id="customConfirmModal" class="modal-overlay hidden">
     <div class="modal" style="text-align:center;">
       <div id="modalIcon" style="font-size:40px;">⚠️</div>
       <h3 id="modalTitle">確認</h3>
       <p id="modalMessage" style="margin:15px 0; color:#666;"></p>
       <div style="display:flex; gap:10px;">
-        <button id="modalCancelBtn" class="btn btn-secondary" style="flex:1;" onclick="closeCustomModal()">いいえ</button>
-        <button id="modalConfirmBtn" class="btn btn-danger" style="flex:1;">はい</button>
+        <button class="btn" style="flex:1; background:#ddd;" onclick="closeCustomModal()">いいえ</button>
+        <button id="modalConfirmBtn" class="btn" style="flex:1; background:#f44336; color:white;">はい</button>
       </div>
     </div>
   </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-    import { getFirestore, collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    import { getFirestore, collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, onSnapshot, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
+    // Firebase設定 (元ファイルから引用)
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
       authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
@@ -98,103 +94,92 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // グローバル変数と関数の公開
     let currentStoreId = null;
-    let currentTable = null;
+    let currentTableName = null;
     let currentOrders = [];
+    let customModalResolve = null;
 
-    // --- モーダル制御 ---
-    window.showCustomConfirm = ({icon, title, message, btnText, btnClass}) => {
+    // --- 確認モーダル ---
+    window.showCustomConfirm = (options) => {
       return new Promise((resolve) => {
+        customModalResolve = resolve;
         const modal = document.getElementById('customConfirmModal');
-        document.getElementById('modalIcon').textContent = icon || '⚠️';
-        document.getElementById('modalTitle').textContent = title;
-        document.getElementById('modalMessage').textContent = message;
+        document.getElementById('modalIcon').textContent = options.icon || '⚠️';
+        document.getElementById('modalTitle').textContent = options.title || '確認';
+        document.getElementById('modalMessage').textContent = options.message || '';
         const confirmBtn = document.getElementById('modalConfirmBtn');
-        confirmBtn.textContent = btnText || 'はい';
-        confirmBtn.className = `btn ${btnClass || 'btn-danger'}`;
-        
+        confirmBtn.textContent = options.btnText || 'はい';
+        confirmBtn.style.background = options.btnClass === 'success' ? '#4CAF50' : '#f44336';
         confirmBtn.onclick = () => { modal.classList.add('hidden'); resolve(true); };
         modal.classList.remove('hidden');
       });
     };
+    window.closeCustomModal = () => { document.getElementById('customConfirmModal').classList.add('hidden'); if(customModalResolve) customModalResolve(false); };
 
-    window.closeCustomModal = () => document.getElementById('customConfirmModal').classList.add('hidden');
-
-    // --- 会計処理 (売上反映対応) ---
+    // --- 会計完了 (売上反映) ---
     window.completePayment = async (method) => {
       const confirmed = await showCustomConfirm({
-        icon: '💰', title: '会計確定', message: '会計を完了して売上に計上しますか？', btnClass: 'btn-success', btnText: '会計する'
+        icon: '💰', title: '会計確定', message: 'この内容で売上に反映しますか？', btnText: '会計完了', btnClass: 'success'
       });
       if (!confirmed) return;
 
       try {
-        const batchPromises = [];
         const now = serverTimestamp();
-        let totalSales = 0;
-
+        let totalAmount = 0;
+        
+        // 1. 各注文のステータス更新
         for (const order of currentOrders) {
-          // 1. 注文ステータス更新
           const orderRef = doc(db, 'stores', currentStoreId, 'orders', order.id);
-          batchPromises.push(updateDoc(orderRef, { paidAt: now, paymentMethod: method }));
-          totalSales += (order.totalAmount || 0);
+          await updateDoc(orderRef, { paidAt: now, paymentMethod: method });
+          totalAmount += (order.totalAmount || 0);
         }
 
-        // 2. 売上データ(sales)へ反映
-        const salesRef = collection(db, 'stores', currentStoreId, 'sales');
-        batchPromises.push(addDoc(salesRef, {
-          amount: totalSales,
+        // 2. POSの売上コレクション(sales)へ書き込み
+        await addDoc(collection(db, 'stores', currentStoreId, 'sales'), {
+          amount: totalAmount,
           method: method,
           createdAt: now,
-          type: 'order',
-          tableName: currentTable
-        }));
+          tableName: currentTableName,
+          type: 'order'
+        });
 
-        await Promise.all(batchPromises);
-        
-        await showCustomConfirm({ icon: '✅', title: '完了', message: '会計が完了しました', btnClass: 'btn-primary', btnText: 'OK' });
-        location.reload(); // テーブル画面へ戻る
-      } catch (e) { alert('エラーが発生しました'); }
+        await showCustomConfirm({ icon: '✅', title: '完了', message: '売上に反映しました', btnText: 'OK', btnClass: 'success' });
+        location.reload(); 
+      } catch (e) { alert('会計処理に失敗しました'); }
     };
 
-    // --- 削除処理 (即時反映・自動戻り) ---
-    window.deleteOrders = async () => {
-      const confirmed = await showCustomConfirm({
-        icon: '🗑️', title: '削除確認', message: 'このテーブルの注文を完全に削除しますか？', btnClass: 'btn-danger', btnText: '削除'
-      });
+    // --- 削除 (自動戻り) ---
+    window.deleteOrdersForTable = async () => {
+      const confirmed = await showCustomConfirm({ icon: '🗑️', title: '削除確認', message: '注文を完全に消去しますか？' });
       if (!confirmed) return;
 
       try {
-        const promises = currentOrders.map(order => 
-          updateDoc(doc(db, 'stores', currentStoreId, 'orders', order.id), { deleted: true })
-        );
-        await Promise.all(promises);
-        
-        await showCustomConfirm({ icon: '🗑️', title: '削除完了', message: '注文を削除しました', btnClass: 'btn-primary', btnText: 'OK' });
-        location.reload(); 
+        for (const order of currentOrders) {
+          await updateDoc(doc(db, 'stores', currentStoreId, 'orders', order.id), { deleted: true });
+        }
+        await showCustomConfirm({ icon: '🗑️', title: '完了', message: '削除しました', btnText: 'OK' });
+        location.reload();
       } catch (e) { alert('削除に失敗しました'); }
     };
 
-    // --- キャンセル処理 ---
-    window.cancelOrders = async () => {
-      const confirmed = await showCustomConfirm({
-        icon: '⏸️', title: 'キャンセル確認', message: '注文をキャンセル扱いにしますか？', btnClass: 'btn-secondary', btnText: 'キャンセル実行'
-      });
+    // --- キャンセル (自動戻り) ---
+    window.cancelOrdersForTable = async () => {
+      const confirmed = await showCustomConfirm({ icon: '⏸️', title: 'キャンセル確認', message: '注文を取り消しますか？' });
       if (!confirmed) return;
 
       try {
-        const promises = currentOrders.map(order => 
-          updateDoc(doc(db, 'stores', currentStoreId, 'orders', order.id), { cancelledAt: serverTimestamp() })
-        );
-        await Promise.all(promises);
-        await showCustomConfirm({ icon: 'OK', title: '完了', message: 'キャンセルしました', btnClass: 'btn-primary', btnText: 'OK' });
+        const now = serverTimestamp();
+        for (const order of currentOrders) {
+          await updateDoc(doc(db, 'stores', currentStoreId, 'orders', order.id), { cancelledAt: now });
+        }
+        await showCustomConfirm({ icon: '⏸️', title: '完了', message: 'キャンセルしました', btnText: 'OK' });
         location.reload();
-      } catch (e) { alert('失敗しました'); }
+      } catch (e) { alert('キャンセルに失敗しました'); }
     };
 
-    // --- データ取得・表示ロジック ---
+    // --- データ読み込み ---
     window.openCheckoutForTable = async (tableName) => {
-      currentTable = tableName;
+      currentTableName = tableName;
       const q = query(collection(db, 'stores', currentStoreId, 'orders'), 
                 where('tableNumber', '==', String(tableName)),
                 where('paidAt', '==', null),
@@ -204,18 +189,25 @@
       const snap = await getDocs(q);
       currentOrders = snap.docs.map(d => ({id: d.id, ...d.data()}));
       
-      if (currentOrders.length === 0) return alert('注文がありません');
+      if (currentOrders.length === 0) {
+        alert('未会計の注文はありません');
+        return;
+      }
 
-      document.getElementById('targetTableLabel').textContent = `テーブル: ${tableName}`;
+      document.getElementById('selectedTableLabel2').textContent = `テーブル: ${tableName}`;
       const total = currentOrders.reduce((s, o) => s + (o.totalAmount || 0), 0);
-      document.getElementById('finalTotalLabel').textContent = `¥${total.toLocaleString()}`;
+      document.getElementById('finalPaymentAmount').textContent = `¥${total.toLocaleString()}`;
+      
+      // 税率表示エリア（簡易版）
+      const list = document.getElementById('taxRateItemsList');
+      list.innerHTML = currentOrders.map(o => `<div>注文 #${o.orderNumber || ''}: ¥${(o.totalAmount || 0).toLocaleString()}</div>`).join('');
       
       document.getElementById('paymentModal').classList.remove('hidden');
     };
 
     window.closePaymentModal = () => document.getElementById('paymentModal').classList.add('hidden');
 
-    // --- ログイン・初期化 (略) ---
+    // ログイン処理
     window.handleLogin = async () => {
       const sid = document.getElementById('storeSelect').value;
       if (!sid) return;
@@ -226,24 +218,36 @@
       loadTables();
     };
 
+    window.handleLogout = () => { sessionStorage.clear(); location.reload(); };
+
     async function loadTables() {
-      const snap = await getDocs(collection(db, 'stores', currentStoreId, 'tables'));
+      const tRef = collection(db, 'stores', currentStoreId, 'tables');
+      const snap = await getDocs(tRef);
       const grid = document.getElementById('tablesGrid');
       grid.innerHTML = '';
-      snap.forEach(d => {
-        const t = d.data();
-        const card = document.createElement('div');
-        card.className = 'table-card';
-        card.innerHTML = `<h3>${t.name}</h3><button class="checkout-btn btn-success" onclick="openCheckoutForTable('${t.name}')">会計/管理</button>`;
-        grid.appendChild(card);
+      
+      // 注文状態の監視
+      const oRef = collection(db, 'stores', currentStoreId, 'orders');
+      onSnapshot(query(oRef, where('paidAt', '==', null), where('deleted', '==', false), where('cancelledAt', '==', null)), (oSnap) => {
+        const activeTables = new Set();
+        oSnap.forEach(d => activeTables.add(d.data().tableNumber));
+        
+        grid.innerHTML = '';
+        snap.forEach(d => {
+          const t = d.data();
+          const card = document.createElement('div');
+          card.className = `table-card ${activeTables.has(t.name) ? 'has-pending-orders' : ''}`;
+          card.innerHTML = `<h3>${t.name}</h3><button class="checkout-btn" onclick="openCheckoutForTable('${t.name}')">会計/管理</button>`;
+          grid.appendChild(card);
+        });
       });
     }
 
-    // 初期化実行
+    // 初期化
     (async () => {
-      const snap = await getDocs(query(collection(db, 'stores'), where('isActive', '==', true)));
+      const sSnap = await getDocs(query(collection(db, 'stores'), where('isActive', '==', true)));
       const sel = document.getElementById('storeSelect');
-      snap.forEach(d => {
+      sSnap.forEach(d => {
         const opt = document.createElement('option');
         opt.value = d.id; opt.textContent = d.data().storeName;
         sel.appendChild(opt);
