@@ -685,6 +685,53 @@
     window.deleteDoc = deleteDoc;
     window.Timestamp = Timestamp;
     
+    // 店舗別コレクション参照を取得
+    window.getStoreCollection = function(collectionName) {
+      console.log('🔍 HANDY getStoreCollection呼び出し');
+      console.log('   コレクション名:', collectionName);
+      console.log('   window.currentStoreId:', window.currentStoreId);
+      console.log('   typeof:', typeof window.currentStoreId);
+      
+      // currentStoreIdがnullまたは空の場合は旧パスを使用
+      if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
+        const oldPathMap = {
+          "menus": "menu",
+          "employees": "kintai_employees",
+          "attendance": "kintai_attendance",
+          "orders": "orders",
+          "tables": "tables"
+        };
+        const path = oldPathMap[collectionName] || collectionName;
+        console.log('   → 旧パス使用:', path);
+        return collection(db, path);
+      }
+      console.log('   → 新パス使用: stores/' + window.currentStoreId + '/' + collectionName);
+      return collection(db, "stores", window.currentStoreId, collectionName);
+    };
+
+    // 店舗別ドキュメント参照を取得
+    window.getStoreDoc = function(collectionName, docId) {
+      console.log('🔍 HANDY getStoreDoc呼び出し');
+      console.log('   コレクション名:', collectionName, 'ドキュメントID:', docId);
+      console.log('   window.currentStoreId:', window.currentStoreId);
+      
+      // currentStoreIdがnullまたは空の場合は旧パスを使用
+      if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
+        const oldPathMap = {
+          "menus": "menu",
+          "employees": "kintai_employees",
+          "attendance": "kintai_attendance",
+          "orders": "orders",
+          "tables": "tables"
+        };
+        const path = oldPathMap[collectionName] || collectionName;
+        console.log('   → 旧パス使用:', path + '/' + docId);
+        return doc(db, path, docId);
+      }
+      console.log('   → 新パス使用: stores/' + window.currentStoreId + '/' + collectionName + '/' + docId);
+      return doc(db, "stores", window.currentStoreId, collectionName, docId);
+    };
+    
     console.log('✅ Firebase初期化完了');
     
     window.firebaseReady = true;
@@ -798,9 +845,17 @@
       }
       
       currentStoreId = storeId;
+      window.currentStoreId = storeId; // グローバル変数として設定
       currentStoreName = storeInfo.storeName;
       sessionStorage.setItem('handyStoreId', storeId);
       sessionStorage.setItem('handyStoreName', currentStoreName);
+      
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📍 HANDY 店舗ID設定完了');
+      console.log('   currentStoreId:', currentStoreId);
+      console.log('   window.currentStoreId:', window.currentStoreId);
+      console.log('   currentStoreName:', currentStoreName);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       showTablesScreen();
     };
@@ -842,7 +897,7 @@
     
     function startOrdersListener() {
       if (ordersListener) ordersListener();
-      const ordersRef = window.collection(window.db, 'stores', currentStoreId, 'orders');
+      const ordersRef = window.getStoreCollection('orders');
       ordersListener = window.onSnapshot(ordersRef, (snapshot) => {
         updateTableStatus(snapshot);
       });
@@ -930,7 +985,7 @@
         const tablesGrid = document.getElementById('tablesGrid');
         tablesGrid.innerHTML = '<div class="loading">読み込み中...</div>';
         
-        const tablesRef = window.collection(window.db, 'stores', currentStoreId, 'tables');
+        const tablesRef = window.getStoreCollection('tables');
         const tablesSnapshot = await window.getDocs(tablesRef);
         const tables = [];
         
@@ -1000,7 +1055,7 @@
     
     async function openCheckoutForTable(tableName) {
       try {
-        const ordersRef = window.collection(window.db, 'stores', currentStoreId, 'orders');
+        const ordersRef = window.getStoreCollection('orders');
         const ordersQuery = window.query(ordersRef, window.where('tableNumber', '==', String(tableName)));
         const ordersSnapshot = await window.getDocs(ordersQuery);
         
@@ -1647,7 +1702,16 @@
       await loadStoreList();
       if (sessionStorage.getItem('handyStoreId')) {
         currentStoreId = sessionStorage.getItem('handyStoreId');
+        window.currentStoreId = currentStoreId; // グローバル変数として設定
         currentStoreName = sessionStorage.getItem('handyStoreName');
+        
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📍 HANDY セッションから店舗ID復元');
+        console.log('   currentStoreId:', currentStoreId);
+        console.log('   window.currentStoreId:', window.currentStoreId);
+        console.log('   currentStoreName:', currentStoreName);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        
         showTablesScreen();
       }
     });
