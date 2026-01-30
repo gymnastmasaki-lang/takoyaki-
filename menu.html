@@ -837,7 +837,7 @@
       // 🔧 修正: currentStoreIdがnullまたは空の場合のみ旧パスを使用
       if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
         const oldPathMap = {
-          "menus": "menus",  // 🔧 修正: "menu" → "menus" (複数形)
+          "menus": "menu",
           "employees": "kintai_employees",
           "attendance": "kintai_attendance"
         };
@@ -854,7 +854,7 @@
       // 🔧 修正: currentStoreIdがnullまたは空の場合のみ旧パスを使用
       if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
         const oldPathMap = {
-          "menus": "menus",  // 🔧 修正: "menu" → "menus" (複数形)
+          "menus": "menu",
           "employees": "kintai_employees",
           "attendance": "kintai_attendance"
         };
@@ -867,14 +867,16 @@
     const urlParams = new URLSearchParams(window.location.search);
     const storeIdParam = urlParams.get('store');
     
+    // 🆕 セッションストレージから店舗IDを取得（ハンディモード対応）
+    const sessionStoreId = sessionStorage.getItem('handyStoreId');
+    const sessionStoreName = sessionStorage.getItem('handyStoreName');
+    
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('📍 menu.html 店舗ID設定開始');
     console.log('   URL:', window.location.href);
     console.log('   storeパラメータ:', storeIdParam);
-    
-    // ハンディモードの場合、セッションストレージから店舗IDを取得
-    const sessionStoreId = sessionStorage.getItem('handyStoreId');
-    console.log('   セッションストレージの店舗ID:', sessionStoreId);
+    console.log('   セッション店舗ID:', sessionStoreId);
+    console.log('   セッション店舗名:', sessionStoreName);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
     // 🔧 優先順位: URLパラメータ > セッションストレージ
@@ -885,8 +887,8 @@
       // 新しい店舗
       currentStoreId = effectiveStoreId;
       window.currentStoreId = currentStoreId;
-      // セッションストレージから店舗名も取得を試みる
-      currentStoreName = sessionStorage.getItem('handyStoreName') || effectiveStoreId;
+      // セッションストレージから店舗名も取得（優先）
+      currentStoreName = sessionStoreName || effectiveStoreId;
       console.log('✅ 新店舗モード');
       console.log('   設定された店舗ID:', currentStoreId);
       console.log('   店舗名:', currentStoreName);
@@ -909,9 +911,9 @@
       // ⚠️ 警告：storeパラメータがない場合
       if (!effectiveStoreId) {
         console.warn('⚠️ URLとセッションストレージの両方に店舗IDがありません');
+        console.warn('   他の店舗のメニューを見る場合は、正しいURLを使用してください');
+        console.warn('   例: menu.html?store=店舗ID&table=テーブル名');
       }
-      console.warn('   他の店舗のメニューを見る場合は、正しいURLを使用してください');
-      console.warn('   例: menu.html?store=店舗ID&table=テーブル名');
     }
     
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -1127,42 +1129,24 @@
     // メニュー設定を読み込み
     async function loadMenuSettings() {
       try {
-        // 🔧 修正: window.currentStoreIdを使用
-        console.log('🍽️ メニュー設定を読み込み中...');
-        console.log('   currentStoreId:', currentStoreId);
-        console.log('   window.currentStoreId:', window.currentStoreId);
+        // 🔧 修正: currentStoreIdがnullなら旧パスを使用
+        console.log('🍽️ メニュー設定を読み込み中... 店舗ID:', currentStoreId);
         
-        // window.currentStoreIdが存在する場合は stores/{storeId}/menu_settings/default
+        // currentStoreIdが存在する場合は stores/{storeId}/menu_settings/default
         // nullの場合は menu_settings/shimoakatsuka（旧パス）
-        const menuSettingsRef = window.currentStoreId ? 
-          doc(db, 'stores', window.currentStoreId, 'menu_settings', 'default') : 
+        const menuSettingsRef = currentStoreId ? 
+          doc(db, 'stores', currentStoreId, 'menu_settings', 'default') : 
           doc(db, 'menu_settings', 'shimoakatsuka');
-        
-        console.log('📖 メニュー設定の読み込みパス:', 
-          window.currentStoreId ? 
-          `stores/${window.currentStoreId}/menu_settings/default` : 
-          'menu_settings/shimoakatsuka'
-        );
         const menuSettingsDoc = await getDoc(menuSettingsRef);
-        
-        console.log('📖 メニュー設定ドキュメント:', {
-          exists: menuSettingsDoc.exists(),
-          id: menuSettingsDoc.id
-        });
         
         if (menuSettingsDoc.exists()) {
           menuSettings = menuSettingsDoc.data();
           console.log('✅ メニュー設定を読み込みました:', menuSettings);
         } else {
           console.log('⚠️ メニュー設定が見つかりません。デフォルト設定を使用します。');
-          console.warn('⚠️ パスを確認してください:', 
-            window.currentStoreId ? 
-            `stores/${window.currentStoreId}/menu_settings/default` : 
-            'menu_settings/shimoakatsuka'
-          );
           
-          // 下赤塚店（window.currentStoreId = null）の場合はデフォルトで表示
-          if (!window.currentStoreId) {
+          // 下赤塚店（currentStoreId = null）の場合はデフォルトで表示
+          if (!currentStoreId) {
             menuSettings = {
               showMemoField: true,
               showNameField: false,
