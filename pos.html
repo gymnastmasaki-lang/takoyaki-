@@ -9050,13 +9050,20 @@ ${redSlipCount > 0 ? `
         } else {
           // 各商品を表示
           order.items.forEach((item, itemIdx) => {
-            const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
-            console.log(`  商品追加: ${item.name} x${item.quantity}, 金額:${itemTotal}, taxType:${item.taxType}`);
+            // 🆕 外税の場合は本体価格として扱う（taxTypeがexclusiveの場合、item.priceは本体価格）
+            // 内税の場合はitem.priceが税込価格なので、そのまま使用
+            const itemBasePrice = item.price + (item.toppingPrice || 0);
+            const itemTotal = itemBasePrice * (item.quantity || 1);
+            console.log(`  商品追加: ${item.name} x${item.quantity}, 本体価格:${itemTotal}, taxType:${item.taxType}`);
             
             let defaultTaxRate;
             
-            // 即会計、テイクアウト、モバイルオーダー、予約テーブル、予約テイクアウト、予約テイクアウト2の場合は、商品の税率よりテーブル番号を優先
-            if (order.tableNumber === '即会計' || order.tableNumber === 'テイクアウト' || order.tableNumber === 'モバイルオーダー' || order.tableNumber === '予約テーブル' || order.tableNumber === '予約テイクアウト' || order.tableNumber === '予約テイクアウト2') {
+            // 🆕 まず商品のtaxRateを確認（即会計でも商品の税率を優先）
+            if (item.taxRate !== undefined && item.taxRate !== null) {
+              defaultTaxRate = item.taxRate;
+              console.log(`  ✅ 商品のtaxRateを使用: ${defaultTaxRate}%`);
+            } else if (order.tableNumber === '即会計' || order.tableNumber === 'テイクアウト' || order.tableNumber === 'モバイルオーダー' || order.tableNumber === '予約テーブル' || order.tableNumber === '予約テイクアウト' || order.tableNumber === '予約テイクアウト2') {
+              // 商品にtaxRateがない場合のみ、テーブル番号で判定
               // レジ袋（包材）のみ10%、それ以外は8%
               if (item.name && (item.name.includes('レジ袋') || item.name.includes('袋') || item.category === '包材')) {
                 defaultTaxRate = 10;
@@ -9066,15 +9073,9 @@ ${redSlipCount > 0 ? `
                 console.log(`  🥡 持ち帰り: 8%`);
               }
             } else {
-              // テーブル注文の場合は商品のtaxRateを優先
-              if (item.taxRate) {
-                defaultTaxRate = item.taxRate;
-                console.log(`  ✅ 商品のtaxRateを使用: ${defaultTaxRate}%`);
-              } else {
-                // taxRateがない場合はテーブル番号に基づいて決定
-                defaultTaxRate = determineDefaultTaxRate(order.tableNumber);
-                console.log(`  ℹ️ テーブル番号から税率を決定: ${defaultTaxRate}%`);
-              }
+              // それ以外のテーブルの場合
+              defaultTaxRate = determineDefaultTaxRate(order.tableNumber);
+              console.log(`  ℹ️ テーブル番号から税率を決定: ${defaultTaxRate}%`);
             }
             
             // 🆕 taxTypeを渡す
