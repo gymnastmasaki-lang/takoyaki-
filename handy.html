@@ -4,6 +4,33 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ハンディシステム</title>
+  <!-- タップ音 -->
+  <script>
+    // AudioContextを使用したタップ音生成
+    let audioContext = null;
+    function initAudio() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    }
+    function playTapSound() {
+      initAudio();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 800;
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    }
+  </script>
   <style>
     * {
       margin: 0;
@@ -749,6 +776,7 @@
     }
     
     window.handleLogin = async function() {
+      playTapSound();
       const storeSelect = document.getElementById('storeSelect');
       const passwordInput = document.getElementById('passwordInput');
       const storeId = storeSelect.value;
@@ -778,6 +806,7 @@
     };
     
     window.handleLogout = async function() {
+      playTapSound();
       const confirmed = await showCustomConfirm({
         icon: '🚪',
         title: 'ログアウト',
@@ -930,13 +959,13 @@
           menuBtn.className = 'checkout-btn';
           menuBtn.textContent = '📱 メニュー';
           menuBtn.style.background = '#667eea';
-          menuBtn.onclick = (e) => { e.stopPropagation(); openMenu(table.name); };
+          menuBtn.onclick = (e) => { e.stopPropagation(); playTapSound(); openMenu(table.name); };
           tableCard.appendChild(menuBtn);
           
           const checkoutBtn = document.createElement('button');
           checkoutBtn.className = 'checkout-btn';
           checkoutBtn.textContent = '💰 会計';
-          checkoutBtn.onclick = (e) => { e.stopPropagation(); openCheckoutForTable(table.name); };
+          checkoutBtn.onclick = (e) => { e.stopPropagation(); playTapSound(); openCheckoutForTable(table.name); };
           tableCard.appendChild(checkoutBtn);
           
           tablesGrid.appendChild(tableCard);
@@ -1079,7 +1108,7 @@
       // 選択された注文をグローバル変数に保存（会計処理で使用）
       window.ordersToCheckout = ordersToCheckout;
       
-      generateTaxRateItems(ordersToCheckout);
+      generateTaxRateItems(ordersToCheckout, tableName);
       document.getElementById('discountAmount').value = 0;
       updatePaymentTotal();
       
@@ -1093,22 +1122,26 @@
       document.getElementById('paymentModal').classList.add('hidden');
     };
     
-    function generateTaxRateItems(ordersToProcess = null) {
+    function generateTaxRateItems(ordersToProcess = null, tableName = '') {
       const container = document.getElementById('taxRateItemsList');
       container.innerHTML = '';
       let itemIndex = 0;
       
       const orders = ordersToProcess || currentOrders;
       
+      // テーブル名が「テイクアウト」または「モバイルオーダー」の場合は8%、それ以外は10%
+      const isTakeoutOrMobile = tableName.includes('テイクアウト') || tableName.includes('モバイルオーダー');
+      const defaultTaxRate = isTakeoutOrMobile ? 8 : 10;
+      
       orders.forEach(order => {
         if (!order.items || order.items.length === 0) {
-          addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, order.totalAmount || 0, itemIndex, 8);
+          addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, order.totalAmount || 0, itemIndex, defaultTaxRate);
           itemIndex++;
         } else {
           order.items.forEach(item => {
             const toppingStr = item.toppings || item.toppingDetails || 'なし';
             const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-            addTaxRateItem(container, `${item.name} (${toppingStr})`, item.quantity, itemTotal, itemIndex, item.taxRate || 8);
+            addTaxRateItem(container, `${item.name} (${toppingStr})`, item.quantity, itemTotal, itemIndex, item.taxRate || defaultTaxRate);
             itemIndex++;
           });
           if (order.bagNeeded && order.bagQuantity > 0) {
@@ -1191,6 +1224,7 @@
     };
     
     window.selectPaymentMethod = function(method) {
+      playTapSound();
       selectedPaymentMethod = method;
       document.querySelectorAll('.payment-method-btn').forEach(btn => btn.classList.toggle('selected', btn.innerText.includes(method === 'cash' ? '現金' : method === 'emoney' ? '電子' : 'クレジット')));
       document.getElementById('cashInputSection').classList.toggle('hidden', method !== 'cash');
@@ -1245,6 +1279,8 @@
 
     // 会計処理（売上・客数をPOSに反映）- ワンタップで完結
     window.processPayment = async function() {
+      playTapSound();
+      
       if (!selectedPaymentMethod) {
         await showCustomAlert({ icon: '⚠️', title: 'エラー', message: '支払い方法を選択してください', btnClass: 'modal-btn-danger' });
         return;
@@ -1428,6 +1464,7 @@
     // 完了処理（POSのcompletedAtに合わせる）- ワンタップで完結
     window.completeOrdersForTable = async function() {
       try {
+        playTapSound();
         const now = window.Timestamp.now();
         
         // window.ordersToCheckoutから完了対象の注文を取得（なければcurrentOrders）
@@ -1471,106 +1508,89 @@
 
     // キャンセル処理 - ワンタップで完結
     window.cancelOrdersForTable = async function() {
-      const confirmed = await showCustomConfirm({ 
-        icon: '⏸️', 
-        title: '確認', 
-        message: '注文をキャンセルしますか？', 
-        btnText: 'キャンセルする',
-        btnClass: 'modal-btn-warning' 
-      });
-      
-      if (confirmed) {
-        try {
-          const now = window.Timestamp.now();
-          
-          // window.ordersToCheckoutからキャンセル対象の注文を取得（なければcurrentOrders）
-          const ordersToCancel = window.ordersToCheckout || currentOrders;
-          
-          console.log('⏸️ キャンセル処理開始:', {
-            ordersCount: ordersToCancel.length,
-            orderIds: ordersToCancel.map(o => o.id)
+      try {
+        playTapSound();
+        const now = window.Timestamp.now();
+        
+        // window.ordersToCheckoutからキャンセル対象の注文を取得（なければcurrentOrders）
+        const ordersToCancel = window.ordersToCheckout || currentOrders;
+        
+        console.log('⏸️ キャンセル処理開始:', {
+          ordersCount: ordersToCancel.length,
+          orderIds: ordersToCancel.map(o => o.id)
+        });
+        
+        for (const order of ordersToCancel) {
+          const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+          await window.updateDoc(orderRef, { 
+            cancelledAt: now
           });
-          
-          for (const order of ordersToCancel) {
-            const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
-            await window.updateDoc(orderRef, { 
-              cancelledAt: now
-            });
-            console.log('✅ 注文をキャンセル:', order.id);
-          }
-          
-          // モーダルを閉じる
-          closePaymentModal();
-          
-          // 少し待ってから成功メッセージ（Firestoreの変更が反映されるのを待つ）
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          await showCustomAlert({ 
-            icon: '⏸️', 
-            title: 'キャンセル完了', 
-            message: '注文をキャンセルしました。', 
-            btnClass: 'modal-btn-success' 
-          });
-        } catch (error) {
-          console.error('❌ キャンセル処理エラー:', error);
-          await showCustomAlert({ 
-            icon: '❌', 
-            title: 'エラー', 
-            message: 'キャンセル処理に失敗しました\n\n' + error.message, 
-            btnClass: 'modal-btn-danger' 
-          });
+          console.log('✅ 注文をキャンセル:', order.id);
         }
+        
+        // モーダルを閉じる
+        closePaymentModal();
+        
+        // 少し待ってから成功メッセージ（Firestoreの変更が反映されるのを待つ）
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        await showCustomAlert({ 
+          icon: '⏸️', 
+          title: 'キャンセル完了', 
+          message: '注文をキャンセルしました。', 
+          btnClass: 'modal-btn-success' 
+        });
+      } catch (error) {
+        console.error('❌ キャンセル処理エラー:', error);
+        await showCustomAlert({ 
+          icon: '❌', 
+          title: 'エラー', 
+          message: 'キャンセル処理に失敗しました\n\n' + error.message, 
+          btnClass: 'modal-btn-danger' 
+        });
       }
     };
 
     // 削除処理 - ワンタップで完結
     window.deleteOrdersForTable = async function() {
-      const confirmed = await showCustomConfirm({ 
-        icon: '🗑️', 
-        title: '削除確認', 
-        message: '注文を完全に削除しますか？\n（POSからも削除されます）',
-        btnText: '削除する',
-        btnClass: 'modal-btn-danger'
-      });
-      
-      if (confirmed) {
-        try {
-          // window.ordersToCheckoutから削除対象の注文を取得（なければcurrentOrders）
-          const ordersToDelete = window.ordersToCheckout || currentOrders;
-          
-          console.log('🗑️ 削除処理開始:', {
-            ordersCount: ordersToDelete.length,
-            orderIds: ordersToDelete.map(o => o.id)
-          });
-          
-          for (const order of ordersToDelete) {
-            const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
-            // Firestoreから完全に削除（POSからも消える）
-            await window.deleteDoc(orderRef);
-            console.log('✅ 注文を削除:', order.id);
-          }
-          
-          // モーダルを閉じる
-          closePaymentModal();
-          
-          // 少し待ってから成功メッセージ（Firestoreの変更が反映されるのを待つ）
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          await showCustomAlert({ 
-            icon: '✅', 
-            title: '削除完了', 
-            message: '注文を完全に削除しました。\nPOSからも削除されます。', 
-            btnClass: 'modal-btn-success' 
-          });
-        } catch (error) {
-          console.error('❌ 削除エラー:', error);
-          await showCustomAlert({ 
-            icon: '❌', 
-            title: 'エラー', 
-            message: '削除に失敗しました\n\n' + error.message, 
-            btnClass: 'modal-btn-danger' 
-          });
+      try {
+        playTapSound();
+        
+        // window.ordersToCheckoutから削除対象の注文を取得（なければcurrentOrders）
+        const ordersToDelete = window.ordersToCheckout || currentOrders;
+        
+        console.log('🗑️ 削除処理開始:', {
+          ordersCount: ordersToDelete.length,
+          orderIds: ordersToDelete.map(o => o.id)
+        });
+        
+        for (const order of ordersToDelete) {
+          const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
+          // Firestoreから完全に削除（POSからも消える）
+          await window.deleteDoc(orderRef);
+          console.log('✅ 注文を削除:', order.id);
         }
+        
+        // モーダルを閉じる
+        closePaymentModal();
+        
+        // 少し待ってから成功メッセージ（Firestoreの変更が反映されるのを待つ）
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        await showCustomAlert({ 
+          icon: '✅', 
+          title: '削除完了', 
+          message: '注文を完全に削除しました。\nPOSからも削除されます。', 
+          btnClass: 'modal-btn-success' 
+        });
+      } catch (error) {
+        console.error('❌ 削除エラー:', error);
+        await showCustomAlert({ 
+          icon: '❌', 
+          title: 'エラー', 
+          message: '削除に失敗しました\n\n' + error.message, 
+          btnClass: 'modal-btn-danger' 
+        });
       }
     };
 
