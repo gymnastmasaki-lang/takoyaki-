@@ -1135,17 +1135,24 @@
       
       orders.forEach(order => {
         if (!order.items || order.items.length === 0) {
-          addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, order.totalAmount || 0, itemIndex, defaultTaxRate);
+          addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, order.totalAmount || 0, itemIndex, defaultTaxRate, 'inclusive');
           itemIndex++;
         } else {
           order.items.forEach(item => {
             const toppingStr = item.toppings || item.toppingDetails || 'なし';
-            const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
-            addTaxRateItem(container, `${item.name} (${toppingStr})`, item.quantity, itemTotal, itemIndex, item.taxRate || defaultTaxRate);
+            // 🆕 外税の場合は本体価格、内税の場合は税込価格
+            const itemBasePrice = item.price + (item.toppingPrice || 0);
+            const itemTotal = itemBasePrice * item.quantity;
+            
+            // 🆕 商品のtaxRateを優先、なければデフォルト値
+            const itemTaxRate = (item.taxRate !== undefined && item.taxRate !== null) ? item.taxRate : defaultTaxRate;
+            
+            // 🆕 taxTypeを渡す（デフォルトは内税）
+            addTaxRateItem(container, `${item.name} (${toppingStr})`, item.quantity, itemTotal, itemIndex, itemTaxRate, item.taxType || 'inclusive');
             itemIndex++;
           });
           if (order.bagNeeded && order.bagQuantity > 0) {
-            addTaxRateItem(container, '🛍️ レジ袋', order.bagQuantity, order.bagPrice || (order.bagQuantity * 3), itemIndex, 10);
+            addTaxRateItem(container, '🛍️ レジ袋', order.bagQuantity, order.bagPrice || (order.bagQuantity * 3), itemIndex, 10, 'inclusive');
             itemIndex++;
           }
         }
@@ -1153,18 +1160,26 @@
       calculateTaxSummary();
     }
     
-    function addTaxRateItem(container, itemName, quantity, itemTotal, index, defaultTaxRate) {
+    function addTaxRateItem(container, itemName, quantity, itemTotal, index, defaultTaxRate, taxType = 'inclusive') {
+      // 🆕 外税の場合は税込価格を計算（itemTotalは本体価格）
+      let displayTotal = itemTotal;
+      if (taxType === 'exclusive') {
+        // 外税の場合、itemTotalは本体価格なので税を加算
+        displayTotal = itemTotal + Math.floor(itemTotal * (defaultTaxRate / 100));
+        console.log(`🆕 外税計算: 本体${itemTotal}円 + 税${Math.floor(itemTotal * (defaultTaxRate / 100))}円 → ${displayTotal}円（税率${defaultTaxRate}%）`);
+      }
+      
       const itemDiv = document.createElement('div');
       itemDiv.style.cssText = 'padding: 10px; margin-bottom: 8px; background: white; border-radius: 6px; border: 1px solid #ddd;';
       
       const headerDiv = document.createElement('div');
       headerDiv.style.cssText = 'display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: bold; font-size: 14px; cursor: pointer;';
-      headerDiv.innerHTML = `<span>${itemName} ×${quantity}</span><span style="color: #667eea;" id="itemPrice${index}">¥${itemTotal.toLocaleString()}</span>`;
+      headerDiv.innerHTML = `<span>${itemName} ×${quantity}</span><span style="color: #667eea;" id="itemPrice${index}">¥${displayTotal.toLocaleString()}</span>`;
       
       headerDiv.onclick = function() {
         document.getElementById('priceChangeTitle').textContent = itemName;
-        document.getElementById('priceChangeCurrentPrice').textContent = `¥${itemTotal.toLocaleString()}`;
-        document.getElementById('priceChangeInput').value = itemTotal;
+        document.getElementById('priceChangeCurrentPrice').textContent = `¥${displayTotal.toLocaleString()}`;
+        document.getElementById('priceChangeInput').value = displayTotal;
         document.getElementById('priceChangeItemId').value = index;
         document.getElementById('priceChangeModal').classList.remove('hidden');
       };
@@ -1172,8 +1187,8 @@
       const radioDiv = document.createElement('div');
       radioDiv.style.cssText = 'display: flex; gap: 10px; justify-content: center;';
       
-      const radio8 = createRadio(index, 8, itemTotal, defaultTaxRate === 8);
-      const radio10 = createRadio(index, 10, itemTotal, defaultTaxRate === 10);
+      const radio8 = createRadio(index, 8, displayTotal, defaultTaxRate === 8, itemTotal, taxType);
+      const radio10 = createRadio(index, 10, displayTotal, defaultTaxRate === 10, itemTotal, taxType);
       
       radioDiv.appendChild(createRadioLabel(radio8, '8%持ち帰り', '#fff3e0', '#FF9800'));
       radioDiv.appendChild(createRadioLabel(radio10, '10%店内', '#e3f2fd', '#2196F3'));
@@ -1183,15 +1198,31 @@
       container.appendChild(itemDiv);
     }
     
-    function createRadio(index, rate, amount, checked) {
+    function createRadio(index, rate, amount, checked, baseAmount = null, taxType = 'inclusive') {
       const radio = document.createElement('input');
       radio.type = 'radio';
       radio.name = `taxRate${index}`;
       radio.value = rate;
       radio.checked = checked;
       radio.dataset.amount = amount;
+      radio.dataset.taxType = taxType;  // 🆕 taxTypeを保存
+      radio.dataset.baseAmount = baseAmount || amount;  // 🆕 本体価格を保存
       radio.style.marginRight = '5px';
-      radio.onchange = calculateTaxSummary;
+      
+      // 🆕 外税の場合は税率変更時に金額を再計算
+      radio.onchange = function() {
+        if (taxType === 'exclusive') {
+          const newAmount = parseInt(radio.dataset.baseAmount) + Math.floor(parseInt(radio.dataset.baseAmount) * (rate / 100));
+          // 同じグループの全ラジオボタンのamountを更新
+          document.querySelectorAll(`input[name="taxRate${index}"]`).forEach(r => {
+            r.dataset.amount = newAmount;
+          });
+          document.getElementById('itemPrice' + index).textContent = '¥' + newAmount.toLocaleString();
+          console.log(`🔄 外税${rate}%に変更: ${radio.dataset.baseAmount}円 → ${newAmount}円`);
+        }
+        calculateTaxSummary();
+      };
+      
       return radio;
     }
     
