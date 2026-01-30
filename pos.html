@@ -245,6 +245,111 @@
   </script>
   
   <script>
+    // ======================================
+    // 外税対応: 価格計算ヘルパー関数
+    // ======================================
+    
+    /**
+     * 商品の表示価格を計算（お客様が見る価格）
+     */
+    function getDisplayPrice(item) {
+      const taxType = item.taxType || 'inclusive';
+      if (taxType === 'exclusive') {
+        return Math.floor(item.price * (1 + (item.taxRate || 10) / 100));
+      }
+      return item.price;
+    }
+    
+    /**
+     * 商品の税抜価格を計算
+     */
+    function getPreTaxPrice(item) {
+      const taxType = item.taxType || 'inclusive';
+      if (taxType === 'exclusive') {
+        return item.price;
+      }
+      return Math.floor(item.price / (1 + (item.taxRate || 10) / 100));
+    }
+    
+    /**
+     * 商品の税額を計算
+     */
+    function getTaxAmount(item, quantity = 1) {
+      const taxType = item.taxType || 'inclusive';
+      const basePrice = item.price + (item.toppingPrice || 0);
+      const taxRate = item.taxRate || 10;
+      
+      if (taxType === 'exclusive') {
+        return Math.floor(basePrice * quantity * taxRate / 100);
+      } else {
+        const totalWithTax = basePrice * quantity;
+        const totalWithoutTax = Math.floor(totalWithTax / (1 + taxRate / 100));
+        return totalWithTax - totalWithoutTax;
+      }
+    }
+    
+    /**
+     * 商品の合計金額を計算（お客様支払い額）
+     */
+    function getItemTotal(item, quantity = 1) {
+      const taxType = item.taxType || 'inclusive';
+      const basePrice = item.price + (item.toppingPrice || 0);
+      const taxRate = item.taxRate || 10;
+      
+      if (taxType === 'exclusive') {
+        return Math.floor(basePrice * quantity * (1 + taxRate / 100));
+      }
+      return basePrice * quantity;
+    }
+    
+    /**
+     * 注文全体の合計を計算
+     */
+    function calculateOrderTotals(items) {
+      let total = 0;
+      let tax8Total = 0;
+      let tax10Total = 0;
+      let tax8Inclusive = 0;
+      let tax10Inclusive = 0;
+      let tax8Exclusive = 0;
+      let tax10Exclusive = 0;
+      
+      items.forEach(item => {
+        const quantity = item.quantity || 1;
+        const itemTotal = getItemTotal(item, quantity);
+        const itemTax = getTaxAmount(item, quantity);
+        const taxType = item.taxType || 'inclusive';
+        
+        total += itemTotal;
+        
+        if ((item.taxRate || 10) === 8) {
+          tax8Total += itemTax;
+          if (taxType === 'exclusive') {
+            tax8Exclusive += itemTax;
+          } else {
+            tax8Inclusive += itemTax;
+          }
+        } else {
+          tax10Total += itemTax;
+          if (taxType === 'exclusive') {
+            tax10Exclusive += itemTax;
+          } else {
+            tax10Inclusive += itemTax;
+          }
+        }
+      });
+      
+      return {
+        total,
+        tax8Total,
+        tax10Total,
+        tax8Inclusive,
+        tax10Inclusive,
+        tax8Exclusive,
+        tax10Exclusive
+      };
+    }
+    
     // 担当者リストを読み込む（kanri.htmlの従業員リストから）
     async function loadStaffList() {
       try {
@@ -4985,6 +5090,48 @@
         const totalSales = totalCashSales + totalEmoneSales + totalCreditSales;
         const averageSpend = totalCustomerCount > 0 ? Math.round(totalSales / totalCustomerCount) : 0;
         
+        // 🆕 外税・内税を区別して計算
+        // 注文データから外税と内税を分離
+        let tax8InclusiveTotal = 0;
+        let tax10InclusiveTotal = 0;
+        let tax8ExclusiveTotal = 0;
+        let tax10ExclusiveTotal = 0;
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (!data.paidAt || !data.items) return;
+          
+          const orderDate = data.paidAt.toDate();
+          let targetDate = new Date(orderDate);
+          if (orderDate.getHours() < 3) {
+            targetDate.setDate(targetDate.getDate() - 1);
+          }
+          
+          const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+          
+          if (dates.includes(orderDateStr)) {
+            data.items.forEach(item => {
+              const taxType = item.taxType || 'inclusive';
+              const taxAmount = getTaxAmount(item, item.quantity || 1);
+              
+              if ((item.taxRate || 10) === 8) {
+                if (taxType === 'exclusive') {
+                  tax8ExclusiveTotal += taxAmount;
+                } else {
+                  tax8InclusiveTotal += taxAmount;
+                }
+              } else {
+                if (taxType === 'exclusive') {
+                  tax10ExclusiveTotal += taxAmount;
+                } else {
+                  tax10InclusiveTotal += taxAmount;
+                }
+              }
+            });
+          }
+        });
+        
+        // 旧計算（互換性のため残す）
         const tax8Excluded = Math.floor(totalTax8 / 1.08);
         const tax10Excluded = Math.floor(totalTax10 / 1.10);
         const tax8Amount = totalTax8 - tax8Excluded;
@@ -5018,17 +5165,19 @@
 値引き: ¥${totalDiscount.toLocaleString()}
 
 -------------------------------------
-税金内訳（内税）※赤伝票減算前
+税金内訳※赤伝票減算前
 -------------------------------------
-8%の商品合計（税抜）: ¥${tax8Excluded.toLocaleString()}
-8%の商品合計（税込）: ¥${totalTax8.toLocaleString()}
-8%の消費税: ¥${tax8Amount.toLocaleString()}
+【8%軽減税率】
+内税の消費税: ¥${tax8InclusiveTotal.toLocaleString()}
+外税の消費税: ¥${tax8ExclusiveTotal.toLocaleString()}
+8%合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal).toLocaleString()}
 
-10%の商品合計（税抜）: ¥${tax10Excluded.toLocaleString()}
-10%の商品合計（税込）: ¥${totalTax10.toLocaleString()}
-10%の消費税: ¥${tax10Amount.toLocaleString()}
+【10%標準税率】
+内税の消費税: ¥${tax10InclusiveTotal.toLocaleString()}
+外税の消費税: ¥${tax10ExclusiveTotal.toLocaleString()}
+10%合計: ¥${(tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
 
-消費税の合計: ¥${totalTax.toLocaleString()}
+消費税の合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal + tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
 税抜合計: ¥${taxExcludedTotal.toLocaleString()}
 税込合計: ¥${taxIncludedTotal.toLocaleString()}
 ${totalRedSlipCount > 0 ? `
