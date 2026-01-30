@@ -909,6 +909,29 @@
     console.log('   テーブル:', urlParams.get('table'));
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
+    // 外税対応：表示価格を計算（お客様に見せる価格）
+    function getDisplayPrice(item) {
+      const taxType = item.taxType || 'inclusive';
+      if (taxType === 'exclusive') {
+        // 外税の場合：税込価格を計算
+        return Math.floor(item.price * (1 + (item.taxRate || 10) / 100));
+      }
+      return item.price;
+    }
+    
+    // 外税対応：商品の合計金額を計算
+    function getItemTotal(item, quantity = 1) {
+      const taxType = item.taxType || 'inclusive';
+      const basePrice = item.price + (item.toppingPrice || 0);
+      const taxRate = item.taxRate || 10;
+      
+      if (taxType === 'exclusive') {
+        // 外税の場合：税込価格を計算
+        return Math.floor(basePrice * quantity * (1 + taxRate / 100));
+      }
+      return basePrice * quantity;
+    }
+    
     // 🆕 店舗別ヘッダ画像を読み込む
     async function loadStoreHeaderImage() {
       if (!currentStoreId) {
@@ -1024,7 +1047,7 @@
           const list = document.getElementById('order-items');
           list.innerHTML = '';
           orderData.items.forEach(item => {
-            const subtotal = (item.price + item.toppingPrice) * item.quantity;
+            const subtotal = getItemTotal(item, item.quantity);
             const div = document.createElement('div');
             div.className = 'cart-item';
             div.innerHTML = `
@@ -2103,7 +2126,7 @@
           ${imageHtml}
           <div class="menu-item-content">
             <div class="menu-item-name">${item.name}</div>
-            <div class="menu-item-price">¥${item.price.toLocaleString()}</div>
+            <div class="menu-item-price">¥${getDisplayPrice(item).toLocaleString()}</div>
             ${item.note ? `<div class="menu-item-note">${item.note}</div>` : ''}
           </div>
         `;
@@ -2131,7 +2154,7 @@
       
       document.getElementById('item-info').innerHTML = `
         <div class="menu-item-name" style="font-size: 20px;">${item.name}</div>
-        <div class="menu-item-price" style="font-size: 24px; margin-top: 10px;">¥${item.price.toLocaleString()}</div>
+        <div class="menu-item-price" style="font-size: 24px; margin-top: 10px;">¥${getDisplayPrice(item).toLocaleString()}</div>
       `;
       
       // トッピングIDが空または存在しない場合でも、数量選択画面を表示
@@ -2398,6 +2421,7 @@
         price: currentItem.price,
         category: currentItem.category,  // カテゴリを追加
         taxRate: effectiveTaxRate,
+        taxType: currentItem.taxType || 'inclusive',  // 外税/内税の設定を追加
         toppings: toppingNames, // 表示用（後方互換性）
         toppingsData: toppingsData, // 🆕 構造化データ
         toppingPrice: toppingPrice,
@@ -2465,7 +2489,7 @@
       let hasSoldOut = false;
       
       cart.forEach((item, index) => {
-        const subtotal = (item.price + item.toppingPrice) * item.quantity;
+        const subtotal = getItemTotal(item, item.quantity);
         total += subtotal;
         const div = document.createElement('div');
         div.className = 'cart-item';
@@ -2665,7 +2689,7 @@
       // 合計金額を再計算
       let total = 0;
       cart.forEach(item => {
-        total += (item.price + item.toppingPrice) * item.quantity;
+        total += getItemTotal(item, item.quantity);
       });
       const bagTotal = bagNeeded ? bagQuantity * BAG_PRICE : 0;
       const finalTotal = total + bagTotal;
@@ -2974,7 +2998,7 @@
         let totalAmount = 0;
         
         cart.forEach(item => {
-          const subtotal = (item.price + item.toppingPrice) * item.quantity;
+          const subtotal = getItemTotal(item, item.quantity);
           totalAmount += subtotal;
           
           // 税率の判定:
@@ -3080,7 +3104,7 @@
         const list = document.getElementById('order-items');
         list.innerHTML = '';
         cart.forEach(item => {
-          const subtotal = (item.price + item.toppingPrice) * item.quantity;
+          const subtotal = getItemTotal(item, item.quantity);
           const div = document.createElement('div');
           div.className = 'cart-item';
           
@@ -3336,13 +3360,14 @@
         tax10Total = orderData.tax10Total || 0;
         
         orderData.items.forEach(item => {
-          const subtotal = (item.price + item.toppingPrice) * item.quantity;
+          const subtotal = getItemTotal(item, item.quantity);
+          const unitPrice = getItemTotal(item, 1);
           itemsHtml += `
             <div style="display: flex; justify-content: space-between; margin: 8px 0; padding: 8px 0; border-bottom: 1px dashed #ddd;">
               <div style="flex: 1;">
                 <div style="font-weight: bold;">${item.name}</div>
                 <div style="font-size: 12px; color: #666;">トッピング: ${item.toppings}</div>
-                <div style="font-size: 12px; color: #666;">単価: ¥${(item.price + item.toppingPrice).toLocaleString()} × ${item.quantity}</div>
+                <div style="font-size: 12px; color: #666;">単価: ¥${unitPrice.toLocaleString()} × ${item.quantity}</div>
               </div>
               <div style="font-weight: bold; white-space: nowrap;">¥${subtotal.toLocaleString()}</div>
             </div>
@@ -3981,7 +4006,7 @@
         // 合計金額を計算
         let totalAmount = 0;
         cart.forEach(item => {
-          totalAmount += (item.price + (item.toppingPrice || 0)) * item.quantity;
+          totalAmount += getItemTotal(item, item.quantity);
         });
         
         // 注文データを作成
@@ -3994,6 +4019,7 @@
             toppingName: item.toppingName || null,
             toppingPrice: item.toppingPrice || 0,
             taxRate: item.taxRate || 10,
+            taxType: item.taxType || 'inclusive',
             takeout: false
           })),
           totalAmount: totalAmount,
