@@ -493,9 +493,10 @@
 
                     const { collection, getDocs } = window.firebaseModules;
                     
+                    // ✅ 最優先: 従業員データのみ先に読み込み
                     // 🔧 修正: 下赤塚店（storeId=null）の場合は旧パスを使用
                     if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
-                        console.log('📍 下赤塚店（旧システム）のデータを読み込みます');
+                        console.log('📍 下赤塚店（旧システム）の従業員データを読み込みます');
                         
                         // 旧パスから従業員データを取得
                         const empRef = collection(window.db, 'kintai_employees');
@@ -516,56 +517,12 @@
                         
                         setEmployees(empList);
                         
-                        // 旧パスから勤怠データを取得
-                        console.log('📊 勤怠データ読み込み開始');
-                        const attRef = collection(window.db, 'kintai_attendance');
-                        const attSnapshot = await getDocs(attRef);
-                        console.log('   取得したドキュメント数:', attSnapshot.size);
-                        const attData = {};
-                        
-                        attSnapshot.forEach(doc => {
-                            const docId = doc.id;
-                            const docData = doc.data();
-                            console.log('   ドキュメントID:', docId);
-                            console.log('   データ:', docData);
-                            
-                            // 🔧 修正: ドキュメントIDが {employeeId}_{date} 形式の場合に対応
-                            const parts = docId.split('_');
-                            let employeeId, dateKey;
-                            
-                            if (parts.length >= 2) {
-                                // {employeeId}_{date} 形式
-                                employeeId = parts[0];
-                                dateKey = parts.slice(1).join('_'); // 2026-01-24
-                            } else {
-                                // 日付のみの形式（旧形式との互換性）
-                                dateKey = docId;
-                                employeeId = docData.employeeId;
-                            }
-                            
-                            console.log('   解析結果 - 従業員ID:', employeeId, '日付:', dateKey);
-                            
-                            // 日付が現在の月のものか確認
-                            const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
-                            if (dateMatch && employeeId) {
-                                const year = parseInt(dateMatch[1]);
-                                const month = parseInt(dateMatch[2]) - 1;
-                                
-                                if (year === currentYear && month === currentMonth) {
-                                    if (!attData[employeeId]) {
-                                        attData[employeeId] = {};
-                                    }
-                                    attData[employeeId][dateKey] = docData;
-                                    console.log('   ✅ 勤怠データを追加:', employeeId, dateKey);
-                                }
-                            }
-                        });
-                        
-                        setAttendanceData(attData);
+                        // 勤怠データは後で読み込む（遅延読み込み）
+                        setTimeout(() => loadAttendanceData(), 100);
                         
                     } else {
                         // 新パス: 店舗別データを取得
-                        console.log('📍 店舗別データを読み込みます: stores/' + window.currentStoreId);
+                        console.log('📍 店舗別の従業員データを読み込みます: stores/' + window.currentStoreId);
                         
                         const empRef = collection(window.db, 'stores', window.currentStoreId, 'employees');
                         const empSnapshot = await getDocs(empRef);
@@ -585,6 +542,74 @@
                         
                         setEmployees(empList);
                         
+                        // 勤怠データは後で読み込む（遅延読み込み）
+                        setTimeout(() => loadAttendanceData(), 100);
+                    }
+                    
+                    // ⏱️ 初期表示完了（ローディング解除）
+                    setIsLoading(false);
+                    
+                    // 🔄 その他の設定データは非同期で遅延読み込み（ユーザーの待ち時間を減らす）
+                    setTimeout(() => {
+                        loadReceiptSettings();
+                        loadMenuSettings();
+                        loadAlertSettings();
+                        loadTableSettings();
+                        loadMenuItems();
+                        loadGlobalMenuSettings();
+                        loadInventorySettings();
+                    }, 200);
+                    
+                } catch (err) {
+                    console.error('データ読み込みエラー:', err);
+                    setError('データの読み込みに失敗しました: ' + err.message);
+                    setIsLoading(false);
+                }
+            };
+            
+            // ✅ 勤怠データの読み込みを分離
+            const loadAttendanceData = async () => {
+                try {
+                    const { collection, getDocs } = window.firebaseModules;
+                    
+                    if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+                        // 旧パスから勤怠データを取得
+                        const attRef = collection(window.db, 'kintai_attendance');
+                        const attSnapshot = await getDocs(attRef);
+                        const attData = {};
+                        
+                        attSnapshot.forEach(doc => {
+                            const docId = doc.id;
+                            const docData = doc.data();
+                            
+                            const parts = docId.split('_');
+                            let employeeId, dateKey;
+                            
+                            if (parts.length >= 2) {
+                                employeeId = parts[0];
+                                dateKey = parts.slice(1).join('_');
+                            } else {
+                                dateKey = docId;
+                                employeeId = docData.employeeId;
+                            }
+                            
+                            const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
+                            if (dateMatch && employeeId) {
+                                const year = parseInt(dateMatch[1]);
+                                const month = parseInt(dateMatch[2]) - 1;
+                                
+                                if (year === currentYear && month === currentMonth) {
+                                    if (!attData[employeeId]) {
+                                        attData[employeeId] = {};
+                                    }
+                                    attData[employeeId][dateKey] = docData;
+                                }
+                            }
+                        });
+                        
+                        setAttendanceData(attData);
+                        
+                    } else {
                         const attRef = collection(window.db, 'stores', window.currentStoreId, 'attendance');
                         const attSnapshot = await getDocs(attRef);
                         const attData = {};
@@ -593,18 +618,14 @@
                             const docId = doc.id;
                             const docData = doc.data();
                             
-                            // 🔧 修正: ドキュメントIDが {employeeId}_{date} 形式の場合に対応（kintai.htmlと同じ）
                             const parts = docId.split('_');
                             let employeeId, dateKey;
                             
                             if (parts.length >= 2) {
-                                // {employeeId}_{date} 形式（kintai.htmlが保存する形式）
                                 employeeId = parts[0];
-                                dateKey = parts.slice(1).join('_'); // 2026-01-24
+                                dateKey = parts.slice(1).join('_');
                             } else {
-                                // 日付のみの形式（旧形式との互換性）
                                 dateKey = docId;
-                                // この場合、docData内に複数の従業員データが含まれている
                                 const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
                                 if (dateMatch) {
                                     const year = parseInt(dateMatch[1]);
@@ -619,10 +640,9 @@
                                         });
                                     }
                                 }
-                                return; // 次のドキュメントへ
+                                return;
                             }
                             
-                            // {employeeId}_{date} 形式の処理
                             const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
                             if (dateMatch && employeeId) {
                                 const year = parseInt(dateMatch[1]);
@@ -639,33 +659,8 @@
                         
                         setAttendanceData(attData);
                     }
-                    
-                    // レシート設定を読み込み
-                    await loadReceiptSettings();
-                    
-                    // メニュー設定を読み込み
-                    await loadMenuSettings();
-                    
-                    // アラート設定を読み込み
-                    await loadAlertSettings();
-                    
-                    // 🆕 テーブル設定を読み込み
-                    await loadTableSettings();
-                    
-                    // 🆕 メニュー項目を読み込み
-                    await loadMenuItems();
-                    
-                    // 🆕 グローバルメニュー設定を読み込み
-                    await loadGlobalMenuSettings();
-                    
-                    // 🆕 在庫設定を読み込み
-                    await loadInventorySettings();
-                    
                 } catch (err) {
-                    console.error('データ読み込みエラー:', err);
-                    setError('データの読み込みに失敗しました: ' + err.message);
-                } finally {
-                    setIsLoading(false);
+                    console.error('勤怠データ読み込みエラー:', err);
                 }
             };
 
@@ -3658,7 +3653,8 @@
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                             <div className="bg-white rounded-lg p-8 text-center">
                                 <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
-                                <p className="text-gray-700">処理中...</p>
+                                <p className="text-gray-700 font-semibold text-lg">読み込み中...</p>
+                                <p className="text-gray-500 text-sm mt-2">従業員データを取得しています</p>
                             </div>
                         </div>
                     )}
