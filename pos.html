@@ -1416,6 +1416,11 @@
       color: white;
     }
     
+    .modal-btn-warning {
+      background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+      color: white;
+    }
+    
     .modal-btn-success {
       background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
       color: white;
@@ -14041,6 +14046,97 @@ ${redSlipCount > 0 ? `
       
       // 🆕 在庫アラートをチェック
       checkInventoryAlerts();
+    }
+    
+    // 🆕 在庫アラートをチェックする関数
+    async function checkInventoryAlerts() {
+      try {
+        console.log('🔔 在庫アラートをチェック中...');
+        
+        // アラート設定を取得
+        let alertSettingsRef;
+        if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+          alertSettingsRef = window.doc(window.db, 'alert_settings', 'shimoakatsuka');
+          console.log('  → 旧パス: alert_settings/shimoakatsuka');
+        } else {
+          alertSettingsRef = window.doc(window.db, 'stores', window.currentStoreId, 'alert_settings', 'default');
+          console.log('  → 新パス: stores/' + window.currentStoreId + '/alert_settings/default');
+        }
+        
+        const alertSettingsDoc = await window.getDoc(alertSettingsRef);
+        
+        if (!alertSettingsDoc.exists()) {
+          console.log('⚠️ アラート設定が見つかりません');
+          return;
+        }
+        
+        const alertSettings = alertSettingsDoc.data();
+        console.log('📋 アラート設定:', alertSettings);
+        
+        // メニュー設定を取得
+        let menuSettingsRef;
+        if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+          menuSettingsRef = window.doc(window.db, 'menu_settings', 'shimoakatsuka');
+          console.log('  → 旧パス: menu_settings/shimoakatsuka');
+        } else {
+          menuSettingsRef = window.doc(window.db, 'stores', window.currentStoreId, 'menu_settings', 'default');
+          console.log('  → 新パス: stores/' + window.currentStoreId + '/menu_settings/default');
+        }
+        
+        const menuSettingsDoc = await window.getDoc(menuSettingsRef);
+        
+        if (!menuSettingsDoc.exists()) {
+          console.log('⚠️ メニュー設定が見つかりません');
+          return;
+        }
+        
+        const menuSettings = menuSettingsDoc.data();
+        const inventoryData = menuSettings.inventory || {};
+        console.log('📦 在庫データ:', inventoryData);
+        
+        // 在庫が少ない商品をチェック
+        const lowStockItems = [];
+        
+        for (const [itemName, settings] of Object.entries(alertSettings)) {
+          if (typeof settings === 'object' && settings.enabled) {
+            const threshold = settings.threshold || 0;
+            const currentStock = inventoryData[itemName] || 0;
+            
+            console.log(`  📊 ${itemName}: 現在庫=${currentStock}, 閾値=${threshold}`);
+            
+            if (currentStock <= threshold) {
+              lowStockItems.push({
+                name: itemName,
+                current: currentStock,
+                threshold: threshold
+              });
+            }
+          }
+        }
+        
+        // アラート表示
+        if (lowStockItems.length > 0) {
+          console.log('🚨 在庫アラート:', lowStockItems);
+          
+          let alertMessage = '⚠️ 在庫が少なくなっています:\n\n';
+          lowStockItems.forEach(item => {
+            alertMessage += `${item.name}: 残り${item.current}個 (閾値: ${item.threshold}個)\n`;
+          });
+          
+          await showCustomConfirm({
+            icon: '⚠️',
+            title: '在庫アラート',
+            message: alertMessage,
+            btnClass: 'modal-btn-warning',
+            btnText: 'OK'
+          });
+        } else {
+          console.log('✅ 在庫は十分です');
+        }
+        
+      } catch (error) {
+        console.error('❌ 在庫アラートチェックエラー:', error);
+      }
     }
     
     // 🆕 レシート設定をグローバル変数で保持
