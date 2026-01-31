@@ -1936,7 +1936,7 @@
       <div style="display: flex; gap: 10px; flex-wrap: wrap;">
         <button class="btn" style="flex: 1; min-width: 150px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;" onclick="saveExpenses()">保存</button>
         <button class="btn" style="flex: 1; min-width: 150px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="exportExpensesToCSV()">本日分出力</button>
-        <button class="btn" style="flex: 1; min-width: 150px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white;" onclick="exportMonthlyExpenses()">経費出力</button>
+        <button class="btn" style="flex: 1; min-width: 150px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white;" onclick="showExpenseExportModal()">経費出力</button>
         <button class="btn" style="flex: 1; min-width: 150px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white;" onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/receipt.html', '_blank')">領収書管理</button>
         <button class="btn btn-secondary" style="flex: 1; min-width: 150px;" onclick="closeExpenseModal()">閉じる</button>
       </div>
@@ -7138,22 +7138,27 @@ ${redSlipCount > 0 ? `
     };
     
     // ===== 月次経費出力機能（1日からの集計） =====
-    window.exportMonthlyExpenses = async function() {
+    window.exportMonthlyExpenses = async function(year = null, month = null) {
       try {
         console.log('📊 月次経費出力開始');
         
-        const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        
-        // 現在の年月を取得（午前3時基準）
-        const todayStart = new Date(jstNow);
-        todayStart.setHours(3, 0, 0, 0);
-        if (jstNow.getHours() < 3) {
-          todayStart.setDate(todayStart.getDate() - 1);
+        // デフォルト値を設定（引数がない場合は当月）
+        if (!year || !month) {
+          const now = new Date();
+          const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+          
+          // 現在の年月を取得（午前3時基準）
+          const todayStart = new Date(jstNow);
+          todayStart.setHours(3, 0, 0, 0);
+          if (jstNow.getHours() < 3) {
+            todayStart.setDate(todayStart.getDate() - 1);
+          }
+          
+          year = todayStart.getFullYear();
+          month = todayStart.getMonth() + 1;
         }
         
-        const year = todayStart.getFullYear();
-        const month = todayStart.getMonth() + 1;
+        console.log(`📊 経費出力: ${year}年${month}月`);
         
         // 月の全データを取得
         const expensesSnapshot = await window.getDocs(window.getStoreCollection('expenses'));
@@ -7437,6 +7442,42 @@ ${redSlipCount > 0 ? `
         console.error('❌ 月次経費出力エラー:', e);
         alert('月次経費の出力に失敗しました: ' + e.message);
       }
+    };
+    
+    // 経費出力モーダルを表示
+    window.showExpenseExportModal = function() {
+      // 年の選択肢を生成（2020年から現在の年まで）
+      const currentYear = new Date().getFullYear();
+      const yearSelect = document.getElementById('expenseExportYear');
+      yearSelect.innerHTML = '';
+      
+      for (let year = currentYear; year >= 2020; year--) {
+        const option = document.createElement('option');
+        option.value = year;
+        option.textContent = year + '年';
+        yearSelect.appendChild(option);
+      }
+      
+      // 現在の月を選択状態にする
+      const currentMonth = new Date().getMonth() + 1;
+      document.getElementById('expenseExportMonth').value = currentMonth;
+      
+      // モーダルを表示
+      document.getElementById('expenseExportModal').style.display = 'flex';
+    };
+    
+    // 経費出力モーダルを閉じる
+    window.closeExpenseExportModal = function() {
+      document.getElementById('expenseExportModal').style.display = 'none';
+    };
+    
+    // 経費出力を実行
+    window.confirmExpenseExport = async function() {
+      const year = parseInt(document.getElementById('expenseExportYear').value);
+      const month = parseInt(document.getElementById('expenseExportMonth').value);
+      
+      closeExpenseExportModal();
+      await exportMonthlyExpenses(year, month);
     };
     
     // ===== 日計表生成機能 =====
@@ -14699,6 +14740,40 @@ ${redSlipCount > 0 ? `
       return unsubscribe;
     }
   </script>
+  
+  <!-- 経費出力の年月選択モーダル -->
+  <div id="expenseExportModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="background: white; border-radius: 20px; padding: 40px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+      <div style="font-size: 64px; text-align: center; margin-bottom: 20px;">📊</div>
+      <h3 style="font-size: 24px; font-weight: bold; text-align: center; margin-bottom: 15px; color: #333;">経費出力</h3>
+      <p style="text-align: center; font-size: 16px; color: #666; margin-bottom: 20px;">出力する年月を選択してください</p>
+      <div style="margin: 20px 0;">
+        <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 15px;">
+          <select id="expenseExportYear" style="padding: 10px; border-radius: 8px; border: 2px solid #667eea; font-size: 16px;">
+            <!-- 年の選択肢 -->
+          </select>
+          <select id="expenseExportMonth" style="padding: 10px; border-radius: 8px; border: 2px solid #667eea; font-size: 16px;">
+            <option value="1">1月</option>
+            <option value="2">2月</option>
+            <option value="3">3月</option>
+            <option value="4">4月</option>
+            <option value="5">5月</option>
+            <option value="6">6月</option>
+            <option value="7">7月</option>
+            <option value="8">8月</option>
+            <option value="9">9月</option>
+            <option value="10">10月</option>
+            <option value="11">11月</option>
+            <option value="12">12月</option>
+          </select>
+        </div>
+      </div>
+      <div style="display: flex; gap: 15px; margin-top: 30px;">
+        <button onclick="closeExpenseExportModal()" style="flex: 1; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: #e0e0e0; color: #666;">キャンセル</button>
+        <button onclick="confirmExpenseExport()" style="flex: 1; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white;">出力</button>
+      </div>
+    </div>
+  </div>
   
   <!-- リアルタイム在庫パネル -->
   <div id="inventoryPanel" style="position: fixed; bottom: 20px; right: 20px; width: 300px; max-height: 400px; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 9999; overflow: hidden; transition: all 0.3s ease;">
