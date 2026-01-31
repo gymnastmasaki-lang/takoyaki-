@@ -534,8 +534,10 @@
       <div class="header">
         <h2 id="storeNameDisplay">店舗名</h2>
         <div class="store-info">テーブルを選択してください</div>
-        <button class="logout-btn" onclick="showInventoryStatus()" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); margin-right: 10px;">📦 在庫状況</button>
-        <button class="logout-btn" onclick="handleLogout()">ログアウト</button>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+          <button class="logout-btn" onclick="showInventoryStatus()" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); flex: 1;">📦 在庫状況</button>
+          <button class="logout-btn" onclick="handleLogout()" style="flex: 1;">ログアウト</button>
+        </div>
       </div>
       
       <div class="tables-grid" id="tablesGrid">
@@ -1810,10 +1812,30 @@
     let menuItems = [];
 
     window.showInventoryStatus = async function() {
+      console.log('📦 在庫状況ボタンが押されました');
       playTapSound();
+      
       try {
+        console.log('🔄 在庫データ読み込み開始...');
+        console.log('   currentStoreId:', currentStoreId);
+        console.log('   window.currentStoreId:', window.currentStoreId);
+        
+        if (!currentStoreId && !window.currentStoreId) {
+          await showCustomAlert({
+            icon: '⚠️',
+            title: 'エラー',
+            message: '店舗が選択されていません',
+            btnClass: 'modal-btn-danger'
+          });
+          return;
+        }
+        
         // メニューと在庫設定を読み込む
         await loadInventoryData();
+        
+        console.log('✅ 在庫データ読み込み完了');
+        console.log('   メニュー件数:', menuItems.length);
+        console.log('   在庫設定:', inventorySettings);
         
         // モーダルを表示
         document.getElementById('inventoryModal').classList.remove('hidden');
@@ -1823,39 +1845,73 @@
         
         // 在庫リストを表示
         renderInventoryList();
+        
       } catch (error) {
-        console.error('在庫データ読み込みエラー:', error);
+        console.error('❌ 在庫データ読み込みエラー:', error);
+        console.error('   エラー詳細:', error.message);
+        console.error('   スタック:', error.stack);
+        
         await showCustomAlert({
           icon: '❌',
           title: 'エラー',
-          message: '在庫データの読み込みに失敗しました',
+          message: '在庫データの読み込みに失敗しました\n\n' + error.message,
           btnClass: 'modal-btn-danger'
         });
       }
     };
 
     async function loadInventoryData() {
+      console.log('📋 メニューデータ読み込み開始...');
+      
       // メニューを読み込む
       const menuRef = window.getStoreCollection('menus');
+      console.log('   メニューコレクション参照:', menuRef);
+      
       const menuSnapshot = await window.getDocs(menuRef);
+      console.log('   メニュースナップショット取得:', menuSnapshot.size, '件');
+      
       menuItems = menuSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })).filter(item => item.isAvailable !== false);
+      
+      console.log('   フィルター後のメニュー:', menuItems.length, '件');
 
       // 在庫設定を読み込む
-      const inventoryRef = window.getStoreDoc('inventory_settings', 'settings');
-      const inventoryDoc = await window.getDoc(inventoryRef);
-      if (inventoryDoc.exists()) {
-        inventorySettings = inventoryDoc.data().items || {};
-      } else {
+      console.log('📊 在庫設定読み込み開始...');
+      
+      try {
+        const inventoryRef = window.getStoreDoc('inventory_settings', 'settings');
+        console.log('   在庫設定ドキュメント参照:', inventoryRef);
+        
+        const inventoryDoc = await window.getDoc(inventoryRef);
+        console.log('   在庫設定ドキュメント存在:', inventoryDoc.exists());
+        
+        if (inventoryDoc.exists()) {
+          inventorySettings = inventoryDoc.data().items || {};
+          console.log('   在庫設定データ:', Object.keys(inventorySettings).length, '件');
+        } else {
+          inventorySettings = {};
+          console.log('   在庫設定なし（デフォルト使用）');
+        }
+      } catch (error) {
+        console.warn('⚠️ 在庫設定の読み込みに失敗（デフォルト使用）:', error.message);
         inventorySettings = {};
       }
     }
 
     function renderCategoryTabs() {
+      console.log('🏷️ カテゴリタブ生成開始...');
+      
       const categories = ['all', ...new Set(menuItems.map(item => item.category))];
+      console.log('   カテゴリ一覧:', categories);
+      
       const tabsContainer = document.getElementById('inventoryCategoryTabs');
+      
+      if (!tabsContainer) {
+        console.error('❌ カテゴリタブコンテナが見つかりません');
+        return;
+      }
       
       tabsContainer.innerHTML = categories.map(cat => {
         const isActive = cat === currentInventoryCategory;
@@ -1879,6 +1935,8 @@
           </button>
         `;
       }).join('');
+      
+      console.log('✅ カテゴリタブ生成完了');
     }
 
     window.selectInventoryCategory = function(category) {
@@ -1895,14 +1953,23 @@
     };
 
     function renderInventoryList() {
-      const searchQuery = document.getElementById('inventorySearch').value.toLowerCase();
+      console.log('📝 在庫リスト描画開始...');
+      
+      const searchInput = document.getElementById('inventorySearch');
+      const searchQuery = searchInput ? searchInput.value.toLowerCase() : '';
+      
+      console.log('   検索クエリ:', searchQuery);
+      console.log('   現在のフィルター:', currentInventoryFilter);
+      console.log('   現在のカテゴリ:', currentInventoryCategory);
       
       // フィルタリング
       let filtered = menuItems;
+      console.log('   フィルタ前:', filtered.length, '件');
       
       // カテゴリフィルター
       if (currentInventoryCategory !== 'all') {
         filtered = filtered.filter(item => item.category === currentInventoryCategory);
+        console.log('   カテゴリフィルタ後:', filtered.length, '件');
       }
       
       // 検索フィルター
@@ -1910,6 +1977,7 @@
         filtered = filtered.filter(item => 
           item.name.toLowerCase().includes(searchQuery)
         );
+        console.log('   検索フィルタ後:', filtered.length, '件');
       }
       
       // 在庫状態フィルター
@@ -1928,7 +1996,14 @@
         return true;
       });
       
+      console.log('   状態フィルタ後:', filtered.length, '件');
+      
       const listContainer = document.getElementById('inventoryList');
+      
+      if (!listContainer) {
+        console.error('❌ 在庫リストコンテナが見つかりません');
+        return;
+      }
       
       if (filtered.length === 0) {
         listContainer.innerHTML = `
@@ -1936,6 +2011,7 @@
             該当する商品がありません
           </div>
         `;
+        console.log('   結果: 該当商品なし');
         return;
       }
       
@@ -1994,6 +2070,8 @@
           </div>
         `;
       }).join('');
+      
+      console.log('✅ 在庫リスト描画完了:', filtered.length, '件');
     }
 
     window.closeInventoryModal = function() {
