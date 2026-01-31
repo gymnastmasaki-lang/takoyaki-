@@ -1852,22 +1852,23 @@
         
         // 在庫データも確認
         try {
-          let inventoryRef;
-          if (window.currentStoreId) {
-            inventoryRef = window.getStoreCollection('inventory');
-          } else {
-            inventoryRef = collection(db, 'inventory');
-          }
+          const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+          const inventoryDoc = await getDoc(inventoryRef);
           
-          const inventorySnapshot = await getDocs(inventoryRef);
-          inventorySnapshot.forEach(doc => {
-            const data = doc.data();
-            const stock = data.stock || 0;
-            // 在庫が0以下の場合は品切れに追加
-            if (stock <= 0) {
-              soldOutIds.add(doc.id);
-            }
-          });
+          if (inventoryDoc.exists()) {
+            const inventoryData = inventoryDoc.data().items || {};
+            
+            // 各商品の在庫をチェック
+            Object.keys(inventoryData).forEach(menuId => {
+              const itemData = inventoryData[menuId];
+              const stock = itemData.stock !== undefined ? itemData.stock : null;
+              
+              // 在庫が0以下の場合は品切れに追加
+              if (stock !== null && stock <= 0) {
+                soldOutIds.add(menuId);
+              }
+            });
+          }
         } catch (error) {
           console.error('在庫データの読み込みエラー:', error);
         }
@@ -1877,14 +1878,9 @@
       });
       
       // 在庫データも監視
-      let inventoryRef;
-      if (window.currentStoreId) {
-        inventoryRef = window.getStoreCollection('inventory');
-      } else {
-        inventoryRef = collection(db, 'inventory');
-      }
+      const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
       
-      onSnapshot(inventoryRef, async (snapshot) => {
+      onSnapshot(inventoryRef, async (docSnap) => {
         // sold_outデータも再取得
         const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
         soldOutIds.clear();
@@ -1893,14 +1889,20 @@
         });
         
         // 在庫データを確認
-        snapshot.forEach(doc => {
-          const data = doc.data();
-          const stock = data.stock || 0;
-          // 在庫が0以下の場合は品切れに追加
-          if (stock <= 0) {
-            soldOutIds.add(doc.id);
-          }
-        });
+        if (docSnap.exists()) {
+          const inventoryData = docSnap.data().items || {};
+          
+          // 各商品の在庫をチェック
+          Object.keys(inventoryData).forEach(menuId => {
+            const itemData = inventoryData[menuId];
+            const stock = itemData.stock !== undefined ? itemData.stock : null;
+            
+            // 在庫が0以下の場合は品切れに追加
+            if (stock !== null && stock <= 0) {
+              soldOutIds.add(menuId);
+            }
+          });
+        }
         
         console.log('📦 在庫変更検知。品切れID:', Array.from(soldOutIds));
         updateSoldOutDisplay();
@@ -2138,23 +2140,29 @@
 
         // 在庫データを確認して在庫0のアイテムを品切れに追加
         try {
-          let inventoryRef;
-          if (window.currentStoreId) {
-            inventoryRef = window.getStoreCollection('inventory');
-          } else {
-            inventoryRef = collection(db, 'inventory');
-          }
+          const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+          const inventoryDoc = await getDoc(inventoryRef);
           
-          const inventorySnapshot = await getDocs(inventoryRef);
-          inventorySnapshot.forEach(doc => {
-            const data = doc.data();
-            const stock = data.stock || 0;
-            // 在庫が0以下の場合は品切れに追加
-            if (stock <= 0) {
-              soldOutIds.add(doc.id);
-            }
-          });
-          console.log('📦 在庫チェック完了。品切れID:', Array.from(soldOutIds));
+          if (inventoryDoc.exists()) {
+            const inventoryData = inventoryDoc.data().items || {};
+            console.log('📦 在庫データ:', inventoryData);
+            
+            // 各商品の在庫をチェック
+            Object.keys(inventoryData).forEach(menuId => {
+              const itemData = inventoryData[menuId];
+              const stock = itemData.stock !== undefined ? itemData.stock : null;
+              
+              // 在庫が0以下の場合は品切れに追加
+              if (stock !== null && stock <= 0) {
+                soldOutIds.add(menuId);
+                console.log('品切れ追加:', menuId, 'stock:', stock);
+              }
+            });
+            
+            console.log('📦 在庫チェック完了。品切れID:', Array.from(soldOutIds));
+          } else {
+            console.log('⚠️ 在庫設定が存在しません');
+          }
         } catch (error) {
           console.error('在庫データの読み込みエラー:', error);
         }
