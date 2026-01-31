@@ -131,6 +131,12 @@
       font-size: 14px;
     }
     
+    .header-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    
     .logout-btn {
       background: #f44336;
       color: white;
@@ -139,7 +145,16 @@
       border-radius: 8px;
       font-weight: bold;
       cursor: pointer;
-      margin-top: 10px;
+    }
+    
+    .sales-btn {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
     }
     
     .tables-grid {
@@ -262,6 +277,64 @@
       padding: 40px;
       color: white;
       font-size: 18px;
+    }
+    
+    /* 売上モーダル用CSS */
+    .sales-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(5px);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .sales-modal-content {
+      background: white;
+      border-radius: 20px;
+      padding: 30px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      animation: modalSlideIn 0.3s ease-out;
+    }
+    
+    .sales-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    
+    .sales-modal-title {
+      font-size: 24px;
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .sales-modal-close {
+      background: none;
+      border: none;
+      font-size: 28px;
+      color: #999;
+      cursor: pointer;
+      padding: 0;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .sales-modal-close:hover {
+      color: #333;
     }
     
     .custom-modal-overlay {
@@ -534,7 +607,10 @@
       <div class="header">
         <h2 id="storeNameDisplay">店舗名</h2>
         <div class="store-info">テーブルを選択してください</div>
-        <button class="logout-btn" onclick="handleLogout()">ログアウト</button>
+        <div class="header-buttons">
+          <button class="sales-btn" onclick="showSalesModal()">売上</button>
+          <button class="logout-btn" onclick="handleLogout()">ログアウト</button>
+        </div>
       </div>
       
       <div class="tables-grid" id="tablesGrid">
@@ -1921,7 +1997,92 @@
       
       return unsubscribe;
     }
+    
+    // ========== 💰 売上モーダル機能 ==========
+    
+    // 売上モーダルを表示
+    window.showSalesModal = function() {
+      document.getElementById('salesModal').style.display = 'flex';
+      calculateSales();
+    };
+    
+    // 売上モーダルを閉じる
+    window.closeSalesModal = function() {
+      document.getElementById('salesModal').style.display = 'none';
+    };
+    
+    // 売上を計算（客数と売上のみ）
+    window.calculateSales = async function() {
+      const container = document.getElementById('salesContent');
+      container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
+      
+      try {
+        // 本日の日付を取得（3時基準）
+        const now = new Date();
+        let today = new Date(now);
+        if (now.getHours() < 3) {
+          today.setDate(today.getDate() - 1);
+        }
+        const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+        
+        console.log('📊 売上取得日付:', dateStr);
+        
+        let salesRef;
+        if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
+          salesRef = window.doc(window.db, 'dailySales', dateStr);
+        } else {
+          salesRef = window.doc(window.db, 'stores', window.currentStoreId, 'dailySales', dateStr);
+        }
+        
+        const salesDoc = await window.getDoc(salesRef);
+        
+        let totalSales = 0;
+        let orderCount = 0;
+        
+        if (salesDoc.exists()) {
+          const data = salesDoc.data();
+          console.log('💰 売上データ:', data);
+          totalSales = data.totalSales || 0;
+          orderCount = data.customerCount || 0;
+        } else {
+          console.log('⚠️ 売上データが存在しません');
+        }
+        
+        container.innerHTML = `
+          <div style="background: white; border-radius: 12px; padding: 20px;">
+            <div style="display: grid; grid-template-columns: 1fr; gap: 15px;">
+              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 20px; border-radius: 10px; text-align: center;">
+                <div style="font-size: 16px; opacity: 0.9; margin-bottom: 8px;">総売上</div>
+                <div style="font-size: 36px; font-weight: bold;">¥${totalSales.toLocaleString()}</div>
+              </div>
+              <div style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center;">
+                <div style="font-size: 16px; opacity: 0.9; margin-bottom: 8px;">客数</div>
+                <div style="font-size: 36px; font-weight: bold;">${orderCount}件</div>
+              </div>
+            </div>
+          </div>
+        `;
+        
+      } catch (e) {
+        console.error('売上計算エラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red; padding: 20px;">エラーが発生しました</div>';
+      }
+    };
+  
   </script>
+  
+  <!-- 売上モーダル -->
+  <div id="salesModal" class="sales-modal">
+    <div class="sales-modal-content">
+      <div class="sales-modal-header">
+        <h2 class="sales-modal-title" id="salesModalTitle">本日の売上</h2>
+        <button class="sales-modal-close" onclick="closeSalesModal()">×</button>
+      </div>
+      <div id="salesContent">
+        <div style="text-align: center; padding: 20px;">読み込み中...</div>
+      </div>
+    </div>
+  </div>
   
   <!-- リアルタイム在庫パネル -->
   <div id="inventoryPanel" style="position: fixed; bottom: 20px; right: 20px; width: 300px; max-height: 400px; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 9999; overflow: hidden; transition: all 0.3s ease;">
