@@ -8177,6 +8177,10 @@ ${redSlipCount > 0 ? `
         
         console.log('注文データ:', currentOrders[0]);
         
+        // 🆕 在庫を減らす（即会計時）
+        console.log('📦 即会計: 在庫減少処理を実行');
+        await decreaseInventoryFromMenuSettings(manualCart);
+        
         // 会計モーダルを表示
         document.getElementById('discountAmount').value = '0';
         buildTaxRateSelectionList();
@@ -14213,26 +14217,27 @@ ${redSlipCount > 0 ? `
         console.log('🔔🔔🔔 在庫アラートをチェック開始 🔔🔔🔔');
         console.log('現在のStoreID:', window.currentStoreId);
         
-        // アラート設定を取得
-        let alertSettingsRef;
+        // 在庫設定を取得（kanri.htmlと同じパス）
+        let inventorySettingsRef;
         if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
-          alertSettingsRef = window.doc(window.db, 'alert_settings', 'default');
-          console.log('  → 旧パス使用: alert_settings/default');
+          inventorySettingsRef = window.doc(window.db, 'inventory_settings', 'default');
+          console.log('  → 旧パス使用: inventory_settings/default');
         } else {
-          alertSettingsRef = window.doc(window.db, 'stores', window.currentStoreId, 'alert_settings', 'default');
-          console.log('  → 新パス使用: stores/' + window.currentStoreId + '/alert_settings/default');
+          inventorySettingsRef = window.doc(window.db, 'stores', window.currentStoreId, 'inventory_settings', 'default');
+          console.log('  → 新パス使用: stores/' + window.currentStoreId + '/inventory_settings/default');
         }
         
-        const alertSettingsDoc = await window.getDoc(alertSettingsRef);
+        const inventorySettingsDoc = await window.getDoc(inventorySettingsRef);
         
-        if (!alertSettingsDoc.exists()) {
-          console.error('❌❌❌ アラート設定が見つかりません！ ❌❌❌');
+        if (!inventorySettingsDoc.exists()) {
+          console.error('❌❌❌ 在庫設定が見つかりません！ ❌❌❌');
           alert('アラート設定が見つかりません。kanri.htmlで在庫アラート設定を保存してください。');
           return;
         }
         
-        const alertSettings = alertSettingsDoc.data();
-        console.log('📋 アラート設定（全データ）:', JSON.stringify(alertSettings, null, 2));
+        const inventorySettingsData = inventorySettingsDoc.data();
+        const alertSettings = inventorySettingsData.items || {};
+        console.log('📋 在庫設定（全データ）:', JSON.stringify(alertSettings, null, 2));
         
         // メニュー設定を取得
         let menuSettingsRef;
@@ -14260,37 +14265,55 @@ ${redSlipCount > 0 ? `
         const lowStockItems = [];
         let checkedCount = 0;
         
-        for (const [itemName, settings] of Object.entries(alertSettings)) {
+        // inventory_settingsの各商品IDをチェック
+        for (const [itemId, settings] of Object.entries(alertSettings)) {
           console.log(`\n--- チェック ${checkedCount + 1} ---`);
-          console.log('商品名:', itemName);
+          console.log('商品ID:', itemId);
           console.log('設定:', settings);
           console.log('設定のタイプ:', typeof settings);
           
           if (typeof settings === 'object' && settings !== null) {
-            console.log('  enabled:', settings.enabled);
-            console.log('  threshold:', settings.threshold);
+            const stock = settings.stock;
+            const alertThreshold = settings.alertThreshold;
             
-            if (settings.enabled === true) {
+            console.log('  stock:', stock);
+            console.log('  alertThreshold:', alertThreshold);
+            
+            // stockとalertThresholdの両方がnullでない場合のみチェック
+            if (stock !== null && stock !== undefined && alertThreshold !== null && alertThreshold !== undefined) {
               checkedCount++;
-              const threshold = settings.threshold || 0;
-              const currentStock = inventoryData[itemName] || 0;
               
-              console.log(`  ✅ ${itemName}: 現在庫=${currentStock}, 閾値=${threshold}`);
-              console.log(`  比較: ${currentStock} <= ${threshold} = ${currentStock <= threshold}`);
+              console.log(`  ✅ 商品ID ${itemId}: 現在庫=${stock}, 閾値=${alertThreshold}`);
+              console.log(`  比較: ${stock} <= ${alertThreshold} = ${stock <= alertThreshold}`);
               
-              if (currentStock <= threshold) {
+              if (stock <= alertThreshold) {
                 console.log(`  🚨 在庫不足検出！`);
-                lowStockItems.push({
-                  name: itemName,
-                  current: currentStock,
-                  threshold: threshold
-                });
+                
+                // メニュー名を取得（menusコレクションから）
+                try {
+                  const menuRef = window.getStoreDoc('menus', itemId);
+                  const menuDoc = await window.getDoc(menuRef);
+                  const itemName = menuDoc.exists() ? menuDoc.data().name : itemId;
+                  
+                  lowStockItems.push({
+                    name: itemName,
+                    current: stock,
+                    threshold: alertThreshold
+                  });
+                } catch (e) {
+                  console.error('メニュー名取得エラー:', e);
+                  lowStockItems.push({
+                    name: itemId,
+                    current: stock,
+                    threshold: alertThreshold
+                  });
+                }
               }
             } else {
-              console.log(`  ⏭️ ${itemName}: アラート無効（enabled=${settings.enabled}）`);
+              console.log(`  ⏭️ 商品ID ${itemId}: アラート無効（stock=${stock}, alertThreshold=${alertThreshold}）`);
             }
           } else {
-            console.log(`  ⏭️ ${itemName}: 無効な設定形式`);
+            console.log(`  ⏭️ 商品ID ${itemId}: 無効な設定形式`);
           }
         }
         
