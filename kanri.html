@@ -353,6 +353,8 @@
             const [showInventoryManagement, setShowInventoryManagement] = useState(false);
             const [inventoryCurrentPage, setInventoryCurrentPage] = useState(1);
             const inventoryItemsPerPage = 10;
+            const [selectedInventoryCategory, setSelectedInventoryCategory] = useState('全て');
+            const [inventorySearchQuery, setInventorySearchQuery] = useState('');
             const [inventorySettings, setInventorySettings] = useState({});  // { menuItemId: { stock: number, alertThreshold: number } }
             const [alertTitle, setAlertTitle] = useState('');
             const [alertIcon, setAlertIcon] = useState('');
@@ -5469,6 +5471,85 @@
                                         </div>
                                     </div>
 
+                                    {/* 🆕 検索・フィルター機能 */}
+                                    <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {/* カテゴリフィルター */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                    📂 カテゴリで絞り込み
+                                                </label>
+                                                <select
+                                                    value={selectedInventoryCategory}
+                                                    onChange={(e) => {
+                                                        setSelectedInventoryCategory(e.target.value);
+                                                        setInventoryCurrentPage(1);
+                                                    }}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                >
+                                                    <option value="全て">全てのカテゴリ</option>
+                                                    {Array.from(new Set(availableMenuItems.map(item => item.category))).sort().map(cat => (
+                                                        <option key={cat} value={cat}>{cat}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            {/* 検索ボックス */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                    🔍 商品名で検索
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={inventorySearchQuery}
+                                                    onChange={(e) => {
+                                                        setInventorySearchQuery(e.target.value);
+                                                        setInventoryCurrentPage(1);
+                                                    }}
+                                                    placeholder="商品名を入力..."
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* 在庫状態フィルター */}
+                                        <div className="mt-4">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                📊 在庫状態で絞り込み
+                                            </label>
+                                            <div className="flex flex-wrap gap-2">
+                                                <button
+                                                    onClick={() => {
+                                                        setInventorySearchQuery('');
+                                                        setSelectedInventoryCategory('全て');
+                                                        setInventoryCurrentPage(1);
+                                                    }}
+                                                    className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded-full text-sm font-medium"
+                                                >
+                                                    全て表示
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setInventorySearchQuery('品切れ');
+                                                        setInventoryCurrentPage(1);
+                                                    }}
+                                                    className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded-full text-sm font-medium"
+                                                >
+                                                    🔴 品切れのみ
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setInventorySearchQuery('在庫少');
+                                                        setInventoryCurrentPage(1);
+                                                    }}
+                                                    className="px-3 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded-full text-sm font-medium"
+                                                >
+                                                    🟡 在庫少のみ
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     {availableMenuItems.length === 0 ? (
                                         <div className="text-center py-8 text-gray-500">
                                             メニュー商品が登録されていません
@@ -5476,12 +5557,60 @@
                                     ) : (
                                         <>
                                             <div className="space-y-3">
-                                                {availableMenuItems
-                                                    .slice(
+                                                {(() => {
+                                                    // フィルタリング処理
+                                                    let filteredItems = availableMenuItems;
+                                                    
+                                                    // カテゴリフィルター
+                                                    if (selectedInventoryCategory !== '全て') {
+                                                        filteredItems = filteredItems.filter(item => item.category === selectedInventoryCategory);
+                                                    }
+                                                    
+                                                    // 検索フィルター
+                                                    if (inventorySearchQuery) {
+                                                        const query = inventorySearchQuery.toLowerCase();
+                                                        filteredItems = filteredItems.filter(item => {
+                                                            const inventory = inventorySettings[item.id] || {};
+                                                            const stock = inventory.stock !== undefined ? inventory.stock : null;
+                                                            const alertThreshold = inventory.alertThreshold !== undefined ? inventory.alertThreshold : null;
+                                                            const isOutOfStock = stock !== null && stock === 0;
+                                                            const isLowStock = stock !== null && alertThreshold !== null && stock <= alertThreshold;
+                                                            
+                                                            // 商品名検索
+                                                            if (item.name.toLowerCase().includes(query)) return true;
+                                                            
+                                                            // 状態フィルター
+                                                            if (query === '品切れ' && isOutOfStock) return true;
+                                                            if (query === '在庫少' && isLowStock && !isOutOfStock) return true;
+                                                            
+                                                            return false;
+                                                        });
+                                                    }
+                                                    
+                                                    // ページネーション
+                                                    const totalPages = Math.ceil(filteredItems.length / inventoryItemsPerPage);
+                                                    const paginatedItems = filteredItems.slice(
                                                         (inventoryCurrentPage - 1) * inventoryItemsPerPage,
                                                         inventoryCurrentPage * inventoryItemsPerPage
-                                                    )
-                                                    .map((item) => {
+                                                    );
+                                                    
+                                                    // 結果が0件の場合
+                                                    if (filteredItems.length === 0) {
+                                                        return (
+                                                            <div className="text-center py-8 text-gray-500">
+                                                                条件に一致する商品が見つかりませんでした
+                                                            </div>
+                                                        );
+                                                    }
+                                                    
+                                                    return (
+                                                        <>
+                                                            {/* 件数表示 */}
+                                                            <div className="text-sm text-gray-600 mb-3">
+                                                                {filteredItems.length}件の商品が見つかりました
+                                                            </div>
+                                                            
+                                                            {paginatedItems.map((item) => {
                                                 const inventory = inventorySettings[item.id] || {};
                                                 const stock = inventory.stock !== undefined ? inventory.stock : null;
                                                 const alertThreshold = inventory.alertThreshold !== undefined ? inventory.alertThreshold : null;
@@ -5570,41 +5699,44 @@
                                                     </div>
                                                 );
                                             })}
-                                        </div>
-
-                                        {/* ページネーション */}
-                                        {availableMenuItems.length > inventoryItemsPerPage && (
-                                            <div className="flex justify-center items-center gap-4 mt-6 pt-4 border-t">
-                                                <button
-                                                    onClick={() => setInventoryCurrentPage(Math.max(1, inventoryCurrentPage - 1))}
-                                                    disabled={inventoryCurrentPage === 1}
-                                                    className={`px-4 py-2 rounded-lg font-bold ${
-                                                        inventoryCurrentPage === 1
-                                                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                                            : 'bg-blue-500 text-white hover:bg-blue-600'
-                                                    }`}
-                                                >
-                                                    ← 前へ
-                                                </button>
-                                                <div className="text-sm font-medium">
-                                                    ページ {inventoryCurrentPage} / {Math.ceil(availableMenuItems.length / inventoryItemsPerPage)}
-                                                    <span className="text-gray-500 ml-2">
-                                                        (全{availableMenuItems.length}件)
-                                                    </span>
+                                                            
+                                            {/* ページネーション */}
+                                            {filteredItems.length > inventoryItemsPerPage && (
+                                                <div className="flex justify-center items-center gap-4 mt-6 pt-4 border-t">
+                                                    <button
+                                                        onClick={() => setInventoryCurrentPage(Math.max(1, inventoryCurrentPage - 1))}
+                                                        disabled={inventoryCurrentPage === 1}
+                                                        className={`px-4 py-2 rounded-lg font-bold ${
+                                                            inventoryCurrentPage === 1
+                                                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                                : 'bg-blue-500 text-white hover:bg-blue-600'
+                                                        }`}
+                                                    >
+                                                        ← 前へ
+                                                    </button>
+                                                    <div className="text-sm font-medium">
+                                                        ページ {inventoryCurrentPage} / {totalPages}
+                                                        <span className="text-gray-500 ml-2">
+                                                            (全{filteredItems.length}件)
+                                                        </span>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => setInventoryCurrentPage(Math.min(totalPages, inventoryCurrentPage + 1))}
+                                                        disabled={inventoryCurrentPage >= totalPages}
+                                                        className={`px-4 py-2 rounded-lg font-bold ${
+                                                            inventoryCurrentPage >= totalPages
+                                                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                                : 'bg-blue-500 text-white hover:bg-blue-600'
+                                                        }`}
+                                                    >
+                                                        次へ →
+                                                    </button>
                                                 </div>
-                                                <button
-                                                    onClick={() => setInventoryCurrentPage(Math.min(Math.ceil(availableMenuItems.length / inventoryItemsPerPage), inventoryCurrentPage + 1))}
-                                                    disabled={inventoryCurrentPage >= Math.ceil(availableMenuItems.length / inventoryItemsPerPage)}
-                                                    className={`px-4 py-2 rounded-lg font-bold ${
-                                                        inventoryCurrentPage >= Math.ceil(availableMenuItems.length / inventoryItemsPerPage)
-                                                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                                            : 'bg-blue-500 text-white hover:bg-blue-600'
-                                                    }`}
-                                                >
-                                                    次へ →
-                                                </button>
-                                            </div>
-                                        )}
+                                            )}
+                                        </>
+                                                    );
+                                                })()}
+                                        </div>
                                     </>
                                     )}
 
