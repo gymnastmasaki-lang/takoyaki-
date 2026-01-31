@@ -348,6 +348,10 @@
             // カスタムアラート用の状態
             const [showCustomAlert, setShowCustomAlert] = useState(false);
             const [alertMessage, setAlertMessage] = useState('');
+            
+            // 🆕 在庫管理用のstate
+            const [showInventoryManagement, setShowInventoryManagement] = useState(false);
+            const [inventorySettings, setInventorySettings] = useState({});  // { menuItemId: { stock: number, alertThreshold: number } }
             const [alertTitle, setAlertTitle] = useState('');
             const [alertIcon, setAlertIcon] = useState('');
             const [showCustomConfirm, setShowCustomConfirm] = useState(false);
@@ -649,6 +653,9 @@
                     
                     // 🆕 グローバルメニュー設定を読み込み
                     await loadGlobalMenuSettings();
+                    
+                    // 🆕 在庫設定を読み込み
+                    await loadInventorySettings();
                     
                 } catch (err) {
                     console.error('データ読み込みエラー:', err);
@@ -1431,6 +1438,58 @@
                 } catch (e) {
                     console.error('❌ テーブル一覧読み込みエラー:', e);
                 }
+            };
+
+            // 🆕 在庫設定読み込み
+            const loadInventorySettings = async () => {
+                try {
+                    const { getDoc } = window.firebaseModules;
+                    const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+                    
+                    console.log('🔍 在庫設定読み込み');
+                    
+                    const inventoryDoc = await getDoc(inventoryRef);
+                    
+                    if (inventoryDoc.exists()) {
+                        setInventorySettings(inventoryDoc.data().items || {});
+                        console.log('✅ 在庫設定を読み込みました');
+                    } else {
+                        console.log('⚠️ 在庫設定が存在しないため、空の設定を使用');
+                        setInventorySettings({});
+                    }
+                } catch (error) {
+                    console.error('❌ 在庫設定読み込みエラー:', error);
+                }
+            };
+
+            // 🆕 在庫設定保存
+            const saveInventorySettings = async () => {
+                try {
+                    const { setDoc } = window.firebaseModules;
+                    const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+                    
+                    await setDoc(inventoryRef, {
+                        items: inventorySettings,
+                        updatedAt: new Date().toISOString()
+                    });
+                    
+                    showAlert('✅ 在庫設定を保存しました');
+                    console.log('✅ 在庫設定を保存しました');
+                } catch (error) {
+                    console.error('❌ 在庫設定保存エラー:', error);
+                    showAlert('❌ 保存に失敗しました');
+                }
+            };
+
+            // 🆕 在庫設定更新
+            const updateInventorySetting = (itemId, field, value) => {
+                setInventorySettings(prev => ({
+                    ...prev,
+                    [itemId]: {
+                        ...prev[itemId],
+                        [field]: value
+                    }
+                }));
             };
 
             // 🆕 テーブル設定読み込み
@@ -5368,6 +5427,145 @@
                                             className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
                                         >
                                             保存
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 🆕 在庫管理 */}
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                    📦 在庫管理
+                                </h2>
+                                <button
+                                    onClick={() => setShowInventoryManagement(!showInventoryManagement)}
+                                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                                >
+                                    {showInventoryManagement ? '閉じる' : '設定を開く'}
+                                </button>
+                            </div>
+
+                            {showInventoryManagement && (
+                                <div className="space-y-4 border-t pt-4">
+                                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                                        <div className="text-sm text-blue-800">
+                                            <p className="font-bold mb-2">📋 在庫管理の使い方</p>
+                                            <ul className="list-disc list-inside space-y-1">
+                                                <li>各商品の在庫数とアラート設定が可能です</li>
+                                                <li>アラート設定を「未設定」にすると無限在庫になります</li>
+                                                <li>在庫を0に設定すると自動的に品切れになります</li>
+                                                <li>注文完了時に自動で在庫が減ります</li>
+                                                <li>アラート在庫数になるとPOSに警告が表示されます</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+
+                                    {availableMenuItems.length === 0 ? (
+                                        <div className="text-center py-8 text-gray-500">
+                                            メニュー商品が登録されていません
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {availableMenuItems.map((item) => {
+                                                const inventory = inventorySettings[item.id] || {};
+                                                const stock = inventory.stock !== undefined ? inventory.stock : null;
+                                                const alertThreshold = inventory.alertThreshold !== undefined ? inventory.alertThreshold : null;
+                                                const isUnlimited = stock === null;
+                                                const isLowStock = stock !== null && alertThreshold !== null && stock <= alertThreshold;
+                                                const isOutOfStock = stock !== null && stock === 0;
+
+                                                return (
+                                                    <div 
+                                                        key={item.id} 
+                                                        className={`border rounded-lg p-4 ${
+                                                            isOutOfStock ? 'bg-red-50 border-red-300' : 
+                                                            isLowStock ? 'bg-yellow-50 border-yellow-300' : 
+                                                            'hover:bg-gray-50'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-start justify-between gap-4">
+                                                            <div className="flex-1">
+                                                                <div className="font-bold text-lg mb-2">
+                                                                    {item.name}
+                                                                    {isOutOfStock && <span className="ml-2 px-2 py-1 bg-red-500 text-white text-xs rounded">品切れ</span>}
+                                                                    {isLowStock && !isOutOfStock && <span className="ml-2 px-2 py-1 bg-yellow-500 text-white text-xs rounded">在庫少</span>}
+                                                                    {isUnlimited && <span className="ml-2 px-2 py-1 bg-green-500 text-white text-xs rounded">無限</span>}
+                                                                </div>
+                                                                <div className="text-sm text-gray-600 mb-3">
+                                                                    カテゴリ: {item.category} | 価格: ¥{item.price}
+                                                                </div>
+
+                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                    {/* 在庫数 */}
+                                                                    <div>
+                                                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                                            現在の在庫数
+                                                                        </label>
+                                                                        <div className="flex gap-2">
+                                                                            <input
+                                                                                type="number"
+                                                                                min="0"
+                                                                                value={stock === null ? '' : stock}
+                                                                                onChange={(e) => {
+                                                                                    const val = e.target.value;
+                                                                                    updateInventorySetting(item.id, 'stock', val === '' ? null : parseInt(val));
+                                                                                }}
+                                                                                placeholder="未設定（無限）"
+                                                                                className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
+                                                                            />
+                                                                            <button
+                                                                                onClick={() => updateInventorySetting(item.id, 'stock', null)}
+                                                                                className="px-3 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 text-sm"
+                                                                            >
+                                                                                無限
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* アラート設定 */}
+                                                                    <div>
+                                                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                                            アラート在庫数（この数になったら警告）
+                                                                        </label>
+                                                                        <div className="flex gap-2">
+                                                                            <input
+                                                                                type="number"
+                                                                                min="0"
+                                                                                value={alertThreshold === null ? '' : alertThreshold}
+                                                                                onChange={(e) => {
+                                                                                    const val = e.target.value;
+                                                                                    updateInventorySetting(item.id, 'alertThreshold', val === '' ? null : parseInt(val));
+                                                                                }}
+                                                                                placeholder="未設定"
+                                                                                className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
+                                                                                disabled={stock === null}
+                                                                            />
+                                                                            <button
+                                                                                onClick={() => updateInventorySetting(item.id, 'alertThreshold', null)}
+                                                                                className="px-3 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 text-sm"
+                                                                                disabled={stock === null}
+                                                                            >
+                                                                                未設定
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    <div className="flex justify-end pt-4 border-t">
+                                        <button
+                                            onClick={saveInventorySettings}
+                                            className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold"
+                                        >
+                                            💾 在庫設定を保存
                                         </button>
                                     </div>
                                 </div>

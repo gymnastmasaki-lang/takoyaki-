@@ -8807,6 +8807,15 @@ ${redSlipCount > 0 ? `
     // 注文を完了にする
     window.completeOrder = async function(orderId) {
       try {
+        // 注文データを取得して在庫を減らす
+        const orderRef = window.getStoreDoc('orders', orderId);
+        const orderSnap = await window.getDoc(orderRef);
+        
+        if (orderSnap.exists()) {
+          const orderData = orderSnap.data();
+          await decreaseInventory(orderData.items || []);
+        }
+        
         // 注文を完了にする
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           completedAt: window.Timestamp.now()
@@ -8832,6 +8841,9 @@ ${redSlipCount > 0 ? `
         }
         
         await loadOrders(selectedTable);
+        
+        // 在庫アラートチェック
+        await checkInventoryAlerts();
       } catch (e) {
         console.error('完了エラー:', e);
         alert('エラーが発生しました');
@@ -8882,6 +8894,206 @@ ${redSlipCount > 0 ? `
         alert('エラーが発生しました');
       }
     };
+    
+    // 🆕 在庫を減らす
+    async function decreaseInventory(items) {
+      try {
+        const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+        const inventorySnap = await window.getDoc(inventoryRef);
+        
+        if (!inventorySnap.exists()) {
+          console.log('⚠️ 在庫設定が存在しません');
+          return;
+        }
+        
+        const inventoryData = inventorySnap.data();
+        const inventorySettings = inventoryData.items || {};
+        let updated = false;
+        
+        for (const item of items) {
+          const menuItemId = item.id;
+          const quantity = item.quantity || 1;
+          
+          if (inventorySettings[menuItemId]) {
+            const currentStock = inventorySettings[menuItemId].stock;
+            
+            // 在庫が設定されている場合のみ減らす
+            if (currentStock !== null && currentStock !== undefined) {
+              const newStock = Math.max(0, currentStock - quantity);
+              inventorySettings[menuItemId].stock = newStock;
+              updated = true;
+              
+              console.log(`📦 在庫減少: ${item.name} ${currentStock} → ${newStock} (${quantity}個使用)`);
+              
+              // 在庫が0になった場合、自動的に品切れにする
+              if (newStock === 0) {
+                console.log(`⚠️ 在庫切れ: ${item.name}`);
+                // menu商品を品切れに設定
+                try {
+                  const menuRef = window.getStoreDoc('menus', menuItemId);
+                  await window.updateDoc(menuRef, {
+                    isSoldOut: true
+                  });
+                  console.log(`✅ 自動品切れ設定: ${item.name}`);
+                } catch (e) {
+                  console.error('品切れ設定エラー:', e);
+                }
+              }
+            }
+          }
+        }
+        
+        // 在庫を更新
+        if (updated) {
+          await window.updateDoc(inventoryRef, {
+            items: inventorySettings,
+            updatedAt: new Date().toISOString()
+          });
+          console.log('✅ 在庫を更新しました');
+        }
+      } catch (error) {
+        console.error('❌ 在庫減少エラー:', error);
+      }
+    }
+    
+    // 🆕 在庫アラートをチェック
+    async function checkInventoryAlerts() {
+      try {
+        const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+        const inventorySnap = await window.getDoc(inventoryRef);
+        
+        if (!inventorySnap.exists()) {
+          return;
+        }
+        
+        const inventoryData = inventorySnap.data();
+        const inventorySettings = inventoryData.items || {};
+        
+        // メニュー商品を取得
+        const menusSnapshot = await window.getDocs(window.getStoreCollection('menus'));
+        const menuItems = {};
+        menusSnapshot.forEach(doc => {
+          menuItems[doc.id] = doc.data();
+        });
+        
+        // アラート対象の商品をチェック
+        const alerts = [];
+        for (const [itemId, settings] of Object.entries(inventorySettings)) {
+          const stock = settings.stock;
+          const alertThreshold = settings.alertThreshold;
+          
+          if (stock !== null && alertThreshold !== null && stock <= alertThreshold && stock > 0) {
+            const menuItem = menuItems[itemId];
+            if (menuItem) {
+              alerts.push({
+                name: menuItem.name,
+                stock: stock
+              });
+            }
+          }
+        }
+        
+        // アラート表示
+        if (alerts.length > 0) {
+          showInventoryAlert(alerts);
+        }
+      } catch (error) {
+        console.error('❌ 在庫アラートチェックエラー:', error);
+      }
+    }
+    
+    // 🆕 在庫アラート表示
+    function showInventoryAlert(alerts) {
+      // 既存のアラートがあれば削除
+      const existingAlert = document.getElementById('inventory-alert-box');
+      if (existingAlert) {
+        existingAlert.remove();
+      }
+      
+      const alertBox = document.createElement('div');
+      alertBox.id = 'inventory-alert-box';
+      alertBox.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        background: linear-gradient(135deg, #ff6b6b 0%, #ff5252 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(255, 0, 0, 0.3);
+        z-index: 10000;
+        max-width: 400px;
+        animation: slideIn 0.5s ease-out;
+      `;
+      
+      let alertHTML = `
+        <div style="font-size: 18px; font-weight: bold; margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 24px;">⚠️</span>
+          <span>在庫アラート</span>
+        </div>
+        <div style="font-size: 14px; line-height: 1.6; margin-bottom: 15px;">
+          以下の商品の在庫が少なくなっています：
+        </div>
+        <div style="background: rgba(255, 255, 255, 0.2); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+      `;
+      
+      alerts.forEach(alert => {
+        alertHTML += `
+          <div style="margin-bottom: 10px; padding: 10px; background: rgba(255, 255, 255, 0.15); border-radius: 6px;">
+            <div style="font-weight: bold; font-size: 16px;">${alert.name}</div>
+            <div style="font-size: 14px; margin-top: 5px;">残り <span style="font-size: 20px; font-weight: bold;">${alert.stock}</span> 個</div>
+            <div style="color: #ffeb3b; font-size: 12px; margin-top: 5px;">💡 補充してください</div>
+          </div>
+        `;
+      });
+      
+      alertHTML += `
+        </div>
+        <button onclick="this.parentElement.remove()" style="
+          width: 100%;
+          padding: 12px;
+          background: white;
+          color: #ff5252;
+          border: none;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          transition: all 0.3s;
+        " onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='white'">
+          閉じる
+        </button>
+      `;
+      
+      alertBox.innerHTML = alertHTML;
+      document.body.appendChild(alertBox);
+      
+      // アニメーション用のスタイルを追加
+      if (!document.getElementById('inventory-alert-animation')) {
+        const style = document.createElement('style');
+        style.id = 'inventory-alert-animation';
+        style.innerHTML = `
+          @keyframes slideIn {
+            from {
+              transform: translateX(100%);
+              opacity: 0;
+            }
+            to {
+              transform: translateX(0);
+              opacity: 1;
+            }
+          }
+        `;
+        document.head.appendChild(style);
+      }
+      
+      // 5秒後に自動で薄くする
+      setTimeout(() => {
+        if (alertBox.parentElement) {
+          alertBox.style.opacity = '0.7';
+        }
+      }, 5000);
+    }
     
     // 注文を削除する
     window.deleteOrder = async function(orderId) {
@@ -13826,6 +14038,9 @@ ${redSlipCount > 0 ? `
       
       // 🆕 menu.htmlのiframeに店舗IDを設定
       updateMenuIframe();
+      
+      // 🆕 在庫アラートをチェック
+      checkInventoryAlerts();
     }
     
     // 🆕 レシート設定をグローバル変数で保持
