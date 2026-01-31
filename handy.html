@@ -534,6 +534,7 @@
       <div class="header">
         <h2 id="storeNameDisplay">店舗名</h2>
         <div class="store-info">テーブルを選択してください</div>
+        <button class="logout-btn" onclick="showInventoryStatus()" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); margin-right: 10px;">📦 在庫状況</button>
         <button class="logout-btn" onclick="handleLogout()">ログアウト</button>
       </div>
       
@@ -625,6 +626,56 @@
         <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrdersForTable()">🗑️ 削除</button>
         <button class="btn btn-secondary" style="flex: 1;" onclick="closePaymentModal()">閉じる</button>
       </div>
+    </div>
+  </div>
+
+  <div id="priceChangeModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <div style="font-size: 50px; margin-bottom: 10px;">💴</div>
+        <h3 style="margin: 0; font-size: 20px; color: #333;" id="priceChangeTitle">金額を入力してください</h3>
+      </div>
+      
+      <div style="background: #f5f5f5; border-radius: 10px; padding: 15px; margin: 20px 0; text-align: center;">
+        <div style="color: #666; margin-bottom: 10px;" id="priceChangeItemInfo"></div>
+        <div style="font-size: 18px; font-weight: bold; color: #333;">
+          現在: <span id="priceChangeCurrentPrice"></span>
+        </div>
+      </div>
+      
+      <div style="margin: 20px 0;">
+        <input type="number" id="priceChangeInput" placeholder="新しい金額を入力" style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 8px; font-size: 24px; text-align: center;">
+      </div>
+      
+      <input type="hidden" id="priceChangeItemId">
+
+  <!-- 在庫状況モーダル -->
+  <div id="inventoryModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 600px;">
+      <h3 style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px;">
+        📦 在庫状況
+      </h3>
+      
+      <!-- 検索・フィルター -->
+      <div style="margin-bottom: 20px; background: #f5f5f5; padding: 15px; border-radius: 10px;">
+        <div style="margin-bottom: 10px;">
+          <input type="text" id="inventorySearch" placeholder="🔍 商品名で検索..." style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px;">
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button onclick="filterInventory('all')" class="btn" style="flex: 1; min-width: 80px; padding: 8px; font-size: 12px; background: #9E9E9E;">全て表示</button>
+          <button onclick="filterInventory('outofstock')" class="btn" style="flex: 1; min-width: 80px; padding: 8px; font-size: 12px; background: #f44336;">🔴 品切れ</button>
+          <button onclick="filterInventory('lowstock')" class="btn" style="flex: 1; min-width: 80px; padding: 8px; font-size: 12px; background: #FF9800;">🟡 在庫少</button>
+          <button onclick="filterInventory('unlimited')" class="btn" style="flex: 1; min-width: 80px; padding: 8px; font-size: 12px; background: #4CAF50;">♾️ 無限</button>
+        </div>
+      </div>
+
+      <!-- カテゴリタブ -->
+      <div id="inventoryCategoryTabs" style="display: flex; gap: 5px; margin-bottom: 15px; overflow-x: auto; white-space: nowrap; padding-bottom: 5px;"></div>
+      
+      <!-- 在庫リスト -->
+      <div id="inventoryList" style="max-height: 400px; overflow-y: auto; margin-bottom: 20px;"></div>
+      
+      <button class="btn btn-secondary" style="width: 100%;" onclick="closeInventoryModal()">閉じる</button>
     </div>
   </div>
 
@@ -1751,6 +1802,217 @@
         });
       }
     };
+
+    // 在庫状況表示機能
+    let currentInventoryFilter = 'all';
+    let currentInventoryCategory = 'all';
+    let inventorySettings = {};
+    let menuItems = [];
+
+    window.showInventoryStatus = async function() {
+      playTapSound();
+      try {
+        // メニューと在庫設定を読み込む
+        await loadInventoryData();
+        
+        // モーダルを表示
+        document.getElementById('inventoryModal').classList.remove('hidden');
+        
+        // カテゴリタブを生成
+        renderCategoryTabs();
+        
+        // 在庫リストを表示
+        renderInventoryList();
+      } catch (error) {
+        console.error('在庫データ読み込みエラー:', error);
+        await showCustomAlert({
+          icon: '❌',
+          title: 'エラー',
+          message: '在庫データの読み込みに失敗しました',
+          btnClass: 'modal-btn-danger'
+        });
+      }
+    };
+
+    async function loadInventoryData() {
+      // メニューを読み込む
+      const menuRef = window.getStoreCollection('menus');
+      const menuSnapshot = await window.getDocs(menuRef);
+      menuItems = menuSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })).filter(item => item.isAvailable !== false);
+
+      // 在庫設定を読み込む
+      const inventoryRef = window.getStoreDoc('inventory_settings', 'settings');
+      const inventoryDoc = await window.getDoc(inventoryRef);
+      if (inventoryDoc.exists()) {
+        inventorySettings = inventoryDoc.data().items || {};
+      } else {
+        inventorySettings = {};
+      }
+    }
+
+    function renderCategoryTabs() {
+      const categories = ['all', ...new Set(menuItems.map(item => item.category))];
+      const tabsContainer = document.getElementById('inventoryCategoryTabs');
+      
+      tabsContainer.innerHTML = categories.map(cat => {
+        const isActive = cat === currentInventoryCategory;
+        return `
+          <button 
+            onclick="selectInventoryCategory('${cat}')"
+            style="
+              padding: 8px 16px;
+              border: none;
+              border-radius: 20px;
+              font-size: 13px;
+              font-weight: bold;
+              cursor: pointer;
+              transition: all 0.2s;
+              ${isActive ? 
+                'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;' : 
+                'background: #f0f0f0; color: #666;'}
+            "
+          >
+            ${cat === 'all' ? '📂 全て' : cat}
+          </button>
+        `;
+      }).join('');
+    }
+
+    window.selectInventoryCategory = function(category) {
+      playTapSound();
+      currentInventoryCategory = category;
+      renderCategoryTabs();
+      renderInventoryList();
+    };
+
+    window.filterInventory = function(filter) {
+      playTapSound();
+      currentInventoryFilter = filter;
+      renderInventoryList();
+    };
+
+    function renderInventoryList() {
+      const searchQuery = document.getElementById('inventorySearch').value.toLowerCase();
+      
+      // フィルタリング
+      let filtered = menuItems;
+      
+      // カテゴリフィルター
+      if (currentInventoryCategory !== 'all') {
+        filtered = filtered.filter(item => item.category === currentInventoryCategory);
+      }
+      
+      // 検索フィルター
+      if (searchQuery) {
+        filtered = filtered.filter(item => 
+          item.name.toLowerCase().includes(searchQuery)
+        );
+      }
+      
+      // 在庫状態フィルター
+      filtered = filtered.filter(item => {
+        const inventory = inventorySettings[item.id] || {};
+        const stock = inventory.stock !== undefined ? inventory.stock : null;
+        const alertThreshold = inventory.alertThreshold !== undefined ? inventory.alertThreshold : null;
+        const isOutOfStock = stock !== null && stock === 0;
+        const isLowStock = stock !== null && alertThreshold !== null && stock <= alertThreshold && stock > 0;
+        const isUnlimited = stock === null;
+        
+        if (currentInventoryFilter === 'all') return true;
+        if (currentInventoryFilter === 'outofstock') return isOutOfStock;
+        if (currentInventoryFilter === 'lowstock') return isLowStock;
+        if (currentInventoryFilter === 'unlimited') return isUnlimited;
+        return true;
+      });
+      
+      const listContainer = document.getElementById('inventoryList');
+      
+      if (filtered.length === 0) {
+        listContainer.innerHTML = `
+          <div style="text-align: center; padding: 40px; color: #999;">
+            該当する商品がありません
+          </div>
+        `;
+        return;
+      }
+      
+      listContainer.innerHTML = filtered.map(item => {
+        const inventory = inventorySettings[item.id] || {};
+        const stock = inventory.stock !== undefined ? inventory.stock : null;
+        const alertThreshold = inventory.alertThreshold !== undefined ? inventory.alertThreshold : null;
+        const isOutOfStock = stock !== null && stock === 0;
+        const isLowStock = stock !== null && alertThreshold !== null && stock <= alertThreshold && stock > 0;
+        const isUnlimited = stock === null;
+        
+        let statusBadge = '';
+        let bgColor = '#fff';
+        
+        if (isOutOfStock) {
+          statusBadge = '<span style="background: #f44336; color: white; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold;">🔴 品切れ</span>';
+          bgColor = '#ffebee';
+        } else if (isLowStock) {
+          statusBadge = '<span style="background: #FF9800; color: white; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold;">🟡 在庫少</span>';
+          bgColor = '#fff3e0';
+        } else if (isUnlimited) {
+          statusBadge = '<span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold;">♾️ 無限</span>';
+        }
+        
+        return `
+          <div style="
+            background: ${bgColor};
+            border: 2px solid ${isOutOfStock ? '#f44336' : isLowStock ? '#FF9800' : '#e0e0e0'};
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 10px;
+          ">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+              <div style="flex: 1;">
+                <div style="font-weight: bold; font-size: 15px; color: #333; margin-bottom: 4px;">
+                  ${item.name}
+                </div>
+                <div style="font-size: 12px; color: #666;">
+                  ${item.category} | ¥${item.price.toLocaleString()}
+                </div>
+              </div>
+              ${statusBadge}
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px solid #e0e0e0;">
+              <div style="font-size: 13px; color: #666;">
+                ${isUnlimited ? 
+                  '在庫: 無限' : 
+                  `在庫: <strong style="color: ${isOutOfStock ? '#f44336' : isLowStock ? '#FF9800' : '#4CAF50'}; font-size: 16px;">${stock}</strong>`
+                }
+              </div>
+              ${!isUnlimited && alertThreshold !== null ? 
+                `<div style="font-size: 11px; color: #999;">アラート: ${alertThreshold}</div>` : 
+                ''
+              }
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    window.closeInventoryModal = function() {
+      playTapSound();
+      document.getElementById('inventoryModal').classList.add('hidden');
+      currentInventoryFilter = 'all';
+      currentInventoryCategory = 'all';
+      document.getElementById('inventorySearch').value = '';
+    };
+
+    // 検索ボックスのリアルタイム検索
+    document.addEventListener('DOMContentLoaded', () => {
+      const searchInput = document.getElementById('inventorySearch');
+      if (searchInput) {
+        searchInput.addEventListener('input', () => {
+          renderInventoryList();
+        });
+      }
+    });
 
     window.addEventListener('DOMContentLoaded', async () => {
       while (!window.firebaseReady || !window.db) await new Promise(r => setTimeout(r, 100));
