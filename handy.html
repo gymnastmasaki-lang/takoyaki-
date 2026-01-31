@@ -1578,12 +1578,67 @@
           orderIds: ordersToComplete.map(o => o.id)
         });
         
+        // 🆕 在庫を減らす処理
         for (const order of ordersToComplete) {
+          // 注文を完了にする
           const orderRef = window.doc(window.db, 'stores', currentStoreId, 'orders', order.id);
           await window.updateDoc(orderRef, { 
             completedAt: now
           });
           console.log('✅ 注文を完了:', order.id);
+          
+          // 🆕 在庫を減らす
+          if (order.items && Array.isArray(order.items)) {
+            try {
+              // 在庫設定を取得
+              const inventoryRef = window.doc(window.db, 'stores', currentStoreId, 'inventory_settings', 'default');
+              const inventoryDoc = await window.getDoc(inventoryRef);
+              
+              if (inventoryDoc.exists()) {
+                const inventoryData = inventoryDoc.data().items || {};
+                let hasChanges = false;
+                
+                // 各商品の在庫を減らす
+                for (const item of order.items) {
+                  // メニューデータから商品IDを取得（名前で検索）
+                  const menuSnapshot = await window.getDocs(window.collection(window.db, 'stores', currentStoreId, 'menus'));
+                  let menuId = null;
+                  
+                  menuSnapshot.forEach(doc => {
+                    const menuData = doc.data();
+                    if (menuData.name === item.name) {
+                      menuId = menuData.id || doc.id;
+                    }
+                  });
+                  
+                  if (menuId && inventoryData[menuId]) {
+                    const currentStock = inventoryData[menuId].stock;
+                    if (currentStock !== undefined && currentStock !== null) {
+                      // 在庫を減らす
+                      const quantity = item.quantity || 1;
+                      const newStock = Math.max(0, currentStock - quantity);
+                      inventoryData[menuId].stock = newStock;
+                      hasChanges = true;
+                      
+                      console.log(`📦 在庫減算: ${item.name} (${menuId}) ${currentStock} → ${newStock} (-${quantity})`);
+                    }
+                  }
+                }
+                
+                // 変更があれば保存
+                if (hasChanges) {
+                  await window.setDoc(inventoryRef, {
+                    items: inventoryData,
+                    updatedAt: new Date().toISOString()
+                  });
+                  console.log('✅ 在庫を更新しました');
+                }
+              }
+            } catch (inventoryError) {
+              console.error('⚠️ 在庫更新エラー:', inventoryError);
+              // 在庫更新エラーは致命的でないため続行
+            }
+          }
         }
         
         // モーダルを閉じる
