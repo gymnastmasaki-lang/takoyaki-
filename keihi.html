@@ -534,6 +534,104 @@
         padding: 6px;
       }
     }
+    
+    /* モーダル用CSS */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(5px);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .modal-box {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      animation: modalSlideIn 0.3s ease-out;
+    }
+    
+    @keyframes modalSlideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-30px) scale(0.95);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+    
+    .modal-icon {
+      font-size: 64px;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    
+    .modal-title {
+      font-size: 24px;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 15px;
+      color: #333;
+    }
+    
+    .modal-message {
+      text-align: center;
+      font-size: 16px;
+      color: #666;
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }
+    
+    .modal-buttons {
+      display: flex;
+      gap: 15px;
+      margin-top: 30px;
+    }
+    
+    .modal-btn {
+      flex: 1;
+      padding: 18px;
+      font-size: 18px;
+      font-weight: bold;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    .modal-btn:active {
+      transform: scale(0.95);
+    }
+    
+    .modal-btn-cancel {
+      background: #e0e0e0;
+      color: #666;
+    }
+    
+    .modal-btn-cancel:hover {
+      background: #d0d0d0;
+    }
+    
+    .modal-btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .modal-btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    }
   </style>
 </head>
 <body>
@@ -585,7 +683,7 @@
         </select>
         <input type="date" id="dateSelect" style="padding: 10px; border-radius: 8px; border: 2px solid #667eea;" />
         <button class="btn" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;" onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/receipt.html', '_blank')">領収書管理</button>
-        <button class="btn btn-secondary" onclick="exportExpenses()">経費出力</button>
+        <button class="btn btn-secondary" onclick="showExportModal()">経費出力</button>
         <button class="btn btn-danger" onclick="handleLogout()">ログアウト</button>
       </div>
     </div>
@@ -1271,19 +1369,63 @@
       }
     }
 
-    // 経費出力（Excel）
-    async function exportExpenses() {
+    // 経費出力モーダルを表示
+    function showExportModal() {
+      if (!currentStaff) {
+        showCustomAlert('担当者を選択してください', '⚠️ エラー', '⚠️');
+        return;
+      }
+      
+      // 年の選択肢を生成（2020年から現在の年まで）
+      const currentYear = new Date().getFullYear();
+      const yearSelect = document.getElementById('exportYear');
+      yearSelect.innerHTML = '';
+      
+      for (let year = currentYear; year >= 2020; year--) {
+        const option = document.createElement('option');
+        option.value = year;
+        option.textContent = year + '年';
+        yearSelect.appendChild(option);
+      }
+      
+      // 現在の月を選択状態にする
+      const currentMonth = new Date().getMonth() + 1;
+      document.getElementById('exportMonth').value = currentMonth;
+      
+      // モーダルを表示
+      document.getElementById('exportModal').style.display = 'flex';
+    }
+    
+    // 経費出力モーダルを閉じる
+    function closeExportModal() {
+      document.getElementById('exportModal').style.display = 'none';
+    }
+    
+    // 経費出力を実行
+    async function confirmExport() {
+      const year = parseInt(document.getElementById('exportYear').value);
+      const month = parseInt(document.getElementById('exportMonth').value);
+      
+      closeExportModal();
+      await exportExpenses(year, month);
+    }
+    
+    // 経費出力（Excel）- 年月を引数で受け取るように変更
+    async function exportExpenses(year = null, month = null) {
       try {
         if (!currentStaff) {
           await showCustomAlert('担当者を選択してください', '⚠️ エラー', '⚠️');
           return;
         }
         
-        console.log('📊 経費出力開始（担当者:', currentStaff, ')');
+        // デフォルト値を設定（引数がない場合は当月）
+        if (!year || !month) {
+          const now = new Date();
+          year = now.getFullYear();
+          month = now.getMonth() + 1;
+        }
         
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
+        console.log(`📊 経費出力開始（担当者: ${currentStaff}, 年月: ${year}年${month}月）`);
         
         // 月の全データを取得
         const expensesSnapshot = await window.getDocs(window.getStoreCollection('expenses'));
@@ -1600,5 +1742,42 @@
       }
     });
   </script>
+  
+  <!-- 経費出力の年月選択モーダル -->
+  <div id="exportModal" class="modal-overlay" style="display: none;">
+    <div class="modal-box">
+      <div class="modal-icon">📊</div>
+      <div class="modal-title">経費出力</div>
+      <div class="modal-message">
+        出力する年月を選択してください
+      </div>
+      <div style="margin: 20px 0;">
+        <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 15px;">
+          <select id="exportYear" style="padding: 10px; border-radius: 8px; border: 2px solid #667eea; font-size: 16px;">
+            <!-- 年の選択肢 -->
+          </select>
+          <select id="exportMonth" style="padding: 10px; border-radius: 8px; border: 2px solid #667eea; font-size: 16px;">
+            <option value="1">1月</option>
+            <option value="2">2月</option>
+            <option value="3">3月</option>
+            <option value="4">4月</option>
+            <option value="5">5月</option>
+            <option value="6">6月</option>
+            <option value="7">7月</option>
+            <option value="8">8月</option>
+            <option value="9">9月</option>
+            <option value="10">10月</option>
+            <option value="11">11月</option>
+            <option value="12">12月</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-buttons">
+        <button class="modal-btn modal-btn-cancel" onclick="closeExportModal()">キャンセル</button>
+        <button class="modal-btn modal-btn-primary" onclick="confirmExport()">出力</button>
+      </div>
+    </div>
+  </div>
+  
 </body>
 </html>
