@@ -8900,6 +8900,83 @@ ${redSlipCount > 0 ? `
       }
     };
     
+    // 🆕 menu_settingsコレクションから在庫を減らす（kanri.htmlと互換性あり）
+    async function decreaseInventoryFromMenuSettings(items) {
+      try {
+        console.log('📦 在庫減少処理開始（menu_settings使用）');
+        console.log('  減らす商品:', items);
+        
+        // メニュー設定を取得
+        let menuSettingsRef;
+        if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+          menuSettingsRef = window.doc(window.db, 'menu_settings', 'shimoakatsuka');
+          console.log('  → 旧パス: menu_settings/shimoakatsuka');
+        } else {
+          menuSettingsRef = window.doc(window.db, 'stores', window.currentStoreId, 'menu_settings', 'default');
+          console.log('  → 新パス: stores/' + window.currentStoreId + '/menu_settings/default');
+        }
+        
+        const menuSettingsSnap = await window.getDoc(menuSettingsRef);
+        
+        if (!menuSettingsSnap.exists()) {
+          console.log('⚠️ メニュー設定が存在しません');
+          return;
+        }
+        
+        const menuSettings = menuSettingsSnap.data();
+        const inventory = menuSettings.inventory || {};
+        console.log('  現在の在庫データ:', inventory);
+        
+        let updated = false;
+        
+        for (const item of items) {
+          const itemName = item.name;
+          const quantity = item.quantity || 1;
+          
+          console.log(`  チェック: ${itemName} (数量: ${quantity})`);
+          
+          // 在庫が設定されている商品のみ減らす
+          if (inventory.hasOwnProperty(itemName)) {
+            const currentStock = inventory[itemName];
+            
+            if (currentStock !== null && currentStock !== undefined && currentStock !== '') {
+              const newStock = Math.max(0, currentStock - quantity);
+              inventory[itemName] = newStock;
+              updated = true;
+              
+              console.log(`  ✅ 在庫減少: ${itemName} ${currentStock} → ${newStock}`);
+              
+              // 在庫が0になった場合の警告
+              if (newStock === 0) {
+                console.log(`  ⚠️ 在庫切れ: ${itemName}`);
+              }
+            } else {
+              console.log(`  ⏭️ ${itemName}: 在庫管理対象外（現在値: ${currentStock}）`);
+            }
+          } else {
+            console.log(`  ⏭️ ${itemName}: 在庫設定なし`);
+          }
+        }
+        
+        // 在庫を更新
+        if (updated) {
+          await window.updateDoc(menuSettingsRef, {
+            inventory: inventory
+          });
+          console.log('✅ 在庫を更新しました');
+          console.log('  更新後の在庫:', inventory);
+          
+          // 🆕 在庫更新後にアラートをチェック
+          await checkInventoryAlertsAfterUpdate();
+        } else {
+          console.log('⚠️ 在庫更新なし（在庫管理対象の商品がありませんでした）');
+        }
+      } catch (error) {
+        console.error('❌ 在庫減少エラー:', error);
+        console.error('エラー詳細:', error.stack);
+      }
+    }
+    
     // 🆕 在庫を減らす
     async function decreaseInventory(items) {
       try {
@@ -9783,6 +9860,14 @@ ${redSlipCount > 0 ? `
         if (isDirectPayment) {
           console.log('💳 即会計完了: カートをクリア & 注文を完了→削除');
           console.log('💳 削除対象の注文数:', currentOrders.length);
+          
+          // 🆕 即会計の場合は在庫を減らす
+          console.log('📦 即会計: 在庫を減らします');
+          for (const order of currentOrders) {
+            if (order.items && Array.isArray(order.items)) {
+              await decreaseInventoryFromMenuSettings(order.items);
+            }
+          }
           
           manualCart = [];
           updateManualCart();
@@ -14048,61 +14133,51 @@ ${redSlipCount > 0 ? `
       checkInventoryAlerts();
     }
     
-    // 🆕 在庫アラートをチェックする関数
-    async function checkInventoryAlerts() {
+    // 🆕 在庫更新後にアラートをチェック（ページロード時とは別）
+    async function checkInventoryAlertsAfterUpdate() {
       try {
-        console.log('🔔 在庫アラートをチェック中...');
+        console.log('🔔 在庫更新後のアラートチェック');
         
         // アラート設定を取得
         let alertSettingsRef;
         if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
           alertSettingsRef = window.doc(window.db, 'alert_settings', 'shimoakatsuka');
-          console.log('  → 旧パス: alert_settings/shimoakatsuka');
         } else {
           alertSettingsRef = window.doc(window.db, 'stores', window.currentStoreId, 'alert_settings', 'default');
-          console.log('  → 新パス: stores/' + window.currentStoreId + '/alert_settings/default');
         }
         
         const alertSettingsDoc = await window.getDoc(alertSettingsRef);
         
         if (!alertSettingsDoc.exists()) {
-          console.log('⚠️ アラート設定が見つかりません');
           return;
         }
         
         const alertSettings = alertSettingsDoc.data();
-        console.log('📋 アラート設定:', alertSettings);
         
         // メニュー設定を取得
         let menuSettingsRef;
         if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
           menuSettingsRef = window.doc(window.db, 'menu_settings', 'shimoakatsuka');
-          console.log('  → 旧パス: menu_settings/shimoakatsuka');
         } else {
           menuSettingsRef = window.doc(window.db, 'stores', window.currentStoreId, 'menu_settings', 'default');
-          console.log('  → 新パス: stores/' + window.currentStoreId + '/menu_settings/default');
         }
         
         const menuSettingsDoc = await window.getDoc(menuSettingsRef);
         
         if (!menuSettingsDoc.exists()) {
-          console.log('⚠️ メニュー設定が見つかりません');
           return;
         }
         
         const menuSettings = menuSettingsDoc.data();
         const inventoryData = menuSettings.inventory || {};
-        console.log('📦 在庫データ:', inventoryData);
         
         // 在庫が少ない商品をチェック
         const lowStockItems = [];
         
         for (const [itemName, settings] of Object.entries(alertSettings)) {
-          if (typeof settings === 'object' && settings.enabled) {
+          if (typeof settings === 'object' && settings !== null && settings.enabled === true) {
             const threshold = settings.threshold || 0;
             const currentStock = inventoryData[itemName] || 0;
-            
-            console.log(`  📊 ${itemName}: 現在庫=${currentStock}, 閾値=${threshold}`);
             
             if (currentStock <= threshold) {
               lowStockItems.push({
@@ -14116,13 +14191,127 @@ ${redSlipCount > 0 ? `
         
         // アラート表示
         if (lowStockItems.length > 0) {
-          console.log('🚨 在庫アラート:', lowStockItems);
+          console.log('🚨 在庫アラート（更新後）:', lowStockItems);
           
-          let alertMessage = '⚠️ 在庫が少なくなっています:\n\n';
+          let alertMessage = '在庫が少なくなっています:\n\n';
           lowStockItems.forEach(item => {
             alertMessage += `${item.name}: 残り${item.current}個 (閾値: ${item.threshold}個)\n`;
           });
           
+          // 標準アラートで表示（確実に表示されるため）
+          alert('⚠️ ' + alertMessage);
+        }
+        
+      } catch (error) {
+        console.error('❌ 在庫アラートチェックエラー（更新後）:', error);
+      }
+    }
+    
+    // 🆕 在庫アラートをチェックする関数（ページロード時）
+    async function checkInventoryAlerts() {
+      try {
+        console.log('🔔🔔🔔 在庫アラートをチェック開始 🔔🔔🔔');
+        console.log('現在のStoreID:', window.currentStoreId);
+        
+        // アラート設定を取得
+        let alertSettingsRef;
+        if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+          alertSettingsRef = window.doc(window.db, 'alert_settings', 'shimoakatsuka');
+          console.log('  → 旧パス使用: alert_settings/shimoakatsuka');
+        } else {
+          alertSettingsRef = window.doc(window.db, 'stores', window.currentStoreId, 'alert_settings', 'default');
+          console.log('  → 新パス使用: stores/' + window.currentStoreId + '/alert_settings/default');
+        }
+        
+        const alertSettingsDoc = await window.getDoc(alertSettingsRef);
+        
+        if (!alertSettingsDoc.exists()) {
+          console.error('❌❌❌ アラート設定が見つかりません！ ❌❌❌');
+          alert('アラート設定が見つかりません。kanri.htmlで在庫アラート設定を保存してください。');
+          return;
+        }
+        
+        const alertSettings = alertSettingsDoc.data();
+        console.log('📋 アラート設定（全データ）:', JSON.stringify(alertSettings, null, 2));
+        
+        // メニュー設定を取得
+        let menuSettingsRef;
+        if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
+          menuSettingsRef = window.doc(window.db, 'menu_settings', 'shimoakatsuka');
+          console.log('  → 旧パス使用: menu_settings/shimoakatsuka');
+        } else {
+          menuSettingsRef = window.doc(window.db, 'stores', window.currentStoreId, 'menu_settings', 'default');
+          console.log('  → 新パス使用: stores/' + window.currentStoreId + '/menu_settings/default');
+        }
+        
+        const menuSettingsDoc = await window.getDoc(menuSettingsRef);
+        
+        if (!menuSettingsDoc.exists()) {
+          console.error('❌❌❌ メニュー設定が見つかりません！ ❌❌❌');
+          alert('メニュー設定が見つかりません。');
+          return;
+        }
+        
+        const menuSettings = menuSettingsDoc.data();
+        const inventoryData = menuSettings.inventory || {};
+        console.log('📦 在庫データ（全データ）:', JSON.stringify(inventoryData, null, 2));
+        
+        // 在庫が少ない商品をチェック
+        const lowStockItems = [];
+        let checkedCount = 0;
+        
+        for (const [itemName, settings] of Object.entries(alertSettings)) {
+          console.log(`\n--- チェック ${checkedCount + 1} ---`);
+          console.log('商品名:', itemName);
+          console.log('設定:', settings);
+          console.log('設定のタイプ:', typeof settings);
+          
+          if (typeof settings === 'object' && settings !== null) {
+            console.log('  enabled:', settings.enabled);
+            console.log('  threshold:', settings.threshold);
+            
+            if (settings.enabled === true) {
+              checkedCount++;
+              const threshold = settings.threshold || 0;
+              const currentStock = inventoryData[itemName] || 0;
+              
+              console.log(`  ✅ ${itemName}: 現在庫=${currentStock}, 閾値=${threshold}`);
+              console.log(`  比較: ${currentStock} <= ${threshold} = ${currentStock <= threshold}`);
+              
+              if (currentStock <= threshold) {
+                console.log(`  🚨 在庫不足検出！`);
+                lowStockItems.push({
+                  name: itemName,
+                  current: currentStock,
+                  threshold: threshold
+                });
+              }
+            } else {
+              console.log(`  ⏭️ ${itemName}: アラート無効（enabled=${settings.enabled}）`);
+            }
+          } else {
+            console.log(`  ⏭️ ${itemName}: 無効な設定形式`);
+          }
+        }
+        
+        console.log('\n=== チェック結果 ===');
+        console.log('チェックした商品数:', checkedCount);
+        console.log('在庫不足商品数:', lowStockItems.length);
+        console.log('在庫不足商品:', lowStockItems);
+        
+        // アラート表示
+        if (lowStockItems.length > 0) {
+          console.log('🚨🚨🚨 アラート表示します！ 🚨🚨🚨');
+          
+          let alertMessage = '在庫が少なくなっています:\n\n';
+          lowStockItems.forEach(item => {
+            alertMessage += `${item.name}: 残り${item.current}個 (閾値: ${item.threshold}個)\n`;
+          });
+          
+          // まずalertで表示（確実に表示されるため）
+          alert(alertMessage);
+          
+          // カスタムモーダルでも表示
           await showCustomConfirm({
             icon: '⚠️',
             title: '在庫アラート',
@@ -14131,11 +14320,14 @@ ${redSlipCount > 0 ? `
             btnText: 'OK'
           });
         } else {
-          console.log('✅ 在庫は十分です');
+          console.log('✅ 在庫は十分です（または有効なアラート設定なし）');
         }
         
       } catch (error) {
-        console.error('❌ 在庫アラートチェックエラー:', error);
+        console.error('❌❌❌ 在庫アラートチェックエラー ❌❌❌');
+        console.error('エラー詳細:', error);
+        console.error('スタックトレース:', error.stack);
+        alert('在庫アラートチェックでエラーが発生しました: ' + error.message);
       }
     }
     
