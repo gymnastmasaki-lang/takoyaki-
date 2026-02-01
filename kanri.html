@@ -44,6 +44,7 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, deleteDoc, doc, setDoc, query, where, Timestamp, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
         import { getStorage, ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
+        import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
         const firebaseConfig = {
             apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -57,17 +58,19 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const storage = getStorage(app);
+        const auth = getAuth(app);
 
         window.FirebaseReady = true;
         window.db = db;
         window.storage = storage;
+        window.auth = auth;
         window.storageRef = ref;
         window.uploadBytes = uploadBytes;
         window.getDownloadURL = getDownloadURL;
         window.firebaseModules = { 
             collection, getDocs, getDoc, addDoc, onSnapshot, 
             updateDoc, deleteDoc, doc, setDoc, query, where, 
-            Timestamp, orderBy 
+            Timestamp, orderBy, ref, uploadBytes, getDownloadURL, signInAnonymously 
         };
     </script>
 
@@ -368,6 +371,15 @@
             const [isLoading, setIsLoading] = useState(false);
             const [error, setError] = useState(null);
             
+            // 🆕 オープニングページ画像設定用のstate
+            const [showImageSettings, setShowImageSettings] = useState(false);
+            const [currentStoreData, setCurrentStoreData] = useState(null);
+            const [imageUploading, setImageUploading] = useState({
+                main: false,
+                welcome: false,
+                button: false
+            });
+            
             // カスタムアラート表示関数
             const showCustomAlertFunc = (message, title = 'お知らせ', icon = 'ℹ️') => {
                 setAlertMessage(message);
@@ -385,6 +397,86 @@
                     setConfirmResolve(() => resolve);
                     setShowCustomConfirm(true);
                 });
+            };
+
+            // 🆕 オープニングページ画像設定を開く
+            const openImageSettings = async () => {
+                setShowImageSettings(true);
+                // 現在の店舗データを読み込む
+                try {
+                    if (window.currentStoreId) {
+                        const { doc, getDoc } = window.firebaseModules;
+                        const storeRef = doc(window.db, 'stores', window.currentStoreId);
+                        const storeDoc = await getDoc(storeRef);
+                        if (storeDoc.exists()) {
+                            setCurrentStoreData({ id: storeDoc.id, ...storeDoc.data() });
+                        }
+                    }
+                } catch (error) {
+                    console.error('店舗データ読み込みエラー:', error);
+                }
+            };
+            
+            // 🆕 画像アップロード処理
+            const handleImageUpload = async (imageType, file) => {
+                if (!file) return;
+                if (!window.currentStoreId) {
+                    showCustomAlertFunc('この機能は新店舗のみ利用可能です', '⚠️ エラー', '⚠️');
+                    return;
+                }
+                
+                const { ref, uploadBytes, getDownloadURL, updateDoc, doc, signInAnonymously } = window.firebaseModules;
+                
+                setImageUploading(prev => ({ ...prev, [imageType]: true }));
+                
+                try {
+                    // Firebase匿名ログイン（画像アップロード時のみ）
+                    try {
+                        await signInAnonymously(window.auth);
+                        console.log('✅ Firebase匿名ログイン成功');
+                    } catch (authError) {
+                        console.log('匿名ログインスキップ（既にログイン済みの可能性）:', authError.code);
+                    }
+                    
+                    // Firebase Storageにアップロード
+                    const timestamp = Date.now();
+                    const fileName = `${window.currentStoreId}_${imageType}_${timestamp}_${file.name}`;
+                    const storageRef = ref(window.storage, `store-images/${fileName}`);
+                    
+                    await uploadBytes(storageRef, file);
+                    const imageUrl = await getDownloadURL(storageRef);
+                    
+                    // Firestoreに画像URLを保存
+                    const imageField = {
+                        main: 'mainImageUrl',
+                        button: 'buttonImageUrl',
+                        welcome: 'welcomeImageUrl'
+                    }[imageType];
+                    
+                    await updateDoc(doc(window.db, 'stores', window.currentStoreId), {
+                        [imageField]: imageUrl
+                    });
+                    
+                    const imageNames = {
+                        main: '看板画像',
+                        button: 'ボタン画像',
+                        welcome: 'ヘッダ下画像'
+                    };
+                    
+                    showCustomAlertFunc(`${imageNames[imageType]}をアップロードしました`, '✅ 完了', '✅');
+                    
+                    // 店舗情報を更新
+                    setCurrentStoreData(prev => ({
+                        ...prev,
+                        [imageField]: imageUrl
+                    }));
+                    
+                } catch (error) {
+                    console.error('画像アップロードエラー:', error);
+                    showCustomAlertFunc('画像のアップロードに失敗しました: ' + error.message, '❌ エラー', '❌');
+                } finally {
+                    setImageUploading(prev => ({ ...prev, [imageType]: false }));
+                }
             };
 
             // 時刻を15分単位に丸める関数
@@ -3593,6 +3685,119 @@
                 </div>
             );
 
+            // 🆕 画像設定モーダル
+            const ImageSettingsModal = () => showImageSettings && currentStoreData && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl my-8">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-6">
+                            📸 オープニングページ画像設定
+                        </h2>
+                        <p className="text-sm text-gray-600 mb-6">
+                            index.htmlで表示される画像をアップロードして変更できます
+                        </p>
+                        
+                        <div className="space-y-6">
+                            {/* 看板画像 */}
+                            <div className="border-2 border-gray-200 rounded-lg p-4">
+                                <h3 className="font-bold text-gray-700 mb-2">📸 看板画像</h3>
+                                <p className="text-sm text-gray-500 mb-3">推奨サイズ: 600×300px（index.html上部）</p>
+                                
+                                {currentStoreData.mainImageUrl && (
+                                    <img 
+                                        src={currentStoreData.mainImageUrl} 
+                                        alt="看板画像プレビュー" 
+                                        className="w-full max-w-md mb-3 rounded-lg border"
+                                    />
+                                )}
+                                
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                        const file = e.target.files[0];
+                                        if (file) handleImageUpload('main', file);
+                                    }}
+                                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                                    disabled={imageUploading.main}
+                                />
+                                {imageUploading.main && (
+                                    <p className="text-blue-600 mt-2">⏳ アップロード中...</p>
+                                )}
+                            </div>
+                            
+                            {/* ヘッダ下画像 */}
+                            <div className="border-2 border-gray-200 rounded-lg p-4">
+                                <h3 className="font-bold text-gray-700 mb-2">👋 ヘッダ下画像</h3>
+                                <p className="text-sm text-gray-500 mb-3">推奨サイズ: 600×204px（index.html）</p>
+                                
+                                {currentStoreData.welcomeImageUrl && (
+                                    <img 
+                                        src={currentStoreData.welcomeImageUrl} 
+                                        alt="ヘッダ下画像プレビュー" 
+                                        className="w-full max-w-md mb-3 rounded-lg border"
+                                    />
+                                )}
+                                
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                        const file = e.target.files[0];
+                                        if (file) handleImageUpload('welcome', file);
+                                    }}
+                                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+                                    disabled={imageUploading.welcome}
+                                />
+                                {imageUploading.welcome && (
+                                    <p className="text-green-600 mt-2">⏳ アップロード中...</p>
+                                )}
+                            </div>
+                            
+                            {/* 注文開始ボタン画像 */}
+                            <div className="border-2 border-gray-200 rounded-lg p-4">
+                                <h3 className="font-bold text-gray-700 mb-2">🔘 注文開始ボタン画像</h3>
+                                <p className="text-sm text-gray-500 mb-3">推奨サイズ: 250×80px（index.html）</p>
+                                
+                                {currentStoreData.buttonImageUrl && (
+                                    <img 
+                                        src={currentStoreData.buttonImageUrl} 
+                                        alt="ボタン画像プレビュー" 
+                                        className="mb-3 rounded-lg border"
+                                        style={{maxWidth: '250px'}}
+                                    />
+                                )}
+                                
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                        const file = e.target.files[0];
+                                        if (file) handleImageUpload('button', file);
+                                    }}
+                                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+                                    disabled={imageUploading.button}
+                                />
+                                {imageUploading.button && (
+                                    <p className="text-purple-600 mt-2">⏳ アップロード中...</p>
+                                )}
+                            </div>
+                        </div>
+                        
+                        <div className="mt-6 flex justify-end">
+                            <button
+                                onClick={() => {
+                                    setShowImageSettings(false);
+                                    setCurrentStoreData(null);
+                                }}
+                                className="bg-gray-300 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-400 transition-all"
+                            >
+                                閉じる
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+
             // ログイン画面
             if (!isAdminAuthenticated) {
                 return (
@@ -3733,6 +3938,24 @@
                                 </a>
                             </div>
                         </div>
+
+                        {/* 🆕 オープニングページ画像設定 */}
+                        {window.currentStoreId && (
+                            <div className="bg-gradient-to-r from-pink-500 to-rose-500 rounded-lg shadow-lg p-6 mb-6 text-white">
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <h2 className="text-2xl font-bold mb-2">📸 オープニングページ画像設定</h2>
+                                        <p className="text-sm opacity-90">index.htmlで表示される画像をカスタマイズ</p>
+                                    </div>
+                                    <button
+                                        onClick={openImageSettings}
+                                        className="px-6 py-3 bg-white text-pink-600 rounded-lg hover:bg-gray-100 font-bold shadow-lg transition-all hover:scale-105"
+                                    >
+                                        画像設定を開く →
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         {/* テーブル設定 */}
                         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
@@ -6462,6 +6685,7 @@
                     
                     <CustomAlert />
                     <CustomConfirm />
+                    <ImageSettingsModal />
                 </div>
             );
         };
