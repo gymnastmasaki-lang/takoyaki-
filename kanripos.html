@@ -9,6 +9,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     <style>
         @keyframes fadeIn {
             from { opacity: 0; }
@@ -177,6 +178,13 @@
                 welcome: false,
                 header: false
             });
+            
+            // 🆕 日計表出力用のstate
+            const [showDailyReportModal, setShowDailyReportModal] = useState(false);
+            const [selectedStore, setSelectedStore] = useState(null);
+            const [reportYear, setReportYear] = useState(new Date().getFullYear());
+            const [reportMonth, setReportMonth] = useState(new Date().getMonth() + 1);
+            const [reportDay, setReportDay] = useState(new Date().getDate());
             
             // カスタムアラート関数
             const showAlert = (type, title, message) => {
@@ -440,6 +448,130 @@
                 }
             };
             
+            // 日計表モーダルを開く
+            const openDailyReportModal = (store) => {
+                setSelectedStore(store);
+                const now = new Date();
+                setReportYear(now.getFullYear());
+                setReportMonth(now.getMonth() + 1);
+                setReportDay(now.getDate());
+                setShowDailyReportModal(true);
+            };
+            
+            // 日計表モーダルを閉じる
+            const closeDailyReportModal = () => {
+                setShowDailyReportModal(false);
+                setSelectedStore(null);
+            };
+            
+            // 日計表を生成
+            const generateDailyReport = async () => {
+                if (!selectedStore) return;
+                
+                try {
+                    showAlert('info', '処理中', '日計表を生成しています...');
+                    
+                    const dateStr = `${reportYear}-${String(reportMonth).padStart(2, '0')}-${String(reportDay).padStart(2, '0')}`;
+                    
+                    // 売上データを取得
+                    const { doc, getDoc, collection, getDocs } = window.firebaseModules;
+                    const salesRef = doc(window.db, 'stores', selectedStore.id, 'dailySales', dateStr);
+                    const salesDoc = await getDoc(salesRef);
+                    
+                    let totalSales = 0;
+                    let cashSales = 0;
+                    let creditSales = 0;
+                    let emoneSales = 0;
+                    let customerCount = 0;
+                    
+                    if (salesDoc.exists()) {
+                        const data = salesDoc.data();
+                        totalSales = data.totalSales || 0;
+                        cashSales = data.cashSales || 0;
+                        creditSales = data.creditSales || 0;
+                        emoneSales = data.emoneSales || 0;
+                        customerCount = data.customerCount || 0;
+                    }
+                    
+                    // 支出データを取得
+                    const expenseRef = doc(window.db, 'stores', selectedStore.id, 'expenses', dateStr);
+                    const expenseDoc = await getDoc(expenseRef);
+                    let totalExpense = 0;
+                    
+                    if (expenseDoc.exists()) {
+                        totalExpense = expenseDoc.data().total || 0;
+                    }
+                    
+                    // 人件費を取得
+                    const attendanceRef = collection(window.db, 'stores', selectedStore.id, 'attendance');
+                    const attendanceSnapshot = await getDocs(attendanceRef);
+                    let totalLaborCost = 0;
+                    
+                    attendanceSnapshot.forEach(doc => {
+                        const data = doc.data();
+                        if (data.date === dateStr && data.totalWage) {
+                            totalLaborCost += data.totalWage;
+                        }
+                    });
+                    
+                    // Excelデータ作成
+                    const excelData = [];
+                    
+                    // ヘッダー
+                    excelData.push([selectedStore.storeName, '', '']);
+                    excelData.push(['日計表', '', '']);
+                    excelData.push([`${reportYear}年${reportMonth}月${reportDay}日`, '', '']);
+                    excelData.push(['', '', '']);
+                    
+                    // 売上データ
+                    excelData.push(['【売上】', '', '']);
+                    excelData.push(['総売上', totalSales, '円']);
+                    excelData.push(['　現金', cashSales, '円']);
+                    excelData.push(['　カード', creditSales, '円']);
+                    excelData.push(['　電子マネー', emoneSales, '円']);
+                    excelData.push(['客数', customerCount, '件']);
+                    excelData.push(['', '', '']);
+                    
+                    // 支出データ
+                    excelData.push(['【支出】', '', '']);
+                    excelData.push(['支出合計', totalExpense, '円']);
+                    excelData.push(['', '', '']);
+                    
+                    // 人件費
+                    excelData.push(['【人件費】', '', '']);
+                    excelData.push(['人件費合計', Math.round(totalLaborCost), '円']);
+                    excelData.push(['', '', '']);
+                    
+                    // 純利益
+                    const netProfit = totalSales - totalExpense - totalLaborCost;
+                    excelData.push(['【純利益】', '', '']);
+                    excelData.push(['売上 - 支出 - 人件費', Math.round(netProfit), '円']);
+                    
+                    // Excelファイル作成
+                    const wb = XLSX.utils.book_new();
+                    const ws = XLSX.utils.aoa_to_sheet(excelData);
+                    
+                    // 列幅設定
+                    ws['!cols'] = [
+                        { wch: 20 },
+                        { wch: 15 },
+                        { wch: 10 }
+                    ];
+                    
+                    XLSX.utils.book_append_sheet(wb, ws, '日計表');
+                    
+                    const fileName = `${selectedStore.storeName}_日計表_${dateStr}.xlsx`;
+                    XLSX.writeFile(wb, fileName);
+                    
+                    showAlert('success', '完了', `日計表を出力しました\n${fileName}`);
+                    closeDailyReportModal();
+                    
+                } catch (error) {
+                    console.error('日計表生成エラー:', error);
+                    showAlert('error', 'エラー', '日計表の生成に失敗しました: ' + error.message);
+                }
+            };
+            
             // 🆕 画像管理モーダルを開く
             const openImageManager = (store) => {
                 setCurrentManagingStore(store);
@@ -614,6 +746,15 @@
                                             </button>
                                         </div>
                                         <p className="font-mono font-bold text-gray-800 break-all">{store.storePassword}</p>
+                                    </div>
+
+                                    <div className="flex gap-2 mb-2">
+                                        <button
+                                            onClick={() => openDailyReportModal(store)}
+                                            className="flex-1 bg-gradient-to-r from-green-500 to-green-600 text-white py-2 rounded-lg font-bold hover:opacity-90 transition-all"
+                                        >
+                                            📊 日計表
+                                        </button>
                                     </div>
 
                                     <div className="flex gap-2">
@@ -1015,6 +1156,79 @@
                         title={confirmModal.title}
                         message={confirmModal.message}
                     />
+                    
+                    {/* 日計表出力モーダル */}
+                    {showDailyReportModal && selectedStore && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+                                <h2 className="text-2xl font-bold text-gray-800 mb-6">📊 日計表出力</h2>
+                                
+                                <div className="mb-6">
+                                    <p className="text-gray-700 mb-4">
+                                        <span className="font-bold text-lg">{selectedStore.storeName}</span>
+                                    </p>
+                                    <p className="text-sm text-gray-600 mb-4">出力する日付を選択してください</p>
+                                    
+                                    <div className="grid grid-cols-3 gap-3">
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-2">年</label>
+                                            <select
+                                                value={reportYear}
+                                                onChange={(e) => setReportYear(parseInt(e.target.value))}
+                                                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                                            >
+                                                {[...Array(5)].map((_, i) => {
+                                                    const year = new Date().getFullYear() - i;
+                                                    return <option key={year} value={year}>{year}年</option>;
+                                                })}
+                                            </select>
+                                        </div>
+                                        
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-2">月</label>
+                                            <select
+                                                value={reportMonth}
+                                                onChange={(e) => setReportMonth(parseInt(e.target.value))}
+                                                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                                            >
+                                                {[...Array(12)].map((_, i) => (
+                                                    <option key={i + 1} value={i + 1}>{i + 1}月</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-2">日</label>
+                                            <select
+                                                value={reportDay}
+                                                onChange={(e) => setReportDay(parseInt(e.target.value))}
+                                                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                                            >
+                                                {[...Array(31)].map((_, i) => (
+                                                    <option key={i + 1} value={i + 1}>{i + 1}日</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={closeDailyReportModal}
+                                        className="flex-1 bg-gray-300 text-gray-700 py-3 rounded-lg font-bold hover:bg-gray-400 transition-all"
+                                    >
+                                        キャンセル
+                                    </button>
+                                    <button
+                                        onClick={generateDailyReport}
+                                        className="flex-1 bg-gradient-to-r from-green-500 to-green-600 text-white py-3 rounded-lg font-bold hover:opacity-90 transition-all"
+                                    >
+                                        出力
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     
                     {/* 🆕 画像管理モーダル */}
                     {showImageManager && currentManagingStore && (
