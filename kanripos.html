@@ -464,103 +464,236 @@
                 setSelectedStore(null);
             };
             
-            // 日計表を生成
+            // 日計表を生成（pos.htmlと同じ形式）
             const generateDailyReport = async () => {
                 if (!selectedStore) return;
                 
                 try {
                     showAlert('info', '処理中', '日計表を生成しています...');
                     
-                    const dateStr = `${reportYear}-${String(reportMonth).padStart(2, '0')}-${String(reportDay).padStart(2, '0')}`;
+                    const year = reportYear;
+                    const month = reportMonth;
+                    const endDay = reportDay; // 選択した日まで出力
                     
-                    // 売上データを取得
-                    const { doc, getDoc, collection, getDocs } = window.firebaseModules;
-                    const salesRef = doc(window.db, 'stores', selectedStore.id, 'dailySales', dateStr);
-                    const salesDoc = await getDoc(salesRef);
+                    console.log(`📊 ${year}年${month}月1日〜${endDay}日の日計表を生成中...`);
                     
-                    let totalSales = 0;
-                    let cashSales = 0;
-                    let creditSales = 0;
-                    let emoneSales = 0;
-                    let customerCount = 0;
+                    // Firestoreから当月のデータを取得
+                    const { collection, getDocs, getDoc, doc } = window.firebaseModules;
+                    const dailySalesRef = collection(window.db, 'stores', selectedStore.id, 'dailySales');
+                    const dailySalesSnapshot = await getDocs(dailySalesRef);
                     
-                    if (salesDoc.exists()) {
-                        const data = salesDoc.data();
-                        totalSales = data.totalSales || 0;
-                        cashSales = data.cashSales || 0;
-                        creditSales = data.creditSales || 0;
-                        emoneSales = data.emoneSales || 0;
-                        customerCount = data.customerCount || 0;
-                    }
-                    
-                    // 支出データを取得
-                    const expenseRef = doc(window.db, 'stores', selectedStore.id, 'expenses', dateStr);
-                    const expenseDoc = await getDoc(expenseRef);
-                    let totalExpense = 0;
-                    
-                    if (expenseDoc.exists()) {
-                        totalExpense = expenseDoc.data().total || 0;
-                    }
-                    
-                    // 人件費を取得
-                    const attendanceRef = collection(window.db, 'stores', selectedStore.id, 'attendance');
-                    const attendanceSnapshot = await getDocs(attendanceRef);
-                    let totalLaborCost = 0;
-                    
-                    attendanceSnapshot.forEach(doc => {
-                        const data = doc.data();
-                        if (data.date === dateStr && data.totalWage) {
-                            totalLaborCost += data.totalWage;
+                    // 日付ごとにデータを整理
+                    const salesByDate = {};
+                    dailySalesSnapshot.forEach(docData => {
+                        const data = docData.data();
+                        const date = data.date;
+                        
+                        // 当月のデータのみ
+                        if (date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
+                            salesByDate[date] = data;
                         }
                     });
                     
-                    // Excelデータ作成
+                    console.log('取得したデータ:', salesByDate);
+                    
+                    // Excelデータを作成
                     const excelData = [];
                     
-                    // ヘッダー
-                    excelData.push([selectedStore.storeName, '', '']);
-                    excelData.push(['日計表', '', '']);
-                    excelData.push([`${reportYear}年${reportMonth}月${reportDay}日`, '', '']);
-                    excelData.push(['', '', '']);
+                    // ヘッダー行1（タイトル）
+                    excelData.push(['', '売上日計表', '', '', '', '', '', '', '', '', selectedStore.storeName, '', '', '']);
+                    excelData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+                    excelData.push(['', `${year}-${String(month).padStart(2, '0')}-01`, '', '', '', '', '', '', '', '', '', '', '', '']);
+                    excelData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
                     
-                    // 売上データ
-                    excelData.push(['【売上】', '', '']);
-                    excelData.push(['総売上', totalSales, '円']);
-                    excelData.push(['　現金', cashSales, '円']);
-                    excelData.push(['　カード', creditSales, '円']);
-                    excelData.push(['　電子マネー', emoneSales, '円']);
-                    excelData.push(['客数', customerCount, '件']);
-                    excelData.push(['', '', '']);
+                    // ヘッダー行2（列名）
+                    excelData.push(['', '日', '曜日', '伝票数', '現金', 'カード', '電子マネー', '売上合計', '人件費', '人件費%', '支払い', '純売上', 'TOTAL粗利', '天気']);
                     
-                    // 支出データ
-                    excelData.push(['【支出】', '', '']);
-                    excelData.push(['支出合計', totalExpense, '円']);
-                    excelData.push(['', '', '']);
+                    // 曜日配列
+                    const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
                     
-                    // 人件費
-                    excelData.push(['【人件費】', '', '']);
-                    excelData.push(['人件費合計', Math.round(totalLaborCost), '円']);
-                    excelData.push(['', '', '']);
+                    // 累計粗利
+                    let totalGrossProfit = 0;
                     
-                    // 純利益
-                    const netProfit = totalSales - totalExpense - totalLaborCost;
-                    excelData.push(['【純利益】', '', '']);
-                    excelData.push(['売上 - 支出 - 人件費', Math.round(netProfit), '円']);
+                    // 合計用の変数
+                    let sumCustomerCount = 0;
+                    let sumCashSales = 0;
+                    let sumCreditSales = 0;
+                    let sumEmoneSales = 0;
+                    let sumTotalSales = 0;
+                    let sumLaborCost = 0;
+                    let sumPayment = 0;
+                    let sumNetSales = 0;
                     
-                    // Excelファイル作成
+                    // 各日のデータ（1日から選択した日まで）
+                    for (let day = 1; day <= endDay; day++) {
+                        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        const date = new Date(year, month - 1, day);
+                        const weekDay = weekDays[date.getDay()];
+                        
+                        const data = salesByDate[dateStr];
+                        
+                        if (data) {
+                            // データがある場合
+                            const customerCount = data.customerCount || 0;
+                            const cashSales = data.cashSales || 0;
+                            const creditSales = data.creditSales || 0;
+                            const emoneSales = data.emoneSales || 0;
+                            const totalSales = cashSales + creditSales + emoneSales;
+                            
+                            // 人件費をattendanceから取得
+                            let laborCost = 0;
+                            try {
+                                const attendanceRef = collection(window.db, 'stores', selectedStore.id, 'attendance');
+                                const attendanceSnapshot = await getDocs(attendanceRef);
+                                attendanceSnapshot.forEach(docData => {
+                                    const attData = docData.data();
+                                    if (attData.date === dateStr && attData.totalWage) {
+                                        laborCost += attData.totalWage;
+                                    }
+                                });
+                            } catch (e) {
+                                console.error('人件費取得エラー:', e);
+                            }
+                            
+                            const laborCostPercent = totalSales > 0 ? Math.round(laborCost / totalSales * 100) : 0;
+                            
+                            // 支出をexpensesから取得
+                            let payment = 0;
+                            try {
+                                const expenseRef = doc(window.db, 'stores', selectedStore.id, 'expenses', dateStr);
+                                const expenseDoc = await getDoc(expenseRef);
+                                if (expenseDoc.exists()) {
+                                    payment = expenseDoc.data().total || 0;
+                                }
+                            } catch (e) {
+                                console.error('支出取得エラー:', e);
+                            }
+                            
+                            // 純売上
+                            const netSales = totalSales - laborCost - payment;
+                            
+                            // 累計粗利
+                            totalGrossProfit += netSales;
+                            
+                            // 合計に加算
+                            sumCustomerCount += customerCount;
+                            sumCashSales += cashSales;
+                            sumCreditSales += creditSales;
+                            sumEmoneSales += emoneSales;
+                            sumTotalSales += totalSales;
+                            sumLaborCost += laborCost;
+                            sumPayment += payment;
+                            sumNetSales += netSales;
+                            
+                            excelData.push([
+                                '',
+                                day,
+                                weekDay,
+                                customerCount,
+                                cashSales,
+                                creditSales,
+                                emoneSales,
+                                totalSales,
+                                Math.round(laborCost),
+                                laborCostPercent + '%',
+                                payment,
+                                Math.round(netSales),
+                                Math.round(totalGrossProfit),
+                                ''
+                            ]);
+                        } else {
+                            // データがない場合（空行）
+                            excelData.push([
+                                '',
+                                day,
+                                weekDay,
+                                '', '', '', '', '', '', '', '', '', '', ''
+                            ]);
+                        }
+                    }
+                    
+                    // 合計行を追加
+                    const avgLaborCostPercent = sumTotalSales > 0 ? Math.round(sumLaborCost / sumTotalSales * 100) : 0;
+                    excelData.push([
+                        '',
+                        '',
+                        '合計',
+                        sumCustomerCount,
+                        sumCashSales,
+                        sumCreditSales,
+                        sumEmoneSales,
+                        sumTotalSales,
+                        Math.round(sumLaborCost),
+                        avgLaborCostPercent + '%',
+                        sumPayment,
+                        Math.round(sumNetSales),
+                        '',
+                        ''
+                    ]);
+                    
+                    console.log('Excelデータ作成完了:', excelData.length, '行');
+                    
+                    // SheetJSでExcelファイルを生成
                     const wb = XLSX.utils.book_new();
                     const ws = XLSX.utils.aoa_to_sheet(excelData);
                     
-                    // 列幅設定
+                    // 列幅を設定
                     ws['!cols'] = [
-                        { wch: 20 },
-                        { wch: 15 },
-                        { wch: 10 }
+                        { wch: 3 },  // A列
+                        { wch: 12 }, // B列（日）
+                        { wch: 5 },  // C列（曜日）
+                        { wch: 8 },  // D列（伝票数）
+                        { wch: 10 }, // E列（現金）
+                        { wch: 10 }, // F列（カード）
+                        { wch: 12 }, // G列（電子マネー）
+                        { wch: 12 }, // H列（売上合計）
+                        { wch: 10 }, // I列（人件費）
+                        { wch: 8 },  // J列（人件費%）
+                        { wch: 10 }, // K列（支払い）
+                        { wch: 10 }, // L列（純売上）
+                        { wch: 12 }, // M列（TOTAL粗利）
+                        { wch: 8 }   // N列（天気）
                     ];
                     
-                    XLSX.utils.book_append_sheet(wb, ws, '日計表');
+                    // スタイル設定
+                    const range = XLSX.utils.decode_range(ws['!ref']);
+                    for (let R = range.s.r; R <= range.e.r; ++R) {
+                        for (let C = range.s.c; C <= range.e.c; ++C) {
+                            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                            if (!ws[cellAddress]) continue;
+                            
+                            // セルのスタイル初期化
+                            if (!ws[cellAddress].s) ws[cellAddress].s = {};
+                            
+                            // ヘッダー行のスタイル（1行目と5行目）
+                            if (R === 0 || R === 4) {
+                                ws[cellAddress].s.font = { bold: true, sz: 12 };
+                                ws[cellAddress].s.fill = {
+                                    patternType: 'solid',
+                                    fgColor: { rgb: 'D3D3D3' }
+                                };
+                                ws[cellAddress].s.alignment = { horizontal: 'center', vertical: 'center' };
+                            }
+                            
+                            // 数値列は右寄せ
+                            if (C >= 3 && C <= 12 && R > 4) {
+                                ws[cellAddress].s.alignment = { horizontal: 'right' };
+                            }
+                            
+                            // 合計行のスタイル
+                            if (excelData[R] && excelData[R][2] === '合計') {
+                                ws[cellAddress].s.fill = {
+                                    patternType: 'solid',
+                                    fgColor: { rgb: 'FFFF00' }
+                                };
+                                ws[cellAddress].s.font = { bold: true };
+                            }
+                        }
+                    }
                     
-                    const fileName = `${selectedStore.storeName}_日計表_${dateStr}.xlsx`;
+                    XLSX.utils.book_append_sheet(wb, ws, '売上日計表');
+                    
+                    const fileName = `${selectedStore.storeName}_日計表_${year}年${month}月1日〜${endDay}日.xlsx`;
                     XLSX.writeFile(wb, fileName);
                     
                     showAlert('success', '完了', `日計表を出力しました\n${fileName}`);
@@ -1167,7 +1300,8 @@
                                     <p className="text-gray-700 mb-4">
                                         <span className="font-bold text-lg">{selectedStore.storeName}</span>
                                     </p>
-                                    <p className="text-sm text-gray-600 mb-4">出力する日付を選択してください</p>
+                                    <p className="text-sm text-gray-600 mb-2">出力する月と最終日を選択してください</p>
+                                    <p className="text-xs text-blue-600 mb-4">※ 1日から選択した日までのデータを出力します</p>
                                     
                                     <div className="grid grid-cols-3 gap-3">
                                         <div>
