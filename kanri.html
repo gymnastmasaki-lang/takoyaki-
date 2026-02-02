@@ -2771,6 +2771,252 @@
                 }
             };
 
+            // 🆕 弥生会計等向けデータ連携CSV出力機能
+            const exportAccountingDataCSV = async () => {
+                try {
+                    const { collection, getDocs, query, where, orderBy } = window.firebaseModules;
+                    
+                    // 期間設定（1月1日〜12月31日）
+                    const currentYear = new Date().getFullYear();
+                    const startDate = `${currentYear}-01-01`;
+                    const endDate = `${currentYear}-12-31`;
+                    
+                    // ==================== 1. 売上データ ====================
+                    let totalSales = 0;
+                    let totalCashSales = 0;
+                    let totalCreditSales = 0;
+                    let totalEmoneSales = 0;
+                    let totalCustomerCount = 0;
+                    let totalTax8 = 0;
+                    let totalTax10 = 0;
+                    
+                    const dailySalesRef = window.getStoreCollection('dailySales');
+                    const salesSnapshot = await getDocs(dailySalesRef);
+                    
+                    salesSnapshot.forEach(doc => {
+                        const dateKey = doc.id;
+                        if (dateKey >= startDate && dateKey <= endDate) {
+                            const data = doc.data();
+                            totalSales += data.totalSales || 0;
+                            totalCashSales += data.cashSales || 0;
+                            totalCreditSales += data.creditSales || 0;
+                            totalEmoneSales += data.emoneSales || 0;
+                            totalCustomerCount += data.customerCount || 0;
+                            totalTax8 += data.tax8Total || 0;
+                            totalTax10 += data.tax10Total || 0;
+                        }
+                    });
+                    
+                    // ==================== 2. 支出データ（人件費以外） ====================
+                    // 注: 現在のシステムには支出データが明示的にないため、人件費のみを計上
+                    let totalExpenses = 0;
+                    
+                    // ==================== 3. 人件費データ ====================
+                    let totalLaborCost = 0;
+                    const laborCostByEmployee = {};
+                    
+                    // 全従業員の給与を集計
+                    for (const emp of employees) {
+                        const employeeId = emp.id;
+                        let employeeTotalCost = 0;
+                        
+                        // 出勤記録から給与計算
+                        const attendanceRef = window.getStoreCollection('attendance');
+                        const attSnapshot = await getDocs(attendanceRef);
+                        
+                        attSnapshot.forEach(doc => {
+                            const attData = doc.data();
+                            const docId = doc.id;
+                            
+                            // docIdから従業員IDと日付を抽出
+                            let attEmployeeId, dateKey;
+                            const parts = docId.split('_');
+                            if (parts.length >= 2) {
+                                attEmployeeId = parts[0];
+                                dateKey = parts.slice(1).join('-');
+                            } else if (attData.employeeId && attData.date) {
+                                attEmployeeId = attData.employeeId;
+                                dateKey = attData.date;
+                            }
+                            
+                            // 該当従業員かつ期間内かチェック
+                            if (attEmployeeId === employeeId && dateKey >= startDate && dateKey <= endDate) {
+                                // 勤務時間を計算
+                                if (attData.checkIn && attData.checkOut) {
+                                    const checkIn = attData.checkIn.toDate ? attData.checkIn.toDate() : new Date(attData.checkIn);
+                                    const checkOut = attData.checkOut.toDate ? attData.checkOut.toDate() : new Date(attData.checkOut);
+                                    const breakMinutes = attData.breakTime || 0;
+                                    
+                                    const workMilliseconds = checkOut - checkIn;
+                                    const workMinutes = Math.floor(workMilliseconds / (1000 * 60));
+                                    const netWorkMinutes = Math.max(0, workMinutes - breakMinutes);
+                                    const workHours = netWorkMinutes / 60;
+                                    
+                                    // 時給を取得（記録の時給 or 従業員のデフォルト時給）
+                                    const hourlyRate = attData.hourlyRate || emp.hourlyRate || 0;
+                                    const dailyPay = Math.floor(workHours * hourlyRate);
+                                    const transportAllowance = attData.transportAllowance || emp.transportAllowance || 0;
+                                    
+                                    employeeTotalCost += dailyPay + transportAllowance;
+                                }
+                            }
+                        });
+                        
+                        // 固定給の場合は月額×稼働月数で計算
+                        if (emp.salaryType === '固定給' && emp.monthlySalary) {
+                            const monthsInPeriod = 12; // 1月〜12月
+                            employeeTotalCost = emp.monthlySalary * monthsInPeriod;
+                        }
+                        
+                        laborCostByEmployee[emp.name] = employeeTotalCost;
+                        totalLaborCost += employeeTotalCost;
+                    }
+                    
+                    // ==================== CSV生成 ====================
+                    const timestamp = new Date().toISOString().split('T')[0];
+                    
+                    // === 1. 売上サマリーCSV ===
+                    let salesCSV = '\uFEFF';
+                    salesCSV += '項目,金額\n';
+                    salesCSV += `期間,${startDate}〜${endDate}\n`;
+                    salesCSV += `総売上,${totalSales}\n`;
+                    salesCSV += `現金売上,${totalCashSales}\n`;
+                    salesCSV += `クレジットカード売上,${totalCreditSales}\n`;
+                    salesCSV += `電子マネー売上,${totalEmoneSales}\n`;
+                    salesCSV += `客数,${totalCustomerCount}\n`;
+                    salesCSV += `8%対象税額,${totalTax8}\n`;
+                    salesCSV += `10%対象税額,${totalTax10}\n`;
+                    
+                    const salesBlob = new Blob([salesCSV], { type: 'text/csv;charset=utf-8;' });
+                    const salesLink = document.createElement('a');
+                    salesLink.href = URL.createObjectURL(salesBlob);
+                    salesLink.download = `売上データ_${timestamp}.csv`;
+                    salesLink.click();
+                    
+                    // === 2. 人件費CSV ===
+                    let laborCSV = '\uFEFF';
+                    laborCSV += '従業員名,人件費合計\n';
+                    employees.forEach(emp => {
+                        const cost = laborCostByEmployee[emp.name] || 0;
+                        laborCSV += `${emp.name},${cost}\n`;
+                    });
+                    laborCSV += `合計,${totalLaborCost}\n`;
+                    
+                    const laborBlob = new Blob([laborCSV], { type: 'text/csv;charset=utf-8;' });
+                    const laborLink = document.createElement('a');
+                    laborLink.href = URL.createObjectURL(laborBlob);
+                    laborLink.download = `人件費データ_${timestamp}.csv`;
+                    laborLink.click();
+                    
+                    // === 3. 従業員マスタCSV（弥生会計用） ===
+                    let employeeCSV = '\uFEFF';
+                    employeeCSV += '従業員コード,従業員名,区分,時給,月給,交通費,都道府県,年齢\n';
+                    employees.forEach(emp => {
+                        const empId = emp.id || '';
+                        const name = emp.name || '';
+                        const salaryType = emp.salaryType || '時間給';
+                        const hourlyRate = emp.hourlyRate || 0;
+                        const monthlySalary = emp.monthlySalary || 0;
+                        const transport = emp.transportAllowance || 0;
+                        const prefecture = emp.prefecture || '';
+                        const age = emp.age || '';
+                        
+                        employeeCSV += `${empId},${name},${salaryType},${hourlyRate},${monthlySalary},${transport},${prefecture},${age}\n`;
+                    });
+                    
+                    const employeeBlob = new Blob([employeeCSV], { type: 'text/csv;charset=utf-8;' });
+                    const employeeLink = document.createElement('a');
+                    employeeLink.href = URL.createObjectURL(employeeBlob);
+                    employeeLink.download = `従業員マスタ_${timestamp}.csv`;
+                    employeeLink.click();
+                    
+                    // === 4. 弥生会計向け仕訳帳CSV（拡張版） ===
+                    let journalCSV = '\uFEFF';
+                    journalCSV += '伝票No,日付,借方科目,借方補助,借方金額,借方税区分,貸方科目,貸方補助,貸方金額,貸方税区分,摘要\n';
+                    
+                    let slipNo = 1;
+                    
+                    // 売上仕訳（現金）
+                    journalCSV += `${slipNo++},${endDate},現金,,${totalCashSales},課税売上10%,売上高,,${totalCashSales},課税売上10%,現金売上\n`;
+                    
+                    // 売上仕訳（カード・電子マネー）
+                    if (totalCreditSales > 0 || totalEmoneSales > 0) {
+                        journalCSV += `${slipNo++},${endDate},売掛金,カード・電子マネー,${totalCreditSales + totalEmoneSales},課税売上10%,売上高,,${totalCreditSales + totalEmoneSales},課税売上10%,カード・電子マネー売上\n`;
+                    }
+                    
+                    // 人件費仕訳
+                    journalCSV += `${slipNo++},${endDate},給料手当,,${totalLaborCost},対象外,未払金,給与,${totalLaborCost},対象外,人件費計上\n`;
+                    
+                    // 消費税仕訳
+                    const totalTaxAmount = totalTax8 + totalTax10;
+                    if (totalTaxAmount > 0) {
+                        journalCSV += `${slipNo++},${endDate},仮受消費税,,${totalTaxAmount},対象外,売上高,,${totalTaxAmount},対象外,消費税振替\n`;
+                    }
+                    
+                    const journalBlob = new Blob([journalCSV], { type: 'text/csv;charset=utf-8;' });
+                    const journalLink = document.createElement('a');
+                    journalLink.href = URL.createObjectURL(journalBlob);
+                    journalLink.download = `仕訳帳_${timestamp}.csv`;
+                    journalLink.click();
+                    
+                    // === 5. 日次売上明細CSV（詳細データ） ===
+                    let dailySalesDetailCSV = '\uFEFF';
+                    dailySalesDetailCSV += '日付,総売上,現金売上,クレジット売上,電子マネー売上,客数,8%税額,10%税額\n';
+                    
+                    // 日別データを日付順にソート
+                    const dailyDataArray = [];
+                    salesSnapshot.forEach(doc => {
+                        const dateKey = doc.id;
+                        if (dateKey >= startDate && dateKey <= endDate) {
+                            const data = doc.data();
+                            dailyDataArray.push({
+                                date: dateKey,
+                                totalSales: data.totalSales || 0,
+                                cashSales: data.cashSales || 0,
+                                creditSales: data.creditSales || 0,
+                                emoneSales: data.emoneSales || 0,
+                                customerCount: data.customerCount || 0,
+                                tax8: data.tax8Total || 0,
+                                tax10: data.tax10Total || 0
+                            });
+                        }
+                    });
+                    
+                    dailyDataArray.sort((a, b) => a.date.localeCompare(b.date));
+                    
+                    dailyDataArray.forEach(data => {
+                        dailySalesDetailCSV += `${data.date},${data.totalSales},${data.cashSales},${data.creditSales},${data.emoneSales},${data.customerCount},${data.tax8},${data.tax10}\n`;
+                    });
+                    
+                    const dailySalesDetailBlob = new Blob([dailySalesDetailCSV], { type: 'text/csv;charset=utf-8;' });
+                    const dailySalesDetailLink = document.createElement('a');
+                    dailySalesDetailLink.href = URL.createObjectURL(dailySalesDetailBlob);
+                    dailySalesDetailLink.download = `日次売上明細_${timestamp}.csv`;
+                    dailySalesDetailLink.click();
+                    
+                    // 完了メッセージ
+                    showCustomAlertFunc(
+                        `データ連携CSVを出力しました\n\n` +
+                        `📊 総売上: ¥${totalSales.toLocaleString()}\n` +
+                        `💰 総人件費: ¥${totalLaborCost.toLocaleString()}\n` +
+                        `👥 従業員数: ${employees.length}名\n` +
+                        `📅 期間: ${startDate} ～ ${endDate}\n\n` +
+                        `以下のファイルがダウンロードされました:\n` +
+                        `1. 売上データ（サマリー）\n` +
+                        `2. 日次売上明細（日別データ）\n` +
+                        `3. 人件費データ（従業員別）\n` +
+                        `4. 従業員マスタ\n` +
+                        `5. 仕訳帳（弥生会計用）`,
+                        '✅ データ連携CSV出力完了',
+                        '📥'
+                    );
+                    
+                } catch (e) {
+                    console.error('データ連携CSV出力エラー:', e);
+                    showCustomAlertFunc('エラーが発生しました: ' + e.message, '❌ エラー', '❌');
+                }
+            };
+
             const addEmployee = async (name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches) => {
                 setIsLoading(true);
                 try {
@@ -6507,6 +6753,16 @@
                                     従業員管理
                                 </h2>
                                 <div className="flex gap-2">
+                                    <button
+                                        onClick={exportAccountingDataCSV}
+                                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2"
+                                        title="弥生会計等に読み込むためのCSVを出力"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                                        </svg>
+                                        データ連携CSV出力
+                                    </button>
                                     <button
                                         onClick={() => setShowEmployeeManagement(!showEmployeeManagement)}
                                         className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
