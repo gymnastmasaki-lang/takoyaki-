@@ -458,8 +458,17 @@
     function getApplicableTaxRate(item, tableSettings) {
       // テーブル設定がない、またはtaxRuleが'none'の場合は商品のデフォルト税率を使用
       if (!tableSettings || !tableSettings.taxRule || tableSettings.taxRule === 'none') {
-        console.log(`[税率決定] テーブル設定なし or taxRule=none → デフォルト税率: ${item.taxRate || 10}%`);
-        return item.taxRate || 10;
+        // 商品のtaxRateを優先使用
+        if (item.taxRate !== undefined && item.taxRate !== null) {
+          console.log(`[税率決定] テーブル設定なし → 商品のtaxRate: ${item.taxRate}%`);
+          return item.taxRate;
+        }
+        
+        // taxRateがない場合、foodTypeから推測（食材:8%, 食材以外:10%）
+        const foodType = item.foodType || 'food';
+        const inferredRate = (foodType === 'non-food') ? 10 : 8;
+        console.log(`[税率決定] テーブル設定なし、taxRate未設定 → foodType(${foodType})から推測: ${inferredRate}%`);
+        return inferredRate;
       }
       
       const taxRule = tableSettings.taxRule;
@@ -486,8 +495,14 @@
         
         default:
           // 不明な場合は商品のデフォルト税率
-          console.log(`  → 不明なtaxRule: ${taxRule} → デフォルト税率: ${item.taxRate || 10}%`);
-          return item.taxRate || 10;
+          if (item.taxRate !== undefined && item.taxRate !== null) {
+            console.log(`  → 不明なtaxRule: ${taxRule} → 商品のtaxRate: ${item.taxRate}%`);
+            return item.taxRate;
+          }
+          // foodTypeから推測（食材:8%, 食材以外:10%）
+          const defaultRate = (item.foodType === 'non-food') ? 10 : 8;
+          console.log(`  → 不明なtaxRule: ${taxRule}, taxRate未設定 → foodType(${item.foodType || 'food'})から: ${defaultRate}%`);
+          return defaultRate;
       }
     }
   </script>
@@ -7930,13 +7945,23 @@ ${redSlipCount > 0 ? `
     window.addItemFromIframe = function(item) {
       console.log('🛒 iframeから商品追加:', item);
       
-      // 商品のtaxRateをそのまま使用（包材以外はundefinedの可能性あり）
+      // 商品のtaxRateとfoodTypeを取得
       let taxRate = item.taxRate;
+      let foodType = item.foodType || 'food';  // デフォルトは食材
       
-      // 包材カテゴリの商品は強制的に10%
+      // 包材カテゴリの商品は強制的に10%、食材以外に設定
       if (item.category === '包材') {
         taxRate = 10;
-        console.log('📦 包材カテゴリ: 税率を10%に強制設定');
+        foodType = 'non-food';
+        console.log('📦 包材カテゴリ: 税率を10%、食材以外に強制設定');
+      }
+      
+      // taxRateが未設定の場合、foodTypeに基づいて設定
+      if (taxRate === undefined || taxRate === null) {
+        // 食材以外は10%、食材は8%（ただし即会計では商品のデフォルト税率を使うべき）
+        // ここでは商品データに税率が設定されていない場合のフォールバック
+        taxRate = (foodType === 'non-food') ? 10 : 8;
+        console.log(`⚠️ taxRate未設定 → foodType(${foodType})に基づき${taxRate}%を設定`);
       }
       
       // 🆕 taxTypeの自動判定: menu.htmlから渡されない場合はデフォルト値を設定
@@ -7959,7 +7984,8 @@ ${redSlipCount > 0 ? `
         name: item.name,
         price: item.price,
         category: item.category,  // カテゴリを保存
-        taxRate: taxRate,  // undefinedの場合もそのまま（後でテーブル番号で判定）
+        taxRate: taxRate,  // 確実に設定済み
+        foodType: foodType,  // 🆕 食材区分を保存
         taxType: taxType,  // 🆕 外税/内税タイプ
         toppings: item.toppings || '標準トッピング',
         toppingPrice: item.toppingPrice || 0,
@@ -9550,12 +9576,15 @@ ${redSlipCount > 0 ? `
     // 🔧 旧バージョン: テーブル番号に基づいてデフォルト税率を決定（廃止予定）
     // 新しいロジックでは、getApplicableTaxRate()を使用してテーブル設定とfoodTypeから税率を決定
     function determineDefaultTaxRate(tableNumber) {
-      // テイクアウト、モバイルオーダー、予約テーブル、予約テイクアウト、予約テイクアウト2: 8%
-      // ⚠️ 即会計は10%がデフォルトに変更されました
-      if (tableNumber === 'テイクアウト' || tableNumber === 'モバイルオーダー' || tableNumber === '予約テーブル' || tableNumber === '予約テイクアウト' || tableNumber === '予約テイクアウト2') {
+      // 即会計、テイクアウト、モバイルオーダー、予約テーブル、予約テイクアウト、予約テイクアウト2: 8%
+      if (tableNumber === '即会計' || tableNumber === 'テイクアウト' || tableNumber === 'モバイルオーダー' || tableNumber === '予約テーブル' || tableNumber === '予約テイクアウト' || tableNumber === '予約テイクアウト2') {
         return 8;
       }
-      // 即会計、c1, c2, T-M, T-H、その他すべて: 10%（デフォルト）
+      // c1, c2, T-M, T-H: 10%
+      if (tableNumber === 'c1' || tableNumber === 'c2' || tableNumber === 'T-M' || tableNumber === 'T-H') {
+        return 10;
+      }
+      // それ以外のテーブル: 10%（デフォルト）
       return 10;
     }
     
