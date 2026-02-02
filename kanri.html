@@ -329,7 +329,8 @@
                 note: '',
                 image: '',
                 taxRate: 10,
-                taxType: 'inclusive'  // 'inclusive'(内税) or 'exclusive'(外税)
+                taxType: 'inclusive',  // 'inclusive'(内税) or 'exclusive'(外税)
+                foodType: 'food'  // 'food'(食材) or 'non-food'(食材以外)
             });
             const [editingProductId, setEditingProductId] = useState(null);
             const [productToppingSets, setProductToppingSets] = useState([]);
@@ -1751,7 +1752,8 @@
                     enabled: false,  // このテーブル専用の営業時間設定を使用するか
                     openTime: '11:00',
                     closeTime: '22:00'
-                }
+                },
+                taxRule: 'none'  // 'none', 'takeout', 'dine-in', 'all-10'
             });
 
             // 🆕 テーブル設定保存
@@ -2071,7 +2073,7 @@
             // 🆕 商品登録関数
             const registerProduct = async () => {
                 try {
-                    const { name, price, category, customCategory, note, image, taxRate, taxType } = productForm;
+                    const { name, price, category, customCategory, note, image, taxRate, taxType, foodType } = productForm;
                     
                     if (!name.trim()) {
                         showCustomAlertFunc('商品名を入力してください', '⚠️ 入力エラー', '⚠️');
@@ -2156,6 +2158,7 @@
                         image: image.trim() || '',
                         taxRate: taxRate,
                         taxType: taxType || 'inclusive',  // デフォルトは内税
+                        foodType: foodType || 'food',  // デフォルトは食材
                         order: maxOrder,
                         createdAt: window.firebaseModules.Timestamp.now()
                     };
@@ -2173,7 +2176,8 @@
                         note: '',
                         image: '',
                         taxRate: 10,
-                        taxType: 'inclusive'
+                        taxType: 'inclusive',
+                        foodType: 'food'
                     });
                     setProductToppingSets([]);
                     setShowProductRegistration(false);
@@ -2277,7 +2281,8 @@
                     note: product.note || '',
                     image: product.image || '',
                     taxRate: product.taxRate || 10,
-                    taxType: product.taxType || 'inclusive'  // デフォルトは内税
+                    taxType: product.taxType || 'inclusive',  // デフォルトは内税
+                    foodType: product.foodType || 'food'  // デフォルトは食材
                 });
                 setProductToppingSets(product.toppingSets || []);
                 setShowProductEdit(true);
@@ -2286,7 +2291,7 @@
             // 🆕 商品を更新
             const updateProduct = async () => {
                 try {
-                    const { name, price, category, customCategory, note, image, taxRate, taxType } = productForm;
+                    const { name, price, category, customCategory, note, image, taxRate, taxType, foodType } = productForm;
                     
                     if (!name.trim()) {
                         showCustomAlertFunc('商品名を入力してください', '⚠️ 入力エラー', '⚠️');
@@ -2315,7 +2320,8 @@
                         note: note.trim(),
                         image: image.trim() || '',
                         taxRate: taxRate,
-                        taxType: taxType || 'inclusive'  // デフォルトは内税
+                        taxType: taxType || 'inclusive',  // デフォルトは内税
+                        foodType: foodType || 'food'  // デフォルトは食材
                     };
                     
                     await window.firebaseModules.updateDoc(
@@ -2334,7 +2340,8 @@
                         note: '',
                         image: '',
                         taxRate: 10,
-                        taxType: 'inclusive'
+                        taxType: 'inclusive',
+                        foodType: 'food'
                     });
                     setProductToppingSets([]);
                     setEditingProductId(null);
@@ -5135,6 +5142,37 @@
                                                 )}
                                             </div>
 
+                                            {/* 🆕 消費税ルール設定 */}
+                                            <div className="border border-gray-300 rounded-lg p-4">
+                                                <h4 className="font-bold text-lg mb-3">💴 消費税ルール</h4>
+                                                <div className="space-y-3">
+                                                    <select
+                                                        value={tableSettings[selectedTable]?.taxRule || 'none'}
+                                                        onChange={(e) => {
+                                                            setTableSettings(prev => ({
+                                                                ...prev,
+                                                                [selectedTable]: {
+                                                                    ...(prev[selectedTable] || getDefaultTableSettings()),
+                                                                    taxRule: e.target.value
+                                                                }
+                                                            }));
+                                                        }}
+                                                        className="w-full p-3 border-2 rounded-lg text-base"
+                                                    >
+                                                        <option value="none">なし（商品のデフォルト税率）</option>
+                                                        <option value="takeout">テイクアウトデフォルト（食材8%、食材以外10%）</option>
+                                                        <option value="dine-in">店内デフォルト（全部10%）</option>
+                                                        <option value="all-10">食材以外の全てデフォルト（全部10%）</option>
+                                                    </select>
+                                                    <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded border border-blue-200">
+                                                        💡 このテーブルで注文時に適用される消費税ルールです。<br/>
+                                                        • テイクアウト: 食材は8%、食材以外（包材など）は10%<br/>
+                                                        • 店内: 全商品10%<br/>
+                                                        • なし: 各商品に設定された税率を使用
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             {/* 保存ボタン */}
                                             <div className="flex gap-2">
                                                 <button
@@ -5956,7 +5994,34 @@
                                                     </div>
 
                                                     <div>
-                                                        <label className="block font-bold mb-2">消費税率</label>
+                                                        <label className="block font-bold mb-2">食材区分</label>
+                                                        <div className="flex gap-4">
+                                                            <label className="flex items-center gap-2 p-3 border-2 rounded-lg cursor-pointer flex-1 bg-green-50">
+                                                                <input
+                                                                    type="radio"
+                                                                    checked={productForm.foodType === 'food' || !productForm.foodType}
+                                                                    onChange={() => setProductForm({...productForm, foodType: 'food'})}
+                                                                    className="w-5 h-5"
+                                                                />
+                                                                <span className="font-bold">食材（テイクアウト時8%対象）</span>
+                                                            </label>
+                                                            <label className="flex items-center gap-2 p-3 border-2 rounded-lg cursor-pointer flex-1">
+                                                                <input
+                                                                    type="radio"
+                                                                    checked={productForm.foodType === 'non-food'}
+                                                                    onChange={() => setProductForm({...productForm, foodType: 'non-food'})}
+                                                                    className="w-5 h-5"
+                                                                />
+                                                                <span className="font-bold">食材以外（常に10%）</span>
+                                                            </label>
+                                                        </div>
+                                                        <small className="text-gray-600 mt-2 block">
+                                                            食材: たこ焼き、お好み焼きなど | 食材以外: 包材、飲み物容器など
+                                                        </small>
+                                                    </div>
+
+                                                    <div>
+                                                        <label className="block font-bold mb-2">デフォルト消費税率</label>
                                                         <div className="flex gap-4">
                                                             <label className="flex items-center gap-2 p-3 border-2 rounded-lg cursor-pointer flex-1">
                                                                 <input
@@ -5965,7 +6030,7 @@
                                                                     onChange={() => setProductForm({...productForm, taxRate: 8})}
                                                                     className="w-5 h-5"
                                                                 />
-                                                                <span className="font-bold">8%（持ち帰り）</span>
+                                                                <span className="font-bold">8%</span>
                                                             </label>
                                                             <label className="flex items-center gap-2 p-3 border-2 rounded-lg cursor-pointer flex-1">
                                                                 <input
@@ -5974,9 +6039,12 @@
                                                                     onChange={() => setProductForm({...productForm, taxRate: 10})}
                                                                     className="w-5 h-5"
                                                                 />
-                                                                <span className="font-bold">10%（店内・包材）</span>
+                                                                <span className="font-bold">10%</span>
                                                             </label>
                                                         </div>
+                                                        <small className="text-gray-600 mt-2 block">
+                                                            テーブルに消費税ルールが設定されていない場合に使用されます
+                                                        </small>
                                                     </div>
 
                                                     <div>
