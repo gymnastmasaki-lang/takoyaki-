@@ -831,6 +831,86 @@
     let storesData = {};
     let ordersListener = null;
     let currentOrders = [];
+    let currentTableSettings = null;  // 🆕 現在のテーブル設定
+    
+    let selectedPaymentMethod = null;
+    let totalAmountToPay = 0;
+    let cashReceived = 0;
+    let changeAmount = 0;
+    let customModalResolve = null;
+    
+    /**
+     * 🆕 商品の適用税率を決定（テーブル設定とfoodTypeを考慮）
+     */
+    function getApplicableTaxRate(item, tableSettings) {
+      // テーブル設定がない、またはtaxRuleが'none'の場合は商品のデフォルト税率を使用
+      if (!tableSettings || !tableSettings.taxRule || tableSettings.taxRule === 'none') {
+        // 商品のtaxRateを優先使用
+        if (item.taxRate !== undefined && item.taxRate !== null) {
+          console.log(`[税率決定] テーブル設定なし → 商品のtaxRate: ${item.taxRate}%`);
+          return item.taxRate;
+        }
+        
+        // taxRateがない場合、foodTypeから推測（食材:8%, 食材以外:10%）
+        const foodType = item.foodType || 'food';
+        const inferredRate = (foodType === 'non-food') ? 10 : 8;
+        console.log(`[税率決定] テーブル設定なし、taxRate未設定 → foodType(${foodType})から推測: ${inferredRate}%`);
+        return inferredRate;
+      }
+      
+      const taxRule = tableSettings.taxRule;
+      const foodType = item.foodType || 'food';  // デフォルトは食材
+      
+      console.log(`[税率決定] 商品: ${item.name}, foodType: ${foodType}, taxRule: ${taxRule}`);
+      
+      switch(taxRule) {
+        case 'takeout':
+          // テイクアウト: 食材は8%、食材以外は10%
+          const takeoutRate = (foodType === 'food') ? 8 : 10;
+          console.log(`  → テイクアウトモード: ${foodType === 'food' ? '食材' : '食材以外'} = ${takeoutRate}%`);
+          return takeoutRate;
+        
+        case 'dine-in':
+          // 店内飲食及び食材以外: 全部10%
+          console.log(`  → 店内飲食及び食材以外モード: 10%`);
+          return 10;
+        
+        default:
+          // 不明な場合は商品のデフォルト税率
+          if (item.taxRate !== undefined && item.taxRate !== null) {
+            console.log(`  → 不明なtaxRule: ${taxRule} → 商品のtaxRate: ${item.taxRate}%`);
+            return item.taxRate;
+          }
+          // foodTypeから推測（食材:8%, 食材以外:10%）
+          const defaultRate = (item.foodType === 'non-food') ? 10 : 8;
+          console.log(`  → 不明なtaxRule: ${taxRule}, taxRate未設定 → foodType(${item.foodType || 'food'})から: ${defaultRate}%`);
+          return defaultRate;
+      }
+    }
+    
+    /**
+     * 🆕 テーブル設定を取得
+     */
+    async function getTableSettings(tableId) {
+      if (!tableId || !currentStoreId) {
+        return null;
+      }
+      
+      try {
+        const tableDocRef = window.doc(window.db, 'stores', currentStoreId, 'tableSettings', tableId);
+        const tableDoc = await window.getDoc(tableDocRef);
+        
+        if (tableDoc.exists()) {
+          console.log('📋 テーブル設定取得:', tableId, tableDoc.data());
+          return tableDoc.data();
+        }
+        console.log('📋 テーブル設定なし:', tableId);
+        return null;
+      } catch (e) {
+        console.error('❌ テーブル設定取得エラー:', e);
+        return null;
+      }
+    }
     
     let selectedPaymentMethod = null;
     let totalAmountToPay = 0;
@@ -1249,7 +1329,7 @@
       document.getElementById('orderSelectionModal').classList.add('hidden');
     };
     
-    function showCheckoutMenu(tableName, selectedOrders = null) {
+    async function showCheckoutMenu(tableName, selectedOrders = null) {
       // selectedOrdersが指定されていればそれを使用、なければcurrentOrders全て
       const ordersToCheckout = selectedOrders || currentOrders;
       
@@ -1270,6 +1350,10 @@
       
       // 選択された注文をグローバル変数に保存（会計処理で使用）
       window.ordersToCheckout = ordersToCheckout;
+      
+      // 🆕 テーブル設定を取得
+      currentTableSettings = await getTableSettings(tableName);
+      console.log('📋 テーブル設定:', tableName, currentTableSettings);
       
       generateTaxRateItems(ordersToCheckout, tableName);
       document.getElementById('discountAmount').value = 0;
@@ -1292,12 +1376,11 @@
       
       const orders = ordersToProcess || currentOrders;
       
-      // テーブル名が「テイクアウト」「モバイルオーダー」「予約テイクアウト」「予約テイクアウト2」の場合は8%、それ以外は10%
-      const isTakeoutOrMobile = tableName.includes('テイクアウト') || tableName.includes('モバイルオーダー') || tableName.includes('予約テイクアウト');
-      const defaultTaxRate = isTakeoutOrMobile ? 8 : 10;
-      
       orders.forEach(order => {
         if (!order.items || order.items.length === 0) {
+          // 注文全体として扱う場合（古い形式）
+          // テーブル設定に基づいてデフォルト税率を決定するが、商品がないので10%とする
+          const defaultTaxRate = 10;
           addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, order.totalAmount || 0, itemIndex, defaultTaxRate, 'inclusive');
           itemIndex++;
         } else {
@@ -1307,8 +1390,9 @@
             const itemBasePrice = item.price + (item.toppingPrice || 0);
             const itemTotal = itemBasePrice * item.quantity;
             
-            // 🆕 商品のtaxRateを優先、なければデフォルト値
-            const itemTaxRate = (item.taxRate !== undefined && item.taxRate !== null) ? item.taxRate : defaultTaxRate;
+            // 🆕 テーブル設定とfoodTypeに基づいて税率を決定
+            const itemTaxRate = getApplicableTaxRate(item, currentTableSettings);
+            console.log(`✅ 適用税率: ${itemTaxRate}% (商品: ${item.name}, foodType: ${item.foodType || 'food'}, taxRule: ${currentTableSettings?.taxRule || 'none'})`);
             
             // 🆕 taxTypeを渡す（デフォルトは内税）
             addTaxRateItem(container, `${item.name} (${toppingStr})`, item.quantity, itemTotal, itemIndex, itemTaxRate, item.taxType || 'inclusive');
