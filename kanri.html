@@ -391,6 +391,17 @@
                 background: false
             });
             
+            // 🆕 データ連携用のstate
+            const [showDataExport, setShowDataExport] = useState(false);
+            const [exportStartDate, setExportStartDate] = useState(() => {
+                const now = new Date();
+                return `${now.getFullYear()}-01-01`;
+            });
+            const [exportEndDate, setExportEndDate] = useState(() => {
+                const now = new Date();
+                return `${now.getFullYear()}-12-31`;
+            });
+            
             // カスタムアラート表示関数
             const showCustomAlertFunc = (message, title = 'お知らせ', icon = 'ℹ️') => {
                 setAlertMessage(message);
@@ -1740,10 +1751,6 @@
                     enabled: false,  // このテーブル専用の営業時間設定を使用するか
                     openTime: '11:00',
                     closeTime: '22:00'
-                },
-                taxSettings: {
-                    defaultTaxRate: 8,  // デフォルト消費税率（8% or 10%）
-                    packagingTaxRate: 10  // 包材の消費税率（固定10%）
                 }
             });
 
@@ -2592,6 +2599,176 @@
                     setReceiptSettings({...receiptSettings, stampImage: event.target.result});
                 };
                 reader.readAsDataURL(file);
+            };
+
+            // 🆕 CSV出力関数: 売上データ
+            const exportSalesCSV = async () => {
+                try {
+                    showCustomAlertFunc('売上データを集計中...', 'ℹ️ 処理中', 'ℹ️');
+                    
+                    const startDate = new Date(exportStartDate);
+                    startDate.setHours(0, 0, 0, 0);
+                    const endDate = new Date(exportEndDate);
+                    endDate.setHours(23, 59, 59, 999);
+                    
+                    // 注文データを取得
+                    const ordersSnapshot = await window.firebaseModules.getDocs(
+                        window.firebaseModules.query(
+                            window.getStoreCollection('orders'),
+                            window.firebaseModules.where('timestamp', '>=', window.firebaseModules.Timestamp.fromDate(startDate)),
+                            window.firebaseModules.where('timestamp', '<=', window.firebaseModules.Timestamp.fromDate(endDate)),
+                            window.firebaseModules.orderBy('timestamp', 'asc')
+                        )
+                    );
+                    
+                    let csvContent = '\uFEFF'; // BOM for Excel
+                    csvContent += '日付,注文番号,テーブル,合計金額,税率8%売上,税率10%売上,商品明細,メモ\n';
+                    
+                    ordersSnapshot.forEach(doc => {
+                        const order = doc.data();
+                        
+                        // 削除済み・キャンセル済みは除外
+                        if (order.deleted || order.cancelledAt) return;
+                        
+                        const date = order.timestamp.toDate();
+                        const dateStr = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+                        const orderNum = order.orderNumber || '';
+                        const table = order.tableNumber || '';
+                        const total = order.totalAmount || 0;
+                        
+                        // 税率別売上を計算
+                        let sales8 = 0;
+                        let sales10 = 0;
+                        let itemsDetail = [];
+                        
+                        if (order.items && Array.isArray(order.items)) {
+                            order.items.forEach(item => {
+                                const itemName = item.name || '';
+                                const itemPrice = item.price || 0;
+                                const itemQty = item.quantity || 1;
+                                const toppingPrice = item.toppingPrice || 0;
+                                const taxRate = item.taxRate || 10;
+                                
+                                const itemTotal = (itemPrice + toppingPrice) * itemQty;
+                                
+                                if (taxRate === 8) {
+                                    sales8 += itemTotal;
+                                } else {
+                                    sales10 += itemTotal;
+                                }
+                                
+                                itemsDetail.push(`${itemName}×${itemQty}`);
+                            });
+                        }
+                        
+                        const itemsStr = itemsDetail.join('; ');
+                        const memo = (order.memo || '').replace(/"/g, '""').replace(/\n/g, ' ');
+                        
+                        csvContent += `${dateStr},${orderNum},${table},${total},${sales8},${sales10},"${itemsStr}","${memo}"\n`;
+                    });
+                    
+                    // CSVダウンロード
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `売上データ_${exportStartDate}_${exportEndDate}.csv`;
+                    link.click();
+                    
+                    showCustomAlertFunc('売上データを出力しました', '✅ 完了', '✅');
+                } catch (e) {
+                    console.error('売上CSV出力エラー:', e);
+                    showCustomAlertFunc('エラーが発生しました: ' + e.message, '❌ エラー', '❌');
+                }
+            };
+
+            // 🆕 CSV出力関数: 支出データ（将来実装用の仮関数）
+            const exportExpensesCSV = async () => {
+                showCustomAlertFunc('支出データ機能は今後実装予定です', 'ℹ️ 情報', 'ℹ️');
+            };
+
+            // 🆕 CSV出力関数: 人件費データ
+            const exportPayrollCSV = async () => {
+                try {
+                    showCustomAlertFunc('人件費データを集計中...', 'ℹ️ 処理中', 'ℹ️');
+                    
+                    const startDate = new Date(exportStartDate);
+                    const endDate = new Date(exportEndDate);
+                    
+                    let csvContent = '\uFEFF';
+                    csvContent += '年月,従業員名,従業員番号,総支給額,健康保険,厚生年金,雇用保険,所得税,住民税,手取額\n';
+                    
+                    // 期間内の各月をループ
+                    const currentDate = new Date(startDate);
+                    while (currentDate <= endDate) {
+                        const year = currentDate.getFullYear();
+                        const month = currentDate.getMonth();
+                        const yearMonth = `${year}年${month + 1}月`;
+                        
+                        // 各従業員の給与を計算
+                        for (const employee of employees) {
+                            const totals = calculateMonthlyTotals(employee.id, year, month);
+                            
+                            if (totals.hours === 0 && totals.monthlySalary === 0) {
+                                // 勤務実績なしはスキップ
+                                continue;
+                            }
+                            
+                            const salaryType = employee.salaryType || '時間給';
+                            const grossPay = salaryType === '月給' ? totals.monthlyTotalGross : totals.hourlyTotalGross;
+                            const netPay = salaryType === '月給' ? totals.monthlyNetPay : totals.hourlyNetPay;
+                            
+                            csvContent += `${yearMonth},${employee.name},${employee.id},${Math.round(grossPay)},${Math.round(totals.healthInsurance)},${Math.round(totals.pension)},${Math.round(totals.employmentInsurance)},${Math.round(totals.incomeTax)},${Math.round(totals.residentTax)},${Math.round(netPay)}\n`;
+                        }
+                        
+                        // 次の月へ
+                        currentDate.setMonth(currentDate.getMonth() + 1);
+                    }
+                    
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `人件費データ_${exportStartDate}_${exportEndDate}.csv`;
+                    link.click();
+                    
+                    showCustomAlertFunc('人件費データを出力しました', '✅ 完了', '✅');
+                } catch (e) {
+                    console.error('人件費CSV出力エラー:', e);
+                    showCustomAlertFunc('エラーが発生しました: ' + e.message, '❌ エラー', '❌');
+                }
+            };
+
+            // 🆕 CSV出力関数: 従業員一覧
+            const exportEmployeesCSV = async () => {
+                try {
+                    let csvContent = '\uFEFF';
+                    csvContent += '従業員番号,氏名,区分,時給/月給,交通費,入社日,ステータス\n';
+                    
+                    employees.forEach(emp => {
+                        const empId = emp.id || '';
+                        const name = emp.name || '';
+                        const salaryType = emp.salaryType || '時間給';
+                        const rate = emp.rate || 0;
+                        const monthlySalary = emp.monthlySalary || 0;
+                        const transport = emp.transport || 0;
+                        const hireDate = emp.hireDate || '';
+                        const status = '在籍';
+                        
+                        const amount = salaryType === '月給' ? monthlySalary : rate;
+                        
+                        csvContent += `${empId},${name},${salaryType},${amount},${transport},${hireDate},${status}\n`;
+                    });
+                    
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `従業員一覧_${new Date().toISOString().split('T')[0]}.csv`;
+                    link.click();
+                    
+                    showCustomAlertFunc('従業員一覧を出力しました', '✅ 完了', '✅');
+                } catch (e) {
+                    console.error('従業員CSV出力エラー:', e);
+                    showCustomAlertFunc('エラーが発生しました: ' + e.message, '❌ エラー', '❌');
+                }
             };
 
             const addEmployee = async (name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches) => {
@@ -4580,60 +4757,6 @@
                                                         )}
                                                     </div>
                                                 )}
-                                            </div>
-
-                                            {/* 🆕 消費税設定 */}
-                                            <div className="border-l-4 border-green-500 pl-4 mb-6">
-                                                <h3 className="text-lg font-bold mb-3">消費税設定（このテーブル専用）</h3>
-                                                <p className="text-sm text-gray-600 mb-4">
-                                                    このテーブルで注文された商品のデフォルト消費税率を設定できます
-                                                </p>
-                                                
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div className="p-4 bg-gray-50 rounded-lg">
-                                                        <label className="block text-sm font-medium mb-2">デフォルト消費税率</label>
-                                                        <select
-                                                            value={tableSettings[selectedTable]?.taxSettings?.defaultTaxRate || 8}
-                                                            onChange={(e) => {
-                                                                setTableSettings(prev => ({
-                                                                    ...prev,
-                                                                    [selectedTable]: {
-                                                                        ...(prev[selectedTable] || getDefaultTableSettings()),
-                                                                        taxSettings: {
-                                                                            ...(prev[selectedTable]?.taxSettings || {}),
-                                                                            defaultTaxRate: parseInt(e.target.value)
-                                                                        }
-                                                                    }
-                                                                }));
-                                                            }}
-                                                            className="w-full p-2 border rounded-lg"
-                                                        >
-                                                            <option value="8">8%（軽減税率）</option>
-                                                            <option value="10">10%（標準税率）</option>
-                                                        </select>
-                                                        <p className="text-xs text-gray-500 mt-2">
-                                                            商品個別の設定がない場合に適用される税率
-                                                        </p>
-                                                    </div>
-                                                    <div className="p-4 bg-gray-50 rounded-lg">
-                                                        <label className="block text-sm font-medium mb-2">包材の消費税率</label>
-                                                        <div className="p-2 bg-gray-200 rounded-lg text-center font-medium">
-                                                            10%（固定）
-                                                        </div>
-                                                        <p className="text-xs text-gray-500 mt-2">
-                                                            レジ袋などの包材は常に10%
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                
-                                                <div className="mt-3 p-3 bg-green-50 rounded-lg">
-                                                    <div className="text-xs text-green-700">
-                                                        <strong>設定例：</strong><br/>
-                                                        • テイクアウト専用テーブル → 8%（軽減税率）<br/>
-                                                        • 店内飲食専用テーブル → 10%（標準税率）<br/>
-                                                        • 包材カテゴリの商品 → 常に10%
-                                                    </div>
-                                                </div>
                                             </div>
 
                                             {/* 保存ボタン */}
