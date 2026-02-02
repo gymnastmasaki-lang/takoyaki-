@@ -273,6 +273,15 @@
                 cancelMessage: '注文がキャンセルされました\n\n注文番号 #{orderNumber}\n\n番号をお呼びしましたがご不在でしたので\n注文をキャンセルさせて頂きました'
             });
             
+            // 営業時間外設定用のstate
+            const [businessHoursSettings, setBusinessHoursSettings] = useState({
+                enabled: false, // 営業時間外設定を有効にするか
+                openTime: '09:00',
+                closeTime: '22:00',
+                closedMessage: '営業時間外です\n\n営業時間: {openTime} - {closeTime}\n\n営業時間内にご利用ください'
+            });
+            const [showBusinessHoursSettings, setShowBusinessHoursSettings] = useState(false);
+            
             // メニューカスタマイズ設定用のstate
             const [menuSettings, setMenuSettings] = useState({
                 showMemoField: true, // デフォルトで表示
@@ -652,6 +661,7 @@
                         loadReceiptSettings();
                         loadMenuSettings();
                         loadAlertSettings();
+                        loadBusinessHoursSettings(); // 営業時間設定を読み込み
                         loadTableSettings();
                         loadMenuItems();
                         loadGlobalMenuSettings();
@@ -1502,6 +1512,60 @@
                     }
                 } catch (error) {
                     console.error('❌ アラート設定読み込みエラー:', error);
+                }
+            };
+
+            // 営業時間設定を保存
+            const saveBusinessHoursSettings = async () => {
+                try {
+                    // Firebaseモジュールの準備を待つ
+                    while (!window.FirebaseReady || !window.db) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                    
+                    console.log('💾 営業時間設定保存開始');
+                    const { setDoc } = window.firebaseModules;
+                    
+                    const docId = 'default';
+                    const businessHoursRef = window.getStoreDoc('business_hours_settings', docId);
+                    
+                    await setDoc(businessHoursRef, businessHoursSettings);
+                    
+                    console.log('✅ 営業時間設定を保存しました');
+                    showCustomAlertFunc('✅ 営業時間設定を保存しました', '保存完了', '✅');
+                } catch (error) {
+                    console.error('❌ 営業時間設定保存エラー:', error);
+                    showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
+                }
+            };
+
+            // 営業時間設定を読み込み
+            const loadBusinessHoursSettings = async () => {
+                try {
+                    const { getDoc } = window.firebaseModules;
+                    
+                    const docId = 'default';
+                    const businessHoursRef = window.getStoreDoc('business_hours_settings', docId);
+                    
+                    console.log('🔍 営業時間設定読み込み');
+                    
+                    const businessHoursDoc = await getDoc(businessHoursRef);
+                    
+                    if (businessHoursDoc.exists()) {
+                        setBusinessHoursSettings(businessHoursDoc.data());
+                        console.log('✅ 営業時間設定を読み込みました');
+                    } else {
+                        console.log('⚠️ 営業時間設定が存在しないため、デフォルト設定を使用');
+                        const defaultSettings = {
+                            enabled: false,
+                            openTime: '09:00',
+                            closeTime: '22:00',
+                            closedMessage: '営業時間外です\n\n営業時間: {openTime} - {closeTime}\n\n営業時間内にご利用ください'
+                        };
+                        setBusinessHoursSettings(defaultSettings);
+                    }
+                } catch (error) {
+                    console.error('❌ 営業時間設定読み込みエラー:', error);
                 }
             };
 
@@ -5607,6 +5671,94 @@
                                     <div className="flex gap-2">
                                         <button
                                             onClick={saveAlertSettings}
+                                            className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold"
+                                        >
+                                            保存
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 営業時間外設定 */}
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                        🕒 営業時間外設定
+                                    </h2>
+                                    <p className="text-sm text-gray-600 mt-1">営業時間外にメニュー画面を非表示にする設定</p>
+                                </div>
+                                <button
+                                    onClick={() => setShowBusinessHoursSettings(!showBusinessHoursSettings)}
+                                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                                >
+                                    {showBusinessHoursSettings ? '閉じる' : '設定を開く'}
+                                </button>
+                            </div>
+
+                            {showBusinessHoursSettings && (
+                                <div className="space-y-6 border-t pt-4">
+                                    <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg">
+                                        <input
+                                            type="checkbox"
+                                            id="businessHoursEnabled"
+                                            checked={businessHoursSettings.enabled}
+                                            onChange={(e) => setBusinessHoursSettings({...businessHoursSettings, enabled: e.target.checked})}
+                                            className="w-5 h-5"
+                                        />
+                                        <label htmlFor="businessHoursEnabled" className="text-sm font-medium cursor-pointer">
+                                            営業時間外設定を有効にする
+                                        </label>
+                                    </div>
+
+                                    {businessHoursSettings.enabled && (
+                                        <>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="block text-sm font-medium mb-2">開店時間</label>
+                                                    <input
+                                                        type="time"
+                                                        value={businessHoursSettings.openTime}
+                                                        onChange={(e) => setBusinessHoursSettings({...businessHoursSettings, openTime: e.target.value})}
+                                                        className="w-full p-3 border rounded-lg"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium mb-2">閉店時間</label>
+                                                    <input
+                                                        type="time"
+                                                        value={businessHoursSettings.closeTime}
+                                                        onChange={(e) => setBusinessHoursSettings({...businessHoursSettings, closeTime: e.target.value})}
+                                                        className="w-full p-3 border rounded-lg"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-md font-bold mb-2">営業時間外メッセージ</label>
+                                                <p className="text-xs text-gray-500 mb-2">営業時間外にお客様に表示されるメッセージ</p>
+                                                <textarea
+                                                    value={businessHoursSettings.closedMessage}
+                                                    onChange={(e) => setBusinessHoursSettings({...businessHoursSettings, closedMessage: e.target.value})}
+                                                    className="w-full p-3 border rounded-lg font-mono text-sm"
+                                                    rows="5"
+                                                    placeholder="例: 営業時間外です\n\n営業時間: {openTime} - {closeTime}\n\n営業時間内にご利用ください"
+                                                />
+                                                <p className="text-xs text-blue-600 mt-1">💡 ヒント: {'{'}openTime{'}'} と {'{'}closeTime{'}'} は自動的に設定した時間に置き換わります</p>
+                                            </div>
+
+                                            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                                <p className="text-sm text-yellow-800">
+                                                    <strong>⚠️ 注意:</strong> この設定を有効にすると、設定した営業時間外はお客様がメニュー画面にアクセスできなくなります。
+                                                </p>
+                                            </div>
+                                        </>
+                                    )}
+
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={saveBusinessHoursSettings}
                                             className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold"
                                         >
                                             保存

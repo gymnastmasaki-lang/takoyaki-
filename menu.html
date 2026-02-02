@@ -1501,33 +1501,82 @@
       const currentTime = hours * 60 + minutes; // 分単位に変換
       
       const hasTableParam = urlParams.get('table');
-      let closedStartTime, closedEndTime, operatingHours;
       
-      // 🆕 時間外解除設定を確認
-      let timeOverrideEnabled = false;
+      // 🆕 kanri.htmlで設定した営業時間外設定を読み込み
+      let businessHoursSettings = null;
       try {
-        const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
-        timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
-        console.log('時間外解除設定:', timeOverrideEnabled);
+        const settingsRef = await getDoc(window.getStoreDoc('business_hours_settings', 'default'));
+        if (settingsRef.exists()) {
+          businessHoursSettings = settingsRef.data();
+          console.log('✅ 営業時間外設定を読み込みました:', businessHoursSettings);
+        } else {
+          console.log('⚠️ 営業時間外設定が存在しません');
+        }
       } catch (e) {
-        console.error('時間外解除設定の読み込みエラー:', e);
+        console.error('❌ 営業時間外設定の読み込みエラー:', e);
       }
       
-      if (hasTableParam) {
-        // menu.html?table=の場合：22:00-11:00が営業時間外
-        closedStartTime = 22 * 60; // 22:00 = 1320分
-        closedEndTime = 11 * 60;   // 11:00 = 660分
-        operatingHours = '11:00 - 22:00';
+      let closedStartTime, closedEndTime, operatingHours;
+      let isClosed = false;
+      
+      // 営業時間外設定が有効な場合は、その設定を使用
+      if (businessHoursSettings && businessHoursSettings.enabled) {
+        console.log('🕒 営業時間外設定が有効です');
+        
+        // 開店時間と閉店時間を分単位に変換
+        const openTimeParts = businessHoursSettings.openTime.split(':');
+        const closeTimeParts = businessHoursSettings.closeTime.split(':');
+        
+        const openTimeMinutes = parseInt(openTimeParts[0]) * 60 + parseInt(openTimeParts[1]);
+        const closeTimeMinutes = parseInt(closeTimeParts[0]) * 60 + parseInt(closeTimeParts[1]);
+        
+        closedStartTime = closeTimeMinutes;
+        closedEndTime = openTimeMinutes;
+        operatingHours = `${businessHoursSettings.openTime} - ${businessHoursSettings.closeTime}`;
+        
+        // 営業時間外判定
+        if (closedStartTime > closedEndTime) {
+          // 例: 22:00-11:00 の場合（閉店時刻が開店時刻より後ろ = 深夜営業）
+          isClosed = currentTime >= closedStartTime || currentTime < closedEndTime;
+        } else {
+          // 例: 09:00-18:00 の場合（通常営業）
+          isClosed = currentTime < closedStartTime || currentTime >= closedEndTime;
+        }
+        
+        console.log(`現在時刻: ${hours}:${minutes.toString().padStart(2, '0')} (${currentTime}分)`);
+        console.log(`営業時間: ${operatingHours}`);
+        console.log(`営業時間外: ${isClosed}`);
+        
       } else {
-        // menu.htmlのみの場合：22:30-11:00が営業時間外
-        closedStartTime = 22 * 60 + 30; // 22:30 = 1350分
-        closedEndTime = 11 * 60;        // 11:00 = 660分
-        operatingHours = '11:00 - 22:30';
+        console.log('⚠️ 営業時間外設定が無効、またはデフォルトの時間を使用します');
+        
+        // デフォルトの営業時間（従来の動作）
+        // 🆕 時間外解除設定を確認
+        let timeOverrideEnabled = false;
+        try {
+          const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+          timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
+          console.log('時間外解除設定:', timeOverrideEnabled);
+        } catch (e) {
+          console.error('時間外解除設定の読み込みエラー:', e);
+        }
+        
+        if (hasTableParam) {
+          // menu.html?table=の場合：22:00-11:00が営業時間外
+          closedStartTime = 22 * 60; // 22:00 = 1320分
+          closedEndTime = 11 * 60;   // 11:00 = 660分
+          operatingHours = '11:00 - 22:00';
+        } else {
+          // menu.htmlのみの場合：22:30-11:00が営業時間外
+          closedStartTime = 22 * 60 + 30; // 22:30 = 1350分
+          closedEndTime = 11 * 60;        // 11:00 = 660分
+          operatingHours = '11:00 - 22:30';
+        }
+        
+        // 営業時間外判定（22:00/22:30以降 または 11:00より前）
+        // 🆕 時間外解除が有効な場合は営業中として扱う
+        isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
       }
-      
-      // 営業時間外判定（22:00/22:30以降 または 11:00より前）
-      // 🆕 時間外解除が有効な場合は営業中として扱う
-      const isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
       
       if (isClosed) {
         console.log('営業時間外');
@@ -1557,6 +1606,21 @@
         document.getElementById('page-cart').style.display = 'none';
         document.getElementById('page-complete').style.display = 'none';
         
+        // 営業時間外メッセージを取得（kanri.htmlで設定したメッセージ）
+        let closedMessage = `注文可能時間外です\n\n注文可能時間\n${operatingHours}\n\n現在はご注文を承っておりません`;
+        
+        if (businessHoursSettings && businessHoursSettings.closedMessage) {
+          // {openTime} と {closeTime} をプレースホルダーとして置き換え
+          closedMessage = businessHoursSettings.closedMessage
+            .replace(/{openTime}/g, businessHoursSettings.openTime)
+            .replace(/{closeTime}/g, businessHoursSettings.closeTime);
+        }
+        
+        // メッセージを改行で分割してHTMLに変換
+        const messageLines = closedMessage.split('\n').map(line => 
+          `<p style="font-size: ${line.length > 20 ? '18px' : '20px'}; line-height: 1.8; margin: 10px 0;">${line}</p>`
+        ).join('');
+        
         // 営業時間外メッセージを表示
         document.body.innerHTML = `
           <div style="
@@ -1579,9 +1643,7 @@
               max-width: 400px;
             ">
               <h1 style="font-size: 48px; margin: 0 0 20px 0;">🕐</h1>
-              <p style="font-size: 24px; font-weight: bold; margin: 10px 0;">注文可能時間外です</p>
-              <p style="font-size: 20px; line-height: 1.8; margin: 20px 0;">注文可能時間<br>${operatingHours}</p>
-              <p style="font-size: 18px; margin: 10px 0;">現在はご注文を<br>承っておりません</p>
+              ${messageLines}
             </div>
           </div>
         `;
@@ -1612,27 +1674,54 @@
             const urlParams = new URLSearchParams(window.location.search);
             const hasTableParam = urlParams.get('table');
             
-            // 時間外解除設定を確認
-            let timeOverrideEnabled = false;
+            // kanri.htmlで設定した営業時間外設定を読み込み
+            let businessHoursSettings = null;
             try {
-              const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
-              timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
+              const settingsRef = await getDoc(window.getStoreDoc('business_hours_settings', 'default'));
+              if (settingsRef.exists()) {
+                businessHoursSettings = settingsRef.data();
+              }
             } catch (e) {
-              console.error('時間外解除設定の読み込みエラー:', e);
+              console.error('営業時間外設定の読み込みエラー:', e);
             }
             
-            let closedStartTime, closedEndTime, operatingHours;
-            if (hasTableParam) {
-              closedStartTime = 22 * 60;
-              closedEndTime = 11 * 60;
-              operatingHours = '11:00 - 22:00';
+            let isClosed = false;
+            
+            // 営業時間外設定が有効な場合は、その設定を使用
+            if (businessHoursSettings && businessHoursSettings.enabled) {
+              const openTimeParts = businessHoursSettings.openTime.split(':');
+              const closeTimeParts = businessHoursSettings.closeTime.split(':');
+              
+              const openTimeMinutes = parseInt(openTimeParts[0]) * 60 + parseInt(openTimeParts[1]);
+              const closeTimeMinutes = parseInt(closeTimeParts[0]) * 60 + parseInt(closeTimeParts[1]);
+              
+              // 営業時間外判定
+              if (closeTimeMinutes > openTimeMinutes) {
+                isClosed = currentTime >= closeTimeMinutes || currentTime < openTimeMinutes;
+              } else {
+                isClosed = currentTime < closeTimeMinutes || currentTime >= openTimeMinutes;
+              }
             } else {
-              closedStartTime = 22 * 60 + 30;
-              closedEndTime = 11 * 60;
-              operatingHours = '11:00 - 22:30';
+              // デフォルトの営業時間（従来の動作）
+              let timeOverrideEnabled = false;
+              try {
+                const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+                timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
+              } catch (e) {
+                console.error('時間外解除設定の読み込みエラー:', e);
+              }
+              
+              let closedStartTime, closedEndTime;
+              if (hasTableParam) {
+                closedStartTime = 22 * 60;
+                closedEndTime = 11 * 60;
+              } else {
+                closedStartTime = 22 * 60 + 30;
+                closedEndTime = 11 * 60;
+              }
+              
+              isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
             }
-            
-            const isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
             
             if (isClosed) {
               // 注文中の画面でなければリロード
