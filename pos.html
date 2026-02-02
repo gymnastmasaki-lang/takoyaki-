@@ -292,7 +292,9 @@
     function getTaxAmount(item, quantity = 1) {
       const taxType = item.taxType || 'inclusive';
       const basePrice = item.price + (item.toppingPrice || 0);
-      const taxRate = item.taxRate || 10;
+      
+      // 🆕 テーブル設定に基づいて適用税率を決定
+      const taxRate = getApplicableTaxRate(item, currentTableSettings);
       
       if (taxType === 'exclusive') {
         return Math.floor(basePrice * quantity * taxRate / 100);
@@ -309,7 +311,9 @@
     function getItemTotal(item, quantity = 1) {
       const taxType = item.taxType || 'inclusive';
       const basePrice = item.price + (item.toppingPrice || 0);
-      const taxRate = item.taxRate || 10;
+      
+      // 🆕 テーブル設定に基づいて適用税率を決定
+      const taxRate = getApplicableTaxRate(item, currentTableSettings);
       
       if (taxType === 'exclusive') {
         return Math.floor(basePrice * quantity * (1 + taxRate / 100));
@@ -335,9 +339,12 @@
         const itemTax = getTaxAmount(item, quantity);
         const taxType = item.taxType || 'inclusive';
         
+        // 🆕 テーブル設定に基づいて適用税率を決定
+        const applicableTaxRate = getApplicableTaxRate(item, currentTableSettings);
+        
         total += itemTotal;
         
-        if ((item.taxRate || 10) === 8) {
+        if (applicableTaxRate === 8) {
           tax8Total += itemTax;
           if (taxType === 'exclusive') {
             tax8Exclusive += itemTax;
@@ -420,6 +427,59 @@
         console.log('   追加した従業員数:', employees.length);
       } catch (e) {
         console.error('❌ 担当者リスト読み込みエラー:', e);
+      }
+    }
+    
+    /**
+     * 🆕 テーブル設定を取得
+     */
+    async function getTableSettings(tableId) {
+      if (!tableId) {
+        return null;
+      }
+      
+      try {
+        const tableSettingsRef = window.getStoreDoc('tableSettings', tableId);
+        const tableDoc = await getDoc(tableSettingsRef);
+        
+        if (tableDoc.exists()) {
+          return tableDoc.data();
+        }
+        return null;
+      } catch (e) {
+        console.error('テーブル設定取得エラー:', e);
+        return null;
+      }
+    }
+    
+    /**
+     * 🆕 商品の適用税率を決定（テーブル設定とfoodTypeを考慮）
+     */
+    function getApplicableTaxRate(item, tableSettings) {
+      // テーブル設定がない、またはtaxRuleが'none'の場合は商品のデフォルト税率を使用
+      if (!tableSettings || !tableSettings.taxRule || tableSettings.taxRule === 'none') {
+        return item.taxRate || 10;
+      }
+      
+      const taxRule = tableSettings.taxRule;
+      const foodType = item.foodType || 'food';  // デフォルトは食材
+      
+      switch(taxRule) {
+        case 'takeout':
+          // テイクアウト: 食材は8%、食材以外は10%
+          return (foodType === 'food') ? 8 : 10;
+        
+        case 'dine-in':
+          // 店内: 全部10%
+          return 10;
+        
+        case 'all-10':
+          // 全部10%
+          return 10;
+        
+        default:
+          // 不明な場合は商品のデフォルト税率
+          return item.taxRate || 10;
       }
     }
   </script>
@@ -2049,6 +2109,7 @@
   </div>
   <script>
     let selectedTable = null;
+    let currentTableSettings = null;  // 🆕 現在のテーブル設定
     let currentOrders = [];
     let isDirectPaymentMode = false;  // 即会計モードフラグ
     let menuItems = [];
@@ -2912,7 +2973,7 @@
         
         const orderData = orderDoc.data();
         
-        // 商品リストを作成（税率情報はデフォルトで10%）
+        // 商品リストを作成（保存されている税率情報を使用）
         const itemsWithTaxRate = [];
         
         if (orderData.items && Array.isArray(orderData.items)) {
@@ -2922,7 +2983,8 @@
               quantity: item.quantity,
               price: item.price + (item.toppingPrice || 0),
               toppings: item.toppings || 'なし',
-              taxRate: 10  // デフォルト
+              taxRate: item.taxRate || 10,  // 保存されている税率を使用
+              taxType: item.taxType || 'inclusive'  // 🆕 taxTypeも保存
             });
           });
         }
@@ -2935,7 +2997,8 @@
             quantity: orderData.bagQuantity,
             price: 3,
             toppings: 'なし',
-            taxRate: 10
+            taxRate: 10,
+            taxType: 'inclusive'
           });
         }
         
@@ -2980,7 +3043,8 @@
               quantity: item.quantity,
               price: item.price + (item.toppingPrice || 0),
               toppings: item.toppings || 'なし',
-              taxRate: 10
+              taxRate: item.taxRate || 10,  // 保存されている税率を使用
+              taxType: item.taxType || 'inclusive'  // 🆕 taxTypeも保存
             });
           });
         }
@@ -2992,7 +3056,8 @@
             quantity: orderData.bagQuantity,
             price: 3,
             toppings: 'なし',
-            taxRate: 10
+            taxRate: 10,
+            taxType: 'inclusive'
           });
         }
         
@@ -8516,6 +8581,15 @@ ${redSlipCount > 0 ? `
       document.getElementById('selectedTableLabel').textContent = `テーブル ${tableNum}`;
       document.getElementById('orderSection').classList.remove('hidden');
       
+      // 🆕 テーブル設定を読み込み
+      if (tableNum && tableNum !== '即会計') {
+        currentTableSettings = await getTableSettings(tableNum);
+        console.log('📋 テーブル設定読み込み:', tableNum, currentTableSettings);
+      } else {
+        currentTableSettings = null;
+        console.log('📋 即会計モード: テーブル設定なし');
+      }
+      
       await loadOrders(tableNum);
     };
     
@@ -9450,7 +9524,8 @@ ${redSlipCount > 0 ? `
     
     // 税率選択リストを構築
     
-    // テーブル番号に基づいてデフォルト税率を決定
+    // 🔧 旧バージョン: テーブル番号に基づいてデフォルト税率を決定（廃止予定）
+    // 新しいロジックでは、getApplicableTaxRate()を使用してテーブル設定とfoodTypeから税率を決定
     function determineDefaultTaxRate(tableNumber) {
       // 即会計、テイクアウト、モバイルオーダー、予約テーブル、予約テイクアウト、予約テイクアウト2: 8%
       if (tableNumber === '即会計' || tableNumber === 'テイクアウト' || tableNumber === 'モバイルオーダー' || tableNumber === '予約テーブル' || tableNumber === '予約テイクアウト' || tableNumber === '予約テイクアウト2') {
@@ -9505,27 +9580,9 @@ ${redSlipCount > 0 ? `
             const itemTotal = itemBasePrice * (item.quantity || 1);
             console.log(`  商品追加: ${item.name} x${item.quantity}, 本体価格:${itemTotal}, taxType:${item.taxType}`);
             
-            let defaultTaxRate;
-            
-            // 🆕 まず商品のtaxRateを確認（即会計でも商品の税率を優先）
-            if (item.taxRate !== undefined && item.taxRate !== null) {
-              defaultTaxRate = item.taxRate;
-              console.log(`  ✅ 商品のtaxRateを使用: ${defaultTaxRate}%`);
-            } else if (order.tableNumber === '即会計' || order.tableNumber === 'テイクアウト' || order.tableNumber === 'モバイルオーダー' || order.tableNumber === '予約テーブル' || order.tableNumber === '予約テイクアウト' || order.tableNumber === '予約テイクアウト2') {
-              // 商品にtaxRateがない場合のみ、テーブル番号で判定
-              // レジ袋（包材）のみ10%、それ以外は8%
-              if (item.name && (item.name.includes('レジ袋') || item.name.includes('袋') || item.category === '包材')) {
-                defaultTaxRate = 10;
-                console.log(`  📦 レジ袋/包材: 10%`);
-              } else {
-                defaultTaxRate = 8;
-                console.log(`  🥡 持ち帰り: 8%`);
-              }
-            } else {
-              // それ以外のテーブルの場合
-              defaultTaxRate = determineDefaultTaxRate(order.tableNumber);
-              console.log(`  ℹ️ テーブル番号から税率を決定: ${defaultTaxRate}%`);
-            }
+            // 🆕 テーブル設定とfoodTypeに基づいて税率を決定
+            const defaultTaxRate = getApplicableTaxRate(item, currentTableSettings);
+            console.log(`  ✅ 適用税率: ${defaultTaxRate}% (foodType: ${item.foodType || 'food'}, taxRule: ${currentTableSettings?.taxRule || 'none'})`);
             
             // 🆕 taxTypeを渡す
             addTaxRateItem(container, item.name, item.quantity, itemTotal, itemIndex, defaultTaxRate, item.taxType || 'inclusive');
@@ -9932,7 +9989,8 @@ ${redSlipCount > 0 ? `
               quantity: 1,
               price: editedPrice,
               toppings: 'なし',
-              taxRate: taxRate
+              taxRate: taxRate,
+              taxType: 'inclusive'  // 旧データはデフォルトで内税
             });
             itemIndex++;
           } else {
@@ -9946,7 +10004,8 @@ ${redSlipCount > 0 ? `
                 quantity: item.quantity,
                 price: editedPrice / item.quantity, // 単価に戻す
                 toppings: item.toppings || 'なし',
-                taxRate: taxRate
+                taxRate: taxRate,
+                taxType: item.taxType || 'inclusive'  // 🆕 taxTypeを保存
               });
               itemIndex++;
             });
@@ -9961,7 +10020,8 @@ ${redSlipCount > 0 ? `
                 quantity: order.bagQuantity,
                 price: editedPrice / order.bagQuantity, // 単価に戻す
                 toppings: 'なし',
-                taxRate: taxRate
+                taxRate: taxRate,
+                taxType: 'inclusive'  // レジ袋は内税
               });
               itemIndex++;
             }
@@ -10428,6 +10488,7 @@ ${redSlipCount > 0 ? `
     // 選択をクリア
     window.clearSelection = function() {
       selectedTable = null;
+      currentTableSettings = null;  // 🆕 テーブル設定もクリア
       currentOrders = [];
       document.getElementById('orderSection').classList.add('hidden');
     };
