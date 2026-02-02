@@ -458,27 +458,35 @@
     function getApplicableTaxRate(item, tableSettings) {
       // テーブル設定がない、またはtaxRuleが'none'の場合は商品のデフォルト税率を使用
       if (!tableSettings || !tableSettings.taxRule || tableSettings.taxRule === 'none') {
+        console.log(`[税率決定] テーブル設定なし or taxRule=none → デフォルト税率: ${item.taxRate || 10}%`);
         return item.taxRate || 10;
       }
       
       const taxRule = tableSettings.taxRule;
       const foodType = item.foodType || 'food';  // デフォルトは食材
       
+      console.log(`[税率決定] 商品: ${item.name}, foodType: ${foodType}, taxRule: ${taxRule}`);
+      
       switch(taxRule) {
         case 'takeout':
           // テイクアウト: 食材は8%、食材以外は10%
-          return (foodType === 'food') ? 8 : 10;
+          const takeoutRate = (foodType === 'food') ? 8 : 10;
+          console.log(`  → テイクアウトモード: ${foodType === 'food' ? '食材' : '食材以外'} = ${takeoutRate}%`);
+          return takeoutRate;
         
         case 'dine-in':
           // 店内: 全部10%
+          console.log(`  → 店内モード: 10%`);
           return 10;
         
         case 'all-10':
           // 全部10%
+          console.log(`  → 全部10%モード: 10%`);
           return 10;
         
         default:
           // 不明な場合は商品のデフォルト税率
+          console.log(`  → 不明なtaxRule: ${taxRule} → デフォルト税率: ${item.taxRate || 10}%`);
           return item.taxRate || 10;
       }
     }
@@ -2162,6 +2170,7 @@
             category: data.category || 'その他',
             taxRate: data.taxRate || 10,
             taxType: data.taxType || 'inclusive',  // 🆕 外税/内税タイプを追加
+            foodType: data.foodType || 'food',  // 🆕 食材区分を追加
             toppingsId: data.toppingsId || '', // カンマ区切りのトッピングID文字列
             toppings: data.toppings || [], // 配列形式（互換性のため）
             toppingSets: data.toppingSets || [], // 新しいトッピングセット形式
@@ -8274,6 +8283,7 @@ ${redSlipCount > 0 ? `
             price: item.price,
             taxRate: item.taxRate,  // undefinedの場合もそのまま保存
             taxType: item.taxType || 'inclusive',  // 🆕 taxTypeを保存
+            foodType: item.foodType || 'food',  // 🆕 foodTypeを保存
             toppings: item.toppings,
             toppingsData: item.toppingsData,
             toppingPrice: item.toppingPrice || 0,
@@ -8392,6 +8402,7 @@ ${redSlipCount > 0 ? `
             category: item.category,
             taxRate: item.taxRate,
             taxType: item.taxType || 'inclusive',  // 🆕 外税/内税タイプを明示的に保存
+            foodType: item.foodType || 'food',  // 🆕 foodTypeを保存
             toppings: item.toppings,
             toppingPrice: item.toppingPrice || 0,
             toppingsData: item.toppingsData || [],
@@ -8476,6 +8487,7 @@ ${redSlipCount > 0 ? `
               // undefinedでないフィールドのみ追加
               if (item.taxRate !== undefined) itemData.taxRate = item.taxRate;
               if (item.taxType !== undefined) itemData.taxType = item.taxType;  // 🆕 taxTypeも追加
+              if (item.foodType !== undefined) itemData.foodType = item.foodType;  // 🆕 foodTypeも追加
               if (item.toppings) itemData.toppings = item.toppings;
               if (item.toppingsData) itemData.toppingsData = item.toppingsData;
               if (item.toppingDetails) itemData.toppingDetails = item.toppingDetails;
@@ -8584,7 +8596,9 @@ ${redSlipCount > 0 ? `
       // 🆕 テーブル設定を読み込み
       if (tableNum && tableNum !== '即会計') {
         currentTableSettings = await getTableSettings(tableNum);
-        console.log('📋 テーブル設定読み込み:', tableNum, currentTableSettings);
+        console.log('📋 テーブル設定読み込み完了:', tableNum);
+        console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
+        console.log('  設定全体:', currentTableSettings);
       } else {
         currentTableSettings = null;
         console.log('📋 即会計モード: テーブル設定なし');
@@ -8648,6 +8662,15 @@ ${redSlipCount > 0 ? `
             currentOrders.push(order);
             totalAmount += order.totalAmount || 0;
             hasUnpaidOrders = true;
+            
+            // 🔍 デバッグ: 注文内の商品データを確認
+            if (order.items && order.items.length > 0) {
+              console.log(`[注文 #${order.orderNumber}] 商品データ:`, order.items.map(item => ({
+                name: item.name,
+                foodType: item.foodType,
+                taxRate: item.taxRate
+              })));
+            }
           }
         });
         
