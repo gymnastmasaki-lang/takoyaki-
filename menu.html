@@ -1503,17 +1503,50 @@
       const hasTableParam = urlParams.get('table');
       let closedStartTime, closedEndTime, operatingHours;
       
-      // 🆕 時間外解除設定を確認
+      // 🆕 テーブル別の時間外解除設定を確認
       let timeOverrideEnabled = false;
-      try {
-        const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
-        timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
-        console.log('時間外解除設定:', timeOverrideEnabled);
-      } catch (e) {
-        console.error('時間外解除設定の読み込みエラー:', e);
+      let customBusinessHoursEnabled = false;
+      let customOpenTime = null;
+      let customCloseTime = null;
+      
+      if (tableNumber && tableSettings) {
+        // テーブル設定から時間外解除を確認
+        if (tableSettings.timeOverride && tableSettings.timeOverride.enabled) {
+          timeOverrideEnabled = true;
+          console.log('✅ このテーブルは時間外解除が有効です（24時間営業）');
+        }
+        // カスタム営業時間を確認
+        else if (tableSettings.businessHours && tableSettings.businessHours.enabled) {
+          customBusinessHoursEnabled = true;
+          customOpenTime = tableSettings.businessHours.openTime || '11:00';
+          customCloseTime = tableSettings.businessHours.closeTime || '22:00';
+          console.log('✅ このテーブルはカスタム営業時間が設定されています:', customOpenTime, '-', customCloseTime);
+        }
       }
       
-      if (hasTableParam) {
+      // グローバル時間外解除設定も確認（後方互換性）
+      if (!timeOverrideEnabled) {
+        try {
+          const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+          if (settingsRef.exists() && settingsRef.data().enabled) {
+            timeOverrideEnabled = true;
+            console.log('✅ グローバル時間外解除設定が有効です');
+          }
+        } catch (e) {
+          console.error('時間外解除設定の読み込みエラー:', e);
+        }
+      }
+      
+      // 営業時間の設定
+      if (customBusinessHoursEnabled) {
+        // カスタム営業時間を使用
+        const [openHour, openMin] = customOpenTime.split(':').map(Number);
+        const [closeHour, closeMin] = customCloseTime.split(':').map(Number);
+        closedEndTime = openHour * 60 + openMin;
+        closedStartTime = closeHour * 60 + closeMin;
+        operatingHours = `${customOpenTime} - ${customCloseTime}`;
+        console.log('⏰ カスタム営業時間:', operatingHours);
+      } else if (hasTableParam) {
         // menu.html?table=の場合：22:00-11:00が営業時間外
         closedStartTime = 22 * 60; // 22:00 = 1320分
         closedEndTime = 11 * 60;   // 11:00 = 660分
@@ -1612,17 +1645,46 @@
             const urlParams = new URLSearchParams(window.location.search);
             const hasTableParam = urlParams.get('table');
             
-            // 時間外解除設定を確認
+            // テーブル別の時間外解除設定を確認
             let timeOverrideEnabled = false;
-            try {
-              const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
-              timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
-            } catch (e) {
-              console.error('時間外解除設定の読み込みエラー:', e);
+            let customBusinessHoursEnabled = false;
+            let customOpenTime = null;
+            let customCloseTime = null;
+            
+            if (tableNumber && tableSettings) {
+              // テーブル設定から時間外解除を確認
+              if (tableSettings.timeOverride && tableSettings.timeOverride.enabled) {
+                timeOverrideEnabled = true;
+              }
+              // カスタム営業時間を確認
+              else if (tableSettings.businessHours && tableSettings.businessHours.enabled) {
+                customBusinessHoursEnabled = true;
+                customOpenTime = tableSettings.businessHours.openTime || '11:00';
+                customCloseTime = tableSettings.businessHours.closeTime || '22:00';
+              }
+            }
+            
+            // グローバル時間外解除設定も確認
+            if (!timeOverrideEnabled) {
+              try {
+                const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+                if (settingsRef.exists() && settingsRef.data().enabled) {
+                  timeOverrideEnabled = true;
+                }
+              } catch (e) {
+                console.error('時間外解除設定の読み込みエラー:', e);
+              }
             }
             
             let closedStartTime, closedEndTime, operatingHours;
-            if (hasTableParam) {
+            if (customBusinessHoursEnabled) {
+              // カスタム営業時間を使用
+              const [openHour, openMin] = customOpenTime.split(':').map(Number);
+              const [closeHour, closeMin] = customCloseTime.split(':').map(Number);
+              closedEndTime = openHour * 60 + openMin;
+              closedStartTime = closeHour * 60 + closeMin;
+              operatingHours = `${customOpenTime} - ${customCloseTime}`;
+            } else if (hasTableParam) {
               closedStartTime = 22 * 60;
               closedEndTime = 11 * 60;
               operatingHours = '11:00 - 22:00';
