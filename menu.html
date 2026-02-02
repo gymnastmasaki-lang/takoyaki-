@@ -1316,6 +1316,9 @@
         if (settingsDoc.exists()) {
           tableSettings = settingsDoc.data();
           console.log('✅ テーブル設定を読み込みました:', tableSettings);
+          console.log('  📊 デフォルト税率:', tableSettings.taxSettings?.defaultTaxRate);
+          console.log('  ⏰ 時間外解除:', tableSettings.timeOverride?.enabled);
+          console.log('  🕐 カスタム営業時間:', tableSettings.businessHours?.enabled);
         } else {
           tableSettings = {
             inputFields: {
@@ -1329,7 +1332,10 @@
             },
             menuType: 'default',
             customMenuItems: [],
-            visibleCategories: []  // 🆕 空配列 = 全カテゴリ表示
+            visibleCategories: [],  // 🆕 空配列 = 全カテゴリ表示
+            taxSettings: {
+              defaultTaxRate: 10  // デフォルトは10%
+            }
           };
           console.log('ℹ️ デフォルト設定を使用します');
         }
@@ -1339,7 +1345,10 @@
           inputFields: { notes: { visible: true, required: false } },
           menuType: 'default',
           customMenuItems: [],
-          visibleCategories: []  // 🆕 空配列 = 全カテゴリ表示
+          visibleCategories: [],  // 🆕 空配列 = 全カテゴリ表示
+          taxSettings: {
+            defaultTaxRate: 10
+          }
         };
       }
     }
@@ -2158,7 +2167,7 @@
           }
           
           // 🔧 修正: idフィールドがない場合はドキュメントIDを使用
-          items.push({
+          const item = {
             id: data.id || doc.id,
             category: category,
             name: data.name,
@@ -2167,9 +2176,33 @@
             toppingSets: data.toppingSets || [], // 追加
             image: data.image || '',
             note: note,
-            taxRate: data.taxRate || 10,  // 🆕 外税率を追加（デフォルト10%）
-            taxType: data.taxType || 'inclusive'  // 🆕 税込/税抜タイプを追加（デフォルトは内税）
-          });
+            taxRate: data.taxRate,  // 商品個別の税率（未設定の場合はundefined）
+            taxType: data.taxType || 'inclusive'  // 税込/税抜タイプ（デフォルトは内税）
+          };
+          
+          // 🆕 包材カテゴリは常に10%
+          if (category === '包材') {
+            item.taxRate = 10;
+            console.log(`  📊 税率強制: ${item.name} → ${item.taxRate}% (包材固定)`);
+          }
+          // 🆕 テーブル設定のデフォルト税率を適用
+          else if (tableSettings && tableSettings.taxSettings && tableSettings.taxSettings.defaultTaxRate) {
+            // 商品にtaxRateが明示的に設定されていない場合のみテーブル設定を適用
+            if (data.taxRate === undefined || data.taxRate === null) {
+              item.taxRate = tableSettings.taxSettings.defaultTaxRate;
+              console.log(`  📊 税率適用: ${item.name} → ${item.taxRate}% (テーブル設定: デフォルト)`);
+            } else {
+              console.log(`  📊 税率維持: ${item.name} → ${item.taxRate}% (商品個別設定)`);
+            }
+          } else {
+            // テーブル設定がない場合は10%をデフォルトとする
+            if (item.taxRate === undefined || item.taxRate === null) {
+              item.taxRate = 10;
+              console.log(`  📊 税率適用: ${item.name} → ${item.taxRate}% (システムデフォルト)`);
+            }
+          }
+          
+          items.push(item);
         });
         
         items.sort((a, b) => {
@@ -2659,11 +2692,21 @@
       let effectiveTaxRate;
       if (currentItem.category === '包材') {
         effectiveTaxRate = 10;
+        console.log('  📊 税率（包材固定）:', effectiveTaxRate);
       } else if (currentItem.taxRate !== undefined && currentItem.taxRate !== null) {
         effectiveTaxRate = currentItem.taxRate;
+        console.log('  📊 税率（商品設定）:', effectiveTaxRate, '商品:', currentItem.name);
       } else {
         effectiveTaxRate = null; // undefinedではなくnullを設定
+        console.log('  📊 税率（未設定）:', effectiveTaxRate);
       }
+      
+      console.log('🛒 カートに追加:', {
+        商品名: currentItem.name,
+        カテゴリ: currentItem.category,
+        税率: effectiveTaxRate,
+        数量: qty
+      });
       
       const item = {
         id: currentItem.id,
