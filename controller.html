@@ -214,6 +214,19 @@
     .soldout-toggle-btn.set-soldout { background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); }
     .soldout-toggle-btn.set-available { background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); }
     
+    /* 待ち人数表示用のインラインフレームスタイル */
+    .waiting-info-frame {
+      position: sticky;
+      top: 0;
+      width: 100%;
+      height: 80px;
+      border: none;
+      border-radius: 15px;
+      margin-bottom: 15px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      background: white;
+      z-index: 100;
+    }
     
     /* オンライン状態インジケーター */
     .connection-indicator {
@@ -463,13 +476,8 @@
     <span>オンライン</span>
   </div>
 
-  <!-- menu.htmlの待ち人数表示をiframeで表示（固定） -->
-  <div style="position: fixed; top: 0; left: 0; right: 0; z-index: 999; background: white; border-radius: 0 0 12px 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
-    <iframe id="menu-iframe" src="" style="width: 100%; height: 80px; border: none; display: block;"></iframe>
-  </div>
-
-  <!-- 固定iframeの分だけ上部に余白を追加 -->
-  <div style="height: 50px;"></div>
+  <!-- 待ち人数表示用のインラインフレーム（スクロールしても常に表示） -->
+  <iframe id="waiting-info-iframe" class="waiting-info-frame" src=""></iframe>
 
   <div id="page-orders">
     <div class="top-controls">
@@ -663,6 +671,19 @@
       showAudioEnablePopup();
     };
 
+    // iframe用のURLを設定（ログイン後に実行）
+    function setupWaitingInfoIframe() {
+      const storeId = window.currentStoreId || currentStoreId;
+      const iframe = document.getElementById('waiting-info-iframe');
+      if (storeId) {
+        // 店舗IDがある場合
+        iframe.src = `menu.html?store=${storeId}&mode=waiting-info-only`;
+      } else {
+        // 旧システム（下赤塚店）の場合
+        iframe.src = 'menu.html?mode=waiting-info-only';
+      }
+      console.log('待ち人数iframe設定完了:', iframe.src);
+    }
 
     function showAudioEnablePopup() {
       const overlay = document.createElement('div');
@@ -1307,15 +1328,6 @@
 
     async function completeOrder(orderId, tableNumber, orderNumber) {
       try {
-        // 注文データを取得して在庫を減らす
-        const orderRef = window.getStoreDoc('orders', orderId);
-        const orderSnap = await window.getDoc(orderRef);
-        
-        if (orderSnap.exists()) {
-          const orderData = orderSnap.data();
-          await decreaseInventory(orderData.items || []);
-        }
-        
         await updateDoc(window.getStoreDoc('orders', orderId), {
           status: 'completed',
           completedAt: Timestamp.now()
@@ -1377,67 +1389,6 @@
     
     // グローバルに公開
     window.toggleItemCheck = toggleItemCheck;
-
-    // 🆕 在庫を減らす
-    async function decreaseInventory(items) {
-      try {
-        const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
-        const inventorySnap = await window.getDoc(inventoryRef);
-        
-        if (!inventorySnap.exists()) {
-          console.log('⚠️ 在庫設定が存在しません');
-          return;
-        }
-        
-        const inventoryData = inventorySnap.data();
-        const inventorySettings = inventoryData.items || {};
-        let updated = false;
-        
-        for (const item of items) {
-          const menuItemId = item.id;
-          const quantity = item.quantity || 1;
-          
-          if (inventorySettings[menuItemId]) {
-            const currentStock = inventorySettings[menuItemId].stock;
-            
-            // 在庫が設定されている場合のみ減らす
-            if (currentStock !== null && currentStock !== undefined) {
-              const newStock = Math.max(0, currentStock - quantity);
-              inventorySettings[menuItemId].stock = newStock;
-              updated = true;
-              
-              console.log(`📦 在庫減少: ${item.name} ${currentStock} → ${newStock} (${quantity}個使用)`);
-              
-              // 在庫が0になった場合、自動的に品切れにする
-              if (newStock === 0) {
-                console.log(`⚠️ 在庫切れ: ${item.name}`);
-                try {
-                  const menuRef = window.getStoreDoc('menus', menuItemId);
-                  await updateDoc(menuRef, {
-                    isSoldOut: true
-                  });
-                  console.log(`✅ 自動品切れ設定: ${item.name}`);
-                } catch (e) {
-                  console.error('品切れ設定エラー:', e);
-                }
-              }
-            }
-          }
-        }
-        
-        // 在庫を更新
-        if (updated) {
-          await updateDoc(inventoryRef, {
-            items: inventorySettings,
-            updatedAt: new Date().toISOString()
-          });
-          console.log('✅ 在庫を更新しました');
-        }
-      } catch (error) {
-        console.error('❌ 在庫減少エラー:', error);
-      }
-    }
-
 
     async function cancelOrder(orderId, tableNumber, orderNumber) {
       try {
@@ -2214,13 +2165,7 @@
           document.getElementById('loginScreen').style.display = 'none';
           document.getElementById('mainContent').style.display = 'block';
           sessionStorage.setItem('controllerAuth', 'true');
-          
-          // menu.htmlをiframeに表示
-          const iframe = document.getElementById('menu-iframe');
-          if (iframe) {
-            iframe.src = 'menu.html';
-          }
-          
+          setupWaitingInfoIframe(); // iframe設定
           console.log('✅ ログイン成功（旧システム）');
           return false;
         }
@@ -2249,13 +2194,7 @@
             sessionStorage.setItem('controllerAuth', 'true');
             sessionStorage.setItem('controllerStoreId', currentStoreId);
             sessionStorage.setItem('controllerStoreName', currentStoreName);
-            
-            // menu.htmlをiframeに表示（店舗IDパラメータ付き）
-            const iframe = document.getElementById('menu-iframe');
-            if (iframe) {
-              iframe.src = 'menu.html?store=' + currentStoreId;
-            }
-            
+            setupWaitingInfoIframe(); // iframe設定
             console.log('✅ ログイン成功:', currentStoreName);
             return false;
           }
@@ -2313,17 +2252,7 @@
         
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
-        
-        // menu.htmlをiframeに表示
-        const iframe = document.getElementById('menu-iframe');
-        if (iframe) {
-          if (currentStoreId) {
-            iframe.src = 'menu.html?store=' + currentStoreId;
-          } else {
-            iframe.src = 'menu.html';
-          }
-        }
-        
+        setupWaitingInfoIframe(); // iframe設定
         console.log('✅ セッション復元:', currentStoreName);
       } else {
         document.getElementById('loginScreen').style.display = 'flex';
