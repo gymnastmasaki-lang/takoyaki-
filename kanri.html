@@ -1700,6 +1700,9 @@
                         // 🔧 修正: idフィールドがない場合はドキュメントIDを使用
                         const itemId = data.id || doc.id;
                         
+                        // 🆕 非表示商品はスキップ
+                        if (data.hidden) return;
+                        
                         if (data.name) {  // nameがあればOK
                             items.push({
                                 id: itemId,
@@ -2191,22 +2194,23 @@
                 }
             };
 
-            // 🆕 商品削除関数
+            // 🆕 商品削除関数（ソフト削除：hidden: trueに設定）
             const deleteProduct = async (docId, productName) => {
                 const confirmed = await showCustomConfirmFunc(
-                    `「${productName}」を削除しますか？`,
-                    '⚠️ 確認',
+                    `「${productName}」を非表示にしますか？\n\n非表示にした商品はメニューから見えなくなりますが、後から復元できます。`,
+                    '⚠️ 商品を非表示にする',
                     '⚠️'
                 );
                 
                 if (!confirmed) return;
                 
                 try {
-                    await window.firebaseModules.deleteDoc(
-                        window.firebaseModules.doc(window.db, 'stores', window.currentStoreId, 'menus', docId)
+                    await window.firebaseModules.updateDoc(
+                        window.firebaseModules.doc(window.db, 'stores', window.currentStoreId, 'menus', docId),
+                        { hidden: true }
                     );
                     
-                    showCustomAlertFunc('商品を削除しました', '✅ 削除完了', '✅');
+                    showCustomAlertFunc('商品を非表示にしました。「復元済み商品」から元に戻せます。', '✅ 非表示完了', '✅');
                     
                     // 商品リストを再読み込み
                     await loadProductsForDelete();
@@ -2214,11 +2218,39 @@
                     
                 } catch (error) {
                     console.error('商品削除エラー:', error);
-                    showCustomAlertFunc('商品の削除に失敗しました: ' + error.message, '❌ エラー', '❌');
+                    showCustomAlertFunc('商品の非表示に失敗しました: ' + error.message, '❌ エラー', '❌');
                 }
             };
 
-            // 🆕 商品削除リストを読み込み
+            // 🆕 商品復元関数（hidden: falseに戻す）
+            const restoreProduct = async (docId, productName) => {
+                const confirmed = await showCustomConfirmFunc(
+                    `「${productName}」を復元しますか？\n\nメニューに再度表示されます。`,
+                    '🔄 商品復元の確認',
+                    '🔄'
+                );
+                
+                if (!confirmed) return;
+                
+                try {
+                    await window.firebaseModules.updateDoc(
+                        window.firebaseModules.doc(window.db, 'stores', window.currentStoreId, 'menus', docId),
+                        { hidden: false }
+                    );
+                    
+                    showCustomAlertFunc('商品を復元しました。メニューに再度表示されます。', '✅ 復元完了', '✅');
+                    
+                    // 商品リストを再読み込み
+                    await loadProductsForDelete();
+                    await loadMenuItems();
+                    
+                } catch (error) {
+                    console.error('商品復元エラー:', error);
+                    showCustomAlertFunc('商品の復元に失敗しました: ' + error.message, '❌ エラー', '❌');
+                }
+            };
+
+            // 🆕 商品削除リストを読み込み（非表示商品も含む）
             const loadProductsForDelete = async () => {
                 try {
                     const menuSnapshot = await window.firebaseModules.getDocs(window.getStoreCollection('menus'));
@@ -2227,6 +2259,7 @@
                     menuSnapshot.forEach(doc => {
                         products.push({
                             docId: doc.id,
+                            hidden: doc.data().hidden || false,  // 🆕 非表示フラグを保持
                             ...doc.data()
                         });
                     });
@@ -5521,9 +5554,9 @@
                                                 setShowProductDelete(true);
                                                 loadProductsForDelete();
                                             }}
-                                            className="px-6 py-4 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold text-lg"
+                                            className="px-6 py-4 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-bold text-lg"
                                         >
-                                            🗑️ 商品削除
+                                            👁️ 商品非表示・復元
                                         </button>
                                     </div>
 
@@ -5817,11 +5850,32 @@
                                     )}
 
                                     {/* 商品削除モーダル */}
-                                    {showProductDelete && (
+                                    {showProductDelete && (() => {
+                                        const [deleteTab, setDeleteTab] = React.useState('active'); // 'active' or 'hidden'
+                                        const activeProducts = productsForDelete.filter(p => !p.hidden);
+                                        const hiddenProducts = productsForDelete.filter(p => p.hidden);
+                                        return (
                                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                                             <div className="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-                                                <h3 className="text-2xl font-bold mb-4">商品削除</h3>
+                                                <h3 className="text-2xl font-bold mb-2">商品管理（非表示・復元）</h3>
+                                                <p className="text-sm text-gray-500 mb-4">商品を「非表示」にすると、メニューから見えなくなりますが、後から「復元」できます。</p>
                                                 
+                                                {/* タブ */}
+                                                <div className="flex gap-2 mb-4">
+                                                    <button
+                                                        onClick={() => setDeleteTab('active')}
+                                                        className={`flex-1 py-2 px-4 rounded-lg font-bold text-sm ${deleteTab === 'active' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                                                    >
+                                                        表示中の商品（{activeProducts.length}件）
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setDeleteTab('hidden')}
+                                                        className={`flex-1 py-2 px-4 rounded-lg font-bold text-sm ${deleteTab === 'hidden' ? 'bg-orange-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                                                    >
+                                                        非表示中の商品（{hiddenProducts.length}件）
+                                                    </button>
+                                                </div>
+
                                                 <div className="mb-4">
                                                     <input
                                                         type="text"
@@ -5833,26 +5887,38 @@
                                                 </div>
 
                                                 <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                                                    {productsForDelete
+                                                    {(deleteTab === 'active' ? activeProducts : hiddenProducts)
                                                         .filter(product => 
                                                             productSearchQuery === '' || 
                                                             product.name.toLowerCase().includes(productSearchQuery.toLowerCase())
                                                         )
                                                         .map(product => (
-                                                            <div key={product.docId} className="flex justify-between items-center p-4 border-2 rounded-lg hover:bg-gray-50">
+                                                            <div key={product.docId} className={`flex justify-between items-center p-4 border-2 rounded-lg ${product.hidden ? 'bg-orange-50 border-orange-200' : 'hover:bg-gray-50'}`}>
                                                                 <div>
-                                                                    <div className="font-bold text-lg">{product.name}</div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="font-bold text-lg">{product.name}</div>
+                                                                        {product.hidden && <span className="text-xs bg-orange-200 text-orange-700 px-2 py-0.5 rounded font-bold">非表示中</span>}
+                                                                    </div>
                                                                     <div className="text-sm text-gray-600">
                                                                         <span className="bg-blue-100 px-2 py-1 rounded mr-2">{product.category}</span>
                                                                         <span className="text-green-600 font-bold">¥{product.price?.toLocaleString()}</span>
                                                                     </div>
                                                                 </div>
-                                                                <button
-                                                                    onClick={() => deleteProduct(product.docId, product.name)}
-                                                                    className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold"
-                                                                >
-                                                                    🗑️ 削除
-                                                                </button>
+                                                                {product.hidden ? (
+                                                                    <button
+                                                                        onClick={() => restoreProduct(product.docId, product.name)}
+                                                                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-bold"
+                                                                    >
+                                                                        🔄 復元
+                                                                    </button>
+                                                                ) : (
+                                                                    <button
+                                                                        onClick={() => deleteProduct(product.docId, product.name)}
+                                                                        className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold"
+                                                                    >
+                                                                        👁️ 非表示
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         ))
                                                     }
@@ -5866,7 +5932,8 @@
                                                 </button>
                                             </div>
                                         </div>
-                                    )}
+                                        );
+                                    })()}
 
                                     {/* 商品編集モーダル（商品選択） */}
                                     {showProductEdit && !editingProductId && (
