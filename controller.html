@@ -214,6 +214,48 @@
     .soldout-toggle-btn.set-soldout { background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); }
     .soldout-toggle-btn.set-available { background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); }
     
+    /* 音声案内ボタンのスタイル */
+    .audio-buttons-section {
+      background: white;
+      border-radius: 15px;
+      padding: 20px;
+      margin-bottom: 15px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    }
+    .audio-buttons-section h2 {
+      text-align: center;
+      color: #667eea;
+      margin-bottom: 15px;
+      font-size: 20px;
+    }
+    .audio-button-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+    }
+    .audio-btn {
+      padding: 20px 10px;
+      font-size: 20px;
+      font-weight: bold;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      color: white;
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      transition: all 0.3s;
+    }
+    .audio-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    }
+    .audio-btn:active {
+      transform: scale(0.95);
+    }
+    .audio-btn.playing {
+      background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+      animation: pulse 0.5s infinite;
+    }
     
     /* オンライン状態インジケーター */
     .connection-indicator {
@@ -463,13 +505,15 @@
     <span>オンライン</span>
   </div>
 
-  <!-- menu.htmlの待ち人数表示をiframeで表示（固定） -->
-  <div style="position: fixed; top: 0; left: 0; right: 0; z-index: 999; background: white; border-radius: 0 0 12px 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
-    <iframe id="menu-iframe" src="" style="width: 100%; height: 40px; border: none; display: block;"></iframe>
+  <!-- 音声案内ボタンセクション -->
+  <div class="audio-buttons-section">
+    <div class="audio-button-grid" id="audio-button-grid"></div>
   </div>
 
-  <!-- 固定iframeの分だけ上部に余白を追加 -->
-  <div style="height: 50px;"></div>
+  <!-- menu.htmlの待ち人数表示をiframeで表示 -->
+  <div style="margin: 0 0 20px 0; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+    <iframe id="menu-iframe" src="" style="width: 100%; height: 120px; border: none; display: block;"></iframe>
+  </div>
 
   <div id="page-orders">
     <div class="top-controls">
@@ -577,35 +621,31 @@
     let isFirstOrderLoad = true;
     let lastOrderCount = 0;
     let allMenuItems = [];
-    let isBulkSoldOut = false;
-    let currentAudio = null;
-    
-    // タップ音用のAudioContext
-    let audioContext = null;
     
     // タップ音を再生する関数
     function playTapSound() {
       try {
-        if (!audioContext) {
-          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        // 静的変数としてaudioContextを保持
+        if (!playTapSound.audioContext) {
+          playTapSound.audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
         
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
+        const oscillator = playTapSound.audioContext.createOscillator();
+        const gainNode = playTapSound.audioContext.createGain();
         
         oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
+        gainNode.connect(playTapSound.audioContext.destination);
         
         // ピッという音（1000Hz）
         oscillator.frequency.value = 1000;
         oscillator.type = 'sine';
         
         // 音量設定
-        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+        gainNode.gain.setValueAtTime(0.3, playTapSound.audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, playTapSound.audioContext.currentTime + 0.1);
         
-        oscillator.start(audioContext.currentTime);
-        oscillator.stop(audioContext.currentTime + 0.1);
+        oscillator.start(playTapSound.audioContext.currentTime);
+        oscillator.stop(playTapSound.audioContext.currentTime + 0.1);
       } catch (e) {
         console.log('タップ音再生エラー:', e);
       }
@@ -660,9 +700,72 @@
     });
 
     window.onload = async function() {
+      initializeAudioButtons();
       showAudioEnablePopup();
     };
 
+    // 音声案内ボタンの初期化
+    function initializeAudioButtons() {
+      const numbers = [619, 620, 621, 622, 623, 624, 625, 626, 627, 628];
+      const buttonGrid = document.getElementById('audio-button-grid');
+      
+      numbers.forEach(num => {
+        const btn = document.createElement('button');
+        btn.className = 'audio-btn';
+        btn.textContent = num;
+        btn.onclick = () => playAudioAnnouncement(num, btn);
+        buttonGrid.appendChild(btn);
+      });
+    }
+    
+    // 音声案内を再生
+    function playAudioAnnouncement(number, button) {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+      }
+
+      document.querySelectorAll('.audio-btn').forEach(b => {
+        b.classList.remove('playing');
+      });
+
+      try {
+        const pinpon = new Audio('./pinpon.mp3');
+        pinpon.volume = 1.0;
+        currentAudio = pinpon;
+        
+        button.classList.add('playing');
+        
+        pinpon.play().catch(err => console.error('ピンポン音 再生失敗:', err));
+        
+        pinpon.onended = () => {
+          const audio = new Audio(`./${number}.wav`);
+          audio.volume = 1.0;
+          currentAudio = audio;
+
+          audio.play().catch(err => {
+            console.error(`${number}.wav 再生失敗:`, err);
+            button.classList.remove('playing');
+          });
+
+          audio.onended = () => {
+            button.classList.remove('playing');
+          };
+
+          audio.onerror = () => {
+            button.classList.remove('playing');
+          };
+        };
+        
+        pinpon.onerror = () => {
+          button.classList.remove('playing');
+        };
+
+      } catch (e) {
+        console.error('エラー:', e);
+        button.classList.remove('playing');
+      }
+    }
 
     function showAudioEnablePopup() {
       const overlay = document.createElement('div');
@@ -2215,7 +2318,7 @@
           document.getElementById('mainContent').style.display = 'block';
           sessionStorage.setItem('controllerAuth', 'true');
           
-          // menu.htmlをiframeに表示
+          // menu.htmlをiframeに表示（店舗IDなし）
           const iframe = document.getElementById('menu-iframe');
           if (iframe) {
             iframe.src = 'menu.html';
