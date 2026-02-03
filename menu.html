@@ -2177,28 +2177,75 @@
             image: data.image || '',
             note: note,
             taxRate: data.taxRate,  // 商品個別の税率（未設定の場合はundefined）
-            taxType: data.taxType || 'inclusive'  // 税込/税抜タイプ（デフォルトは内税）
+            taxType: data.taxType || 'inclusive',  // 税込/税抜タイプ（デフォルトは内税）
+            foodType: data.foodType  // 🆕 食材/食材以外の区分を保持
           };
           
-          // 🆕 包材カテゴリは常に10%
-          if (category === '包材') {
+          // 🔥 特別処理: レジ袋は常に10%（最優先）
+          if (item.name?.includes('レジ袋') || item.name?.includes('🛍️') || item.name?.includes('袋')) {
             item.taxRate = 10;
+            console.log(`  🔥 レジ袋判定: ${item.name} → 強制的に10%`);
+          }
+          // 🆕 包材カテゴリは常に10%
+          else if (category === '包材') {
+            item.taxRate = 10;
+            item.foodType = 'non-food';  // 包材は食材以外
             console.log(`  📊 税率強制: ${item.name} → ${item.taxRate}% (包材固定)`);
           }
-          // 🆕 テーブル設定のデフォルト税率を適用
-          else if (tableSettings && tableSettings.taxSettings && tableSettings.taxSettings.defaultTaxRate) {
-            // 商品にtaxRateが明示的に設定されていない場合のみテーブル設定を適用
-            if (data.taxRate === undefined || data.taxRate === null) {
-              item.taxRate = tableSettings.taxSettings.defaultTaxRate;
-              console.log(`  📊 税率適用: ${item.name} → ${item.taxRate}% (テーブル設定: デフォルト)`);
+          // 🆕 foodTypeを決定（未設定の場合はcategoryから推測）
+          else {
+            if (!item.foodType) {
+              // カテゴリが「包材」または商品名に「包材」を含む場合は食材以外
+              if (item.category === '包材' || item.name?.includes('包材')) {
+                item.foodType = 'non-food';
+                console.log(`  ⚠️ foodType未設定 → category/name(${item.category}/${item.name})から推測: non-food（食材以外）`);
+              } else {
+                item.foodType = 'food';  // デフォルトは食材
+                console.log(`  ⚠️ foodType未設定 → デフォルト: food（食材）, 商品名: ${item.name}`);
+              }
             } else {
-              console.log(`  📊 税率維持: ${item.name} → ${item.taxRate}% (商品個別設定)`);
+              console.log(`  ✅ foodType設定済み: ${item.foodType} (商品: ${item.name})`);
             }
-          } else {
-            // テーブル設定がない場合は10%をデフォルトとする
-            if (item.taxRate === undefined || item.taxRate === null) {
-              item.taxRate = 10;
-              console.log(`  📊 税率適用: ${item.name} → ${item.taxRate}% (システムデフォルト)`);
+            
+            // 税率決定: pos.htmlと同じロジック
+            // 🔥 改善: テーブル設定が有効（takeout/dine-in）な場合、foodTypeを優先
+            if (tableSettings && tableSettings.taxRule && tableSettings.taxRule !== 'none') {
+              const taxRule = tableSettings.taxRule;
+              console.log(`  📊 [税率決定] 商品: ${item.name}, foodType: ${item.foodType}, taxRule: ${taxRule}`);
+              
+              switch(taxRule) {
+                case 'takeout':
+                  // テイクアウト: 食材は8%、食材以外は10%
+                  item.taxRate = (item.foodType === 'food') ? 8 : 10;
+                  console.log(`    → テイクアウトモード: ${item.foodType === 'food' ? '食材(8%)' : '食材以外(10%)'} = ${item.taxRate}%`);
+                  break;
+                
+                case 'dine-in':
+                  // 店内飲食及び食材以外: 全部10%
+                  item.taxRate = 10;
+                  console.log(`    → 店内飲食及び食材以外モード: 10%`);
+                  break;
+                
+                default:
+                  // 不明な場合は商品のデフォルト税率
+                  if (item.taxRate !== undefined && item.taxRate !== null) {
+                    console.log(`    → 不明なtaxRule: ${taxRule} → 商品のtaxRate: ${item.taxRate}%`);
+                  } else {
+                    // foodTypeから推測（食材:8%, 食材以外:10%）
+                    item.taxRate = (item.foodType === 'non-food') ? 10 : 8;
+                    console.log(`    → 不明なtaxRule: ${taxRule}, taxRate未設定 → foodType(${item.foodType})から: ${item.taxRate}%`);
+                  }
+              }
+            } else {
+              // テーブル設定がない、またはtaxRuleが'none'の場合は商品のデフォルト税率を使用
+              // 商品のtaxRateを優先使用
+              if (item.taxRate !== undefined && item.taxRate !== null) {
+                console.log(`  📊 [税率決定] テーブル設定なし → 商品のtaxRate: ${item.taxRate}%`);
+              } else {
+                // taxRateがない場合、foodTypeから推測（食材:8%, 食材以外:10%）
+                item.taxRate = (item.foodType === 'non-food') ? 10 : 8;
+                console.log(`  📊 [税率決定] テーブル設定なし、taxRate未設定 → foodType(${item.foodType})から推測: ${item.taxRate}%`);
+              }
             }
           }
           
