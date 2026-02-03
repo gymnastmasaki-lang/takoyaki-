@@ -214,18 +214,47 @@
     .soldout-toggle-btn.set-soldout { background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); }
     .soldout-toggle-btn.set-available { background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); }
     
-    /* 待ち人数表示用のインラインフレームスタイル */
-    .waiting-info-frame {
-      position: sticky;
-      top: 0;
-      width: 100%;
-      height: 80px;
-      border: none;
-      border-radius: 15px;
-      margin-bottom: 15px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    /* 音声案内ボタンのスタイル */
+    .audio-buttons-section {
       background: white;
-      z-index: 100;
+      border-radius: 15px;
+      padding: 20px;
+      margin-bottom: 15px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    }
+    .audio-buttons-section h2 {
+      text-align: center;
+      color: #667eea;
+      margin-bottom: 15px;
+      font-size: 20px;
+    }
+    .audio-button-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+    }
+    .audio-btn {
+      padding: 20px 10px;
+      font-size: 20px;
+      font-weight: bold;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      color: white;
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      transition: all 0.3s;
+    }
+    .audio-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    }
+    .audio-btn:active {
+      transform: scale(0.95);
+    }
+    .audio-btn.playing {
+      background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+      animation: pulse 0.5s infinite;
     }
     
     /* オンライン状態インジケーター */
@@ -476,8 +505,10 @@
     <span>オンライン</span>
   </div>
 
-  <!-- 待ち人数表示用のインラインフレーム（スクロールしても常に表示） -->
-  <iframe id="waiting-info-iframe" class="waiting-info-frame" src=""></iframe>
+  <!-- 音声案内ボタンセクション -->
+  <div class="audio-buttons-section">
+    <div class="audio-button-grid" id="audio-button-grid"></div>
+  </div>
 
   <div id="page-orders">
     <div class="top-controls">
@@ -492,6 +523,11 @@
       <div class="manual-waiting-label">手動待ち人数</div>
       <div class="manual-count" id="manual-count">0</div>
       <button class="btn-reset" onclick="resetWaiting()">リセット</button>
+    </div>
+
+    <!-- menu.htmlの待ち人数表示をiframeで埋め込み -->
+    <div style="margin: 20px 0;">
+      <iframe id="waiting-iframe" src="waiting-display.html" style="width: 100%; height: 150px; border: none; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.2);"></iframe>
     </div>
 
     <div id="staff-calls-container"></div>
@@ -585,11 +621,6 @@
     let isFirstOrderLoad = true;
     let lastOrderCount = 0;
     let allMenuItems = [];
-    let isBulkSoldOut = false;
-    let currentAudio = null;
-    
-    // タップ音用のAudioContext
-    let audioContext = null;
     
     // タップ音を再生する関数
     function playTapSound() {
@@ -668,21 +699,71 @@
     });
 
     window.onload = async function() {
+      initializeAudioButtons();
       showAudioEnablePopup();
     };
 
-    // iframe用のURLを設定（ログイン後に実行）
-    function setupWaitingInfoIframe() {
-      const storeId = window.currentStoreId || currentStoreId;
-      const iframe = document.getElementById('waiting-info-iframe');
-      if (storeId) {
-        // 店舗IDがある場合
-        iframe.src = `menu.html?store=${storeId}&mode=waiting-info-only`;
-      } else {
-        // 旧システム（下赤塚店）の場合
-        iframe.src = 'menu.html?mode=waiting-info-only';
+    // 音声案内ボタンの初期化
+    function initializeAudioButtons() {
+      const numbers = [619, 620, 621, 622, 623, 624, 625, 626, 627, 628];
+      const buttonGrid = document.getElementById('audio-button-grid');
+      
+      numbers.forEach(num => {
+        const btn = document.createElement('button');
+        btn.className = 'audio-btn';
+        btn.textContent = num;
+        btn.onclick = () => playAudioAnnouncement(num, btn);
+        buttonGrid.appendChild(btn);
+      });
+    }
+    
+    // 音声案内を再生
+    function playAudioAnnouncement(number, button) {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
       }
-      console.log('待ち人数iframe設定完了:', iframe.src);
+
+      document.querySelectorAll('.audio-btn').forEach(b => {
+        b.classList.remove('playing');
+      });
+
+      try {
+        const pinpon = new Audio('./pinpon.mp3');
+        pinpon.volume = 1.0;
+        currentAudio = pinpon;
+        
+        button.classList.add('playing');
+        
+        pinpon.play().catch(err => console.error('ピンポン音 再生失敗:', err));
+        
+        pinpon.onended = () => {
+          const audio = new Audio(`./${number}.wav`);
+          audio.volume = 1.0;
+          currentAudio = audio;
+
+          audio.play().catch(err => {
+            console.error(`${number}.wav 再生失敗:`, err);
+            button.classList.remove('playing');
+          });
+
+          audio.onended = () => {
+            button.classList.remove('playing');
+          };
+
+          audio.onerror = () => {
+            button.classList.remove('playing');
+          };
+        };
+        
+        pinpon.onerror = () => {
+          button.classList.remove('playing');
+        };
+
+      } catch (e) {
+        console.error('エラー:', e);
+        button.classList.remove('playing');
+      }
     }
 
     function showAudioEnablePopup() {
@@ -1328,6 +1409,15 @@
 
     async function completeOrder(orderId, tableNumber, orderNumber) {
       try {
+        // 注文データを取得して在庫を減らす
+        const orderRef = window.getStoreDoc('orders', orderId);
+        const orderSnap = await window.getDoc(orderRef);
+        
+        if (orderSnap.exists()) {
+          const orderData = orderSnap.data();
+          await decreaseInventory(orderData.items || []);
+        }
+        
         await updateDoc(window.getStoreDoc('orders', orderId), {
           status: 'completed',
           completedAt: Timestamp.now()
@@ -1389,6 +1479,67 @@
     
     // グローバルに公開
     window.toggleItemCheck = toggleItemCheck;
+
+    // 🆕 在庫を減らす
+    async function decreaseInventory(items) {
+      try {
+        const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+        const inventorySnap = await window.getDoc(inventoryRef);
+        
+        if (!inventorySnap.exists()) {
+          console.log('⚠️ 在庫設定が存在しません');
+          return;
+        }
+        
+        const inventoryData = inventorySnap.data();
+        const inventorySettings = inventoryData.items || {};
+        let updated = false;
+        
+        for (const item of items) {
+          const menuItemId = item.id;
+          const quantity = item.quantity || 1;
+          
+          if (inventorySettings[menuItemId]) {
+            const currentStock = inventorySettings[menuItemId].stock;
+            
+            // 在庫が設定されている場合のみ減らす
+            if (currentStock !== null && currentStock !== undefined) {
+              const newStock = Math.max(0, currentStock - quantity);
+              inventorySettings[menuItemId].stock = newStock;
+              updated = true;
+              
+              console.log(`📦 在庫減少: ${item.name} ${currentStock} → ${newStock} (${quantity}個使用)`);
+              
+              // 在庫が0になった場合、自動的に品切れにする
+              if (newStock === 0) {
+                console.log(`⚠️ 在庫切れ: ${item.name}`);
+                try {
+                  const menuRef = window.getStoreDoc('menus', menuItemId);
+                  await updateDoc(menuRef, {
+                    isSoldOut: true
+                  });
+                  console.log(`✅ 自動品切れ設定: ${item.name}`);
+                } catch (e) {
+                  console.error('品切れ設定エラー:', e);
+                }
+              }
+            }
+          }
+        }
+        
+        // 在庫を更新
+        if (updated) {
+          await updateDoc(inventoryRef, {
+            items: inventorySettings,
+            updatedAt: new Date().toISOString()
+          });
+          console.log('✅ 在庫を更新しました');
+        }
+      } catch (error) {
+        console.error('❌ 在庫減少エラー:', error);
+      }
+    }
+
 
     async function cancelOrder(orderId, tableNumber, orderNumber) {
       try {
@@ -2165,7 +2316,13 @@
           document.getElementById('loginScreen').style.display = 'none';
           document.getElementById('mainContent').style.display = 'block';
           sessionStorage.setItem('controllerAuth', 'true');
-          setupWaitingInfoIframe(); // iframe設定
+          
+          // iframeのURLを設定（旧システムは店舗IDなし）
+          const iframe = document.getElementById('waiting-iframe');
+          if (iframe) {
+            iframe.src = 'waiting-display.html';
+          }
+          
           console.log('✅ ログイン成功（旧システム）');
           return false;
         }
@@ -2194,7 +2351,13 @@
             sessionStorage.setItem('controllerAuth', 'true');
             sessionStorage.setItem('controllerStoreId', currentStoreId);
             sessionStorage.setItem('controllerStoreName', currentStoreName);
-            setupWaitingInfoIframe(); // iframe設定
+            
+            // iframeに店舗IDを渡す
+            const iframe = document.getElementById('waiting-iframe');
+            if (iframe && currentStoreId) {
+              iframe.src = 'waiting-display.html?store=' + currentStoreId;
+            }
+            
             console.log('✅ ログイン成功:', currentStoreName);
             return false;
           }
@@ -2252,7 +2415,17 @@
         
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
-        setupWaitingInfoIframe(); // iframe設定
+        
+        // iframeに店舗IDを渡す
+        const iframe = document.getElementById('waiting-iframe');
+        if (iframe) {
+          if (currentStoreId) {
+            iframe.src = 'waiting-display.html?store=' + currentStoreId;
+          } else {
+            iframe.src = 'waiting-display.html';
+          }
+        }
+        
         console.log('✅ セッション復元:', currentStoreName);
       } else {
         document.getElementById('loginScreen').style.display = 'flex';
