@@ -7150,7 +7150,7 @@
                                 </button>
                             </div>
 
-                            {showBackupManagement && <BackupManagement currentStoreId={window.currentStoreId} />}
+                            {showBackupManagement && <BackupManagement currentStoreId={window.currentStoreId} showCustomConfirm={showCustomConfirmFunc} showCustomAlert={showCustomAlertFunc} />}
                         </div>
 
                         {/* 削除設定 */}
@@ -8413,7 +8413,7 @@
         };
 
         // ========== 💾 バックアップ管理コンポーネント ==========
-        const BackupManagement = ({ currentStoreId }) => {
+        const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }) => {
             const [backups, setBackups] = useState([]);
             const [loading, setLoading] = useState(true);
             const [restoring, setRestoring] = useState(false);
@@ -8463,15 +8463,12 @@
             const createManualBackup = async () => {
                 try {
                     // カスタム確認ダイアログを表示
-                    const confirmResult = await new Promise((resolve) => {
-                        showCustomConfirmFunc(
-                            '現在のデータをバックアップしますか？\n\n商品、従業員、注文履歴、勤怠データがバックアップされます。',
-                            'バックアップ作成',
-                            'バックアップする',
-                            'キャンセル',
-                            (confirmed) => resolve(confirmed)
-                        );
-                    });
+                    const confirmResult = await showCustomConfirm(
+                        '現在のデータをバックアップしますか？\n\n商品、従業員、注文履歴、勤怠データがバックアップされます。',
+                        'バックアップ作成',
+                        'バックアップする',
+                        'キャンセル'
+                    );
                     
                     if (!confirmResult) return;
                     
@@ -8521,12 +8518,42 @@
                     } else {
                         ordersRef = collection(window.db, 'orders');
                     }
-                    const ordersQuery = query(ordersRef, orderBy('createdAt', 'desc'), limit(1000));
-                    const ordersSnapshot = await getDocs(ordersQuery);
-                    backupData.data.orders = [];
-                    ordersSnapshot.forEach(docSnap => {
-                        backupData.data.orders.push({ id: docSnap.id, ...docSnap.data() });
-                    });
+                    
+                    try {
+                        // まず createdAt でソートを試みる
+                        const ordersQuery = query(ordersRef, orderBy('createdAt', 'desc'), limit(1000));
+                        const ordersSnapshot = await getDocs(ordersQuery);
+                        backupData.data.orders = [];
+                        ordersSnapshot.forEach(docSnap => {
+                            backupData.data.orders.push({ id: docSnap.id, ...docSnap.data() });
+                        });
+                        console.log('✅ 注文履歴取得（createdAtでソート）:', backupData.data.orders.length, '件');
+                    } catch (orderError) {
+                        console.warn('⚠️ createdAtでのソートに失敗、timestamp でリトライ:', orderError.message);
+                        try {
+                            // timestamp フィールドでソートを試みる
+                            const ordersQuery = query(ordersRef, orderBy('timestamp', 'desc'), limit(1000));
+                            const ordersSnapshot = await getDocs(ordersQuery);
+                            backupData.data.orders = [];
+                            ordersSnapshot.forEach(docSnap => {
+                                backupData.data.orders.push({ id: docSnap.id, ...docSnap.data() });
+                            });
+                            console.log('✅ 注文履歴取得（timestampでソート）:', backupData.data.orders.length, '件');
+                        } catch (timestampError) {
+                            console.warn('⚠️ timestampでのソートも失敗、全件取得を試みます:', timestampError.message);
+                            // ソートなしで全件取得（最大1000件は手動で制限）
+                            const ordersSnapshot = await getDocs(ordersRef);
+                            backupData.data.orders = [];
+                            let count = 0;
+                            ordersSnapshot.forEach(docSnap => {
+                                if (count < 1000) {
+                                    backupData.data.orders.push({ id: docSnap.id, ...docSnap.data() });
+                                    count++;
+                                }
+                            });
+                            console.log('✅ 注文履歴取得（ソートなし）:', backupData.data.orders.length, '件');
+                        }
+                    }
                     
                     // 勤怠データ（最近1000件）
                     let attendanceRef;
@@ -8555,17 +8582,17 @@
                     
                     console.log('✅ 手動バックアップ完了:', backupId);
                     
-                    showCustomAlertFunc(
+                    showCustomAlert(
                         `バックアップを作成しました\n\n商品: ${backupData.data.menus.length}件\n従業員: ${backupData.data.employees.length}名\n注文: ${backupData.data.orders.length}件\n勤怠: ${backupData.data.attendance.length}件`,
                         'バックアップ完了',
-                        'OK'
+                        '✅'
                     );
                     
                     // 一覧を再読み込み
                     await loadBackups();
                 } catch (error) {
                     console.error('バックアップ作成エラー:', error);
-                    showCustomAlertFunc('バックアップの作成に失敗しました\n\n' + error.message, 'エラー', 'OK');
+                    showCustomAlert('バックアップの作成に失敗しました\n\n' + error.message, 'エラー', '❌');
                 }
             };
 
@@ -8573,15 +8600,12 @@
             const restoreBackup = async (backup) => {
                 try {
                     // カスタム確認ダイアログを表示
-                    const confirmResult = await new Promise((resolve) => {
-                        showCustomConfirmFunc(
-                            `このバックアップから復元しますか？\n\n作成日時: ${backup.timestamp.toLocaleString('ja-JP')}\nタイプ: ${backup.type === 'auto' ? '自動' : '手動'}\n\n⚠️ 現在のデータは上書きされます！`,
-                            'バックアップ復元',
-                            '復元する',
-                            'キャンセル',
-                            (confirmed) => resolve(confirmed)
-                        );
-                    });
+                    const confirmResult = await showCustomConfirm(
+                        `このバックアップから復元しますか？\n\n作成日時: ${backup.timestamp.toLocaleString('ja-JP')}\nタイプ: ${backup.type === 'auto' ? '自動' : '手動'}\n\n⚠️ 現在のデータは上書きされます！`,
+                        'バックアップ復元',
+                        '復元する',
+                        'キャンセル'
+                    );
                     
                     if (!confirmResult) return;
                     
@@ -8636,7 +8660,7 @@
                     }
                     
                     setRestoring(false);
-                    showCustomAlertFunc('バックアップからの復元が完了しました！\n\nページを再読み込みしてください。', '復元完了', 'OK');
+                    showCustomAlert('バックアップからの復元が完了しました！\n\nページを再読み込みしてください。', '復元完了', '✅');
                     
                     // ページをリロード
                     setTimeout(() => {
@@ -8645,7 +8669,7 @@
                 } catch (error) {
                     console.error('復元エラー:', error);
                     setRestoring(false);
-                    showCustomAlertFunc('復元に失敗しました: ' + error.message, 'エラー', 'OK');
+                    showCustomAlert('復元に失敗しました: ' + error.message, 'エラー', '❌');
                 }
             };
 
@@ -8653,15 +8677,12 @@
             const deleteBackup = async (backupId) => {
                 try {
                     // カスタム確認ダイアログを表示
-                    const confirmResult = await new Promise((resolve) => {
-                        showCustomConfirmFunc(
-                            'このバックアップを削除しますか？\n\n削除したバックアップは復元できません。',
-                            'バックアップ削除',
-                            '削除する',
-                            'キャンセル',
-                            (confirmed) => resolve(confirmed)
-                        );
-                    });
+                    const confirmResult = await showCustomConfirm(
+                        'このバックアップを削除しますか？\n\n削除したバックアップは復元できません。',
+                        'バックアップ削除',
+                        '削除する',
+                        'キャンセル'
+                    );
                     
                     if (!confirmResult) return;
                     
@@ -8676,11 +8697,11 @@
                     
                     await deleteDoc(backupRef);
                     
-                    showCustomAlertFunc('バックアップを削除しました', '削除完了', 'OK');
+                    showCustomAlert('バックアップを削除しました', '削除完了', '✅');
                     await loadBackups();
                 } catch (error) {
                     console.error('バックアップ削除エラー:', error);
-                    showCustomAlertFunc('削除に失敗しました\n\n' + error.message, 'エラー', 'OK');
+                    showCustomAlert('削除に失敗しました\n\n' + error.message, 'エラー', '❌');
                 }
             };
 
