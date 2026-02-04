@@ -7149,7 +7149,7 @@
                                 </button>
                             </div>
 
-                            {showDeleteSettings && <DeleteSettings />}
+                            {showDeleteSettings && <DeleteSettings currentStoreId={window.currentStoreId} />}
                         </div>
 
                         {/* 給与明細表示 */}
@@ -8395,7 +8395,7 @@
         };
 
         // 削除設定コンポーネント
-        const DeleteSettings = () => {
+        const DeleteSettings = ({ currentStoreId }) => {
             const [products, setProducts] = useState([]);
             const [categories, setCategories] = useState([]);
             const [employees, setEmployees] = useState([]);
@@ -8407,22 +8407,31 @@
             // データ読み込み
             useEffect(() => {
                 loadData();
-            }, []);
+            }, [currentStoreId]);
 
             const loadData = async () => {
                 setLoading(true);
                 try {
+                    console.log('=== 削除設定: データ読み込み開始 ===');
+                    console.log('現在の店舗ID (props):', currentStoreId);
+                    console.log('window.currentStoreId:', window.currentStoreId);
+                    
                     const { getDocs, collection } = window.firebaseModules;
 
                     // 商品データ読み込み
                     console.log('商品データ読み込み開始...');
                     
-                    // 店舗IDがある場合は新パス、ない場合は旧パス
                     let menuSnapshot;
-                    if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
-                        const menuCollection = collection(window.db, 'stores', window.currentStoreId, 'menu_settings');
+                    let menuPath = '';
+                    
+                    if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                        menuPath = `stores/${currentStoreId}/menu_settings`;
+                        console.log('新パスを使用:', menuPath);
+                        const menuCollection = collection(window.db, 'stores', currentStoreId, 'menu_settings');
                         menuSnapshot = await getDocs(menuCollection);
                     } else {
+                        menuPath = 'menu_settings';
+                        console.log('旧パスを使用:', menuPath);
                         const menuCollection = collection(window.db, 'menu_settings');
                         menuSnapshot = await getDocs(menuCollection);
                     }
@@ -8432,15 +8441,24 @@
                     const allProducts = [];
                     const allCategories = new Set();
 
-                    menuSnapshot.docs.forEach(doc => {
-                        console.log('ドキュメントID:', doc.id, 'データ:', doc.data());
+                    menuSnapshot.docs.forEach((doc, index) => {
+                        console.log(`--- ドキュメント ${index + 1} ---`);
+                        console.log('ドキュメントID:', doc.id);
                         const data = doc.data();
+                        console.log('データキー:', Object.keys(data));
+                        console.log('categories存在:', !!data.categories);
                         
                         if (data.categories) {
+                            console.log('カテゴリ数:', Object.keys(data.categories).length);
+                            console.log('カテゴリ名:', Object.keys(data.categories));
+                            
                             Object.entries(data.categories).forEach(([categoryName, items]) => {
+                                console.log(`  カテゴリ: ${categoryName}, アイテム数:`, Array.isArray(items) ? items.length : 'not array');
                                 allCategories.add(categoryName);
+                                
                                 if (Array.isArray(items)) {
-                                    items.forEach(item => {
+                                    items.forEach((item, itemIndex) => {
+                                        console.log(`    アイテム${itemIndex + 1}:`, item.name, '¥' + item.price);
                                         allProducts.push({
                                             id: `${doc.id}_${categoryName}_${item.name}`,
                                             docId: doc.id,
@@ -8449,36 +8467,61 @@
                                             price: item.price
                                         });
                                     });
+                                } else {
+                                    console.warn(`    警告: ${categoryName}のitemsが配列ではありません:`, typeof items);
                                 }
                             });
+                        } else {
+                            console.warn('このドキュメントにはcategoriesがありません');
                         }
                     });
 
-                    console.log('商品数:', allProducts.length);
-                    console.log('カテゴリ数:', allCategories.size);
+                    console.log('=== 商品データ読み込み完了 ===');
+                    console.log('総商品数:', allProducts.length);
+                    console.log('総カテゴリ数:', allCategories.size);
+                    console.log('カテゴリ一覧:', Array.from(allCategories));
 
                     setProducts(allProducts);
                     setCategories(Array.from(allCategories));
 
                     // 従業員データ読み込み
+                    console.log('=== 従業員データ読み込み開始 ===');
                     let employeesSnapshot;
-                    if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
-                        const employeesCollection = collection(window.db, 'stores', window.currentStoreId, 'employees');
+                    let employeesPath = '';
+                    
+                    if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                        employeesPath = `stores/${currentStoreId}/employees`;
+                        console.log('新パスを使用:', employeesPath);
+                        const employeesCollection = collection(window.db, 'stores', currentStoreId, 'employees');
                         employeesSnapshot = await getDocs(employeesCollection);
                     } else {
+                        employeesPath = 'kintai_employees';
+                        console.log('旧パスを使用:', employeesPath);
                         const employeesCollection = collection(window.db, 'kintai_employees');
                         employeesSnapshot = await getDocs(employeesCollection);
                     }
 
-                    const employeesData = employeesSnapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
+                    console.log('従業員ドキュメント数:', employeesSnapshot.docs.length);
+                    
+                    const employeesData = employeesSnapshot.docs.map(doc => {
+                        const data = doc.data();
+                        console.log('従業員:', data.name, '時給:', data.rate);
+                        return {
+                            id: doc.id,
+                            ...data
+                        };
+                    });
+                    
+                    console.log('=== 従業員データ読み込み完了 ===');
+                    console.log('総従業員数:', employeesData.length);
+                    
                     setEmployees(employeesData);
 
                 } catch (error) {
-                    console.error('データ読み込みエラー:', error);
-                    showCustomAlertFunc('データの読み込みに失敗しました', 'エラー', 'X');
+                    console.error('❌ データ読み込みエラー:', error);
+                    console.error('エラー詳細:', error.message);
+                    console.error('スタックトレース:', error.stack);
+                    showCustomAlertFunc('データの読み込みに失敗しました: ' + error.message, 'エラー', 'X');
                 }
                 setLoading(false);
             };
@@ -8514,8 +8557,8 @@
                     // 各ドキュメントを更新
                     for (const [docId, categoriesMap] of Object.entries(groupedByDoc)) {
                         let docRef;
-                        if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
-                            docRef = doc(window.db, 'stores', window.currentStoreId, 'menu_settings', docId);
+                        if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                            docRef = doc(window.db, 'stores', currentStoreId, 'menu_settings', docId);
                         } else {
                             docRef = doc(window.db, 'menu_settings', docId);
                         }
@@ -8563,8 +8606,8 @@
                     const { getDocs, getDoc, updateDoc, doc, collection } = window.firebaseModules;
 
                     let menuCollection;
-                    if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
-                        menuCollection = collection(window.db, 'stores', window.currentStoreId, 'menu_settings');
+                    if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                        menuCollection = collection(window.db, 'stores', currentStoreId, 'menu_settings');
                     } else {
                         menuCollection = collection(window.db, 'menu_settings');
                     }
@@ -8573,8 +8616,8 @@
 
                     for (const docSnap of menuSnapshot.docs) {
                         let docRef;
-                        if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
-                            docRef = doc(window.db, 'stores', window.currentStoreId, 'menu_settings', docSnap.id);
+                        if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                            docRef = doc(window.db, 'stores', currentStoreId, 'menu_settings', docSnap.id);
                         } else {
                             docRef = doc(window.db, 'menu_settings', docSnap.id);
                         }
@@ -8620,20 +8663,31 @@
                 if (!confirmed) return;
 
                 try {
-                    const { deleteDoc, getDocs, query, where } = window.firebaseModules;
+                    const { deleteDoc, getDocs, query, where, doc, collection } = window.firebaseModules;
 
                     for (const employeeId of selectedEmployees) {
                         // 従業員データ削除
-                        const employeeRef = window.getStoreDoc('employees', employeeId);
+                        let employeeRef;
+                        if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                            employeeRef = doc(window.db, 'stores', currentStoreId, 'employees', employeeId);
+                        } else {
+                            employeeRef = doc(window.db, 'kintai_employees', employeeId);
+                        }
                         await deleteDoc(employeeRef);
 
                         // 勤怠データ削除
-                        const attendanceCollection = window.getStoreCollection('attendance');
+                        let attendanceCollection;
+                        if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                            attendanceCollection = collection(window.db, 'stores', currentStoreId, 'attendance');
+                        } else {
+                            attendanceCollection = collection(window.db, 'kintai_attendance');
+                        }
+                        
                         const q = query(attendanceCollection, where('employeeId', '==', employeeId));
                         const attendanceSnapshot = await getDocs(q);
                         
-                        for (const doc of attendanceSnapshot.docs) {
-                            await deleteDoc(doc.ref);
+                        for (const docSnap of attendanceSnapshot.docs) {
+                            await deleteDoc(docSnap.ref);
                         }
                     }
 
