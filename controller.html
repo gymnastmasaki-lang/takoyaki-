@@ -23,6 +23,37 @@
       box-shadow: 0 4px 20px rgba(0,0,0,0.2);
     }
     .header h1 { font-size: 20px; font-weight: bold; }
+    
+    /* 待ち人数表示カード */
+    .waiting-info-card {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 999;
+      background: rgba(255, 255, 255, 0.98);
+      padding: 12px;
+      border-radius: 0 0 12px 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      text-align: center;
+    }
+    .waiting-label {
+      font-size: 14px;
+      font-weight: bold;
+      color: #666;
+      margin-bottom: 3px;
+    }
+    .waiting-count {
+      font-size: 28px;
+      font-weight: bold;
+      color: #ff6b6b;
+    }
+    
+    /* 固定カードの分だけ上部に余白を追加 */
+    .content-spacer {
+      height: 70px;
+    }
+    
     .top-controls { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; }
     .big-btn {
       padding: 15px;
@@ -463,13 +494,14 @@
     <span>オンライン</span>
   </div>
 
-  <!-- menu.htmlの待ち人数表示をiframeで表示（固定） -->
-  <div style="position: fixed; top: 0; left: 0; right: 0; z-index: 999; background: white; border-radius: 0 0 12px 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
-    <iframe id="menu-iframe" src="" style="width: 100%; height: 80px; border: none; display: block;"></iframe>
+  <!-- 待ち人数表示カード（固定） -->
+  <div class="waiting-info-card">
+    <div class="waiting-label">ただ今のお待ち人数</div>
+    <div class="waiting-count"><span id="top-waiting">-</span>組</div>
   </div>
 
-  <!-- 固定iframeの分だけ上部に余白を追加 -->
-  <div style="height: 90px;"></div>
+  <!-- 固定カードの分だけ上部に余白を追加 -->
+  <div class="content-spacer"></div>
 
   <div id="page-orders">
     <div class="top-controls">
@@ -718,6 +750,7 @@
         watchWaiting();
         watchStaffCalls();
         watchOrders();
+        watchTotalWaitingCount(); // 待ち人数のリアルタイム監視を開始
       };
       
       overlay.appendChild(popup);
@@ -756,6 +789,60 @@
       );
       
       return unsubscribe;
+    }
+    
+    // 待ち人数をリアルタイムで更新する関数
+    function watchTotalWaitingCount() {
+      // ordersコレクションを監視
+      onSnapshot(window.getStoreCollection('orders'), async () => {
+        await updateTotalWaitingCount();
+      });
+      
+      // settingsコレクションも監視
+      onSnapshot(window.getStoreDoc('settings', 'waiting'), async () => {
+        await updateTotalWaitingCount();
+      });
+    }
+    
+    async function updateTotalWaitingCount() {
+      try {
+        const ordersSnapshot = await getDocs(window.getStoreCollection('orders'));
+        const now = new Date();
+        const validOrders = new Set();
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          
+          // 削除済みの注文は除外
+          if (data.deleted) return;
+          
+          // 完了済み・キャンセル済みは除外
+          if (data.completedAt || data.cancelledAt) return;
+          
+          // deleteAtがある場合、削除予定時刻を過ぎていたら除外
+          if (data.deleteAt && data.deleteAt.toDate() <= now) return;
+          
+          // 有効な注文としてカウント
+          validOrders.add(data.orderNumber);
+        });
+        
+        const settingsSnapshot = await getDocs(window.getStoreCollection('settings'));
+        let manualCount = 0;
+        settingsSnapshot.forEach(doc => {
+          if (doc.id === 'waiting') {
+            manualCount = doc.data().manualCount || 0;
+          }
+        });
+        
+        // 待ち人数 = 有効注文数 + 手動追加 + 1（最低1組）
+        const totalWaiting = validOrders.size + manualCount + 1;
+        const waitingElem = document.getElementById('top-waiting');
+        if (waitingElem) {
+          waitingElem.textContent = totalWaiting;
+        }
+      } catch (error) {
+        console.error('待ち人数更新エラー:', error);
+      }
     }
 
     function watchStaffCalls() {
@@ -2215,12 +2302,6 @@
           document.getElementById('mainContent').style.display = 'block';
           sessionStorage.setItem('controllerAuth', 'true');
           
-          // menu.htmlをiframeに表示
-          const iframe = document.getElementById('menu-iframe');
-          if (iframe) {
-            iframe.src = 'menu.html';
-          }
-          
           console.log('✅ ログイン成功（旧システム）');
           return false;
         }
@@ -2249,12 +2330,6 @@
             sessionStorage.setItem('controllerAuth', 'true');
             sessionStorage.setItem('controllerStoreId', currentStoreId);
             sessionStorage.setItem('controllerStoreName', currentStoreName);
-            
-            // menu.htmlをiframeに表示（店舗IDパラメータ付き）
-            const iframe = document.getElementById('menu-iframe');
-            if (iframe) {
-              iframe.src = 'menu.html?store=' + currentStoreId;
-            }
             
             console.log('✅ ログイン成功:', currentStoreName);
             return false;
@@ -2313,16 +2388,6 @@
         
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
-        
-        // menu.htmlをiframeに表示
-        const iframe = document.getElementById('menu-iframe');
-        if (iframe) {
-          if (currentStoreId) {
-            iframe.src = 'menu.html?store=' + currentStoreId;
-          } else {
-            iframe.src = 'menu.html';
-          }
-        }
         
         console.log('✅ セッション復元:', currentStoreName);
       } else {
