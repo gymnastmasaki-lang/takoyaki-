@@ -1674,7 +1674,7 @@
       <div class="header-left">
         <div class="status">
           <!-- 📅 営業日表示 -->
-          <div id="businessDateDisplay" style="padding: 10px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px; font-weight: bold; margin-right: 15px; font-size: 14px; cursor: pointer; line-height: 1.4; text-align: center; width: 280px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; height: 68px;" onclick="changeDateSelection()">
+          <div id="businessDateDisplay" style="padding: 10px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px; font-weight: bold; margin-right: 15px; font-size: 14px; cursor: pointer; line-height: 1.4; text-align: center; width: 280px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;" onclick="changeDateSelection()">
             <span id="businessDateText">営業日:<br>読み込み中...</span>
           </div>
           
@@ -1686,10 +1686,10 @@
           </div>
         </div>
       </div>
-      <div class="header-right" style="display: flex; gap: 15px; align-items: stretch;">
+      <div class="header-right" style="display: flex; gap: 15px; align-items: flex-start;">
         
-        <div style="display: flex; flex-direction: column; gap: 10px; align-items: stretch;">
-          <button onclick="window.location.href='https://gymnastmasaki-lang.github.io/takoyaki-/kintai.html'" style="padding: 10px 45px; font-size: 16px; background: linear-gradient(135deg, #3F51B5 0%, #303F9F 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.2; box-sizing: border-box; align-self: stretch; flex: 1;">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button onclick="window.location.href='https://gymnastmasaki-lang.github.io/takoyaki-/kintai.html'" style="padding: 10px 45px; font-size: 16px; background: linear-gradient(135deg, #3F51B5 0%, #303F9F 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.2; height: 102px; box-sizing: border-box;">
             <div style="font-size: 26px; margin-bottom: 2px;">⏰</div>
             <div style="font-size: 15px;">勤怠</div>
           </button>
@@ -6322,6 +6322,194 @@ ${totalRedSlipCount > 0 ? `
       }
     };
     
+    // ========== 🆕 バックアップ機能 ==========
+    
+    /**
+     * 自動バックアップ（7日ローテーション）
+     * 削除設定で削除されるデータをバックアップ
+     */
+    window.createAutoBackup = async function() {
+      try {
+        console.log('🔄 自動バックアップ開始（7日ローテーション）');
+        
+        const { getDocs, setDoc, doc, Timestamp } = window;
+        const today = new Date();
+        const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+        
+        // バックアップデータを収集
+        const backupData = {
+          timestamp: Timestamp.now(),
+          date: dateStr,
+          type: 'auto',
+          data: {}
+        };
+        
+        // 1. 商品データ（menus）
+        const menusSnapshot = await getDocs(window.getStoreCollection('menus'));
+        backupData.data.menus = [];
+        menusSnapshot.forEach(docSnap => {
+          backupData.data.menus.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        console.log(`📦 商品: ${backupData.data.menus.length}件`);
+        
+        // 2. 従業員データ（employees）
+        const employeesSnapshot = await getDocs(window.getStoreCollection('employees'));
+        backupData.data.employees = [];
+        employeesSnapshot.forEach(docSnap => {
+          backupData.data.employees.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        console.log(`👥 従業員: ${backupData.data.employees.length}名`);
+        
+        // 3. 注文履歴（orders）- 最近1000件のみ
+        const ordersQuery = window.query(
+          window.getStoreCollection('orders'),
+          window.orderBy('createdAt', 'desc'),
+          window.limit(1000)
+        );
+        const ordersSnapshot = await getDocs(ordersQuery);
+        backupData.data.orders = [];
+        ordersSnapshot.forEach(docSnap => {
+          backupData.data.orders.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        console.log(`📝 注文履歴: ${backupData.data.orders.length}件`);
+        
+        // 4. 勤怠データ（attendance）- 最近1000件のみ
+        const attendanceQuery = window.query(
+          window.getStoreCollection('attendance'),
+          window.orderBy('createdAt', 'desc'),
+          window.limit(1000)
+        );
+        const attendanceSnapshot = await getDocs(attendanceQuery);
+        backupData.data.attendance = [];
+        attendanceSnapshot.forEach(docSnap => {
+          backupData.data.attendance.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        console.log(`⏰ 勤怠: ${backupData.data.attendance.length}件`);
+        
+        // バックアップを保存（7日ローテーション）
+        const dayOfWeek = today.getDay(); // 0=日曜, 1=月曜, ..., 6=土曜
+        const backupId = `auto_day${dayOfWeek}`; // day0〜day6で7日ローテーション
+        
+        let backupRef;
+        if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+          backupRef = doc(window.db, 'stores', window.currentStoreId, 'backups', backupId);
+        } else {
+          backupRef = doc(window.db, 'backups', backupId);
+        }
+        
+        await setDoc(backupRef, backupData);
+        
+        console.log(`✅ 自動バックアップ完了: ${backupId} (${dateStr})`);
+        return true;
+      } catch (error) {
+        console.error('❌ 自動バックアップエラー:', error);
+        return false;
+      }
+    };
+    
+    /**
+     * 手動バックアップ
+     */
+    window.createManualBackup = async function() {
+      try {
+        console.log('💾 手動バックアップ開始');
+        
+        const { getDocs, setDoc, doc, Timestamp } = window;
+        const now = new Date();
+        const dateTimeStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+        
+        // バックアップデータを収集
+        const backupData = {
+          timestamp: Timestamp.now(),
+          date: dateTimeStr,
+          type: 'manual',
+          data: {}
+        };
+        
+        // 1. 商品データ
+        const menusSnapshot = await getDocs(window.getStoreCollection('menus'));
+        backupData.data.menus = [];
+        menusSnapshot.forEach(docSnap => {
+          backupData.data.menus.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        
+        // 2. 従業員データ
+        const employeesSnapshot = await getDocs(window.getStoreCollection('employees'));
+        backupData.data.employees = [];
+        employeesSnapshot.forEach(docSnap => {
+          backupData.data.employees.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        
+        // 3. 注文履歴（最近1000件）
+        const ordersQuery = window.query(
+          window.getStoreCollection('orders'),
+          window.orderBy('createdAt', 'desc'),
+          window.limit(1000)
+        );
+        const ordersSnapshot = await getDocs(ordersQuery);
+        backupData.data.orders = [];
+        ordersSnapshot.forEach(docSnap => {
+          backupData.data.orders.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        
+        // 4. 勤怠データ（最近1000件）
+        const attendanceQuery = window.query(
+          window.getStoreCollection('attendance'),
+          window.orderBy('createdAt', 'desc'),
+          window.limit(1000)
+        );
+        const attendanceSnapshot = await getDocs(attendanceQuery);
+        backupData.data.attendance = [];
+        attendanceSnapshot.forEach(docSnap => {
+          backupData.data.attendance.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        
+        // 手動バックアップを保存
+        const backupId = `manual_${dateTimeStr}`;
+        
+        let backupRef;
+        if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+          backupRef = doc(window.db, 'stores', window.currentStoreId, 'backups', backupId);
+        } else {
+          backupRef = doc(window.db, 'backups', backupId);
+        }
+        
+        await setDoc(backupRef, backupData);
+        
+        console.log(`✅ 手動バックアップ完了: ${backupId}`);
+        alert(`バックアップを作成しました\n\n商品: ${backupData.data.menus.length}件\n従業員: ${backupData.data.employees.length}名\n注文: ${backupData.data.orders.length}件\n勤怠: ${backupData.data.attendance.length}件`);
+        return true;
+      } catch (error) {
+        console.error('❌ 手動バックアップエラー:', error);
+        alert('バックアップに失敗しました: ' + error.message);
+        return false;
+      }
+    };
+    
     // ========== 精算機能 ==========
     
     // 精算モーダルを表示
@@ -6446,6 +6634,24 @@ ${totalRedSlipCount > 0 ? `
         await new Promise(resolve => {
           window.addEventListener('firebaseReady', resolve, { once: true });
         });
+      }
+      
+      // 🆕 バックアップ確認アラート
+      const shouldBackup = confirm('精算を実行する前に、データの自動バックアップを作成しますか？\n\n【推奨: はい】\n- 商品、従業員、注文履歴、勤怠データをバックアップします\n- 誤って削除した場合に復元できます\n- 過去7日分のバックアップが自動保持されます\n\n【いいえを選択した場合】\n- バックアップなしで精算を実行します');
+      
+      if (shouldBackup) {
+        console.log('💾 バックアップを作成します');
+        const backupSuccess = await window.createAutoBackup();
+        if (!backupSuccess) {
+          const continueAnyway = confirm('バックアップの作成に失敗しました。\n\nそれでも精算を続けますか？');
+          if (!continueAnyway) {
+            return;
+          }
+        } else {
+          console.log('✅ バックアップ作成完了 - 精算を続行します');
+        }
+      } else {
+        console.log('⚠️ バックアップをスキップして精算を実行します');
       }
       
       try {
