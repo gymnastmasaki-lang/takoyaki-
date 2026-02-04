@@ -266,6 +266,7 @@
             const [showReceiptSettings, setShowReceiptSettings] = useState(false);
             const [showAlertSettings, setShowAlertSettings] = useState(false);
             const [showEmployeeManagement, setShowEmployeeManagement] = useState(false);
+            const [showDeleteSettings, setShowDeleteSettings] = useState(false);
             
             // アラート設定用のstate
             const [alertSettings, setAlertSettings] = useState({
@@ -7134,6 +7135,23 @@
                             )}
                         </div>
 
+                        {/* 削除設定 */}
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                    🗑️ 削除設定
+                                </h2>
+                                <button
+                                    onClick={() => setShowDeleteSettings(!showDeleteSettings)}
+                                    className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+                                >
+                                    {showDeleteSettings ? '閉じる' : '設定を開く'}
+                                </button>
+                            </div>
+
+                            {showDeleteSettings && <DeleteSettings />}
+                        </div>
+
                         {/* 給与明細表示 */}
                         {selectedPayslipEmployee && (() => {
                             const employee = employees.find(e => e.id === selectedPayslipEmployee);
@@ -8371,6 +8389,396 @@
                         >
                             追加
                         </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // 削除設定コンポーネント
+        const DeleteSettings = () => {
+            const [products, setProducts] = useState([]);
+            const [categories, setCategories] = useState([]);
+            const [employees, setEmployees] = useState([]);
+            const [selectedProducts, setSelectedProducts] = useState([]);
+            const [selectedCategories, setSelectedCategories] = useState([]);
+            const [selectedEmployees, setSelectedEmployees] = useState([]);
+
+            // データ読み込み
+            useEffect(() => {
+                loadData();
+            }, []);
+
+            const loadData = async () => {
+                try {
+                    const { getDocs } = window.firebaseModules;
+
+                    // 商品データ読み込み
+                    const menuCollection = window.getStoreCollection('menu_settings');
+                    const menuSnapshot = await getDocs(menuCollection);
+                    const menuData = menuSnapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+
+                    const allProducts = [];
+                    const allCategories = new Set();
+
+                    menuData.forEach(doc => {
+                        if (doc.categories) {
+                            Object.entries(doc.categories).forEach(([categoryName, items]) => {
+                                allCategories.add(categoryName);
+                                items.forEach(item => {
+                                    allProducts.push({
+                                        id: `${doc.id}_${categoryName}_${item.name}`,
+                                        docId: doc.id,
+                                        category: categoryName,
+                                        name: item.name,
+                                        price: item.price
+                                    });
+                                });
+                            });
+                        }
+                    });
+
+                    setProducts(allProducts);
+                    setCategories(Array.from(allCategories));
+
+                    // 従業員データ読み込み
+                    const employeesCollection = window.getStoreCollection('employees');
+                    const employeesSnapshot = await getDocs(employeesCollection);
+                    const employeesData = employeesSnapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    setEmployees(employeesData);
+
+                } catch (error) {
+                    console.error('データ読み込みエラー:', error);
+                    showCustomAlertFunc('データの読み込みに失敗しました', 'エラー', '❌');
+                }
+            };
+
+            // 商品削除
+            const deleteProducts = async () => {
+                if (selectedProducts.length === 0) {
+                    showCustomAlertFunc('削除する商品を選択してください', '警告', '⚠️');
+                    return;
+                }
+
+                const confirmed = confirm(`選択した${selectedProducts.length}件の商品を削除しますか？\n\n⚠️ この操作は取り消せません`);
+                if (!confirmed) return;
+
+                try {
+                    const { getDoc, updateDoc } = window.firebaseModules;
+
+                    // 商品をdocId, categoryでグループ化
+                    const groupedByDoc = {};
+                    selectedProducts.forEach(productId => {
+                        const product = products.find(p => p.id === productId);
+                        if (product) {
+                            if (!groupedByDoc[product.docId]) {
+                                groupedByDoc[product.docId] = {};
+                            }
+                            if (!groupedByDoc[product.docId][product.category]) {
+                                groupedByDoc[product.docId][product.category] = [];
+                            }
+                            groupedByDoc[product.docId][product.category].push(product.name);
+                        }
+                    });
+
+                    // 各ドキュメントを更新
+                    for (const [docId, categoriesMap] of Object.entries(groupedByDoc)) {
+                        const docRef = window.getStoreDoc('menu_settings', docId);
+                        const docSnap = await getDoc(docRef);
+                        
+                        if (docSnap.exists()) {
+                            const data = docSnap.data();
+                            const updatedCategories = { ...data.categories };
+
+                            // 各カテゴリから商品を削除
+                            Object.entries(categoriesMap).forEach(([category, productNames]) => {
+                                if (updatedCategories[category]) {
+                                    updatedCategories[category] = updatedCategories[category].filter(
+                                        item => !productNames.includes(item.name)
+                                    );
+                                }
+                            });
+
+                            await updateDoc(docRef, { categories: updatedCategories });
+                        }
+                    }
+
+                    showCustomAlertFunc(`${selectedProducts.length}件の商品を削除しました`, '削除完了', '✅');
+                    setSelectedProducts([]);
+                    loadData();
+
+                } catch (error) {
+                    console.error('商品削除エラー:', error);
+                    showCustomAlertFunc('商品の削除に失敗しました', 'エラー', '❌');
+                }
+            };
+
+            // カテゴリ削除
+            const deleteCategories = async () => {
+                if (selectedCategories.length === 0) {
+                    showCustomAlertFunc('削除するカテゴリを選択してください', '警告', '⚠️');
+                    return;
+                }
+
+                const confirmed = confirm(`選択した${selectedCategories.length}件のカテゴリとその中の全商品を削除しますか？\n\n⚠️ この操作は取り消せません`);
+                if (!confirmed) return;
+
+                try {
+                    const { getDocs, getDoc, updateDoc } = window.firebaseModules;
+
+                    const menuCollection = window.getStoreCollection('menu_settings');
+                    const menuSnapshot = await getDocs(menuCollection);
+
+                    for (const doc of menuSnapshot.docs) {
+                        const docRef = window.getStoreDoc('menu_settings', doc.id);
+                        const docSnap = await getDoc(docRef);
+                        
+                        if (docSnap.exists()) {
+                            const data = docSnap.data();
+                            const updatedCategories = { ...data.categories };
+
+                            // 選択されたカテゴリを削除
+                            selectedCategories.forEach(category => {
+                                delete updatedCategories[category];
+                            });
+
+                            await updateDoc(docRef, { categories: updatedCategories });
+                        }
+                    }
+
+                    showCustomAlertFunc(`${selectedCategories.length}件のカテゴリを削除しました`, '削除完了', '✅');
+                    setSelectedCategories([]);
+                    loadData();
+
+                } catch (error) {
+                    console.error('カテゴリ削除エラー:', error);
+                    showCustomAlertFunc('カテゴリの削除に失敗しました', 'エラー', '❌');
+                }
+            };
+
+            // 従業員削除
+            const deleteEmployees = async () => {
+                if (selectedEmployees.length === 0) {
+                    showCustomAlertFunc('削除する従業員を選択してください', '警告', '⚠️');
+                    return;
+                }
+
+                const employeeNames = selectedEmployees.map(id => {
+                    const emp = employees.find(e => e.id === id);
+                    return emp ? emp.name : '';
+                }).filter(Boolean).join(', ');
+
+                const confirmed = confirm(`以下の従業員を削除しますか？\n${employeeNames}\n\n⚠️ この操作は取り消せません\n⚠️ 勤怠データも全て削除されます`);
+                if (!confirmed) return;
+
+                try {
+                    const { deleteDoc, getDocs, query, where } = window.firebaseModules;
+
+                    for (const employeeId of selectedEmployees) {
+                        // 従業員データ削除
+                        const employeeRef = window.getStoreDoc('employees', employeeId);
+                        await deleteDoc(employeeRef);
+
+                        // 勤怠データ削除
+                        const attendanceCollection = window.getStoreCollection('attendance');
+                        const q = query(attendanceCollection, where('employeeId', '==', employeeId));
+                        const attendanceSnapshot = await getDocs(q);
+                        
+                        for (const doc of attendanceSnapshot.docs) {
+                            await deleteDoc(doc.ref);
+                        }
+                    }
+
+                    showCustomAlertFunc(`${selectedEmployees.length}名の従業員を削除しました`, '削除完了', '✅');
+                    setSelectedEmployees([]);
+                    loadData();
+
+                } catch (error) {
+                    console.error('従業員削除エラー:', error);
+                    showCustomAlertFunc('従業員の削除に失敗しました', 'エラー', '❌');
+                }
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
+                        <h2 className="text-xl font-bold text-red-700 mb-2">⚠️ 重要な注意事項</h2>
+                        <p className="text-red-600">削除したデータは元に戻すことができません。慎重に操作してください。</p>
+                    </div>
+
+                    {/* 商品削除 */}
+                    <div className="bg-white rounded-lg shadow-lg p-6">
+                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                            <span className="text-2xl">🍜</span>
+                            商品削除
+                        </h3>
+                        <div className="max-h-96 overflow-y-auto border rounded p-4 mb-4">
+                            {products.length === 0 ? (
+                                <p className="text-gray-500">商品がありません</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {products.map(product => (
+                                        <label key={product.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedProducts.includes(product.id)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedProducts([...selectedProducts, product.id]);
+                                                    } else {
+                                                        setSelectedProducts(selectedProducts.filter(id => id !== product.id));
+                                                    }
+                                                }}
+                                                className="w-4 h-4"
+                                            />
+                                            <span className="text-sm">
+                                                <span className="font-semibold">{product.category}</span> - {product.name} (¥{product.price})
+                                            </span>
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setSelectedProducts(products.map(p => p.id))}
+                                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                            >
+                                全選択
+                            </button>
+                            <button
+                                onClick={() => setSelectedProducts([])}
+                                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                            >
+                                選択解除
+                            </button>
+                            <button
+                                onClick={deleteProducts}
+                                disabled={selectedProducts.length === 0}
+                                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed ml-auto"
+                            >
+                                選択した商品を削除 ({selectedProducts.length}件)
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* カテゴリ削除 */}
+                    <div className="bg-white rounded-lg shadow-lg p-6">
+                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                            <span className="text-2xl">📁</span>
+                            商品カテゴリ削除
+                        </h3>
+                        <div className="max-h-96 overflow-y-auto border rounded p-4 mb-4">
+                            {categories.length === 0 ? (
+                                <p className="text-gray-500">カテゴリがありません</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {categories.map(category => (
+                                        <label key={category} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedCategories.includes(category)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedCategories([...selectedCategories, category]);
+                                                    } else {
+                                                        setSelectedCategories(selectedCategories.filter(c => c !== category));
+                                                    }
+                                                }}
+                                                className="w-4 h-4"
+                                            />
+                                            <span className="font-semibold">{category}</span>
+                                            <span className="text-sm text-gray-500">
+                                                ({products.filter(p => p.category === category).length}件の商品)
+                                            </span>
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setSelectedCategories([...categories])}
+                                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                            >
+                                全選択
+                            </button>
+                            <button
+                                onClick={() => setSelectedCategories([])}
+                                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                            >
+                                選択解除
+                            </button>
+                            <button
+                                onClick={deleteCategories}
+                                disabled={selectedCategories.length === 0}
+                                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed ml-auto"
+                            >
+                                選択したカテゴリを削除 ({selectedCategories.length}件)
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* 従業員削除 */}
+                    <div className="bg-white rounded-lg shadow-lg p-6">
+                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                            <span className="text-2xl">👤</span>
+                            従業員削除
+                        </h3>
+                        <div className="max-h-96 overflow-y-auto border rounded p-4 mb-4">
+                            {employees.length === 0 ? (
+                                <p className="text-gray-500">従業員がいません</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {employees.map(employee => (
+                                        <label key={employee.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedEmployees.includes(employee.id)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedEmployees([...selectedEmployees, employee.id]);
+                                                    } else {
+                                                        setSelectedEmployees(selectedEmployees.filter(id => id !== employee.id));
+                                                    }
+                                                }}
+                                                className="w-4 h-4"
+                                            />
+                                            <span className="font-semibold">{employee.name}</span>
+                                            <span className="text-sm text-gray-500">
+                                                (時給: ¥{employee.rate})
+                                            </span>
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setSelectedEmployees(employees.map(e => e.id))}
+                                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                            >
+                                全選択
+                            </button>
+                            <button
+                                onClick={() => setSelectedEmployees([])}
+                                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                            >
+                                選択解除
+                            </button>
+                            <button
+                                onClick={deleteEmployees}
+                                disabled={selectedEmployees.length === 0}
+                                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed ml-auto"
+                            >
+                                選択した従業員を削除 ({selectedEmployees.length}名)
+                            </button>
+                        </div>
                     </div>
                 </div>
             );
