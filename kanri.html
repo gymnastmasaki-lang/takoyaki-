@@ -8418,61 +8418,54 @@
                     
                     const { getDocs, collection } = window.firebaseModules;
 
-                    // 商品データ読み込み
+                    // 商品データ読み込み（menusコレクションから）
                     console.log('商品データ読み込み開始...');
                     
-                    let menuSnapshot;
-                    let menuPath = '';
+                    let menusSnapshot;
+                    let menusPath = '';
                     
                     if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
-                        menuPath = `stores/${currentStoreId}/menu_settings`;
-                        console.log('新パスを使用:', menuPath);
-                        const menuCollection = collection(window.db, 'stores', currentStoreId, 'menu_settings');
-                        menuSnapshot = await getDocs(menuCollection);
+                        menusPath = `stores/${currentStoreId}/menus`;
+                        console.log('新パスを使用:', menusPath);
+                        const menusCollection = collection(window.db, 'stores', currentStoreId, 'menus');
+                        menusSnapshot = await getDocs(menusCollection);
                     } else {
-                        menuPath = 'menu_settings';
-                        console.log('旧パスを使用:', menuPath);
-                        const menuCollection = collection(window.db, 'menu_settings');
-                        menuSnapshot = await getDocs(menuCollection);
+                        menusPath = 'menus';
+                        console.log('旧パスを使用:', menusPath);
+                        const menusCollection = collection(window.db, 'menus');
+                        menusSnapshot = await getDocs(menusCollection);
                     }
 
-                    console.log('メニュードキュメント数:', menuSnapshot.docs.length);
+                    console.log('商品ドキュメント数:', menusSnapshot.docs.length);
 
                     const allProducts = [];
                     const allCategories = new Set();
 
-                    menuSnapshot.docs.forEach((doc, index) => {
-                        console.log(`--- ドキュメント ${index + 1} ---`);
+                    menusSnapshot.docs.forEach((doc, index) => {
+                        console.log(`--- 商品 ${index + 1} ---`);
                         console.log('ドキュメントID:', doc.id);
                         const data = doc.data();
                         console.log('データキー:', Object.keys(data));
-                        console.log('categories存在:', !!data.categories);
+                        console.log('name:', data.name, 'category:', data.category, 'price:', data.price);
                         
-                        if (data.categories) {
-                            console.log('カテゴリ数:', Object.keys(data.categories).length);
-                            console.log('カテゴリ名:', Object.keys(data.categories));
+                        // 非表示商品はスキップ
+                        if (data.hidden) {
+                            console.log('  → 非表示商品のためスキップ');
+                            return;
+                        }
+                        
+                        if (data.name) {
+                            const category = data.category || '未分類';
+                            allCategories.add(category);
                             
-                            Object.entries(data.categories).forEach(([categoryName, items]) => {
-                                console.log(`  カテゴリ: ${categoryName}, アイテム数:`, Array.isArray(items) ? items.length : 'not array');
-                                allCategories.add(categoryName);
-                                
-                                if (Array.isArray(items)) {
-                                    items.forEach((item, itemIndex) => {
-                                        console.log(`    アイテム${itemIndex + 1}:`, item.name, '¥' + item.price);
-                                        allProducts.push({
-                                            id: `${doc.id}_${categoryName}_${item.name}`,
-                                            docId: doc.id,
-                                            category: categoryName,
-                                            name: item.name,
-                                            price: item.price
-                                        });
-                                    });
-                                } else {
-                                    console.warn(`    警告: ${categoryName}のitemsが配列ではありません:`, typeof items);
-                                }
+                            allProducts.push({
+                                id: doc.id,
+                                docId: doc.id,
+                                category: category,
+                                name: data.name,
+                                price: data.price || 0
                             });
-                        } else {
-                            console.warn('このドキュメントにはcategoriesがありません');
+                            console.log(`  → 追加: ${category} - ${data.name} (¥${data.price || 0})`);
                         }
                     });
 
@@ -8537,49 +8530,22 @@
                 if (!confirmed) return;
 
                 try {
-                    const { getDoc, updateDoc, doc, collection } = window.firebaseModules;
+                    const { deleteDoc, doc } = window.firebaseModules;
 
-                    // 商品をdocId, categoryでグループ化
-                    const groupedByDoc = {};
-                    selectedProducts.forEach(productId => {
+                    // 各商品ドキュメントを削除
+                    for (const productId of selectedProducts) {
                         const product = products.find(p => p.id === productId);
-                        if (product) {
-                            if (!groupedByDoc[product.docId]) {
-                                groupedByDoc[product.docId] = {};
-                            }
-                            if (!groupedByDoc[product.docId][product.category]) {
-                                groupedByDoc[product.docId][product.category] = [];
-                            }
-                            groupedByDoc[product.docId][product.category].push(product.name);
-                        }
-                    });
+                        if (!product) continue;
 
-                    // 各ドキュメントを更新
-                    for (const [docId, categoriesMap] of Object.entries(groupedByDoc)) {
-                        let docRef;
+                        let productRef;
                         if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
-                            docRef = doc(window.db, 'stores', currentStoreId, 'menu_settings', docId);
+                            productRef = doc(window.db, 'stores', currentStoreId, 'menus', product.docId);
                         } else {
-                            docRef = doc(window.db, 'menu_settings', docId);
+                            productRef = doc(window.db, 'menus', product.docId);
                         }
                         
-                        const docSnap = await getDoc(docRef);
-                        
-                        if (docSnap.exists()) {
-                            const data = docSnap.data();
-                            const updatedCategories = { ...data.categories };
-
-                            // 各カテゴリから商品を削除
-                            Object.entries(categoriesMap).forEach(([category, productNames]) => {
-                                if (updatedCategories[category]) {
-                                    updatedCategories[category] = updatedCategories[category].filter(
-                                        item => !productNames.includes(item.name)
-                                    );
-                                }
-                            });
-
-                            await updateDoc(docRef, { categories: updatedCategories });
-                        }
+                        await deleteDoc(productRef);
+                        console.log(`削除: ${product.name} (${product.docId})`);
                     }
 
                     showCustomAlertFunc(`${selectedProducts.length}件の商品を削除しました`, '削除完了', 'OK');
@@ -8588,7 +8554,7 @@
 
                 } catch (error) {
                     console.error('商品削除エラー:', error);
-                    showCustomAlertFunc('商品の削除に失敗しました', 'エラー', 'X');
+                    showCustomAlertFunc('商品の削除に失敗しました: ' + error.message, 'エラー', 'X');
                 }
             };
 
@@ -8603,47 +8569,33 @@
                 if (!confirmed) return;
 
                 try {
-                    const { getDocs, getDoc, updateDoc, doc, collection } = window.firebaseModules;
+                    const { deleteDoc, doc } = window.firebaseModules;
 
-                    let menuCollection;
-                    if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
-                        menuCollection = collection(window.db, 'stores', currentStoreId, 'menu_settings');
-                    } else {
-                        menuCollection = collection(window.db, 'menu_settings');
-                    }
+                    // 選択されたカテゴリに属する商品を全て削除
+                    const productsToDelete = products.filter(p => selectedCategories.includes(p.category));
                     
-                    const menuSnapshot = await getDocs(menuCollection);
+                    console.log(`削除するカテゴリ: ${selectedCategories.join(', ')}`);
+                    console.log(`削除する商品数: ${productsToDelete.length}`);
 
-                    for (const docSnap of menuSnapshot.docs) {
-                        let docRef;
+                    for (const product of productsToDelete) {
+                        let productRef;
                         if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
-                            docRef = doc(window.db, 'stores', currentStoreId, 'menu_settings', docSnap.id);
+                            productRef = doc(window.db, 'stores', currentStoreId, 'menus', product.docId);
                         } else {
-                            docRef = doc(window.db, 'menu_settings', docSnap.id);
+                            productRef = doc(window.db, 'menus', product.docId);
                         }
                         
-                        const currentDoc = await getDoc(docRef);
-                        
-                        if (currentDoc.exists()) {
-                            const data = currentDoc.data();
-                            const updatedCategories = { ...data.categories };
-
-                            // 選択されたカテゴリを削除
-                            selectedCategories.forEach(category => {
-                                delete updatedCategories[category];
-                            });
-
-                            await updateDoc(docRef, { categories: updatedCategories });
-                        }
+                        await deleteDoc(productRef);
+                        console.log(`削除: ${product.category} - ${product.name}`);
                     }
 
-                    showCustomAlertFunc(`${selectedCategories.length}件のカテゴリを削除しました`, '削除完了', 'OK');
+                    showCustomAlertFunc(`${selectedCategories.length}件のカテゴリと${productsToDelete.length}件の商品を削除しました`, '削除完了', 'OK');
                     setSelectedCategories([]);
                     loadData();
 
                 } catch (error) {
                     console.error('カテゴリ削除エラー:', error);
-                    showCustomAlertFunc('カテゴリの削除に失敗しました', 'エラー', 'X');
+                    showCustomAlertFunc('カテゴリの削除に失敗しました: ' + error.message, 'エラー', 'X');
                 }
             };
 
