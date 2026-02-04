@@ -8519,41 +8519,33 @@
                         ordersRef = collection(window.db, 'orders');
                     }
                     
-                    try {
-                        // まず createdAt でソートを試みる
-                        const ordersQuery = query(ordersRef, orderBy('createdAt', 'desc'), limit(1000));
-                        const ordersSnapshot = await getDocs(ordersQuery);
-                        backupData.data.orders = [];
-                        ordersSnapshot.forEach(docSnap => {
-                            backupData.data.orders.push({ id: docSnap.id, ...docSnap.data() });
+                    // シンプルに全件取得（手動で1000件に制限）
+                    const ordersSnapshot = await getDocs(ordersRef);
+                    backupData.data.orders = [];
+                    let orderCount = 0;
+                    const ordersList = [];
+                    ordersSnapshot.forEach(docSnap => {
+                        const data = docSnap.data();
+                        ordersList.push({ 
+                            id: docSnap.id, 
+                            ...data,
+                            _timestamp: data.createdAt || data.timestamp || new Date(0)
                         });
-                        console.log('✅ 注文履歴取得（createdAtでソート）:', backupData.data.orders.length, '件');
-                    } catch (orderError) {
-                        console.warn('⚠️ createdAtでのソートに失敗、timestamp でリトライ:', orderError.message);
-                        try {
-                            // timestamp フィールドでソートを試みる
-                            const ordersQuery = query(ordersRef, orderBy('timestamp', 'desc'), limit(1000));
-                            const ordersSnapshot = await getDocs(ordersQuery);
-                            backupData.data.orders = [];
-                            ordersSnapshot.forEach(docSnap => {
-                                backupData.data.orders.push({ id: docSnap.id, ...docSnap.data() });
-                            });
-                            console.log('✅ 注文履歴取得（timestampでソート）:', backupData.data.orders.length, '件');
-                        } catch (timestampError) {
-                            console.warn('⚠️ timestampでのソートも失敗、全件取得を試みます:', timestampError.message);
-                            // ソートなしで全件取得（最大1000件は手動で制限）
-                            const ordersSnapshot = await getDocs(ordersRef);
-                            backupData.data.orders = [];
-                            let count = 0;
-                            ordersSnapshot.forEach(docSnap => {
-                                if (count < 1000) {
-                                    backupData.data.orders.push({ id: docSnap.id, ...docSnap.data() });
-                                    count++;
-                                }
-                            });
-                            console.log('✅ 注文履歴取得（ソートなし）:', backupData.data.orders.length, '件');
-                        }
-                    }
+                    });
+                    
+                    // 日付でソート（新しい順）
+                    ordersList.sort((a, b) => {
+                        const timeA = a._timestamp?.toDate ? a._timestamp.toDate() : new Date(a._timestamp);
+                        const timeB = b._timestamp?.toDate ? b._timestamp.toDate() : new Date(b._timestamp);
+                        return timeB - timeA;
+                    });
+                    
+                    // 最新1000件のみ保存
+                    backupData.data.orders = ordersList.slice(0, 1000).map(item => {
+                        const { _timestamp, ...rest } = item;
+                        return rest;
+                    });
+                    console.log('✅ 注文履歴取得:', backupData.data.orders.length, '件');
                     
                     // 勤怠データ（最近1000件）
                     let attendanceRef;
@@ -8562,12 +8554,33 @@
                     } else {
                         attendanceRef = collection(window.db, 'kintai_attendance');
                     }
-                    const attendanceQuery = query(attendanceRef, orderBy('createdAt', 'desc'), limit(1000));
-                    const attendanceSnapshot = await getDocs(attendanceQuery);
+                    
+                    // シンプルに全件取得（手動で1000件に制限）
+                    const attendanceSnapshot = await getDocs(attendanceRef);
                     backupData.data.attendance = [];
+                    const attendanceList = [];
                     attendanceSnapshot.forEach(docSnap => {
-                        backupData.data.attendance.push({ id: docSnap.id, ...docSnap.data() });
+                        const data = docSnap.data();
+                        attendanceList.push({ 
+                            id: docSnap.id, 
+                            ...data,
+                            _timestamp: data.createdAt || data.timestamp || new Date(0)
+                        });
                     });
+                    
+                    // 日付でソート（新しい順）
+                    attendanceList.sort((a, b) => {
+                        const timeA = a._timestamp?.toDate ? a._timestamp.toDate() : new Date(a._timestamp);
+                        const timeB = b._timestamp?.toDate ? b._timestamp.toDate() : new Date(b._timestamp);
+                        return timeB - timeA;
+                    });
+                    
+                    // 最新1000件のみ保存
+                    backupData.data.attendance = attendanceList.slice(0, 1000).map(item => {
+                        const { _timestamp, ...rest } = item;
+                        return rest;
+                    });
+                    console.log('✅ 勤怠データ取得:', backupData.data.attendance.length, '件');
                     
                     // 保存
                     const backupId = `manual_${dateTimeStr}`;
