@@ -7138,8 +7138,8 @@
                         {/* 削除設定 */}
                         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
                             <div className="flex justify-between items-center mb-4">
-                                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                                    🗑️ 削除設定
+                                <h2 className="text-2xl font-bold text-gray-800">
+                                    削除設定
                                 </h2>
                                 <button
                                     onClick={() => setShowDeleteSettings(!showDeleteSettings)}
@@ -8402,6 +8402,7 @@
             const [selectedProducts, setSelectedProducts] = useState([]);
             const [selectedCategories, setSelectedCategories] = useState([]);
             const [selectedEmployees, setSelectedEmployees] = useState([]);
+            const [loading, setLoading] = useState(true);
 
             // データ読み込み
             useEffect(() => {
@@ -8409,43 +8410,66 @@
             }, []);
 
             const loadData = async () => {
+                setLoading(true);
                 try {
-                    const { getDocs } = window.firebaseModules;
+                    const { getDocs, collection } = window.firebaseModules;
 
                     // 商品データ読み込み
-                    const menuCollection = window.getStoreCollection('menu_settings');
-                    const menuSnapshot = await getDocs(menuCollection);
-                    const menuData = menuSnapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
+                    console.log('商品データ読み込み開始...');
+                    
+                    // 店舗IDがある場合は新パス、ない場合は旧パス
+                    let menuSnapshot;
+                    if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+                        const menuCollection = collection(window.db, 'stores', window.currentStoreId, 'menu_settings');
+                        menuSnapshot = await getDocs(menuCollection);
+                    } else {
+                        const menuCollection = collection(window.db, 'menu_settings');
+                        menuSnapshot = await getDocs(menuCollection);
+                    }
+
+                    console.log('メニュードキュメント数:', menuSnapshot.docs.length);
 
                     const allProducts = [];
                     const allCategories = new Set();
 
-                    menuData.forEach(doc => {
-                        if (doc.categories) {
-                            Object.entries(doc.categories).forEach(([categoryName, items]) => {
+                    menuSnapshot.docs.forEach(doc => {
+                        console.log('ドキュメントID:', doc.id, 'データ:', doc.data());
+                        const data = doc.data();
+                        
+                        if (data.categories) {
+                            Object.entries(data.categories).forEach(([categoryName, items]) => {
                                 allCategories.add(categoryName);
-                                items.forEach(item => {
-                                    allProducts.push({
-                                        id: `${doc.id}_${categoryName}_${item.name}`,
-                                        docId: doc.id,
-                                        category: categoryName,
-                                        name: item.name,
-                                        price: item.price
+                                if (Array.isArray(items)) {
+                                    items.forEach(item => {
+                                        allProducts.push({
+                                            id: `${doc.id}_${categoryName}_${item.name}`,
+                                            docId: doc.id,
+                                            category: categoryName,
+                                            name: item.name,
+                                            price: item.price
+                                        });
                                     });
-                                });
+                                }
                             });
                         }
                     });
+
+                    console.log('商品数:', allProducts.length);
+                    console.log('カテゴリ数:', allCategories.size);
 
                     setProducts(allProducts);
                     setCategories(Array.from(allCategories));
 
                     // 従業員データ読み込み
-                    const employeesCollection = window.getStoreCollection('employees');
-                    const employeesSnapshot = await getDocs(employeesCollection);
+                    let employeesSnapshot;
+                    if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+                        const employeesCollection = collection(window.db, 'stores', window.currentStoreId, 'employees');
+                        employeesSnapshot = await getDocs(employeesCollection);
+                    } else {
+                        const employeesCollection = collection(window.db, 'kintai_employees');
+                        employeesSnapshot = await getDocs(employeesCollection);
+                    }
+
                     const employeesData = employeesSnapshot.docs.map(doc => ({
                         id: doc.id,
                         ...doc.data()
@@ -8454,22 +8478,23 @@
 
                 } catch (error) {
                     console.error('データ読み込みエラー:', error);
-                    showCustomAlertFunc('データの読み込みに失敗しました', 'エラー', '❌');
+                    showCustomAlertFunc('データの読み込みに失敗しました', 'エラー', 'X');
                 }
+                setLoading(false);
             };
 
             // 商品削除
             const deleteProducts = async () => {
                 if (selectedProducts.length === 0) {
-                    showCustomAlertFunc('削除する商品を選択してください', '警告', '⚠️');
+                    showCustomAlertFunc('削除する商品を選択してください', '警告', '!');
                     return;
                 }
 
-                const confirmed = confirm(`選択した${selectedProducts.length}件の商品を削除しますか？\n\n⚠️ この操作は取り消せません`);
+                const confirmed = confirm(`選択した${selectedProducts.length}件の商品を削除しますか？\n\nこの操作は取り消せません`);
                 if (!confirmed) return;
 
                 try {
-                    const { getDoc, updateDoc } = window.firebaseModules;
+                    const { getDoc, updateDoc, doc, collection } = window.firebaseModules;
 
                     // 商品をdocId, categoryでグループ化
                     const groupedByDoc = {};
@@ -8488,7 +8513,13 @@
 
                     // 各ドキュメントを更新
                     for (const [docId, categoriesMap] of Object.entries(groupedByDoc)) {
-                        const docRef = window.getStoreDoc('menu_settings', docId);
+                        let docRef;
+                        if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+                            docRef = doc(window.db, 'stores', window.currentStoreId, 'menu_settings', docId);
+                        } else {
+                            docRef = doc(window.db, 'menu_settings', docId);
+                        }
+                        
                         const docSnap = await getDoc(docRef);
                         
                         if (docSnap.exists()) {
@@ -8508,38 +8539,50 @@
                         }
                     }
 
-                    showCustomAlertFunc(`${selectedProducts.length}件の商品を削除しました`, '削除完了', '✅');
+                    showCustomAlertFunc(`${selectedProducts.length}件の商品を削除しました`, '削除完了', 'OK');
                     setSelectedProducts([]);
                     loadData();
 
                 } catch (error) {
                     console.error('商品削除エラー:', error);
-                    showCustomAlertFunc('商品の削除に失敗しました', 'エラー', '❌');
+                    showCustomAlertFunc('商品の削除に失敗しました', 'エラー', 'X');
                 }
             };
 
             // カテゴリ削除
             const deleteCategories = async () => {
                 if (selectedCategories.length === 0) {
-                    showCustomAlertFunc('削除するカテゴリを選択してください', '警告', '⚠️');
+                    showCustomAlertFunc('削除するカテゴリを選択してください', '警告', '!');
                     return;
                 }
 
-                const confirmed = confirm(`選択した${selectedCategories.length}件のカテゴリとその中の全商品を削除しますか？\n\n⚠️ この操作は取り消せません`);
+                const confirmed = confirm(`選択した${selectedCategories.length}件のカテゴリとその中の全商品を削除しますか？\n\nこの操作は取り消せません`);
                 if (!confirmed) return;
 
                 try {
-                    const { getDocs, getDoc, updateDoc } = window.firebaseModules;
+                    const { getDocs, getDoc, updateDoc, doc, collection } = window.firebaseModules;
 
-                    const menuCollection = window.getStoreCollection('menu_settings');
+                    let menuCollection;
+                    if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+                        menuCollection = collection(window.db, 'stores', window.currentStoreId, 'menu_settings');
+                    } else {
+                        menuCollection = collection(window.db, 'menu_settings');
+                    }
+                    
                     const menuSnapshot = await getDocs(menuCollection);
 
-                    for (const doc of menuSnapshot.docs) {
-                        const docRef = window.getStoreDoc('menu_settings', doc.id);
-                        const docSnap = await getDoc(docRef);
+                    for (const docSnap of menuSnapshot.docs) {
+                        let docRef;
+                        if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+                            docRef = doc(window.db, 'stores', window.currentStoreId, 'menu_settings', docSnap.id);
+                        } else {
+                            docRef = doc(window.db, 'menu_settings', docSnap.id);
+                        }
                         
-                        if (docSnap.exists()) {
-                            const data = docSnap.data();
+                        const currentDoc = await getDoc(docRef);
+                        
+                        if (currentDoc.exists()) {
+                            const data = currentDoc.data();
                             const updatedCategories = { ...data.categories };
 
                             // 選択されたカテゴリを削除
@@ -8551,20 +8594,20 @@
                         }
                     }
 
-                    showCustomAlertFunc(`${selectedCategories.length}件のカテゴリを削除しました`, '削除完了', '✅');
+                    showCustomAlertFunc(`${selectedCategories.length}件のカテゴリを削除しました`, '削除完了', 'OK');
                     setSelectedCategories([]);
                     loadData();
 
                 } catch (error) {
                     console.error('カテゴリ削除エラー:', error);
-                    showCustomAlertFunc('カテゴリの削除に失敗しました', 'エラー', '❌');
+                    showCustomAlertFunc('カテゴリの削除に失敗しました', 'エラー', 'X');
                 }
             };
 
             // 従業員削除
             const deleteEmployees = async () => {
                 if (selectedEmployees.length === 0) {
-                    showCustomAlertFunc('削除する従業員を選択してください', '警告', '⚠️');
+                    showCustomAlertFunc('削除する従業員を選択してください', '警告', '!');
                     return;
                 }
 
@@ -8573,7 +8616,7 @@
                     return emp ? emp.name : '';
                 }).filter(Boolean).join(', ');
 
-                const confirmed = confirm(`以下の従業員を削除しますか？\n${employeeNames}\n\n⚠️ この操作は取り消せません\n⚠️ 勤怠データも全て削除されます`);
+                const confirmed = confirm(`以下の従業員を削除しますか？\n${employeeNames}\n\nこの操作は取り消せません\n勤怠データも全て削除されます`);
                 if (!confirmed) return;
 
                 try {
@@ -8594,29 +8637,36 @@
                         }
                     }
 
-                    showCustomAlertFunc(`${selectedEmployees.length}名の従業員を削除しました`, '削除完了', '✅');
+                    showCustomAlertFunc(`${selectedEmployees.length}名の従業員を削除しました`, '削除完了', 'OK');
                     setSelectedEmployees([]);
                     loadData();
 
                 } catch (error) {
                     console.error('従業員削除エラー:', error);
-                    showCustomAlertFunc('従業員の削除に失敗しました', 'エラー', '❌');
+                    showCustomAlertFunc('従業員の削除に失敗しました', 'エラー', 'X');
                 }
             };
 
             return (
                 <div className="space-y-6">
-                    <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
-                        <h2 className="text-xl font-bold text-red-700 mb-2">⚠️ 重要な注意事項</h2>
-                        <p className="text-red-600">削除したデータは元に戻すことができません。慎重に操作してください。</p>
-                    </div>
+                    {loading && (
+                        <div className="text-center py-8">
+                            <p className="text-gray-600">データ読み込み中...</p>
+                        </div>
+                    )}
+                    
+                    {!loading && (
+                        <>
+                            <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
+                                <h2 className="text-xl font-bold text-red-700 mb-2">重要な注意事項</h2>
+                                <p className="text-red-600">削除したデータは元に戻すことができません。慎重に操作してください。</p>
+                            </div>
 
-                    {/* 商品削除 */}
-                    <div className="bg-white rounded-lg shadow-lg p-6">
-                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                            <span className="text-2xl">🍜</span>
-                            商品削除
-                        </h3>
+                            {/* 商品削除 */}
+                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                <h3 className="text-lg font-bold mb-4">
+                                    商品削除
+                                </h3>
                         <div className="max-h-96 overflow-y-auto border rounded p-4 mb-4">
                             {products.length === 0 ? (
                                 <p className="text-gray-500">商品がありません</p>
@@ -8669,8 +8719,7 @@
 
                     {/* カテゴリ削除 */}
                     <div className="bg-white rounded-lg shadow-lg p-6">
-                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                            <span className="text-2xl">📁</span>
+                        <h3 className="text-lg font-bold mb-4">
                             商品カテゴリ削除
                         </h3>
                         <div className="max-h-96 overflow-y-auto border rounded p-4 mb-4">
@@ -8726,8 +8775,7 @@
 
                     {/* 従業員削除 */}
                     <div className="bg-white rounded-lg shadow-lg p-6">
-                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                            <span className="text-2xl">👤</span>
+                        <h3 className="text-lg font-bold mb-4">
                             従業員削除
                         </h3>
                         <div className="max-h-96 overflow-y-auto border rounded p-4 mb-4">
@@ -8780,6 +8828,8 @@
                             </button>
                         </div>
                     </div>
+                        </>
+                    )}
                 </div>
             );
         };
