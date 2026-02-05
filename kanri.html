@@ -1890,6 +1890,100 @@
                 }
             };
 
+            // 🆕 一括在庫0設定
+            const setAllInventoryToZero = async () => {
+                const confirmed = await showCustomConfirmFunc(
+                    '全ての商品の在庫を0に設定しますか？\n\n商品は品切れとして表示されます。',
+                    '一括在庫0設定',
+                    '在庫0にする',
+                    'キャンセル'
+                );
+                if (!confirmed) return;
+
+                try {
+                    // 全ての商品の在庫を0に設定
+                    const zeroSettings = {};
+                    Object.keys(inventorySettings).forEach(itemId => {
+                        zeroSettings[itemId] = {
+                            ...inventorySettings[itemId],
+                            stock: 0
+                        };
+                    });
+                    
+                    setInventorySettings(zeroSettings);
+                    
+                    const { setDoc, updateDoc } = window.firebaseModules;
+                    const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+                    await setDoc(inventoryRef, {
+                        items: zeroSettings,
+                        updatedAt: new Date().toISOString()
+                    });
+                    
+                    // メニューの在庫も0に更新
+                    const menuSnapshot = await window.getDocs(window.getStoreCollection('menus'));
+                    const promises = [];
+                    menuSnapshot.forEach(docSnap => {
+                        promises.push(updateDoc(docSnap.ref, {
+                            stock: 0,
+                            updatedAt: new Date().toISOString()
+                        }));
+                    });
+                    await Promise.all(promises);
+                    
+                    showCustomAlertFunc('全ての商品の在庫を0に設定しました', '設定完了');
+                } catch (error) {
+                    console.error('❌ 一括在庫0エラー:', error);
+                    showCustomAlertFunc('設定に失敗しました: ' + error.message, 'エラー');
+                }
+            };
+
+            // 🆕 一括在庫0解除（未設定に戻す）
+            const clearAllZeroInventory = async () => {
+                const confirmed = await showCustomConfirmFunc(
+                    '全ての商品の在庫を未設定に戻しますか？\n\n商品は通常通り注文可能になります。',
+                    '一括在庫0解除',
+                    '未設定に戻す',
+                    'キャンセル'
+                );
+                if (!confirmed) return;
+
+                try {
+                    // 全ての商品の在庫を未設定（null）に
+                    const resetSettings = {};
+                    Object.keys(inventorySettings).forEach(itemId => {
+                        resetSettings[itemId] = {
+                            ...inventorySettings[itemId],
+                            stock: null
+                        };
+                    });
+                    
+                    setInventorySettings(resetSettings);
+                    
+                    const { setDoc, updateDoc } = window.firebaseModules;
+                    const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+                    await setDoc(inventoryRef, {
+                        items: resetSettings,
+                        updatedAt: new Date().toISOString()
+                    });
+                    
+                    // メニューの在庫も未設定に
+                    const menuSnapshot = await window.getDocs(window.getStoreCollection('menus'));
+                    const promises = [];
+                    menuSnapshot.forEach(docSnap => {
+                        promises.push(updateDoc(docSnap.ref, {
+                            stock: null,
+                            updatedAt: new Date().toISOString()
+                        }));
+                    });
+                    await Promise.all(promises);
+                    
+                    showCustomAlertFunc('全ての商品の在庫を未設定に戻しました', '解除完了');
+                } catch (error) {
+                    console.error('❌ 一括在庫0解除エラー:', error);
+                    showCustomAlertFunc('解除に失敗しました: ' + error.message, 'エラー');
+                }
+            };
+
             // 🆕 在庫設定更新
             const updateInventorySetting = (itemId, field, value) => {
                 setInventorySettings(prev => ({
@@ -7427,6 +7521,20 @@
                                             className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold"
                                         >
                                             全て未設定（満タン）にする
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={setAllInventoryToZero}
+                                            className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold"
+                                        >
+                                            一括在庫0設定
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={clearAllZeroInventory}
+                                            className="px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-bold"
+                                        >
+                                            一括在庫0解除
                                         </button>
                                         <button
                                             type="button"
