@@ -54,7 +54,7 @@
       height: 70px;
     }
     
-    .top-controls { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+    .top-controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; }
     .big-btn {
       padding: 15px;
       font-size: 18px;
@@ -507,8 +507,6 @@
     <div class="top-controls">
       <button class="big-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="handleControllerLogout()">LO</button>
       <button class="big-btn btn-add-waiting" onclick="increaseWaiting()">待1</button>
-      <button class="big-btn" style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);" onclick="alert('在庫管理は管理画面から行ってください')">在庫</button>
-      <button class="big-btn" id="bulk-zero-btn" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);" onclick="alert('一括在庫0設定は管理画面から行ってください')">一括0</button>
       <button class="big-btn" id="time-override-btn" style="background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%);" onclick="toggleTimeOverride()">時外</button>
     </div>
 
@@ -520,6 +518,23 @@
 
     <div id="staff-calls-container"></div>
     <div id="orders-container"><div style="text-align:center;color:white;padding:40px;">読み込み中...</div></div>
+  </div>
+
+  <div id="page-soldout" class="hidden">
+    <button class="big-btn btn-refresh" style="margin-bottom: 15px;" onclick="backToOrders()">← 注文管理に戻る</button>
+    
+    <div class="header" style="margin-bottom: 15px;">
+      <h1>🚫 品切れ設定</h1>
+    </div>
+    
+    <div class="category-filter">
+      <label style="display:block;font-size:16px;font-weight:bold;margin-bottom:10px;">カテゴリを選んでください</label>
+      <select id="soldout-category-select">
+        <option value="">全ての商品</option>
+      </select>
+    </div>
+    
+    <div id="soldout-menu-list"></div>
   </div>
 
   <script type="module">
@@ -1814,6 +1829,188 @@
       }
     }
 
+    window.showSoldOutPage = async function() {
+      try {
+        // 🔧 店舗別パスでmenusを取得
+        const menuSnapshot = await getDocs(window.getStoreCollection('menus'));
+        allMenuItems = [];
+        const categories = new Set();
+        
+        menuSnapshot.forEach(doc => {
+          const data = doc.data();
+          allMenuItems.push({
+            id: data.id,
+            name: data.name,
+            price: data.price,
+            category: data.category
+          });
+          if (data.category) categories.add(data.category);
+        });
+        
+        const select = document.getElementById('soldout-category-select');
+        select.innerHTML = '<option value="">全ての商品</option>';
+        Array.from(categories).sort().forEach(cat => {
+          const opt = document.createElement('option');
+          opt.value = cat;
+          opt.textContent = cat;
+          select.appendChild(opt);
+        });
+        
+        select.onchange = () => {
+          const filtered = select.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === select.value);
+          displaySoldOutItems(filtered);
+        };
+        
+        await displaySoldOutItems(allMenuItems);
+        document.getElementById('page-orders').style.display = 'none';
+        document.getElementById('page-soldout').classList.remove('hidden');
+      } catch (e) {
+        console.error(e);
+        showToast('エラー: ' + e.message);
+      }
+    };
+
+    window.backToOrders = function() {
+      document.getElementById('page-soldout').classList.add('hidden');
+      document.getElementById('page-orders').style.display = 'block';
+    };
+
+    async function displaySoldOutItems(items) {
+      const list = document.getElementById('soldout-menu-list');
+      list.innerHTML = '';
+      
+      // 店舗別パスでsold_outを取得
+      const soldOutSnapshot = await getDocs(window.getStoreCollection('sold_out'));
+      const soldOutIds = new Set();
+      soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
+      
+      items.sort((a, b) => {
+        const numA = a.id ? parseInt(a.id.replace(/\D/g, '') || '0') : 0;
+        const numB = b.id ? parseInt(b.id.replace(/\D/g, '') || '0') : 0;
+        return numA - numB;
+      });
+      
+      items.forEach(item => {
+        const isSoldOut = soldOutIds.has(item.id);
+        const div = document.createElement('div');
+        div.className = 'soldout-item' + (isSoldOut ? ' sold-out' : '');
+        
+        div.innerHTML = `
+          <div>
+            <div class="soldout-item-name">${item.name}</div>
+            <div style="font-size:14px;color:#666;">¥${item.price.toLocaleString()}</div>
+            ${isSoldOut ? '<span class="soldout-badge">品切れ中</span>' : ''}
+          </div>
+          <button class="soldout-toggle-btn ${isSoldOut ? 'set-available' : 'set-soldout'}" 
+                  onclick="toggleSoldOut('${item.id}', ${!isSoldOut})">
+            ${isSoldOut ? '✓ 販売再開' : '🚫 品切れ'}
+          </button>
+        `;
+        
+        list.appendChild(div);
+      });
+    }
+
+    window.toggleSoldOut = async function(menuId, setSoldOut) {
+      try {
+        console.log('toggleSoldOut:', menuId, setSoldOut);
+        
+        if (setSoldOut) {
+          // 品切れに設定（店舗別パス）
+          await setDoc(window.getStoreDoc('sold_out', menuId), {
+            menuId: menuId,
+            timestamp: Timestamp.now()
+          });
+          showToast('✓ 品切れに設定');
+        } else {
+          // 再販：menuIdに一致するドキュメントを検索して削除
+          const soldOutSnapshot = await getDocs(window.getStoreCollection('sold_out'));
+          const deletePromises = [];
+          let foundCount = 0;
+          
+          soldOutSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            console.log('  sold_out doc:', docSnap.id, data);
+            
+            // menuIdが一致するドキュメントを削除（.refを使用）
+            if (data.menuId === menuId || docSnap.id === menuId) {
+              console.log('    → 削除:', docSnap.id);
+              deletePromises.push(deleteDoc(docSnap.ref));
+              foundCount++;
+            }
+          });
+          
+          if (deletePromises.length > 0) {
+            await Promise.all(deletePromises);
+            showToast(`✓ 販売再開 (${foundCount}件)`);
+          } else {
+            console.warn('削除するドキュメントが見つかりません。menuId:', menuId);
+            showToast('⚠️ 削除対象なし');
+          }
+        }
+        
+        const sel = document.getElementById('soldout-category-select');
+        const filtered = sel.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === sel.value);
+        await displaySoldOutItems(filtered);
+      } catch (e) {
+        console.error('toggleSoldOut error:', e);
+        showToast('エラー: ' + e.message);
+      }
+    };
+
+    window.toggleBulkSoldOut = async function() {
+      const btn = document.getElementById('bulk-soldout-btn');
+      
+      if (!isBulkSoldOut) {
+        const confirmed = await showConfirmDialog('全商品を品切れに設定しますか?');
+        if (!confirmed) return;
+        
+        try {
+          // 店舗別パスでmenusを取得
+          const menuSnapshot = await getDocs(window.getStoreCollection('menus'));
+          const promises = [];
+          
+          menuSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data.id) {
+              // 店舗別パスでsold_outに保存
+              promises.push(setDoc(window.getStoreDoc('sold_out', data.id), {
+                menuId: data.id,
+                timestamp: Timestamp.now()
+              }));
+            }
+          });
+          
+          await Promise.all(promises);
+          isBulkSoldOut = true;
+          btn.textContent = '再販';
+          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          showToast('✓ 全商品を品切れに設定');
+        } catch (e) {
+          console.error(e);
+          showToast('エラー: ' + e.message);
+        }
+      } else {
+        const confirmed = await showConfirmDialog('全商品を販売再開しますか?');
+        if (!confirmed) return;
+        
+        try {
+          // 店舗別パスでsold_outを取得
+          const soldOutSnapshot = await getDocs(window.getStoreCollection('sold_out'));
+          const promises = [];
+          soldOutSnapshot.forEach(docSnap => promises.push(deleteDoc(docSnap.ref)));
+          
+          await Promise.all(promises);
+          isBulkSoldOut = false;
+          btn.textContent = '一括';
+          btn.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
+          showToast('✓ 全商品を販売再開');
+        } catch (e) {
+          console.error(e);
+          showToast('エラー: ' + e.message);
+        }
+      }
+    };
 
     window.toggleTimeOverride = async function() {
       const btn = document.getElementById('time-override-btn');

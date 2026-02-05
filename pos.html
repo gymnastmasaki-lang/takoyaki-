@@ -1380,8 +1380,8 @@
       transform: translateY(0);
     }
     
-    /* 在庫ページ用スタイル */
-    .inventory-item {
+    /* 品切れページ用スタイル */
+    .soldout-item {
       background: white;
       border-radius: 12px;
       padding: 15px;
@@ -1390,51 +1390,39 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 15px;
     }
-    .inventory-item.out-of-stock {
-      background: #ffebee;
-      border: 2px solid #f44336;
+    .soldout-item.sold-out {
+      background: #f5f5f5;
+      opacity: 0.7;
     }
-    .inventory-item-name {
+    .soldout-item-name {
       font-size: 16px;
       font-weight: bold;
       color: #333;
-      flex: 1;
     }
-    .inventory-stock-badge {
-      background: #4CAF50;
+    .soldout-badge {
+      background: #f44336;
       color: white;
       padding: 5px 10px;
       border-radius: 8px;
-      font-size: 14px;
+      font-size: 12px;
       font-weight: bold;
       margin-top: 5px;
       display: inline-block;
     }
-    .inventory-stock-badge.zero {
-      background: #f44336;
-    }
-    .inventory-stock-badge.unlimited {
-      background: #2196F3;
-    }
-    .inventory-input {
-      width: 80px;
-      padding: 8px;
-      border: 2px solid #2196F3;
-      border-radius: 8px;
-      font-size: 16px;
-      text-align: center;
-      font-weight: bold;
-    }
-    .inventory-save-btn {
-      padding: 10px 20px;
+    .soldout-toggle-btn {
+      padding: 12px 20px;
       border: none;
       border-radius: 10px;
       font-size: 14px;
       font-weight: bold;
       cursor: pointer;
       color: white;
+    }
+    .soldout-toggle-btn.set-soldout {
+      background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+    }
+    .soldout-toggle-btn.set-available {
       background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
     }
     
@@ -1720,8 +1708,6 @@
           
           <div style="display: flex; gap: 10px;">
             <button onclick="increaseWaiting()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">待増</button>
-            <button onclick="showInventoryPage()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">在庫</button>
-            <button id="bulk-zero-btn" onclick="toggleBulkZeroStock()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">一括0</button>
             <button id="time-override-btn" onclick="toggleTimeOverride()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">時外</button>
             <button onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/order.html', '_blank')" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">発注</button>
           </div>
@@ -2187,8 +2173,7 @@
     let lastPaymentData = null;
     
     let allMenuItems = [];
-    let currentInventorySettings = {};
-    let isBulkZeroMode = false;
+    let isBulkSoldOut = false;
     
     // 音声通知用
     let audioEnabled = false;
@@ -11765,18 +11750,9 @@ ${redSlipCount > 0 ? `
       return unsubscribe;
     }
     
-    // ========== 在庫管理機能 ==========
-    
-    let allMenuItems = [];
-    let currentInventorySettings = {};
-    let isBulkZeroMode = false;
-    
-    // 在庫ページ表示
-    window.showInventoryPage = async function() {
+    // 品切れページ表示
+    window.showSoldOutPage = async function() {
       try {
-        console.log('📦 在庫ページ表示開始');
-        
-        // メニューデータ取得
         const menuSnapshot = await window.getDocs(window.getStoreCollection('menus'));
         allMenuItems = [];
         const categories = new Set();
@@ -11792,17 +11768,7 @@ ${redSlipCount > 0 ? `
           if (data.category) categories.add(data.category);
         });
         
-        // 在庫設定取得
-        const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
-        const inventoryDoc = await window.getDoc(inventoryRef);
-        if (inventoryDoc.exists()) {
-          currentInventorySettings = inventoryDoc.data().items || {};
-        } else {
-          currentInventorySettings = {};
-        }
-        
-        // カテゴリセレクト設定
-        const select = document.getElementById('inventory-category-select');
+        const select = document.getElementById('soldout-category-select');
         select.innerHTML = '<option value="">全ての商品</option>';
         Array.from(categories).sort().forEach(cat => {
           const opt = document.createElement('option');
@@ -11813,28 +11779,39 @@ ${redSlipCount > 0 ? `
         
         select.onchange = () => {
           const filtered = select.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === select.value);
-          displayInventoryItems(filtered);
+          displaySoldOutItems(filtered);
         };
         
-        await displayInventoryItems(allMenuItems);
-        document.getElementById('page-inventory').style.display = 'block';
+        // 🆕 一括品切れボタンのイベントリスナーを設定
+        const bulkBtn = document.getElementById('bulk-soldout-btn');
+        if (bulkBtn && !bulkBtn.hasAttribute('data-listener-added')) {
+          bulkBtn.removeAttribute('onclick'); // 既存のonclick属性を削除
+          bulkBtn.addEventListener('click', window.toggleBulkSoldOut);
+          bulkBtn.setAttribute('data-listener-added', 'true'); // 重複防止
+        }
         
-        console.log('✅ 在庫ページ表示完了');
+        await displaySoldOutItems(allMenuItems);
+        document.getElementById('page-soldout').style.display = 'block';
       } catch (e) {
-        console.error('❌ 在庫ページ表示エラー:', e);
+        console.error(e);
         alert('エラー: ' + e.message);
       }
     };
     
-    // 在庫ページから戻る
-    window.backFromInventory = function() {
-      document.getElementById('page-inventory').style.display = 'none';
+    // 品切れページから戻る
+    window.backFromSoldOut = function() {
+      document.getElementById('page-soldout').style.display = 'none';
     };
     
-    // 在庫リスト表示
-    async function displayInventoryItems(items) {
-      const list = document.getElementById('inventory-menu-list');
+    // 品切れ商品リスト表示
+    async function displaySoldOutItems(items) {
+      const list = document.getElementById('soldout-menu-list');
       list.innerHTML = '';
+      
+      // controller.htmlと同じ形式でsold_outを取得
+      const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
+      const soldOutIds = new Set();
+      soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
       
       items.sort((a, b) => {
         const numA = a.id ? parseInt(a.id.replace(/\D/g, '') || '0') : 0;
@@ -11843,115 +11820,113 @@ ${redSlipCount > 0 ? `
       });
       
       items.forEach(item => {
-        const inventoryData = currentInventorySettings[item.id] || {};
-        const stock = inventoryData.stock;
-        const isOutOfStock = stock === 0;
-        const isUnlimited = stock === null || stock === undefined;
-        
+        const isSoldOut = soldOutIds.has(item.id);
         const div = document.createElement('div');
-        div.className = 'inventory-item' + (isOutOfStock ? ' out-of-stock' : '');
-        
-        let stockDisplay = '';
-        if (isUnlimited) {
-          stockDisplay = '<span class="inventory-stock-badge unlimited">未設定</span>';
-        } else if (isOutOfStock) {
-          stockDisplay = '<span class="inventory-stock-badge zero">在庫0</span>';
-        } else {
-          stockDisplay = `<span class="inventory-stock-badge">在庫${stock}</span>`;
-        }
+        div.className = 'soldout-item' + (isSoldOut ? ' sold-out' : '');
         
         div.innerHTML = `
-          <div class="inventory-item-name">
-            <div>${item.name}</div>
+          <div>
+            <div class="soldout-item-name">${item.name}</div>
             <div style="font-size:14px;color:#666;">¥${item.price.toLocaleString()}</div>
-            ${stockDisplay}
+            ${isSoldOut ? '<span class="soldout-badge">品切れ中</span>' : ''}
           </div>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <input type="number" 
-                   class="inventory-input" 
-                   value="${isUnlimited ? '' : stock}" 
-                   placeholder="未設定"
-                   data-item-id="${item.id}"
-                   min="0"
-                   step="1">
-            <button class="inventory-save-btn" onclick="updateInventoryStock('${item.id}')">
-              保存
-            </button>
-          </div>
+          <button class="soldout-toggle-btn ${isSoldOut ? 'set-available' : 'set-soldout'}" 
+                  data-menu-id="${item.id}" 
+                  data-set-soldout="${!isSoldOut}">
+            ${isSoldOut ? '販売再開' : '品切れ'}
+          </button>
         `;
+        
+        // 🆕 イベントリスナーを直接追加
+        const button = div.querySelector('.soldout-toggle-btn');
+        button.addEventListener('click', async function() {
+          const menuId = this.getAttribute('data-menu-id');
+          const setSoldOut = this.getAttribute('data-set-soldout') === 'true';
+          await window.toggleSoldOut(menuId, setSoldOut);
+        });
         
         list.appendChild(div);
       });
     }
     
-    // 個別在庫更新
-    window.updateInventoryStock = async function(itemId) {
+    // 個別品切れ切り替え
+    window.toggleSoldOut = async function(menuId, setSoldOut) {
       try {
-        const input = document.querySelector(`input[data-item-id="${itemId}"]`);
-        const value = input.value.trim();
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📍 toggleSoldOut 呼び出し');
+        console.log('   menuId:', menuId);
+        console.log('   setSoldOut:', setSoldOut);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
         
-        // 未設定（空欄）の場合はnull、それ以外は数値
-        const stock = value === '' ? null : parseInt(value);
-        
-        if (stock !== null && (isNaN(stock) || stock < 0)) {
-          showToast('⚠️ 正しい数値を入力してください');
-          return;
+        if (setSoldOut) {
+          // 品切れに設定（controller.htmlと同じ形式）
+          console.log('   → 品切れに設定');
+          await window.setDoc(window.doc(window.db, 'sold_out', menuId), {
+            menuId: menuId,
+            timestamp: window.Timestamp.now()
+          });
+          showToast('品切れに設定');
+          console.log('   ✅ 品切れ設定完了');
+        } else {
+          // 再販：menuIdに一致するドキュメントを検索して削除
+          console.log('   → 販売再開');
+          const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
+          const deletePromises = [];
+          let foundCount = 0;
+          
+          soldOutSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            console.log('  sold_out doc:', docSnap.id, data);
+            
+            // menuIdが一致するドキュメントを削除（.refを使用）
+            if (data.menuId === menuId || docSnap.id === menuId) {
+              console.log('    → 削除:', docSnap.id);
+              deletePromises.push(window.deleteDoc(docSnap.ref));
+              foundCount++;
+            }
+          });
+          
+          if (deletePromises.length > 0) {
+            await Promise.all(deletePromises);
+            showToast(`販売再開 (${foundCount}件)`);
+            console.log('   ✅ 販売再開完了:', foundCount, '件');
+          } else {
+            console.warn('削除するドキュメントが見つかりません。menuId:', menuId);
+            showToast('⚠️ 削除対象なし');
+          }
         }
         
-        console.log('📦 在庫更新:', itemId, '→', stock);
-        
-        // 在庫設定を更新
-        currentInventorySettings[itemId] = {
-          ...(currentInventorySettings[itemId] || {}),
-          stock: stock
-        };
-        
-        // Firestoreに保存
-        const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
-        await window.setDoc(inventoryRef, {
-          items: currentInventorySettings,
-          updatedAt: window.Timestamp.now()
-        });
-        
-        // メニューの在庫も更新（POSシステムとの連携）
-        const menuRef = window.getStoreDoc('menus', itemId);
-        await window.updateDoc(menuRef, {
-          stock: stock,
-          updatedAt: window.Timestamp.now()
-        });
-        
-        showToast('✅ 在庫を更新しました');
-        
-        // リスト再表示
-        const select = document.getElementById('inventory-category-select');
-        const filtered = select.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === select.value);
-        await displayInventoryItems(filtered);
-        
-        console.log('✅ 在庫更新完了');
+        console.log('   🔄 リスト更新中...');
+        const sel = document.getElementById('soldout-category-select');
+        const filtered = sel.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === sel.value);
+        await displaySoldOutItems(filtered);
+        console.log('   ✅ リスト更新完了');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
       } catch (e) {
-        console.error('❌ 在庫更新エラー:', e);
-        showToast('❌ エラー: ' + e.message);
+        console.error('❌ toggleSoldOut error:', e);
+        console.error('   エラー詳細:', e.message);
+        console.error('   スタックトレース:', e.stack);
+        showToast('エラー: ' + e.message);
       }
     };
     
-    // 一括在庫0設定/解除
-    window.toggleBulkZeroStock = async function() {
+    // 一括品切れ切り替え
+    window.toggleBulkSoldOut = async function() {
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📍 toggleBulkZeroStock 呼び出し');
+      console.log('📍 toggleBulkSoldOut 呼び出し');
       console.log('   currentStoreId:', window.currentStoreId);
-      console.log('   isBulkZeroMode:', isBulkZeroMode);
+      console.log('   isBulkSoldOut:', isBulkSoldOut);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
-      const btn = document.getElementById('bulk-zero-btn');
+      const btn = document.getElementById('bulk-soldout-btn');
       
-      if (!isBulkZeroMode) {
-        // 一括0設定モード
-        console.log('   → 一括在庫0設定モード');
+      if (!isBulkSoldOut) {
+        console.log('   → 一括品切れ設定モード');
         const confirmed = await showCustomConfirm({
           icon: '🚫',
-          title: '一括在庫0設定',
-          message: '全ての商品の在庫を0に設定しますか？\n商品は品切れとして表示されます。',
-          btnText: '在庫0にする',
+          title: '一括品切れ設定',
+          message: '全ての商品を品切れに設定しますか？\nお客様は注文できなくなります。',
+          btnText: '品切れにする',
           btnClass: 'modal-btn-danger'
         });
         
@@ -11965,56 +11940,36 @@ ${redSlipCount > 0 ? `
           const menuSnapshot = await window.getDocs(window.getStoreCollection('menus'));
           const promises = [];
           
-          // 全商品の在庫を0に設定
           menuSnapshot.forEach(docSnap => {
             const data = docSnap.data();
             if (data.id) {
-              console.log('     在庫0設定:', data.id, data.name);
-              currentInventorySettings[data.id] = {
-                ...(currentInventorySettings[data.id] || {}),
-                stock: 0
-              };
-              
-              // メニューの在庫も0に
-              promises.push(window.updateDoc(docSnap.ref, {
-                stock: 0,
-                updatedAt: window.Timestamp.now()
+              console.log('     品切れ設定:', data.id, data.name);
+              // controller.htmlと同じ形式
+              promises.push(window.setDoc(window.doc(window.db, 'sold_out', data.id), {
+                menuId: data.id,
+                timestamp: window.Timestamp.now()
               }));
             }
           });
           
-          // 在庫設定を保存
-          const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
-          promises.push(window.setDoc(inventoryRef, {
-            items: currentInventorySettings,
-            updatedAt: window.Timestamp.now()
-          }));
-          
           console.log('   ⏳ 一括設定実行中...', promises.length, '件');
           await Promise.all(promises);
-          
-          isBulkZeroMode = true;
-          btn.textContent = '一括解除';
+          isBulkSoldOut = true;
+          btn.textContent = '再販';
           btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
-          showToast('✅ 全商品の在庫を0に設定しました');
-          console.log('   ✅ 一括在庫0設定完了');
-          
-          // リスト再表示
-          const select = document.getElementById('inventory-category-select');
-          const filtered = select.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === select.value);
-          await displayInventoryItems(filtered);
+          showToast('全商品を品切れに設定しました');
+          console.log('   ✅ 一括品切れ設定完了');
         } catch (e) {
-          console.error('❌ 一括在庫0エラー:', e);
+          console.error('❌ 一括品切れエラー:', e);
           alert('エラー: ' + e.message);
         }
       } else {
-        // 一括0解除モード（未設定に戻す）
-        console.log('   → 一括在庫0解除モード');
+        console.log('   → 一括販売再開モード');
         const confirmed = await showCustomConfirm({
           icon: '✅',
-          title: '一括在庫0解除',
-          message: '全ての商品の在庫を未設定に戻しますか？\n商品は通常通り注文可能になります。',
-          btnText: '未設定に戻す',
+          title: '販売再開',
+          message: '全ての商品を販売再開しますか？\nお客様が注文できるようになります。',
+          btnText: '販売再開する',
           btnClass: 'modal-btn-success'
         });
         
@@ -12024,57 +11979,34 @@ ${redSlipCount > 0 ? `
         }
         
         try {
-          console.log('   🔄 メニュー取得中...');
-          const menuSnapshot = await window.getDocs(window.getStoreCollection('menus'));
+          console.log('   🔄 品切れ一覧取得中...');
+          // controller.htmlと同じ形式
+          const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
           const promises = [];
-          
-          // 全商品の在庫を未設定（null）に
-          menuSnapshot.forEach(docSnap => {
-            const data = docSnap.data();
-            if (data.id) {
-              console.log('     在庫未設定:', data.id, data.name);
-              currentInventorySettings[data.id] = {
-                ...(currentInventorySettings[data.id] || {}),
-                stock: null
-              };
-              
-              // メニューの在庫もnullに
-              promises.push(window.updateDoc(docSnap.ref, {
-                stock: null,
-                updatedAt: window.Timestamp.now()
-              }));
-            }
+          soldOutSnapshot.forEach(docSnap => {
+            console.log('     削除:', docSnap.id);
+            promises.push(window.deleteDoc(docSnap.ref));
           });
           
-          // 在庫設定を保存
-          const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
-          promises.push(window.setDoc(inventoryRef, {
-            items: currentInventorySettings,
-            updatedAt: window.Timestamp.now()
-          }));
-          
-          console.log('   ⏳ 一括解除実行中...', promises.length, '件');
+          console.log('   ⏳ 一括削除実行中...', promises.length, '件');
           await Promise.all(promises);
-          
-          isBulkZeroMode = false;
-          btn.textContent = '一括0';
+          isBulkSoldOut = false;
+          btn.textContent = '一括';
           btn.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
-          showToast('✅ 全商品の在庫を未設定に戻しました');
-          console.log('   ✅ 一括在庫0解除完了');
-          
-          // リスト再表示
-          const select = document.getElementById('inventory-category-select');
-          const filtered = select.value === '' ? allMenuItems : allMenuItems.filter(i => i.category === select.value);
-          await displayInventoryItems(filtered);
+          showToast('全商品の販売を再開しました');
+          console.log('   ✅ 一括販売再開完了');
         } catch (e) {
-          console.error('❌ 一括在庫0解除エラー:', e);
+          console.error('❌ 一括販売再開エラー:', e);
           alert('エラー: ' + e.message);
         }
       }
       
+      console.log('   🔄 リスト更新中...');
+      await displaySoldOutItems(allMenuItems);
+      console.log('   ✅ リスト更新完了');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
     };
-
+    
     // 時間外設定切り替え
     window.toggleTimeOverride = async function() {
       const btn = document.getElementById('time-override-btn');
@@ -12777,22 +12709,22 @@ ${redSlipCount > 0 ? `
     </div>
   </div>
   
-  <div id="page-inventory" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); z-index: 10000; padding: 20px; overflow-y: auto;">
+  <div id="page-soldout" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); z-index: 10000; padding: 20px; overflow-y: auto;">
     <div style="max-width: 1200px; margin: 0 auto;">
-      <button onclick="backFromInventory()" style="padding: 15px 30px; font-size: 18px; background: #FFFF00; color: #333; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">← 戻る</button>
+      <button onclick="backFromSoldOut()" style="padding: 15px 30px; font-size: 18px; background: #FFFF00; color: #333; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">← 戻る</button>
       
       <div style="background: white; color: #667eea; padding: 15px 20px; border-radius: 15px; margin-bottom: 15px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
-        <h1 style="font-size: 20px; font-weight: bold; margin: 0;">在庫一覧</h1>
+        <h1 style="font-size: 20px; font-weight: bold; margin: 0;">品切れ設定</h1>
       </div>
       
       <div style="background: white; padding: 15px; border-radius: 15px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
         <label style="display: block; font-size: 16px; font-weight: bold; margin-bottom: 10px;">カテゴリを選んでください</label>
-        <select id="inventory-category-select" style="width: 100%; padding: 15px; font-size: 18px; border: 3px solid #2196F3; border-radius: 12px;">
+        <select id="soldout-category-select" style="width: 100%; padding: 15px; font-size: 18px; border: 3px solid #9C27B0; border-radius: 12px;">
           <option value="">全ての商品</option>
         </select>
       </div>
       
-      <div id="inventory-menu-list"></div>
+      <div id="soldout-menu-list"></div>
     </div>
   </div>
   
