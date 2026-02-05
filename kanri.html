@@ -9277,22 +9277,22 @@
 
                     // テーブルデータ読み込み
                     console.log('=== テーブルデータ読み込み開始 ===');
-                    let tableSettingsRef;
+                    let tableSettingsCollection;
                     if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
-                        tableSettingsRef = window.firebaseModules.doc(window.db, 'stores', currentStoreId, 'table_settings', 'default');
+                        tableSettingsCollection = collection(window.db, 'stores', currentStoreId, 'tableSettings');
                     } else {
-                        tableSettingsRef = window.firebaseModules.doc(window.db, 'table_settings', 'default');
+                        tableSettingsCollection = collection(window.db, 'tableSettings');
                     }
                     
-                    const tableSettingsDoc = await window.firebaseModules.getDoc(tableSettingsRef);
+                    const tableSettingsSnapshot = await getDocs(tableSettingsCollection);
                     let tablesData = [];
-                    if (tableSettingsDoc.exists()) {
-                        const tableSettings = tableSettingsDoc.data();
-                        tablesData = tableSettings.tables || [];
-                        console.log('テーブル数:', tablesData.length);
-                    } else {
-                        console.log('テーブル設定なし');
-                    }
+                    tableSettingsSnapshot.forEach(doc => {
+                        tablesData.push({
+                            id: doc.id,
+                            name: doc.id // テーブルIDをそのまま名前として使用
+                        });
+                    });
+                    console.log('テーブル数:', tablesData.length);
                     
                     setTables(tablesData);
                     console.log('=== テーブルデータ読み込み完了 ===');
@@ -9476,20 +9476,20 @@
                 if (!confirmed) return;
 
                 try {
-                    const { setDoc, doc } = window.firebaseModules;
+                    const { deleteDoc, doc } = window.firebaseModules;
 
-                    // 残すテーブルをフィルタリング
-                    const remainingTables = tables.filter(t => !selectedTables.includes(t.id));
-
-                    // テーブル設定を更新
-                    let tableSettingsRef;
-                    if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
-                        tableSettingsRef = doc(window.db, 'stores', currentStoreId, 'table_settings', 'default');
-                    } else {
-                        tableSettingsRef = doc(window.db, 'table_settings', 'default');
+                    // 各テーブルのドキュメントを削除
+                    for (const tableId of selectedTables) {
+                        let tableRef;
+                        if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                            tableRef = doc(window.db, 'stores', currentStoreId, 'tableSettings', tableId);
+                        } else {
+                            tableRef = doc(window.db, 'tableSettings', tableId);
+                        }
+                        
+                        await deleteDoc(tableRef);
+                        console.log(`削除: ${tableId}`);
                     }
-
-                    await setDoc(tableSettingsRef, { tables: remainingTables });
 
                     showCustomAlert(`${selectedTables.length}個のテーブルを削除しました`, '削除完了');
                     setSelectedTables([]);
