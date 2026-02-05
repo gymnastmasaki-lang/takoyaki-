@@ -2185,6 +2185,64 @@
     // プリンターIPアドレス（画像から）
     const PRINTER_IP = '192.168.244.41';
     
+    // 🆕 プロキシサーバーのURL（HTTPSからHTTPへの通信を中継）
+    // ローカル環境で起動したNode.jsサーバーのURL
+    const PRINTER_PROXY_URL = 'http://localhost:3000/print';
+    
+    // プロキシを使用するかどうか（HTTPSサイトの場合はtrue）
+    const USE_PROXY = window.location.protocol === 'https:';
+    
+    // 🆕 プロキシ対応の印刷ヘルパー関数
+    async function sendPrintRequest(builder, onSuccess, onError) {
+      try {
+        if (USE_PROXY) {
+          console.log('🔄 プロキシサーバー経由で印刷します');
+          
+          // XMLリクエストを取得
+          const request = builder.toString();
+          
+          // プロキシサーバーに送信
+          const response = await fetch(PRINTER_PROXY_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'text/xml; charset=utf-8'
+            },
+            body: request
+          });
+          
+          if (response.ok) {
+            console.log('✅ 印刷成功');
+            const data = await response.text();
+            if (onSuccess) onSuccess({ status: 'success', data: data });
+          } else {
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            console.error('❌ 印刷エラー:', errorData);
+            if (onError) onError({ status: response.status, message: errorData.error || response.statusText });
+          }
+        } else {
+          console.log('🖨️ プリンターに直接印刷します');
+          
+          const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
+          const request = builder.toString();
+          
+          const trader = new StarWebPrintTrader({url: url});
+          trader.onReceive = function(response) {
+            console.log('印刷成功:', response);
+            if (onSuccess) onSuccess(response);
+          };
+          trader.onError = function(response) {
+            console.error('印刷エラー:', response);
+            if (onError) onError(response);
+          };
+          
+          trader.sendMessage({request: request});
+        }
+      } catch (error) {
+        console.error('❌ 印刷処理エラー:', error);
+        if (onError) onError({ status: 'error', message: error.message });
+      }
+    }
+    
     // メニューデータ（Firebaseから取得）
     let menuData = [];
     let toppingsData = [];
@@ -10976,19 +11034,18 @@ ${redSlipCount > 0 ? `
         
         builder.createCutPaperElement({feed: true});
         
-        const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
-        
-        const trader = new StarWebPrintTrader({url: url});
-        trader.onReceive = function(response) {
-          console.log('印刷成功:', response);
-          showToast('お会計伝票を印刷しました');
-        };
-        trader.onError = function(response) {
-          console.error('印刷エラー:', response);
-          alert('印刷に失敗しました: ' + response.status);
-        };
-        
-        trader.sendMessage({request: request});
+        // プロキシ対応の印刷処理
+        await sendPrintRequest(
+          builder,
+          (response) => {
+            console.log('印刷成功:', response);
+            showToast('お会計伝票を印刷しました');
+          },
+          (response) => {
+            console.error('印刷エラー:', response);
+            alert('印刷に失敗しました: ' + (response.message || response.status));
+          }
+        );
         
       } catch (e) {
         console.error('印刷エラー:', e);
@@ -11194,19 +11251,18 @@ ${redSlipCount > 0 ? `
         
         builder.createCutPaperElement({feed: true});
         
-        const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
-        
-        const trader = new StarWebPrintTrader({url: url});
-        trader.onReceive = function(response) {
-          console.log('印刷成功:', response);
-          closeReceiptModal();
-        };
-        trader.onError = function(response) {
-          console.error('印刷エラー:', response);
-          alert('印刷に失敗しました: ' + response.status);
-        };
-        
-        trader.sendMessage({request: request});
+        // プロキシ対応の印刷処理
+        await sendPrintRequest(
+          builder,
+          (response) => {
+            console.log('印刷成功:', response);
+            closeReceiptModal();
+          },
+          (response) => {
+            console.error('印刷エラー:', response);
+            alert('印刷に失敗しました: ' + (response.message || response.status));
+          }
+        );
         
       } catch (e) {
         console.error('印刷エラー:', e);
@@ -11302,19 +11358,18 @@ ${redSlipCount > 0 ? `
         
         builder.createCutPaperElement({feed: true});
         
-        const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
-        
-        const trader = new StarWebPrintTrader({url: url});
-        trader.onReceive = function(response) {
-          console.log('印刷成功:', response);
-          closeReceiptModal();
-        };
-        trader.onError = function(response) {
-          console.error('印刷エラー:', response);
-          alert('印刷に失敗しました: ' + response.status);
-        };
-        
-        trader.sendMessage({request: request});
+        // プロキシ対応の印刷処理
+        await sendPrintRequest(
+          builder,
+          (response) => {
+            console.log('印刷成功:', response);
+            closeReceiptModal();
+          },
+          (response) => {
+            console.error('印刷エラー:', response);
+            alert('印刷に失敗しました: ' + (response.message || response.status));
+          }
+        );
         
       } catch (e) {
         console.error('印刷エラー:', e);
