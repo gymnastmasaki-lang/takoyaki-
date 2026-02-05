@@ -719,7 +719,7 @@
         <div style="font-size: 20px; font-weight: bold; color: #000; margin: 20px 0;">ステータス</div>
         
         <div id="order-status" class="warning-box" style="background: linear-gradient(135deg, #a8edea 0%, #89d4cf 100%); color: #000; border-color: #89d4cf;">
-          ⏳ ただ今準備しています、<br>しばらくお待ちください
+          ⏳ <span id="status-text-preparing">ただ今準備しています</span>、<br>しばらくお待ちください
         </div>
         
         <div class="waiting-info">お客様は<span id="waiting">1</span>番目に<br>お待ち頂いてます</div>
@@ -1047,6 +1047,14 @@
       cancelMessage: '注文がキャンセルされました\n\n注文番号 #{orderNumber}\n\n番号をお呼びしましたがご不在でしたので\n注文をキャンセルさせて頂きました'
     };
     
+    // ステータス表示設定（デフォルト値）
+    let statusDisplaySettings = {
+      preparing: 'ただ今準備しています',
+      completed: '会計完了しました',
+      ready: '商品ができました',
+      cancelled: '注文をキャンセルしました'
+    };
+    
     // 二重送信防止用フラグ
     let isOrderProcessing = false;
     let lastOrderTimestamp = 0;
@@ -1344,6 +1352,33 @@
         }
       } catch (error) {
         console.error('❌ アラート設定読み込みエラー:', error);
+      }
+    }
+
+    // ステータス表示設定を読み込む
+    async function loadStatusDisplaySettings() {
+      try {
+        console.log('📱 ステータス表示設定を読み込み中... 店舗ID:', currentStoreId);
+        
+        const statusDisplayRef = currentStoreId ? 
+          doc(db, 'stores', currentStoreId, 'status_display_settings', 'default') : 
+          doc(db, 'status_display_settings', 'default');
+        const statusDisplayDoc = await getDoc(statusDisplayRef);
+        
+        if (statusDisplayDoc.exists()) {
+          statusDisplaySettings = statusDisplayDoc.data();
+          console.log('✅ ステータス表示設定を読み込みました:', statusDisplaySettings);
+        } else {
+          console.log('⚠️ ステータス表示設定が見つかりません。デフォルト設定を使用します。');
+        }
+        
+        // 初期表示テキストを更新
+        const preparingTextElement = document.getElementById('status-text-preparing');
+        if (preparingTextElement) {
+          preparingTextElement.textContent = statusDisplaySettings.preparing;
+        }
+      } catch (error) {
+        console.error('❌ ステータス表示設定読み込みエラー:', error);
       }
     }
 
@@ -1672,6 +1707,7 @@
         await loadAllData();
         await loadMenuSettings(); // メニュー設定を読み込み
         await loadAlertSettings(); // アラート設定を読み込み
+        await loadStatusDisplaySettings(); // ステータス表示設定を読み込み
         await updateTopWaitingCount();
         setInterval(updateTopWaitingCount, 20000); // 🚀 10秒→20秒に軽量化
         watchSoldOutItems();
@@ -1912,7 +1948,7 @@
         statusBox.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
         statusBox.style.borderColor = '#4CAF50';
         statusBox.style.color = 'white';
-        statusBox.innerHTML = '✅ 商品が出来上がりました!<br>画面の注文番号を店員にお見せください';
+        statusBox.innerHTML = `✅ ${statusDisplaySettings.ready}<br>画面の注文番号を店員にお見せください`;
         // 完了時は1番目に変更
         if (waitingElement) {
           waitingElement.textContent = '1';
@@ -1921,7 +1957,7 @@
         statusBox.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
         statusBox.style.borderColor = '#f44336';
         statusBox.style.color = 'white';
-        statusBox.innerHTML = '❌ 注文がキャンセルされました<br>番号をお呼びしましたがご不在でしたので<br>注文をキャンセルさせて頂きました';
+        statusBox.innerHTML = `❌ ${statusDisplaySettings.cancelled}<br>番号をお呼びしましたがご不在でしたので<br>注文をキャンセルさせて頂きました`;
         // キャンセル時も1番目に変更
         if (waitingElement) {
           waitingElement.textContent = '1';
@@ -1932,7 +1968,7 @@
         statusBox.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
         statusBox.style.borderColor = '#2196F3';
         statusBox.style.color = 'white';
-        statusBox.innerHTML = ' お会計完了<br>商品が出来上がりましたらお呼びします<br>しばらくお待ちください';
+        statusBox.innerHTML = `💳 ${statusDisplaySettings.completed}<br>商品が出来上がりましたらお呼びします<br>しばらくお待ちください`;
         // myPositionがあればそれを表示
         if (waitingElement && orderData.myPosition) {
           waitingElement.textContent = orderData.myPosition;
@@ -1941,7 +1977,7 @@
         statusBox.style.background = 'linear-gradient(135deg, #a8edea 0%, #89d4cf 100%)';
         statusBox.style.borderColor = '#89d4cf';
         statusBox.style.color = '#000';
-        statusBox.innerHTML = '⏳ ただ今準備しています、<br>しばらくお待ちください';
+        statusBox.innerHTML = `⏳ ${statusDisplaySettings.preparing}、<br>しばらくお待ちください`;
         // myPositionがあればそれを表示
         if (waitingElement && orderData.myPosition) {
           waitingElement.textContent = orderData.myPosition;

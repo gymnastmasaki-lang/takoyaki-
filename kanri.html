@@ -275,6 +275,15 @@
                 cancelMessage: '注文がキャンセルされました\n\n注文番号 #{orderNumber}\n\n番号をお呼びしましたがご不在でしたので\n注文をキャンセルさせて頂きました'
             });
             
+            // ステータス表示設定用のstate
+            const [statusDisplaySettings, setStatusDisplaySettings] = useState({
+                preparing: 'ただ今準備しています',
+                completed: '会計完了しました',
+                ready: '商品ができました',
+                cancelled: '注文をキャンセルしました'
+            });
+            const [showStatusDisplaySettings, setShowStatusDisplaySettings] = useState(false);
+            
             // 営業時間外設定用のstate
             const [businessHoursSettings, setBusinessHoursSettings] = useState({
                 enabled: false, // 営業時間外設定を有効にするか
@@ -684,6 +693,7 @@
                         loadReceiptSettings();
                         loadMenuSettings();
                         loadAlertSettings();
+                        loadStatusDisplaySettings(); // ステータス表示設定を読み込み
                         loadBusinessHoursSettings(); // 営業時間設定を読み込み
                         loadTableSettings();
                         loadMenuItems();
@@ -1572,6 +1582,83 @@
                     }
                 } catch (error) {
                     console.error('❌ アラート設定読み込みエラー:', error);
+                }
+            };
+
+            // ステータス表示設定を読み込む
+            const loadStatusDisplaySettings = async () => {
+                try {
+                    const { getDoc } = window.firebaseModules;
+                    
+                    const docId = 'default';
+                    const statusDisplayRef = window.getStoreDoc('status_display_settings', docId);
+                    
+                    console.log('🔍 ステータス表示設定読み込み');
+                    
+                    const statusDisplayDoc = await getDoc(statusDisplayRef);
+                    
+                    if (statusDisplayDoc.exists()) {
+                        setStatusDisplaySettings(statusDisplayDoc.data());
+                        console.log('✅ ステータス表示設定を読み込みました');
+                    } else {
+                        console.log('⚠️ ステータス表示設定が存在しないため、デフォルト設定を使用');
+                    }
+                } catch (error) {
+                    console.error('❌ ステータス表示設定読み込みエラー:', error);
+                }
+            };
+
+            // ステータス表示設定を保存
+            const saveStatusDisplaySettings = async () => {
+                try {
+                    while (!window.FirebaseReady || !window.db) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                    
+                    console.log('💾 ステータス表示設定保存開始');
+                    const { setDoc } = window.firebaseModules;
+                    
+                    const docId = 'default';
+                    const statusDisplayRef = window.getStoreDoc('status_display_settings', docId);
+                    
+                    await setDoc(statusDisplayRef, statusDisplaySettings);
+                    
+                    console.log('✅ ステータス表示設定を保存しました');
+                    showCustomAlertFunc('✅ ステータス表示設定を保存しました', '保存完了', '✅');
+                } catch (error) {
+                    console.error('❌ ステータス表示設定保存エラー:', error);
+                    showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
+                }
+            };
+
+            // ステータス表示設定をデフォルトに戻す
+            const resetStatusDisplaySettings = async () => {
+                const confirmed = await showCustomConfirmFunc(
+                    'ステータス表示設定をデフォルトに戻しますか？\n\nこの操作は取り消せません',
+                    '設定リセット',
+                    'リセットする',
+                    'キャンセル'
+                );
+                if (!confirmed) return;
+
+                try {
+                    const defaultSettings = {
+                        preparing: 'ただ今準備しています',
+                        completed: '会計完了しました',
+                        ready: '商品ができました',
+                        cancelled: '注文をキャンセルしました'
+                    };
+                    setStatusDisplaySettings(defaultSettings);
+                    
+                    const { setDoc } = window.firebaseModules;
+                    const docId = 'default';
+                    const statusDisplayRef = window.getStoreDoc('status_display_settings', docId);
+                    await setDoc(statusDisplayRef, defaultSettings);
+                    
+                    showCustomAlertFunc('ステータス表示設定をデフォルトに戻しました', 'リセット完了');
+                } catch (error) {
+                    console.error('❌ リセットエラー:', error);
+                    showCustomAlertFunc('リセットに失敗しました: ' + error.message, 'エラー');
                 }
             };
 
@@ -6683,6 +6770,92 @@
                         </div>
 
 
+                        {/* ステータス表示設定 */}
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                        📱 ステータス表示設定
+                                    </h2>
+                                    <p className="text-sm text-gray-600 mt-1">注文画面に表示されるステータステキストのカスタマイズ</p>
+                                </div>
+                                <button
+                                    onClick={() => setShowStatusDisplaySettings(!showStatusDisplaySettings)}
+                                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                                >
+                                    {showStatusDisplaySettings ? '閉じる' : '設定を開く'}
+                                </button>
+                            </div>
+
+                            {showStatusDisplaySettings && (
+                                <div className="space-y-6 border-t pt-4">
+                                    <div className="border-l-4 border-yellow-500 pl-4">
+                                        <label className="block text-md font-bold mb-2 text-yellow-700">⏳ 準備中ステータス</label>
+                                        <p className="text-xs text-gray-500 mb-2">注文が準備中のときに表示されるテキスト</p>
+                                        <input
+                                            type="text"
+                                            value={statusDisplaySettings.preparing}
+                                            onChange={(e) => setStatusDisplaySettings({...statusDisplaySettings, preparing: e.target.value})}
+                                            className="w-full p-3 border rounded-lg"
+                                            placeholder="例: ただ今準備しています"
+                                        />
+                                    </div>
+
+                                    <div className="border-l-4 border-blue-500 pl-4">
+                                        <label className="block text-md font-bold mb-2 text-blue-700">💳 会計完了ステータス</label>
+                                        <p className="text-xs text-gray-500 mb-2">会計が完了したときに表示されるテキスト</p>
+                                        <input
+                                            type="text"
+                                            value={statusDisplaySettings.completed}
+                                            onChange={(e) => setStatusDisplaySettings({...statusDisplaySettings, completed: e.target.value})}
+                                            className="w-full p-3 border rounded-lg"
+                                            placeholder="例: 会計完了しました"
+                                        />
+                                    </div>
+
+                                    <div className="border-l-4 border-green-500 pl-4">
+                                        <label className="block text-md font-bold mb-2 text-green-700">✅ 商品完成ステータス</label>
+                                        <p className="text-xs text-gray-500 mb-2">商品が完成したときに表示されるテキスト</p>
+                                        <input
+                                            type="text"
+                                            value={statusDisplaySettings.ready}
+                                            onChange={(e) => setStatusDisplaySettings({...statusDisplaySettings, ready: e.target.value})}
+                                            className="w-full p-3 border rounded-lg"
+                                            placeholder="例: 商品ができました"
+                                        />
+                                    </div>
+
+                                    <div className="border-l-4 border-red-500 pl-4">
+                                        <label className="block text-md font-bold mb-2 text-red-700">❌ キャンセルステータス</label>
+                                        <p className="text-xs text-gray-500 mb-2">注文がキャンセルされたときに表示されるテキスト</p>
+                                        <input
+                                            type="text"
+                                            value={statusDisplaySettings.cancelled}
+                                            onChange={(e) => setStatusDisplaySettings({...statusDisplaySettings, cancelled: e.target.value})}
+                                            className="w-full p-3 border rounded-lg"
+                                            placeholder="例: 注文をキャンセルしました"
+                                        />
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={saveStatusDisplaySettings}
+                                            className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold"
+                                        >
+                                            保存
+                                        </button>
+                                        <button
+                                            onClick={resetStatusDisplaySettings}
+                                            className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold"
+                                        >
+                                            デフォルトに戻す
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+
                         {/* アラートメッセージ設定 */}
                         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
                             <div className="flex justify-between items-center mb-4">
@@ -9024,7 +9197,7 @@
                         backupData.data.receipt_settings = null;
                     }
                     
-                    // 商品カテゴリ設定（menu_settings）
+                    // 商品カテゴリ設定（menu_settings）とトッピング
                     try {
                         let menuSettingsRef;
                         if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
@@ -9033,7 +9206,33 @@
                             menuSettingsRef = doc(window.db, 'menu_settings', 'default');
                         }
                         const menuSettingsDoc = await getDoc(menuSettingsRef);
-                        backupData.data.menu_settings = menuSettingsDoc.exists() ? menuSettingsDoc.data() : null;
+                        const menuSettingsData = menuSettingsDoc.exists() ? menuSettingsDoc.data() : null;
+                        
+                        // menu_settingsにトッピング情報を含める
+                        if (menuSettingsData) {
+                            // トッピングコレクションを取得
+                            let toppingsRef;
+                            if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                                toppingsRef = collection(window.db, 'stores', currentStoreId, 'toppings');
+                            } else {
+                                toppingsRef = collection(window.db, 'toppings');
+                            }
+                            
+                            try {
+                                const toppingsSnapshot = await getDocs(toppingsRef);
+                                const toppings = [];
+                                toppingsSnapshot.forEach(docSnap => {
+                                    toppings.push({ id: docSnap.id, ...docSnap.data() });
+                                });
+                                menuSettingsData.toppings = toppings;
+                                console.log('✅ トッピング取得:', toppings.length, '件');
+                            } catch (e) {
+                                console.warn('トッピング取得エラー:', e.message);
+                                menuSettingsData.toppings = [];
+                            }
+                        }
+                        
+                        backupData.data.menu_settings = menuSettingsData;
                         console.log('✅ 商品カテゴリ設定:', backupData.data.menu_settings ? '取得' : 'なし');
                     } catch (e) {
                         console.warn('商品カテゴリ設定の取得に失敗:', e.message);
@@ -9242,7 +9441,7 @@
                         console.log('✅ レシート設定復元');
                     }
                     
-                    // 商品カテゴリ設定
+                    // 商品カテゴリ設定とトッピング
                     if (data.menu_settings) {
                         let menuSettingsRef;
                         if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
@@ -9250,7 +9449,31 @@
                         } else {
                             menuSettingsRef = doc(window.db, 'menu_settings', 'default');
                         }
-                        await setDoc(menuSettingsRef, data.menu_settings);
+                        
+                        // トッピングデータを分離
+                        const menuSettingsData = { ...data.menu_settings };
+                        const toppings = menuSettingsData.toppings || [];
+                        delete menuSettingsData.toppings;
+                        
+                        // menu_settingsを復元
+                        await setDoc(menuSettingsRef, menuSettingsData);
+                        
+                        // トッピングを復元
+                        if (toppings.length > 0) {
+                            for (const topping of toppings) {
+                                let toppingRef;
+                                if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                                    toppingRef = doc(window.db, 'stores', currentStoreId, 'toppings', topping.id);
+                                } else {
+                                    toppingRef = doc(window.db, 'toppings', topping.id);
+                                }
+                                const toppingData = { ...topping };
+                                delete toppingData.id;
+                                await setDoc(toppingRef, toppingData);
+                            }
+                            console.log(`✅ トッピング復元: ${toppings.length}件`);
+                        }
+                        
                         settingsRestoredCount++;
                         console.log('✅ 商品カテゴリ設定復元');
                     }
