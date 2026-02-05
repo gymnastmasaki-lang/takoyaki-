@@ -8633,12 +8633,19 @@
                     const confirmResult = await showCustomConfirm(
                         '現在のデータをバックアップしますか？\n\n以下がバックアップされます：\n• 商品\n• 従業員\n• 注文履歴\n• 勤怠データ\n• テーブル\n• 商品カテゴリ設定\n• レシート設定\n• 在庫設定\n• アラート設定\n• 営業時間設定\n• テーブル設定',
                         'バックアップ作成',
-                        ''
+                        '作成する',
+                        'キャンセル'
                     );
                     
                     if (!confirmResult) return;
                     
                     console.log('💾 手動バックアップ開始');
+                    
+                    // バックアップ作成中のアラートを表示
+                    showCustomAlertFunc('データをバックアップしています...\n\nしばらくお待ちください', 'バックアップ作成中', '💾');
+                    
+                    // アラートが表示されるまで少し待つ
+                    await new Promise(resolve => setTimeout(resolve, 500));
                     
                     const { getDocs, setDoc, doc, Timestamp, query, orderBy, limit, collection } = window.firebaseModules;
                     const now = new Date();
@@ -8888,16 +8895,23 @@
                         backupData.data.table_settings
                     ].filter(s => s !== null).length;
                     
-                    showCustomAlert(
+                    // バックアップ作成中アラートを閉じて、完了アラートを表示
+                    setShowCustomAlert(false);
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    showCustomAlertFunc(
                         `バックアップを作成しました\n\n商品: ${backupData.data.menus.length}件\n従業員: ${backupData.data.employees.length}名\n注文: ${backupData.data.orders.length}件\n勤怠: ${backupData.data.attendance.length}件\nテーブル: ${backupData.data.tables?.length || 0}件\n設定: ${settingsCount}種類`,
-                        'バックアップ完了'
+                        '✅ バックアップ完了',
+                        '✅'
                     );
                     
                     // 一覧を再読み込み
                     await loadBackups();
                 } catch (error) {
                     console.error('バックアップ作成エラー:', error);
-                    showCustomAlert('バックアップの作成に失敗しました\n\n' + error.message, 'エラー');
+                    setShowCustomAlert(false);
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    showCustomAlertFunc('バックアップの作成に失敗しました\n\n' + error.message, '❌ エラー', '❌');
                 }
             };
 
@@ -8916,6 +8930,12 @@
                     
                     setRestoring(true);
                     console.log('🔄 バックアップ復元開始:', backup.id);
+                    
+                    // 復元中のアラートを表示
+                    showCustomAlertFunc('データを復元しています...\n\nしばらくお待ちください', '復元中', '⏳');
+                    
+                    // アラートが表示されるまで少し待つ
+                    await new Promise(resolve => setTimeout(resolve, 500));
                     
                     const { setDoc, doc, Timestamp } = window.firebaseModules;
                     const data = backup.data;
@@ -9059,7 +9079,16 @@
                     console.log(`✅ 設定復元: ${settingsRestoredCount}種類`);
                     
                     setRestoring(false);
-                    showCustomAlert('バックアップからの復元が完了しました\n\nページを再読み込みしてください。', '復元完了');
+                    
+                    // 復元中アラートを閉じて、完了アラートを表示
+                    setShowCustomAlert(false);
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    showCustomAlertFunc(
+                        'バックアップからの復元が完了しました\n\nページを再読み込みします', 
+                        '✅ 復元完了', 
+                        '✅'
+                    );
                     
                     // ページをリロード
                     setTimeout(() => {
@@ -9068,7 +9097,9 @@
                 } catch (error) {
                     console.error('復元エラー:', error);
                     setRestoring(false);
-                    showCustomAlert('復元に失敗しました: ' + error.message, 'エラー');
+                    setShowCustomAlert(false);
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    showCustomAlertFunc('復元に失敗しました\n\n' + error.message, '❌ エラー', '❌');
                 }
             };
 
