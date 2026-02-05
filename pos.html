@@ -6581,21 +6581,47 @@ ${totalRedSlipCount > 0 ? `
           backupData.data.table_settings = tableDoc.exists() ? tableDoc.data() : null;
         } catch (e) { backupData.data.table_settings = null; }
         
-        // 🆕 テーブル状態データ（store_tables）
+        // 🆕 テーブル状態データ（store_tables / tables）
         try {
-          let storeTablesRef;
+          // 新しい店舗構造の場合
           if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
-            storeTablesRef = doc(window.db, 'store_tables', window.currentStoreId);
+            // store_tables/{storeId} の単一ドキュメントを取得
+            const storeTablesRef = doc(window.db, 'store_tables', window.currentStoreId);
+            const storeTablesDoc = await getDoc(storeTablesRef);
+            if (storeTablesDoc.exists()) {
+              backupData.data.store_tables = storeTablesDoc.data();
+              if (backupData.data.store_tables?.tables) {
+                console.log(`🪑 テーブル状態: ${backupData.data.store_tables.tables.length}個`);
+              }
+            } else {
+              backupData.data.store_tables = null;
+              console.log('⚠️ store_tablesドキュメントが存在しません');
+            }
           } else {
-            storeTablesRef = doc(window.db, 'tables', 'default');
-          }
-          const storeTablesDoc = await getDoc(storeTablesRef);
-          backupData.data.store_tables = storeTablesDoc.exists() ? storeTablesDoc.data() : null;
-          if (backupData.data.store_tables?.tables) {
-            console.log(`🪑 テーブル: ${backupData.data.store_tables.tables.length}個`);
+            // 旧データ構造の場合: tablesコレクション全体を取得
+            const tablesCollectionRef = collection(window.db, 'tables');
+            const tablesSnapshot = await getDocs(tablesCollectionRef);
+            backupData.data.tables = [];
+            tablesSnapshot.forEach(docSnap => {
+              backupData.data.tables.push({ id: docSnap.id, ...docSnap.data() });
+            });
+            console.log(`🪑 テーブル: ${backupData.data.tables.length}件`);
+            
+            // store_tablesも試す（下赤塚店用）
+            try {
+              const storeTablesRef = doc(window.db, 'store_tables', 'shimoakatsuka');
+              const storeTablesDoc = await getDoc(storeTablesRef);
+              if (storeTablesDoc.exists()) {
+                backupData.data.store_tables = storeTablesDoc.data();
+                console.log(`🪑 store_tables(shimoakatsuka)も取得`);
+              }
+            } catch (e2) {
+              console.log('store_tables(shimoakatsuka)は存在しないかエラー');
+            }
           }
         } catch (e) { 
-          backupData.data.store_tables = null; 
+          backupData.data.store_tables = null;
+          backupData.data.tables = [];
           console.log('⚠️ テーブル状態データの取得失敗:', e);
         }
         
@@ -6606,7 +6632,7 @@ ${totalRedSlipCount > 0 ? `
           backupData.data.alert_settings,
           backupData.data.business_hours,
           backupData.data.table_settings,
-          backupData.data.store_tables
+          backupData.data.store_tables || (backupData.data.tables?.length > 0 ? {} : null)
         ].filter(s => s !== null).length;
         console.log(`⚙️ 設定: ${settingsCount}種類`);
         
@@ -6813,18 +6839,41 @@ ${totalRedSlipCount > 0 ? `
           backupData.data.table_settings = tableDoc.exists() ? tableDoc.data() : null;
         } catch (e) { backupData.data.table_settings = null; }
         
-        // 🆕 テーブル状態データ（store_tables）
+        // 🆕 テーブル状態データ（store_tables / tables）
         try {
-          let storeTablesRef;
+          // 新しい店舗構造の場合
           if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
-            storeTablesRef = doc(window.db, 'store_tables', window.currentStoreId);
+            // store_tables/{storeId} の単一ドキュメントを取得
+            const storeTablesRef = doc(window.db, 'store_tables', window.currentStoreId);
+            const storeTablesDoc = await getDoc(storeTablesRef);
+            if (storeTablesDoc.exists()) {
+              backupData.data.store_tables = storeTablesDoc.data();
+            } else {
+              backupData.data.store_tables = null;
+            }
           } else {
-            storeTablesRef = doc(window.db, 'tables', 'default');
+            // 旧データ構造の場合: tablesコレクション全体を取得
+            const tablesCollectionRef = collection(window.db, 'tables');
+            const tablesSnapshot = await getDocs(tablesCollectionRef);
+            backupData.data.tables = [];
+            tablesSnapshot.forEach(docSnap => {
+              backupData.data.tables.push({ id: docSnap.id, ...docSnap.data() });
+            });
+            
+            // store_tablesも試す（下赤塚店用）
+            try {
+              const storeTablesRef = doc(window.db, 'store_tables', 'shimoakatsuka');
+              const storeTablesDoc = await getDoc(storeTablesRef);
+              if (storeTablesDoc.exists()) {
+                backupData.data.store_tables = storeTablesDoc.data();
+              }
+            } catch (e2) {
+              // store_tablesがなければスキップ
+            }
           }
-          const storeTablesDoc = await getDoc(storeTablesRef);
-          backupData.data.store_tables = storeTablesDoc.exists() ? storeTablesDoc.data() : null;
         } catch (e) { 
-          backupData.data.store_tables = null; 
+          backupData.data.store_tables = null;
+          backupData.data.tables = [];
         }
         
         const settingsCount = [
@@ -6834,7 +6883,7 @@ ${totalRedSlipCount > 0 ? `
           backupData.data.alert_settings,
           backupData.data.business_hours,
           backupData.data.table_settings,
-          backupData.data.store_tables
+          backupData.data.store_tables || (backupData.data.tables?.length > 0 ? {} : null)
         ].filter(s => s !== null).length;
         
         // 手動バックアップを保存
