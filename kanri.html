@@ -8584,6 +8584,7 @@
             const [backups, setBackups] = useState([]);
             const [loading, setLoading] = useState(true);
             const [restoring, setRestoring] = useState(false);
+            const [creating, setCreating] = useState(false);
 
             // バックアップ一覧を読み込む
             useEffect(() => {
@@ -8639,13 +8640,8 @@
                     
                     if (!confirmResult) return;
                     
+                    setCreating(true);
                     console.log('💾 手動バックアップ開始');
-                    
-                    // バックアップ作成中のアラートを表示
-                    showCustomAlertFunc('データをバックアップしています...\n\nしばらくお待ちください', 'バックアップ作成中', '💾');
-                    
-                    // アラートが表示されるまで少し待つ
-                    await new Promise(resolve => setTimeout(resolve, 500));
                     
                     const { getDocs, setDoc, doc, Timestamp, query, orderBy, limit, collection } = window.firebaseModules;
                     const now = new Date();
@@ -8895,9 +8891,7 @@
                         backupData.data.table_settings
                     ].filter(s => s !== null).length;
                     
-                    // バックアップ作成中アラートを閉じて、完了アラートを表示
-                    setShowCustomAlert(false);
-                    await new Promise(resolve => setTimeout(resolve, 300));
+                    setCreating(false);
                     
                     showCustomAlertFunc(
                         `バックアップを作成しました\n\n商品: ${backupData.data.menus.length}件\n従業員: ${backupData.data.employees.length}名\n注文: ${backupData.data.orders.length}件\n勤怠: ${backupData.data.attendance.length}件\nテーブル: ${backupData.data.tables?.length || 0}件\n設定: ${settingsCount}種類`,
@@ -8909,8 +8903,7 @@
                     await loadBackups();
                 } catch (error) {
                     console.error('バックアップ作成エラー:', error);
-                    setShowCustomAlert(false);
-                    await new Promise(resolve => setTimeout(resolve, 300));
+                    setCreating(false);
                     showCustomAlertFunc('バックアップの作成に失敗しました\n\n' + error.message, '❌ エラー', '❌');
                 }
             };
@@ -8930,12 +8923,6 @@
                     
                     setRestoring(true);
                     console.log('🔄 バックアップ復元開始:', backup.id);
-                    
-                    // 復元中のアラートを表示
-                    showCustomAlertFunc('データを復元しています...\n\nしばらくお待ちください', '復元中', '⏳');
-                    
-                    // アラートが表示されるまで少し待つ
-                    await new Promise(resolve => setTimeout(resolve, 500));
                     
                     const { setDoc, doc, Timestamp } = window.firebaseModules;
                     const data = backup.data;
@@ -9080,10 +9067,6 @@
                     
                     setRestoring(false);
                     
-                    // 復元中アラートを閉じて、完了アラートを表示
-                    setShowCustomAlert(false);
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                    
                     showCustomAlertFunc(
                         'バックアップからの復元が完了しました\n\nページを再読み込みします', 
                         '✅ 復元完了', 
@@ -9097,8 +9080,6 @@
                 } catch (error) {
                     console.error('復元エラー:', error);
                     setRestoring(false);
-                    setShowCustomAlert(false);
-                    await new Promise(resolve => setTimeout(resolve, 300));
                     showCustomAlertFunc('復元に失敗しました\n\n' + error.message, '❌ エラー', '❌');
                 }
             };
@@ -9155,9 +9136,10 @@
                         </p>
                         <button
                             onClick={createManualBackup}
-                            className="w-full px-6 py-3 bg-white text-blue-700 rounded-lg hover:bg-gray-100 font-bold shadow-lg transition-all hover:scale-105"
+                            disabled={creating || restoring}
+                            className="w-full px-6 py-3 bg-white text-blue-700 rounded-lg hover:bg-gray-100 font-bold shadow-lg transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                         >
-                            💾 手動バックアップを作成
+                            {creating ? '💾 バックアップ作成中...' : '💾 手動バックアップを作成'}
                         </button>
                     </div>
 
@@ -9202,15 +9184,15 @@
                                             <div className="flex gap-2">
                                                 <button
                                                     onClick={() => restoreBackup(backup)}
-                                                    disabled={restoring}
+                                                    disabled={restoring || creating}
                                                     className="px-3 py-1 bg-green-500 text-white text-sm rounded hover:bg-green-600 disabled:bg-gray-300"
                                                 >
-                                                    復元
+                                                    {restoring ? '復元中...' : '復元'}
                                                 </button>
                                                 {backup.type === 'manual' && (
                                                     <button
                                                         onClick={() => deleteBackup(backup.id)}
-                                                        disabled={restoring}
+                                                        disabled={restoring || creating}
                                                         className="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600 disabled:bg-gray-300"
                                                     >
                                                         削除
