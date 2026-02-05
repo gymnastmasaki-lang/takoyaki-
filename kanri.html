@@ -8640,8 +8640,11 @@
                     
                     if (!confirmResult) return;
                     
+                    // メモを入力
+                    const memo = prompt('バックアップにメモを追加できます（任意）\n\n例: 価格改定前、3月1日からの価格、など');
+                    
                     setCreating(true);
-                    console.log('💾 手動バックアップ開始');
+                    console.log('手動バックアップ開始');
                     
                     const { getDocs, setDoc, doc, Timestamp, query, orderBy, limit, collection } = window.firebaseModules;
                     const now = new Date();
@@ -8651,6 +8654,7 @@
                         timestamp: Timestamp.now(),
                         date: dateTimeStr,
                         type: 'manual',
+                        memo: memo || '',
                         data: {}
                     };
                     
@@ -8893,10 +8897,10 @@
                     
                     setCreating(false);
                     
-                    showCustomAlertFunc(
-                        `バックアップを作成しました\n\n商品: ${backupData.data.menus.length}件\n従業員: ${backupData.data.employees.length}名\n注文: ${backupData.data.orders.length}件\n勤怠: ${backupData.data.attendance.length}件\nテーブル: ${backupData.data.tables?.length || 0}件\n設定: ${settingsCount}種類`,
-                        '✅ バックアップ完了',
-                        '✅'
+                    const memoText = memo ? `\nメモ: ${memo}` : '';
+                    showCustomAlert(
+                        `バックアップを作成しました\n\n商品: ${backupData.data.menus.length}件\n従業員: ${backupData.data.employees.length}名\n注文: ${backupData.data.orders.length}件\n勤怠: ${backupData.data.attendance.length}件\nテーブル: ${backupData.data.tables?.length || 0}件\n設定: ${settingsCount}種類${memoText}`,
+                        'バックアップ完了'
                     );
                     
                     // 一覧を再読み込み
@@ -8904,7 +8908,7 @@
                 } catch (error) {
                     console.error('バックアップ作成エラー:', error);
                     setCreating(false);
-                    showCustomAlertFunc('バックアップの作成に失敗しました\n\n' + error.message, '❌ エラー', '❌');
+                    showCustomAlert('バックアップの作成に失敗しました\n\n' + error.message, 'エラー');
                 }
             };
 
@@ -8912,8 +8916,9 @@
             const restoreBackup = async (backup) => {
                 try {
                     // カスタム確認ダイアログを表示
+                    const memoInfo = backup.memo ? `\nメモ: ${backup.memo}` : '';
                     const confirmResult = await showCustomConfirm(
-                        `このバックアップから復元しますか？\n\n作成日時: ${backup.timestamp.toLocaleString('ja-JP')}\nタイプ: ${backup.type === 'auto' ? '自動' : '手動'}\n\n⚠️ 現在のデータは上書きされます！`,
+                        `このバックアップから復元しますか？\n\n作成日時: ${backup.timestamp.toLocaleString('ja-JP')}\nタイプ: ${backup.type === 'auto' ? '自動' : '手動'}${memoInfo}\n\n警告: 現在のデータは上書きされます！`,
                         'バックアップ復元',
                         '復元する',
                         'キャンセル'
@@ -9066,12 +9071,7 @@
                     console.log(`✅ 設定復元: ${settingsRestoredCount}種類`);
                     
                     setRestoring(false);
-                    
-                    showCustomAlertFunc(
-                        'バックアップからの復元が完了しました\n\nページを再読み込みします', 
-                        '✅ 復元完了', 
-                        '✅'
-                    );
+                    showCustomAlert('バックアップからの復元が完了しました\n\nページを再読み込みしてください。', '復元完了');
                     
                     // ページをリロード
                     setTimeout(() => {
@@ -9080,7 +9080,7 @@
                 } catch (error) {
                     console.error('復元エラー:', error);
                     setRestoring(false);
-                    showCustomAlertFunc('復元に失敗しました\n\n' + error.message, '❌ エラー', '❌');
+                    showCustomAlert('復元に失敗しました: ' + error.message, 'エラー');
                 }
             };
 
@@ -9124,6 +9124,7 @@
                         <ul className="text-sm text-blue-600 space-y-1 list-disc list-inside">
                             <li><strong>自動バックアップ:</strong> 精算時に作成され、7日分がローテーションで保持されます</li>
                             <li><strong>手動バックアップ:</strong> いつでも作成でき、手動で削除するまで保持されます</li>
+                            <li><strong>メモ機能:</strong> 手動バックアップ作成時にメモを追加できます（例: 価格改定前、3月1日からの価格など）</li>
                             <li>バックアップには商品、従業員、注文履歴（最近1000件）、勤怠データ（最近1000件）、テーブル、各種設定（カテゴリ・レシート・在庫・アラート・営業時間・テーブル）が含まれます</li>
                         </ul>
                     </div>
@@ -9139,7 +9140,7 @@
                             disabled={creating || restoring}
                             className="w-full px-6 py-3 bg-white text-blue-700 rounded-lg hover:bg-gray-100 font-bold shadow-lg transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                         >
-                            {creating ? '💾 バックアップ作成中...' : '💾 手動バックアップを作成'}
+                            {creating ? 'バックアップ作成中...' : '手動バックアップを作成'}
                         </button>
                     </div>
 
@@ -9173,6 +9174,11 @@
                                                         {backup.timestamp.toLocaleString('ja-JP')}
                                                     </span>
                                                 </div>
+                                                {backup.memo && (
+                                                    <div className="text-sm text-blue-600 font-medium mb-1">
+                                                        メモ: {backup.memo}
+                                                    </div>
+                                                )}
                                                 <div className="text-xs text-gray-500 space-x-3">
                                                     <span>商品: {backup.data?.menus?.length || 0}件</span>
                                                     <span>従業員: {backup.data?.employees?.length || 0}名</span>
