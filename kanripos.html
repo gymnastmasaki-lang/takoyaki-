@@ -265,6 +265,7 @@
                         const sourceMenusRef = collection(window.db, 'stores', formData.sourceStoreId, 'menus');
                         const sourceMenusSnapshot = await getDocs(sourceMenusRef);
                         
+                        let copiedMenuCount = 0;
                         if (!sourceMenusSnapshot.empty) {
                             // 新しい店舗にメニューをコピー
                             const copyPromises = [];
@@ -274,9 +275,30 @@
                                 copyPromises.push(setDoc(newMenuRef, menuData));
                             });
                             await Promise.all(copyPromises);
-                            console.log(`✅ ${sourceMenusSnapshot.size}件のメニューをコピーしました`);
+                            copiedMenuCount = sourceMenusSnapshot.size;
+                            console.log(`✅ ${copiedMenuCount}件のメニューをコピーしました`);
                         } else {
                             console.log('⚠️ コピー元にメニューがありません');
+                        }
+                        
+                        // トッピングのコピー処理
+                        const sourceToppingsRef = collection(window.db, 'stores', formData.sourceStoreId, 'toppings');
+                        const sourceToppingsSnapshot = await getDocs(sourceToppingsRef);
+                        
+                        let copiedToppingCount = 0;
+                        if (!sourceToppingsSnapshot.empty) {
+                            // 新しい店舗にトッピングをコピー
+                            const toppingCopyPromises = [];
+                            sourceToppingsSnapshot.forEach((toppingDoc) => {
+                                const toppingData = toppingDoc.data();
+                                const newToppingRef = doc(window.db, 'stores', storeId, 'toppings', toppingDoc.id);
+                                toppingCopyPromises.push(setDoc(newToppingRef, toppingData));
+                            });
+                            await Promise.all(toppingCopyPromises);
+                            copiedToppingCount = sourceToppingsSnapshot.size;
+                            console.log(`✅ ${copiedToppingCount}件のトッピングをコピーしました`);
+                        } else {
+                            console.log('⚠️ コピー元にトッピングがありません');
                         }
                     }
 
@@ -389,10 +411,36 @@
                         console.log('⚠️ メニュー設定が見つかりませんでした');
                     }
                     
-                    if (copiedCount === 0) {
+                    // 3. toppingsコレクションをコピー
+                    let sourceToppingsRef;
+                    if (sourceStoreId === '' || sourceStoreId === 'shimoakatsuka' || sourceStoreId === '下赤塚') {
+                        // 下赤塚（ルートコレクション）
+                        sourceToppingsRef = collection(window.db, 'toppings');
+                        console.log('📍 トッピングコピー元: toppings コレクション');
+                    } else {
+                        sourceToppingsRef = collection(window.db, 'stores', sourceStoreId, 'toppings');
+                        console.log('📍 トッピングコピー元: stores/' + sourceStoreId + '/toppings');
+                    }
+                    
+                    const toppingsSnapshot = await getDocs(sourceToppingsRef);
+                    console.log('📊 取得したトッピング数:', toppingsSnapshot.size);
+                    
+                    let copiedToppingsCount = 0;
+                    for (const toppingDoc of toppingsSnapshot.docs) {
+                        const toppingData = toppingDoc.data();
+                        console.log('🍕 トッピングコピー中:', toppingDoc.id, toppingData);
+                        
+                        const targetToppingRef = doc(window.db, 'stores', editingStore.id, 'toppings', toppingDoc.id);
+                        await setDoc(targetToppingRef, toppingData);
+                        copiedToppingsCount++;
+                    }
+                    
+                    console.log(`✅ トッピングをコピーしました: ${copiedToppingsCount}件`);
+                    
+                    if (copiedCount === 0 && copiedToppingsCount === 0) {
                         showAlert('warning', '注意', 'コピーするメニューが見つかりませんでした。\nコピー元の店舗にメニューが登録されているか確認してください。');
                     } else {
-                        showAlert('success', 'コピー完了', `メニューをコピーしました\n\n商品数: ${copiedCount}件`);
+                        showAlert('success', 'コピー完了', `メニューをコピーしました\n\n商品数: ${copiedCount}件\nトッピング数: ${copiedToppingsCount}件`);
                     }
                     
                 } catch (error) {
