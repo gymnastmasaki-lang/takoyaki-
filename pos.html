@@ -65,18 +65,37 @@
     window.limit = limit;
     window.deleteDoc = deleteDoc;
     
-    // StarWebPrintBuilderの読み込みを待つ
-    let starWebPrintReady = false;
-    window.addEventListener('DOMContentLoaded', function() {
-      if (typeof StarWebPrintBuilder !== 'undefined') {
-        window.StarWebPrintBuilder = StarWebPrintBuilder;
-        window.StarWebPrintTrader = StarWebPrintTrader;
-        starWebPrintReady = true;
-        console.log('✅ StarWebPrintBuilder loaded');
-      } else {
-        console.warn('⚠️ StarWebPrintBuilder not available');
-      }
-    });
+    // StarWebPrintBuilderを使わない印刷関数
+    window.buildPrintXML = function(commands) {
+      let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<root>\n';
+      xml += '  <initialization/>\n';
+      
+      commands.forEach(item => {
+        switch(item.type) {
+          case 'align':
+            xml += `  <alignment position="${item.position}"/>\n`;
+            break;
+          case 'text':
+            const textData = (item.data || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            let textTag = '<text';
+            if (item.emphasis) textTag += ' emphasis="true"';
+            if (item.width) textTag += ` width="${item.width}"`;
+            if (item.height) textTag += ` height="${item.height}"`;
+            textTag += `>${textData}</text>\n`;
+            xml += '  ' + textTag;
+            break;
+          case 'line':
+            xml += `  <ruledline thickness="${item.thickness || 'thin'}"/>\n`;
+            break;
+          case 'cut':
+            xml += '  <cutpaper feed="true"/>\n';
+            break;
+        }
+      });
+      
+      xml += '</root>';
+      return xml;
+    };
     
     // 店舗別コレクション参照を取得するヘルパー関数
     window.getStoreCollection = function(collectionName) {
@@ -10960,13 +10979,16 @@ ${redSlipCount > 0 ? `
         // 注文番号でソート
         tableOrders.sort((a, b) => (a.orderNumber || 0) - (b.orderNumber || 0));
         
-        // StarWebPrintBuilderが利用可能かチェック
-        if (!window.StarWebPrintBuilder) {
-          alert("プリンターライブラリの読み込み中です。少々お待ちください。");
-          return;
-        }
-
-        const builder = new StarWebPrintBuilder();
+        // StarWebPrintBuilderの代わりに配列でコマンドを管理
+        const printCommands = [];
+        const builder = {
+          createInitializationElement: () => {},
+          createPeripheralElement: () => {},
+          createAlignmentElement: (opts) => printCommands.push({type: 'align', position: opts.position}),
+          createTextElement: (opts) => printCommands.push({type: 'text', ...opts}),
+          createRuledLineElement: (opts) => printCommands.push({type: 'line', thickness: opts.thickness}),
+          createCutPaperElement: (opts) => printCommands.push({type: 'cut', feed: opts.feed})
+        };
         const request = builder.createInitializationElement();
         
         // 58mm幅設定
@@ -11065,8 +11087,9 @@ ${redSlipCount > 0 ? `
         builder.createCutPaperElement({feed: true});
         
         // プロキシ対応の印刷処理
+        const printXML = window.buildPrintXML(printCommands);
         await sendPrintRequest(
-          builder,
+          printXML,
           (response) => {
             console.log('印刷成功:', response);
             showToast('お会計伝票を印刷しました');
@@ -11091,17 +11114,20 @@ ${redSlipCount > 0 ? `
       }
       
       try {
-        const builder = new StarWebPrintBuilder();
+        // StarWebPrintBuilderの代わりに配列でコマンドを管理
+        const printCommands = [];
+        const builder = {
+          createInitializationElement: () => {},
+          createPeripheralElement: () => {},
+          createAlignmentElement: (opts) => printCommands.push({type: 'align', position: opts.position}),
+          createTextElement: (opts) => printCommands.push({type: 'text', ...opts}),
+          createRuledLineElement: (opts) => printCommands.push({type: 'line', thickness: opts.thickness}),
+          createCutPaperElement: (opts) => printCommands.push({type: 'cut', feed: opts.feed})
+        };
         const request = builder.createInitializationElement();
         
         // 58mm幅設定
         builder.createPeripheralElement({channel: 1, on: 100, off: 100});
-        // StarWebPrintBuilderが利用可能かチェック
-        if (!window.StarWebPrintBuilder) {
-          alert("プリンターライブラリの読み込み中です。少々お待ちください。");
-          return;
-        }
-
         
         // レシート作成
         builder.createAlignmentElement({position: 'center'});
@@ -11288,8 +11314,9 @@ ${redSlipCount > 0 ? `
         builder.createCutPaperElement({feed: true});
         
         // プロキシ対応の印刷処理
+        const printXML = window.buildPrintXML(printCommands);
         await sendPrintRequest(
-          builder,
+          printXML,
           (response) => {
             console.log('印刷成功:', response);
             closeReceiptModal();
@@ -11314,16 +11341,19 @@ ${redSlipCount > 0 ? `
       }
       
       try {
-        const builder = new StarWebPrintBuilder();
+        // StarWebPrintBuilderの代わりに配列でコマンドを管理
+        const printCommands = [];
+        const builder = {
+          createInitializationElement: () => {},
+          createPeripheralElement: () => {},
+          createAlignmentElement: (opts) => printCommands.push({type: 'align', position: opts.position}),
+          createTextElement: (opts) => printCommands.push({type: 'text', ...opts}),
+          createRuledLineElement: (opts) => printCommands.push({type: 'line', thickness: opts.thickness}),
+          createCutPaperElement: (opts) => printCommands.push({type: 'cut', feed: opts.feed})
+        };
         const request = builder.createInitializationElement();
         
         // 58mm幅設定
-        // StarWebPrintBuilderが利用可能かチェック
-        if (!window.StarWebPrintBuilder) {
-          alert("プリンターライブラリの読み込み中です。少々お待ちください。");
-          return;
-        }
-
         builder.createPeripheralElement({channel: 1, on: 100, off: 100});
         
         builder.createAlignmentElement({position: 'center'});
@@ -11401,8 +11431,9 @@ ${redSlipCount > 0 ? `
         builder.createCutPaperElement({feed: true});
         
         // プロキシ対応の印刷処理
+        const printXML = window.buildPrintXML(printCommands);
         await sendPrintRequest(
-          builder,
+          printXML,
           (response) => {
             console.log('印刷成功:', response);
             closeReceiptModal();
