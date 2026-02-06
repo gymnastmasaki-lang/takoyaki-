@@ -17,7 +17,8 @@
       to { transform: translateY(0); opacity: 1; }
     }
   </style>
-
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/v1.1.0/StarWebPrintTrader.js"></script>
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/v1.2.0/StarWebPrintBuilder.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -2178,6 +2179,67 @@
     let audioEnabled = false;
     let lastOrderCount = 0;
     let isFirstOrderLoad = true;
+    
+    // プリンターIPアドレス（画像から）
+    const PRINTER_IP = '192.168.244.41';
+    
+    // 🆕 プロキシサーバーのURL（HTTPSからHTTPへの通信を中継）
+    // ローカル環境で起動したNode.jsサーバーのURL
+    const PRINTER_PROXY_URL = 'http://localhost:3000/print';
+    
+    // プロキシを使用するかどうか（HTTPSサイトの場合はtrue）
+    const USE_PROXY = window.location.protocol === 'https:';
+    
+    // 🆕 プロキシ対応の印刷ヘルパー関数
+    async function sendPrintRequest(builder, onSuccess, onError) {
+      try {
+        if (USE_PROXY) {
+          console.log('🔄 プロキシサーバー経由で印刷します');
+          
+          // XMLリクエストを取得
+          const request = builder.toString();
+          
+          // プロキシサーバーに送信
+          const response = await fetch(PRINTER_PROXY_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'text/xml; charset=utf-8'
+            },
+            body: request
+          });
+          
+          if (response.ok) {
+            console.log('✅ 印刷成功');
+            const data = await response.text();
+            if (onSuccess) onSuccess({ status: 'success', data: data });
+          } else {
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            console.error('❌ 印刷エラー:', errorData);
+            if (onError) onError({ status: response.status, message: errorData.error || response.statusText });
+          }
+        } else {
+          console.log('🖨️ プリンターに直接印刷します');
+          
+          const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
+          const request = builder.toString();
+          
+          const trader = new StarWebPrintTrader({url: url});
+          trader.onReceive = function(response) {
+            console.log('印刷成功:', response);
+            if (onSuccess) onSuccess(response);
+          };
+          trader.onError = function(response) {
+            console.error('印刷エラー:', response);
+            if (onError) onError(response);
+          };
+          
+          trader.sendMessage({request: request});
+        }
+      } catch (error) {
+        console.error('❌ 印刷処理エラー:', error);
+        if (onError) onError({ status: 'error', message: error.message });
+      }
+    }
     
     // メニューデータ（Firebaseから取得）
     let menuData = [];
@@ -10858,7 +10920,7 @@ ${redSlipCount > 0 ? `
     window.printBill = async function() {
       const tableNumber = document.getElementById('tableSelect').value;
       if (!tableNumber) {
-        showCustomAlert('テーブルを選択してください', '📢 通知', '📢');
+        alert('テーブルを選択してください');
         return;
       }
       
@@ -10878,7 +10940,7 @@ ${redSlipCount > 0 ? `
         });
         
         if (tableOrders.length === 0) {
-          showCustomAlert('このテーブルに未会計の注文がありません', '📢 通知', '📢');
+          alert('このテーブルに未会計の注文がありません');
           return;
         }
         
@@ -10988,468 +11050,342 @@ ${redSlipCount > 0 ? `
           builder,
           (response) => {
             console.log('印刷成功:', response);
-            showCustomAlert('お会計伝票を印刷しました', '✅ 完了', '🖨️');
+            showToast('お会計伝票を印刷しました');
           },
           (response) => {
             console.error('印刷エラー:', response);
-            showCustomAlert('印刷に失敗しました: ' + (response.message || response.status), '❌ エラー', '⚠️');
+            alert('印刷に失敗しました: ' + (response.message || response.status));
           }
         );
         
       } catch (e) {
         console.error('印刷エラー:', e);
-        showCustomAlert('印刷処理でエラーが発生しました: ' + e.message, '❌ エラー', '⚠️');
+        alert('印刷処理でエラーが発生しました: ' + e.message);
       }
     };
     
     // レシート印刷（58mm幅対応）
     window.printReceipt = async function() {
       if (!lastPaymentData) {
-        showCustomAlert('印刷するデータがありません', '📢 通知', '📢');
+        alert('印刷するデータがありません');
         return;
       }
       
-      // レシート設定を取得
-      const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
-      const branchName = window.receiptSettings?.branchName || '下赤塚店';
-      const address = window.receiptSettings?.address || '東京都板橋区赤塚新町';
-      const phone = window.receiptSettings?.phone || '03-XXXX-XXXX';
-      const receiptMessage = window.receiptSettings?.message || 'ありがとうございました\nまたのご来店を\nお待ちしております';
-      
-      // 日時フォーマット
-      const now = lastPaymentData.timestamp;
-      const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      
-      // 商品明細と税額計算
-      let itemCount = 0;
-      let tax8Total = 0;
-      let tax10Total = 0;
-      let tax8Exclusive = 0;
-      let tax10Exclusive = 0;
-      let itemsHtml = '';
-      
-      lastPaymentData.items.forEach(item => {
-        const subtotal = item.price * item.quantity;
-        itemCount += item.quantity;
+      try {
+        const builder = new StarWebPrintBuilder();
+        const request = builder.createInitializationElement();
         
-        const isExclusive = item.taxType === 'exclusive';
+        // 58mm幅設定
+        builder.createPeripheralElement({channel: 1, on: 100, off: 100});
         
-        if (item.taxRate === 8) {
-          if (isExclusive) {
-            tax8Exclusive += subtotal;
-          } else {
-            tax8Total += subtotal;
-          }
-        } else {
-          if (isExclusive) {
-            tax10Exclusive += subtotal;
-          } else {
-            tax10Total += subtotal;
-          }
-        }
+        // レシート作成
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
         
-        let displayPrice = item.price;
-        if (isExclusive) {
-          const taxRate = item.taxRate || 10;
-          displayPrice = Math.floor(item.price * (1 + taxRate / 100));
-        }
+        // 🔧 修正: レシート設定から店舗名を取得
+        const storeName = window.receiptSettings.storeName || '粉もん屋 八';
+        builder.createTextElement({data: storeName + '\n'});
         
-        const displaySubtotal = displayPrice * item.quantity;
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
         
-        itemsHtml += `
-          <tr>
-            <td style="padding: 4px 8px;">${item.name}</td>
-            <td style="padding: 4px 8px; text-align: right;">¥${displayPrice.toLocaleString()}</td>
-            <td style="padding: 4px 8px; text-align: center;">×${item.quantity}</td>
-            <td style="padding: 4px 8px; text-align: right;">¥${displaySubtotal.toLocaleString()}</td>
-          </tr>`;
+        // 🔧 修正: レシート設定から支店名を取得
+        const branchName = window.receiptSettings.branchName || '下赤塚店';
+        builder.createTextElement({data: branchName + '\n'});
         
-        // トッピング表示
-        if (item.toppingDetails && item.toppingDetails.length > 0) {
-          const groupedBySet = {};
-          item.toppingDetails.forEach(detail => {
-            if (!groupedBySet[detail.setName]) {
-              groupedBySet[detail.setName] = [];
-            }
-            groupedBySet[detail.setName].push(detail.optionName);
-          });
-          
-          Object.entries(groupedBySet).forEach(([setName, options]) => {
-            itemsHtml += `<tr><td colspan="4" style="padding: 2px 8px 2px 24px; font-size: 0.9em; color: #666;">${setName}</td></tr>`;
-            options.forEach(opt => {
-              itemsHtml += `<tr><td colspan="4" style="padding: 2px 8px 2px 32px; font-size: 0.9em; color: #666;">・${opt}</td></tr>`;
+        // 🔧 修正: レシート設定から住所と電話番号を取得
+        const address = window.receiptSettings.address || '東京都板橋区赤塚新町';
+        const phone = window.receiptSettings.phone || '03-XXXX-XXXX';
+        builder.createTextElement({data: address + '\n'});
+        builder.createTextElement({data: 'TEL: ' + phone + '\n'});
+        
+        // 🆕 印鑑画像を印刷（事前変換したCanvasを使用）
+        if (window.receiptSettings.stampCanvas) {
+          try {
+            console.log('🖼️ 印鑑画像を印刷します');
+            builder.createAlignmentElement({position: 'right'});
+            builder.createBitImageElement({
+              context: window.receiptSettings.stampCanvas,
+              x: 0,
+              y: 0,
+              width: window.receiptSettings.stampCanvas.canvas.width,
+              height: window.receiptSettings.stampCanvas.canvas.height
             });
-          });
-        } else if (item.toppings && item.toppings !== 'なし') {
-          itemsHtml += `<tr><td colspan="4" style="padding: 2px 8px 2px 24px; font-size: 0.9em; color: #666;">TP:${item.toppings}</td></tr>`;
+            builder.createFeedElement({line: 1});
+            console.log('✅ 印鑑画像を追加しました');
+          } catch (error) {
+            console.error('❌ 印鑑画像印刷エラー:', error);
+          }
         }
-      });
-      
-      // 税額計算
-      const tax8AmountInclusive = Math.floor(tax8Total * 8 / 108);
-      const tax10AmountInclusive = Math.floor(tax10Total * 10 / 110);
-      const tax8AmountExclusive = Math.floor(tax8Exclusive * 8 / 100);
-      const tax10AmountExclusive = Math.floor(tax10Exclusive * 10 / 100);
-      
-      const totalTax8 = tax8AmountInclusive + tax8AmountExclusive;
-      const totalTax10 = tax10AmountInclusive + tax10AmountExclusive;
-      
-      const total8WithTax = tax8Total + tax8Exclusive + tax8AmountExclusive;
-      const total10WithTax = tax10Total + tax10Exclusive + tax10AmountExclusive;
-      
-      let taxHtml = '';
-      if (total8WithTax > 0) {
-        taxHtml += `
-          <tr>
-            <td colspan="3" style="padding: 4px 8px;">8%対象</td>
-            <td style="padding: 4px 8px; text-align: right;">¥${total8WithTax.toLocaleString()}</td>
-          </tr>
-          <tr>
-            <td colspan="3" style="padding: 2px 8px 4px 24px; font-size: 0.9em; color: #666;">(内消費税</td>
-            <td style="padding: 2px 8px 4px 8px; text-align: right; font-size: 0.9em; color: #666;">¥${totalTax8.toLocaleString()})</td>
-          </tr>`;
-      }
-      if (total10WithTax > 0) {
-        taxHtml += `
-          <tr>
-            <td colspan="3" style="padding: 4px 8px;">10%対象</td>
-            <td style="padding: 4px 8px; text-align: right;">¥${total10WithTax.toLocaleString()}</td>
-          </tr>
-          <tr>
-            <td colspan="3" style="padding: 2px 8px 4px 24px; font-size: 0.9em; color: #666;">(内消費税</td>
-            <td style="padding: 2px 8px 4px 8px; text-align: right; font-size: 0.9em; color: #666;">¥${totalTax10.toLocaleString()})</td>
-          </tr>`;
-      }
-      
-      // 支払い方法
-      let paymentMethodStr = '';
-      let paymentDetailsHtml = '';
-      if (lastPaymentData.paymentMethod === 'cash') {
-        paymentMethodStr = '現金';
-        paymentDetailsHtml = `
-          <tr>
-            <td colspan="3" style="padding: 4px 8px;">お預り</td>
-            <td style="padding: 4px 8px; text-align: right;">¥${lastPaymentData.cashReceived.toLocaleString()}</td>
-          </tr>
-          <tr>
-            <td colspan="3" style="padding: 4px 8px;">おつり</td>
-            <td style="padding: 4px 8px; text-align: right;">¥${lastPaymentData.change.toLocaleString()}</td>
-          </tr>`;
-      } else if (lastPaymentData.paymentMethod === 'emoney') {
-        paymentMethodStr = '電子マネー';
-      } else if (lastPaymentData.paymentMethod === 'credit') {
-        paymentMethodStr = 'クレジットカード';
-      }
-      
-      // 印刷用HTML作成
-      const printWindow = window.open('', '_blank');
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>レシート - ${storeName} ${branchName}</title>
-          <style>
-            @media print {
-              @page {
-                size: 58mm auto;
-                margin: 0;
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        builder.createAlignmentElement({position: 'left'});
+        const now = lastPaymentData.timestamp;
+        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        builder.createTextElement({data: `日時: ${dateStr}\n`});
+        builder.createTextElement({data: `担当: ${lastPaymentData.staffName || 'レジ係'}\n`});
+        builder.createTextElement({data: `テーブル: ${lastPaymentData.tableNumber}\n`});
+        builder.createTextElement({data: `注文No: ${lastPaymentData.orderNumbers.join(',')}\n`});
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        // 商品明細
+        let itemCount = 0;
+        let tax8Total = 0;
+        let tax10Total = 0;
+        let tax8Exclusive = 0;  // 🆕 外税8%の税抜金額
+        let tax10Exclusive = 0;  // 🆕 外税10%の税抜金額
+        
+        lastPaymentData.items.forEach(item => {
+          const subtotal = item.price * item.quantity;
+          itemCount += item.quantity;
+          
+          // 🆕 税込/税抜の判定
+          const isExclusive = item.taxType === 'exclusive';
+          
+          // 税率別集計
+          if (item.taxRate === 8) {
+            if (isExclusive) {
+              // 外税: 税抜価格を集計
+              tax8Exclusive += subtotal;
+            } else {
+              // 内税: 税込価格を集計
+              tax8Total += subtotal;
+            }
+          } else {
+            if (isExclusive) {
+              // 外税: 税抜価格を集計
+              tax10Exclusive += subtotal;
+            } else {
+              // 内税: 税込価格を集計
+              tax10Total += subtotal;
+            }
+          }
+          
+          // 商品名を32文字以内に調整
+          const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
+          builder.createTextElement({data: `${itemName}\n`});
+          
+          // 🆕 外税の場合は表示価格を税込に変換
+          let displayPrice = item.price;
+          if (isExclusive) {
+            const taxRate = item.taxRate || 10;
+            displayPrice = Math.floor(item.price * (1 + taxRate / 100));
+          }
+          
+          // 単価×数量＝小計の形式（58mm幅に最適化）
+          const priceInfo = `@${displayPrice} x${item.quantity}`;
+          const displaySubtotal = displayPrice * item.quantity;
+          const subtotalStr = `${displaySubtotal.toLocaleString()}円`;
+          const spaces = ' '.repeat(Math.max(1, 32 - priceInfo.length - subtotalStr.length));
+          builder.createTextElement({data: `${priceInfo}${spaces}${subtotalStr}\n`});
+          
+          // トッピング表示（toppingDetailsを優先）
+          if (item.toppingDetails && item.toppingDetails.length > 0) {
+            const groupedBySet = {};
+            item.toppingDetails.forEach(detail => {
+              if (!groupedBySet[detail.setName]) {
+                groupedBySet[detail.setName] = [];
               }
-              body {
-                margin: 0;
-                padding: 5mm;
-              }
-            }
-            body {
-              font-family: 'MS Gothic', 'Osaka-Mono', monospace;
-              font-size: 11px;
-              line-height: 1.4;
-              max-width: 58mm;
-              margin: 0 auto;
-              padding: 5mm;
-            }
-            h1 {
-              text-align: center;
-              font-size: 18px;
-              font-weight: bold;
-              margin: 0 0 8px 0;
-            }
-            h2 {
-              text-align: center;
-              font-size: 14px;
-              margin: 0 0 4px 0;
-            }
-            .header {
-              text-align: center;
-              border-bottom: 1px solid #000;
-              padding-bottom: 8px;
-              margin-bottom: 8px;
-            }
-            .info {
-              margin-bottom: 8px;
-              padding-bottom: 8px;
-              border-bottom: 1px dashed #000;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-            }
-            .total-section {
-              border-top: 2px solid #000;
-              border-bottom: 2px solid #000;
-              margin: 8px 0;
-            }
-            .total {
-              font-size: 16px;
-              font-weight: bold;
-              padding: 8px !important;
-            }
-            .footer {
-              text-align: center;
-              margin-top: 16px;
-              padding-top: 8px;
-              border-top: 1px dashed #000;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>${storeName}</h1>
-            <h2>${branchName}</h2>
-            <div>${address}</div>
-            <div>TEL: ${phone}</div>
-          </div>
-          
-          <div class="info">
-            <div>日時: ${dateStr}</div>
-            <div>担当: ${lastPaymentData.staffName || 'レジ係'}</div>
-            <div>テーブル: ${lastPaymentData.tableNumber}</div>
-            <div>注文No: ${lastPaymentData.orderNumbers.join(',')}</div>
-          </div>
-          
-          <table>
-            ${itemsHtml}
-          </table>
-          
-          <table style="border-top: 1px dashed #000; margin-top: 8px;">
-            <tr>
-              <td colspan="3" style="padding: 4px 8px;">小計</td>
-              <td style="padding: 4px 8px; text-align: right;">¥${lastPaymentData.totalAmount.toLocaleString()}</td>
-            </tr>
-            <tr>
-              <td colspan="4" style="padding: 4px 8px;">点数: ${itemCount}点</td>
-            </tr>
-          </table>
-          
-          <table style="border-top: 1px dashed #000; margin-top: 4px;">
-            ${taxHtml}
-          </table>
-          
-          <table class="total-section">
-            <tr class="total">
-              <td colspan="3">合計</td>
-              <td style="text-align: right;">¥${lastPaymentData.totalAmount.toLocaleString()}</td>
-            </tr>
-          </table>
-          
-          <table>
-            ${paymentDetailsHtml}
-            <tr>
-              <td colspan="4" style="padding: 4px 8px;">支払: ${paymentMethodStr}</td>
-            </tr>
-          </table>
-          
-          <div class="footer">
-            ${receiptMessage.split('\n').map(line => `<div>${line}</div>`).join('')}
-          </div>
-        </body>
-        </html>
-      `);
-      
-      printWindow.document.close();
-      
-      // 印刷ダイアログを表示
-      setTimeout(() => {
-        printWindow.print();
-        closeReceiptModal();
-      }, 250);
+              groupedBySet[detail.setName].push(detail.optionName);
+            });
+            
+            Object.entries(groupedBySet).forEach(([setName, options]) => {
+              builder.createTextElement({data: ` ${setName}\n`});
+              options.forEach(opt => {
+                builder.createTextElement({data: `  ・${opt}\n`});
+              });
+            });
+          } else if (item.toppings && item.toppings !== 'なし') {
+            builder.createTextElement({data: ` TP:${item.toppings}\n`});
+          }
+        });
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        builder.createTextElement({data: `小計${' '.repeat(20)}${lastPaymentData.totalAmount.toLocaleString()}円\n`});
+        builder.createTextElement({data: `点数: ${itemCount}点\n`});
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        // 🆕 税額計算（内税と外税を分けて計算）
+        const tax8AmountInclusive = Math.floor(tax8Total * 8 / 108);  // 内税8%の税額
+        const tax10AmountInclusive = Math.floor(tax10Total * 10 / 110);  // 内税10%の税額
+        const tax8AmountExclusive = Math.floor(tax8Exclusive * 8 / 100);  // 外税8%の税額
+        const tax10AmountExclusive = Math.floor(tax10Exclusive * 10 / 100);  // 外税10%の税額
+        
+        // 合計税額
+        const totalTax8 = tax8AmountInclusive + tax8AmountExclusive;
+        const totalTax10 = tax10AmountInclusive + tax10AmountExclusive;
+        
+        // 税込合計
+        const total8WithTax = tax8Total + tax8Exclusive + tax8AmountExclusive;
+        const total10WithTax = tax10Total + tax10Exclusive + tax10AmountExclusive;
+        
+        if (total8WithTax > 0) {
+          builder.createTextElement({data: `8%対象${' '.repeat(16)}${total8WithTax.toLocaleString()}円\n`});
+          builder.createTextElement({data: `(内消費税${' '.repeat(15)}${totalTax8.toLocaleString()}円)\n`});
+        }
+        if (total10WithTax > 0) {
+          builder.createTextElement({data: `10%対象${' '.repeat(15)}${total10WithTax.toLocaleString()}円\n`});
+          builder.createTextElement({data: `(内消費税${' '.repeat(15)}${totalTax10.toLocaleString()}円)\n`});
+        }
+        
+        builder.createRuledLineElement({thickness: 'medium'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: `合計 ${lastPaymentData.totalAmount.toLocaleString()}円\n`});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        builder.createRuledLineElement({thickness: 'medium'});
+        
+        // 支払い情報
+        let paymentMethodStr = '';
+        if (lastPaymentData.paymentMethod === 'cash') {
+          paymentMethodStr = '現金';
+          builder.createTextElement({data: `お預り${' '.repeat(18)}${lastPaymentData.cashReceived.toLocaleString()}円\n`});
+          builder.createTextElement({data: `おつり${' '.repeat(18)}${lastPaymentData.change.toLocaleString()}円\n`});
+        } else if (lastPaymentData.paymentMethod === 'emoney') {
+          paymentMethodStr = '電子マネー';
+        } else if (lastPaymentData.paymentMethod === 'credit') {
+          paymentMethodStr = 'クレジットカード';
+        }
+        builder.createTextElement({data: `支払: ${paymentMethodStr}\n`});
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        builder.createAlignmentElement({position: 'center'});
+        
+        // 🔧 修正: レシート設定からメッセージを取得
+        const receiptMessage = window.receiptSettings.message || 'ありがとうございました\nまたのご来店を\nお待ちしております';
+        const messageLines = receiptMessage.split('\n');
+        messageLines.forEach(line => {
+          if (line.trim()) {
+            builder.createTextElement({data: line + '\n'});
+          }
+        });
+        builder.createTextElement({data: '\n\n'});
+        
+        builder.createCutPaperElement({feed: true});
+        
+        // プロキシ対応の印刷処理
+        await sendPrintRequest(
+          builder,
+          (response) => {
+            console.log('印刷成功:', response);
+            closeReceiptModal();
+          },
+          (response) => {
+            console.error('印刷エラー:', response);
+            alert('印刷に失敗しました: ' + (response.message || response.status));
+          }
+        );
+        
+      } catch (e) {
+        console.error('印刷エラー:', e);
+        alert('印刷処理でエラーが発生しました: ' + e.message);
+      }
     };
     
-    // 領収書印刷
+    // 領収書印刷（印鑑欄付き・58mm幅対応）
     window.printInvoice = async function() {
       if (!lastPaymentData) {
         alert('印刷するデータがありません');
         return;
       }
       
-      // レシート設定を取得
-      const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
-      const branchName = window.receiptSettings?.branchName || '下赤塚店';
-      const address = window.receiptSettings?.address || '東京都板橋区赤塚新町';
-      const phone = window.receiptSettings?.phone || '03-XXXX-XXXX';
-      
-      // 日時フォーマット
-      const now = lastPaymentData.timestamp;
-      const dateStr = `${now.getFullYear()}年${String(now.getMonth()+1).padStart(2,'0')}月${String(now.getDate()).padStart(2,'0')}日`;
-      
-      // 印刷用HTML作成
-      const printWindow = window.open('', '_blank');
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>領収書 - ${storeName} ${branchName}</title>
-          <style>
-            @media print {
-              @page {
-                size: 58mm auto;
-                margin: 0;
-              }
-              body {
-                margin: 0;
-                padding: 5mm;
-              }
-            }
-            body {
-              font-family: 'MS Gothic', 'Osaka-Mono', monospace;
-              font-size: 11px;
-              line-height: 1.6;
-              max-width: 58mm;
-              margin: 0 auto;
-              padding: 5mm;
-            }
-            h1 {
-              text-align: center;
-              font-size: 20px;
-              font-weight: bold;
-              margin: 0 0 16px 0;
-              letter-spacing: 8px;
-            }
-            .date {
-              margin-bottom: 12px;
-            }
-            .customer {
-              margin-bottom: 12px;
-            }
-            .amount-box {
-              border-top: 1px solid #000;
-              border-bottom: 1px solid #000;
-              padding: 12px 0;
-              margin: 16px 0;
-              text-align: center;
-            }
-            .amount {
-              font-size: 24px;
-              font-weight: bold;
-            }
-            .note {
-              margin: 16px 0;
-            }
-            .store-info {
-              text-align: right;
-              margin-top: 24px;
-              padding-top: 12px;
-              border-top: 1px solid #000;
-            }
-            .stamp-area {
-              text-align: right;
-              margin-top: 16px;
-              font-size: 16px;
-              line-height: 1.2;
-            }
-            .details {
-              margin-top: 16px;
-              padding-top: 12px;
-              border-top: 1px dashed #000;
-              font-size: 11px;
-            }
-          </style>
-        </head>
-        <body>
-          <h1>領収書</h1>
-          
-          <div class="date">${dateStr}</div>
-          
-          <div class="customer">お客様</div>
-          
-          <div class="amount-box">
-            <div class="amount">¥${lastPaymentData.totalAmount.toLocaleString()}-</div>
-          </div>
-          
-          <div class="note">
-            上記正に領収いたしました<br><br>
-            但し 飲食代として
-          </div>
-          
-          <div class="store-info">
-            <div>${storeName} ${branchName}</div>
-            <div>${address}</div>
-            <div>TEL: ${phone}</div>
-            <div class="stamp-area">
-              <div style="display: inline-block; border: 2px solid #000; border-radius: 50%; width: 60px; height: 60px; text-align: center; line-height: 56px; font-size: 18px; font-weight: bold;">印</div>
-            </div>
-          </div>
-          
-          <div class="details" style="margin-top: 8px;">
-            ${(() => {
-              // 税率別に計算
-              let tax8Total = 0, tax10Total = 0;
-              let tax8Exclusive = 0, tax10Exclusive = 0;
-              
-              lastPaymentData.items.forEach(item => {
-                const itemTotal = item.price * item.quantity;
-                const isExclusive = item.taxType === 'exclusive';
-                
-                if (item.taxRate === 8) {
-                  if (isExclusive) {
-                    tax8Exclusive += itemTotal;
-                  } else {
-                    tax8Total += itemTotal;
-                  }
-                } else {
-                  if (isExclusive) {
-                    tax10Exclusive += itemTotal;
-                  } else {
-                    tax10Total += itemTotal;
-                  }
-                }
-              });
-              
-              const tax8AmountInclusive = Math.floor(tax8Total * 8 / 108);
-              const tax10AmountInclusive = Math.floor(tax10Total * 10 / 110);
-              const tax8AmountExclusive = Math.floor(tax8Exclusive * 8 / 100);
-              const tax10AmountExclusive = Math.floor(tax10Exclusive * 10 / 100);
-              
-              const totalTax8 = tax8AmountInclusive + tax8AmountExclusive;
-              const totalTax10 = tax10AmountInclusive + tax10AmountExclusive;
-              const totalTax = totalTax8 + totalTax10;
-              
-              let taxDetails = '';
-              if (totalTax8 > 0) {
-                taxDetails += `8%対象: ¥${(tax8Total + tax8Exclusive + tax8AmountExclusive).toLocaleString()} (内消費税 ¥${totalTax8.toLocaleString()})<br>`;
-              }
-              if (totalTax10 > 0) {
-                taxDetails += `10%対象: ¥${(tax10Total + tax10Exclusive + tax10AmountExclusive).toLocaleString()} (内消費税 ¥${totalTax10.toLocaleString()})<br>`;
-              }
-              
-              return taxDetails + `<br>合計内消費税: ¥${totalTax.toLocaleString()}`;
-            })()}
-            <br><br>
-            テーブル: ${lastPaymentData.tableNumber}<br>
-            注文No: ${lastPaymentData.orderNumbers.join(',')}</div>
-          </div>
-        </body>
-        </html>
-      `);
-      
-      printWindow.document.close();
-      
-      // 印刷ダイアログを表示
-      setTimeout(() => {
-        printWindow.print();
-        closeReceiptModal();
-      }, 250);
+      try {
+        const builder = new StarWebPrintBuilder();
+        const request = builder.createInitializationElement();
+        
+        // 58mm幅設定
+        builder.createPeripheralElement({channel: 1, on: 100, off: 100});
+        
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: '領 収 書\n\n'});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        
+        builder.createAlignmentElement({position: 'left'});
+        const now = lastPaymentData.timestamp;
+        const dateStr = `${now.getFullYear()}年${String(now.getMonth()+1).padStart(2,'0')}月${String(now.getDate()).padStart(2,'0')}日`;
+        builder.createTextElement({data: `${dateStr}\n\n`});
+        
+        builder.createTextElement({data: 'お客様\n\n'});
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: `¥${lastPaymentData.totalAmount.toLocaleString()}-\n`});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        builder.createAlignmentElement({position: 'left'});
+        builder.createTextElement({data: '\n上記正に領収いたしました\n\n'});
+        builder.createTextElement({data: '但し 飲食代として\n\n\n'});
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        builder.createAlignmentElement({position: 'right'});
+        
+        // 🔧 修正: レシート設定から店舗情報を取得
+        const storeName = window.receiptSettings.storeName || '粉もん屋 八';
+        const branchName = window.receiptSettings.branchName || '下赤塚店';
+        const address = window.receiptSettings.address || '東京都板橋区赤塚新町';
+        const phone = window.receiptSettings.phone || '03-XXXX-XXXX';
+        
+        builder.createTextElement({data: storeName + ' ' + branchName + '\n'});
+        builder.createTextElement({data: address + '\n'});
+        builder.createTextElement({data: 'TEL: ' + phone + '\n\n'});
+        
+        // 🆕 印鑑画像を印刷（事前変換したCanvasを使用）
+        if (window.receiptSettings.stampCanvas) {
+          try {
+            console.log('🖼️ 印鑑画像を印刷します（領収書）');
+            builder.createAlignmentElement({position: 'right'});
+            builder.createBitImageElement({
+              context: window.receiptSettings.stampCanvas,
+              x: 0,
+              y: 0,
+              width: window.receiptSettings.stampCanvas.canvas.width,
+              height: window.receiptSettings.stampCanvas.canvas.height
+            });
+            builder.createFeedElement({line: 1});
+            console.log('✅ 印鑑画像を追加しました（領収書）');
+          } catch (error) {
+            console.error('❌ 印鑑画像印刷エラー:', error);
+          }
+        } else {
+          // 印鑑画像がない場合は従来のテキスト印鑑欄を表示
+          builder.createAlignmentElement({position: 'right'});
+          builder.createTextElement({data: '        ◯◯◯\n'});
+          builder.createTextElement({data: '       ◯   ◯\n'});
+          builder.createTextElement({data: '      ◯  印 ◯\n'});
+          builder.createTextElement({data: '       ◯   ◯\n'});
+          builder.createTextElement({data: '        ◯◯◯\n\n'});
+        }
+        
+        builder.createAlignmentElement({position: 'left'});
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        builder.createTextElement({data: `\nテーブル: ${lastPaymentData.tableNumber}\n`});
+        builder.createTextElement({data: `注文No: ${lastPaymentData.orderNumbers.join(',')}\n`});
+        
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({data: '\n\n'});
+        
+        builder.createCutPaperElement({feed: true});
+        
+        // プロキシ対応の印刷処理
+        await sendPrintRequest(
+          builder,
+          (response) => {
+            console.log('印刷成功:', response);
+            closeReceiptModal();
+          },
+          (response) => {
+            console.error('印刷エラー:', response);
+            alert('印刷に失敗しました: ' + (response.message || response.status));
+          }
+        );
+        
+      } catch (e) {
+        console.error('印刷エラー:', e);
+        alert('印刷処理でエラーが発生しました: ' + e.message);
+      }
     };
     
     // レシート完了モーダルを閉じる
@@ -15901,1118 +15837,6 @@ ${redSlipCount > 0 ? `
       <div style="padding: 10px; text-align: center; color: #999;">読み込み中...</div>
     </div>
   </div>
-  
-  <!-- ========================================
-       汎用USBレシートプリンター対応パッチ
-       ======================================== -->
-  <script>
-    // グローバル変数
-    window.usbPrinter = null;
-    window.printerEndpoint = null;
-
-    // 汎用USBプリンターを検索して接続
-    async function connectUSBPrinter() {
-      if (!navigator.usb) {
-        throw new Error('このブラウザはWebUSB APIに対応していません。ChromeまたはEdgeをご使用ください。');
-      }
-      
-      try {
-        console.log('🔍 USBプリンターを検索中...');
-        console.log('📱 デバイス情報:', navigator.userAgent);
-        
-        // まず接続済みデバイスを確認
-        const devices = await navigator.usb.getDevices();
-        console.log('🔌 接続済みデバイス数:', devices.length);
-        
-        if (devices.length > 0) {
-          console.log('✅ 接続済みデバイスを使用:', devices[0]);
-          const device = devices[0];
-          
-          // デバイスを開く
-          if (!device.opened) {
-            await device.open();
-            console.log('📂 デバイスをオープンしました');
-            
-            // コンフィグレーションを選択
-            if (device.configuration === null) {
-              await device.selectConfiguration(1);
-              console.log('⚙️ コンフィグレーション選択完了');
-            }
-            
-            // インターフェースをクレーム
-            await device.claimInterface(0);
-            console.log('🔗 インターフェース #0 接続完了');
-          }
-          
-          // エンドポイント検索
-          const endpoint = findOutputEndpoint(device);
-          
-          window.usbPrinter = device;
-          window.printerEndpoint = endpoint;
-          
-          alert(`プリンターとの接続に成功しました!\n\n製品: ${device.productName || '不明'}\nメーカー: ${device.manufacturerName || '不明'}`);
-          return device;
-        }
-        
-        // 新規デバイスを要求（より広範なフィルター）
-        const device = await navigator.usb.requestDevice({
-          filters: [
-            // 主要なプリンターメーカーのVendor ID
-            { vendorId: 0x0519 }, // Star Micronics
-            { vendorId: 0x04b8 }, // EPSON/Seiko Epson
-            { vendorId: 0x1504 }, // Citizen
-            { vendorId: 0x0416 }, // Intermec
-            { vendorId: 0x1fc9 }, // Bixolon
-            { vendorId: 0x0dd4 }, // Custom Engineering
-            { vendorId: 0x0525 }, // NetChip Technology
-            { vendorId: 0x20d1 }, // RONGTA (中国製)
-            { vendorId: 0x6868 }, // Zjiang (中国製)
-            { vendorId: 0x0483 }, // 汎用チップ
-            { vendorId: 0x1a86 }, // QinHeng Electronics (CH340など)
-            { vendorId: 0x067b }, // Prolific
-            { vendorId: 0x0fe6 }, // ICS Advent
-            { vendorId: 0x28e9 }, // GD32
-            { vendorId: 0x2c7f }, // 中国製プリンター
-            { vendorId: 0x1fc9, productId: 0x2016 }, // Bixolon SPP-R200III
-          ]
-        });
-        
-        console.log('✅ USBデバイス検出:', device);
-        console.log('   製品名:', device.productName || '不明');
-        console.log('   メーカー:', device.manufacturerName || '不明');
-        console.log('   Vendor ID:', '0x' + device.vendorId.toString(16).padStart(4, '0'));
-        console.log('   Product ID:', '0x' + device.productId.toString(16).padStart(4, '0'));
-        
-        // デバイスを開く
-        await device.open();
-        console.log('📂 デバイスをオープンしました');
-        
-        // コンフィグレーションを選択
-        if (device.configuration === null) {
-          await device.selectConfiguration(1);
-          console.log('⚙️ コンフィグレーション選択完了');
-        }
-        
-        // 最初のインターフェースを取得
-        const interfaces = device.configuration.interfaces;
-        console.log('📋 利用可能なインターフェース数:', interfaces.length);
-        
-        if (interfaces.length === 0) {
-          throw new Error('利用可能なインターフェースがありません');
-        }
-        
-        // インターフェースをクレーム
-        await device.claimInterface(0);
-        console.log('🔗 インターフェース #0 接続完了');
-        
-        // 出力エンドポイントを検索
-        const endpoint = findOutputEndpoint(device);
-        
-        window.usbPrinter = device;
-        window.printerEndpoint = endpoint;
-        
-        alert(`プリンターとの接続に成功しました!\n\n製品: ${device.productName || '不明'}\nメーカー: ${device.manufacturerName || '不明'}`);
-        return device;
-        
-      } catch (error) {
-        console.error('❌ USB接続エラー:', error);
-        console.error('   エラー名:', error.name);
-        console.error('   エラーメッセージ:', error.message);
-        
-        let errorMsg = 'プリンターへの接続に失敗しました。\n\n';
-        
-        if (error.name === 'NotFoundError') {
-          errorMsg += '確認事項:\n';
-          errorMsg += '1. USBケーブルが接続されているか\n';
-          errorMsg += '2. プリンターの電源が入っているか\n';
-          errorMsg += '3. デバイス選択ダイアログでプリンターを選んだか\n\n';
-          errorMsg += '📱 スマートフォンの場合:\n';
-          errorMsg += '・USB OTGケーブルが必要です\n';
-          errorMsg += '・一部のAndroid端末では動作しない場合があります\n';
-          errorMsg += '・PCでの使用を推奨します';
-        } else if (error.name === 'SecurityError') {
-          errorMsg += 'セキュリティエラー:\n';
-          errorMsg += 'ブラウザでUSBアクセスが許可されていません。\n';
-          errorMsg += 'HTTPSまたはlocalhostで実行してください。';
-        } else if (error.name === 'NotSupportedError') {
-          errorMsg += 'このデバイスではWebUSB APIがサポートされていません。\n\n';
-          errorMsg += '📱 Android版Chromeをお使いの場合:\n';
-          errorMsg += '・Chrome 61以降が必要です\n';
-          errorMsg += '・一部の端末では利用できません\n';
-          errorMsg += '・PCでの使用を推奨します';
-        } else {
-          errorMsg += 'エラー: ' + error.message;
-        }
-        
-        alert(errorMsg);
-        throw error;
-      }
-    }
-    
-    // 出力エンドポイントを検索するヘルパー関数
-    function findOutputEndpoint(device) {
-      const iface = device.configuration.interfaces[0];
-      let endpoint = null;
-      
-      for (const alt of iface.alternates) {
-        for (const ep of alt.endpoints) {
-          console.log(`  エンドポイント: ${ep.endpointNumber} (${ep.direction}) - タイプ: ${ep.type}`);
-          if (ep.direction === 'out' && ep.type === 'bulk') {
-            endpoint = ep.endpointNumber;
-            console.log('✅ 出力エンドポイント発見:', endpoint);
-            return endpoint;
-          }
-        }
-      }
-      
-      // 見つからない場合はデフォルト
-      endpoint = 1;
-      console.warn('⚠️ 出力エンドポイントが見つかりません。デフォルト(1)を使用します');
-      return endpoint;
-    }
-
-    // バイト配列を結合するヘルパー関数
-    function appendBytes(array1, array2) {
-      const tmp = new Uint8Array(array1.length + array2.length);
-      tmp.set(array1, 0);
-      tmp.set(array2, array1.length);
-      return tmp;
-    }
-
-    // ESC/POSコマンドでデータを送信
-    async function sendToUSBPrinter(data) {
-      if (!window.usbPrinter) {
-        throw new Error('プリンターが接続されていません');
-      }
-      
-      const endpoint = window.printerEndpoint || 1;
-      
-      try {
-        console.log(`📤 印刷データ送信中... (${data.length} bytes, endpoint: ${endpoint})`);
-        
-        // データを送信
-        const result = await window.usbPrinter.transferOut(endpoint, data);
-        
-        if (result.status !== 'ok') {
-          throw new Error('データ送信に失敗: ' + result.status);
-        }
-        
-        console.log('✅ 送信完了:', result.bytesWritten, 'bytes');
-        return result;
-        
-      } catch (error) {
-        console.error('❌ 送信エラー:', error);
-        
-        // 接続が切れている可能性があるのでリセット
-        window.usbPrinter = null;
-        window.printerEndpoint = null;
-        
-        throw error;
-      }
-    }
-
-    // お会計伝票を印刷（汎用ESC/POS版）
-    async function printBillToUSB(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount) {
-      let device = window.usbPrinter;
-      
-      // デバイスが未接続の場合は接続を試みる
-      if (!device) {
-        device = await connectUSBPrinter();
-      }
-      
-      try {
-        const encoder = new TextEncoder();
-        
-        // ESC/POS標準コマンドを生成
-        let commands = new Uint8Array([
-          0x1B, 0x40, // ESC @ - プリンター初期化
-        ]);
-        
-        // ===== ヘッダー =====
-        // センター揃え
-        commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // ESC a 1
-        
-        // 倍角（メーカーによって異なる場合があるので両方試す）
-        commands = appendBytes(commands, [0x1D, 0x21, 0x11]); // GS ! 17 (倍角)
-        commands = appendBytes(commands, encoder.encode(storeName + '\n'));
-        
-        // 通常サイズ
-        commands = appendBytes(commands, [0x1D, 0x21, 0x00]); // GS ! 0
-        commands = appendBytes(commands, encoder.encode(branchName + '\n'));
-        
-        // タイトル（縦倍角）
-        commands = appendBytes(commands, [0x1D, 0x21, 0x10]); // GS ! 16
-        commands = appendBytes(commands, encoder.encode('\nお会計伝票\n\n'));
-        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
-        
-        // ===== 罫線 =====
-        commands = appendBytes(commands, encoder.encode('--------------------------------\n'));
-        
-        // ===== 日時・テーブル情報 =====
-        commands = appendBytes(commands, [0x1B, 0x61, 0x00]); // 左揃え
-        commands = appendBytes(commands, encoder.encode(`日時: ${dateStr}\n`));
-        commands = appendBytes(commands, encoder.encode(`テーブル: ${tableNumber}\n`));
-        commands = appendBytes(commands, encoder.encode('--------------------------------\n'));
-        
-        // ===== 商品リスト =====
-        let currentOrder = null;
-        itemsData.forEach(item => {
-          if (item.orderNumber !== currentOrder) {
-            commands = appendBytes(commands, encoder.encode(`\n[注文 #${item.orderNumber}]\n`));
-            currentOrder = item.orderNumber;
-          }
-          
-          // 商品名（32文字幅に調整）
-          const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
-          commands = appendBytes(commands, encoder.encode(itemName + '\n'));
-          
-          // 価格と数量
-          const priceInfo = `@${item.price} x${item.quantity}`;
-          const displaySubtotal = item.price * item.quantity;
-          const subtotalStr = `${displaySubtotal.toLocaleString()}円`;
-          const spaces = ' '.repeat(Math.max(1, 32 - priceInfo.length - subtotalStr.length));
-          commands = appendBytes(commands, encoder.encode(`${priceInfo}${spaces}${subtotalStr}\n`));
-          
-          // トッピング表示
-          if (item.toppingDetails && item.toppingDetails.length > 0) {
-            const groupedBySet = {};
-            item.toppingDetails.forEach(detail => {
-              if (!groupedBySet[detail.setName]) {
-                groupedBySet[detail.setName] = [];
-              }
-              groupedBySet[detail.setName].push(detail.optionName);
-            });
-            
-            Object.entries(groupedBySet).forEach(([setName, options]) => {
-              commands = appendBytes(commands, encoder.encode(` ${setName}\n`));
-              options.forEach(opt => {
-                commands = appendBytes(commands, encoder.encode(`  ・${opt}\n`));
-              });
-            });
-          } else if (item.toppings && item.toppings !== 'なし') {
-            commands = appendBytes(commands, encoder.encode(` TP:${item.toppings}\n`));
-          }
-        });
-        
-        // ===== 合計セクション =====
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        commands = appendBytes(commands, encoder.encode(`点数: ${itemCount}点\n`));
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        
-        // センター揃え
-        commands = appendBytes(commands, [0x1B, 0x61, 0x01]);
-        
-        // 合計金額（倍角）
-        commands = appendBytes(commands, [0x1D, 0x21, 0x11]);
-        commands = appendBytes(commands, encoder.encode(`合計 ${grandTotal.toLocaleString()}円\n`));
-        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
-        
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        commands = appendBytes(commands, encoder.encode('\n\nレジまでお持ちください\n\n\n'));
-        
-        // ===== 用紙カット =====
-        // 3行フィードしてからカット（プリンターによって対応が異なる）
-        commands = appendBytes(commands, [0x1B, 0x64, 0x03]); // ESC d 3 - 3行フィード
-        
-        // 部分カット（メーカーによって異なる）
-        commands = appendBytes(commands, [0x1D, 0x56, 0x01]); // GS V 1 - 部分カット
-        
-        // データ送信
-        await sendToUSBPrinter(commands);
-        
-        console.log('✅ 印刷完了');
-        
-      } catch (error) {
-        console.error('❌ 印刷エラー:', error);
-        throw error;
-      }
-    }
-
-    // 既存のprintBill関数を上書き
-    window.printBill = async function() {
-      const tableNumber = document.getElementById('tableSelect').value;
-      if (!tableNumber) {
-        showCustomAlert('テーブルを選択してください', '📢 通知', '📢');
-        return;
-      }
-      
-      try {
-        // 選択されたテーブルの全注文を取得
-        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
-        const tableOrders = [];
-        
-        ordersSnapshot.forEach(doc => {
-          const order = doc.data();
-          if (order.tableNumber === tableNumber && !order.paidAt && !order.deleted && !order.cancelledAt) {
-            tableOrders.push({
-              id: doc.id,
-              ...order
-            });
-          }
-        });
-        
-        if (tableOrders.length === 0) {
-          showCustomAlert('このテーブルに未会計の注文がありません', '📢 通知', '📢');
-          return;
-        }
-        
-        // 注文番号でソート
-        tableOrders.sort((a, b) => (a.orderNumber || 0) - (b.orderNumber || 0));
-        
-        // 伝票データを準備
-        let grandTotal = 0;
-        let itemCount = 0;
-        const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
-        const branchName = window.receiptSettings?.branchName || '下赤塚店';
-        
-        const now = new Date();
-        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        
-        // 商品データ集計
-        const itemsData = [];
-        tableOrders.forEach(order => {
-          order.items.forEach(item => {
-            const subtotal = item.price * item.quantity;
-            grandTotal += subtotal;
-            itemCount += item.quantity;
-            
-            let displayPrice = item.price;
-            if (item.taxType === 'exclusive') {
-              const taxRate = item.taxRate || 10;
-              displayPrice = Math.floor(item.price * (1 + taxRate / 100));
-            }
-            
-            itemsData.push({
-              name: item.name,
-              price: displayPrice,
-              quantity: item.quantity,
-              toppings: item.toppings,
-              toppingDetails: item.toppingDetails,
-              orderNumber: order.orderNumber
-            });
-          });
-        });
-        
-        // USB接続のプリンターで印刷
-        await printBillToUSB(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
-        
-        showCustomAlert('お会計伝票を印刷しました', '✅ 完了', '🖨️');
-        
-      } catch (e) {
-        console.error('印刷エラー:', e);
-        showCustomAlert('印刷に失敗しました: ' + e.message, '❌ エラー', '⚠️');
-      }
-    };
-
-    // プリンター接続テスト用の関数
-    window.testUSBPrinterConnection = async function() {
-      try {
-        await connectUSBPrinter();
-      } catch (error) {
-        console.error('接続テスト失敗:', error);
-      }
-    };
-
-    // テスト印刷用の関数
-    window.testUSBPrint = async function() {
-      try {
-        if (!window.usbPrinter) {
-          await connectUSBPrinter();
-        }
-        
-        const encoder = new TextEncoder();
-        let commands = new Uint8Array([0x1B, 0x40]); // 初期化
-        
-        commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
-        commands = appendBytes(commands, encoder.encode('\nテスト印刷\n\n'));
-        commands = appendBytes(commands, encoder.encode('プリンターは正常に\n'));
-        commands = appendBytes(commands, encoder.encode('動作しています\n\n\n'));
-        commands = appendBytes(commands, [0x1B, 0x64, 0x03]); // フィード
-        commands = appendBytes(commands, [0x1D, 0x56, 0x01]); // カット
-        
-        await sendToUSBPrinter(commands);
-        alert('テスト印刷を送信しました');
-        
-      } catch (error) {
-        console.error('テスト印刷エラー:', error);
-        alert('テスト印刷に失敗しました: ' + error.message);
-      }
-    };
-
-    // プリンター情報を表示
-    window.showPrinterInfo = function() {
-      if (!window.usbPrinter) {
-        alert('プリンターが接続されていません');
-        return;
-      }
-      
-      const device = window.usbPrinter;
-      const info = `
-【接続中のプリンター情報】
-
-製品名: ${device.productName || '不明'}
-メーカー: ${device.manufacturerName || '不明'}
-Vendor ID: 0x${device.vendorId.toString(16).padStart(4, '0')}
-Product ID: 0x${device.productId.toString(16).padStart(4, '0')}
-出力エンドポイント: ${window.printerEndpoint || '不明'}
-      `.trim();
-      
-      alert(info);
-      console.log('📋 プリンター情報:', device);
-    };
-
-    console.log('✅ 汎用USBプリンター対応パッチを読み込みました');
-    console.log('💡 使い方:');
-    console.log('  - testUSBPrinterConnection() : プリンター接続');
-    console.log('  - testUSBPrint() : テスト印刷');
-    console.log('  - showPrinterInfo() : プリンター情報表示');
-  </script>
-
-  <script>
-    // ========================================
-    // 🔵 Bluetooth レシートプリンター対応
-    // Web Bluetooth API 使用
-    // Chrome/Edge 対応（HTTPS必須）
-    // ========================================
-
-    console.log('🔵 Bluetooth プリンターモジュール読み込み開始');
-
-    // グローバル変数
-    window.bluetoothPrinter = null;
-    window.bluetoothCharacteristic = null;
-
-    // Bluetooth プリンター接続
-    window.connectBluetoothPrinter = async function() {
-      try {
-        // Web Bluetooth 対応チェック
-        if (!navigator.bluetooth) {
-          throw new Error('このブラウザはWeb Bluetoothに対応していません。\n\nChrome/EdgeでHTTPS接続してください。');
-        }
-
-        console.log('🔍 Bluetoothプリンターを検索中...');
-        
-        // Bluetooth デバイス選択
-        const device = await navigator.bluetooth.requestDevice({
-          filters: [
-            { services: ['000018f0-0000-1000-8000-00805f9b34fb'] }, // Star Micronics
-            { services: [0x1101] }, // SPP
-            { namePrefix: 'Star' },
-            { namePrefix: 'mC-' },
-            { namePrefix: 'SM-' },
-            { namePrefix: 'TSP' },
-            { namePrefix: 'TM-' },
-            { namePrefix: 'DPU' },
-            { namePrefix: 'RPP' },
-            { namePrefix: 'MTP' },
-            { namePrefix: 'POS' },
-            { namePrefix: 'PRINTER' },
-          ],
-          optionalServices: [
-            '000018f0-0000-1000-8000-00805f9b34fb',
-            '49535343-fe7d-4ae5-8fa9-9fafd205e455',
-            '0000ff00-0000-1000-8000-00805f9b34fb',
-            0x1101,
-          ]
-        });
-
-        console.log('✅ デバイス検出:', device.name);
-
-        // GATT サーバーに接続
-        console.log('🔗 GATT接続中...');
-        const server = await device.gatt.connect();
-        console.log('✅ GATT接続成功');
-
-        // サービスを取得
-        console.log('🔍 サービス検索中...');
-        const services = await server.getPrimaryServices();
-        console.log(`📋 検出されたサービス数: ${services.length}`);
-
-        let characteristic = null;
-
-        // すべてのサービスをチェック
-        for (const service of services) {
-          console.log(`  サービスUUID: ${service.uuid}`);
-          
-          try {
-            const characteristics = await service.getCharacteristics();
-            
-            for (const char of characteristics) {
-              console.log(`      特性UUID: ${char.uuid}`);
-              
-              // 書き込み可能な特性を探す
-              if (char.properties.write || char.properties.writeWithoutResponse) {
-                characteristic = char;
-                console.log('✅ 書き込み可能な特性を発見:', char.uuid);
-                break;
-              }
-            }
-            
-            if (characteristic) break;
-            
-          } catch (e) {
-            console.warn('    特性取得エラー:', e.message);
-          }
-        }
-
-        if (!characteristic) {
-          throw new Error('書き込み可能な特性が見つかりませんでした。');
-        }
-
-        window.bluetoothPrinter = device;
-        window.bluetoothCharacteristic = characteristic;
-
-        // 切断時の処理
-        device.addEventListener('gattserverdisconnected', () => {
-          console.log('⚠️ Bluetooth プリンター切断');
-          window.bluetoothPrinter = null;
-          window.bluetoothCharacteristic = null;
-          if (typeof showToast === 'function') {
-            showToast('プリンターが切断されました', 'error');
-          }
-        });
-
-        console.log('✅ Bluetooth プリンター接続完了');
-        
-        if (typeof showToast === 'function') {
-          showToast(`接続成功: ${device.name}`, 'success');
-        } else {
-          alert(`プリンター接続成功!\n\n${device.name}`);
-        }
-
-        return device;
-
-      } catch (error) {
-        console.error('❌ Bluetooth接続エラー:', error);
-        
-        let errorMsg = 'Bluetoothプリンター接続に失敗しました。\n\n';
-        
-        if (error.name === 'NotFoundError') {
-          errorMsg += '確認事項:\n';
-          errorMsg += '1. プリンターの電源が入っているか\n';
-          errorMsg += '2. Bluetoothがペアリングモードか\n';
-          errorMsg += '3. 他のデバイスと接続していないか';
-        } else if (error.name === 'SecurityError') {
-          errorMsg += 'HTTPS接続が必要です。\n';
-          errorMsg += 'HTTPでは動作しません。';
-        } else {
-          errorMsg += error.message;
-        }
-        
-        alert(errorMsg);
-        throw error;
-      }
-    };
-
-    // Bluetooth にデータ送信
-    async function sendToBluetoothPrinter(data) {
-      if (!window.bluetoothCharacteristic) {
-        throw new Error('プリンターが接続されていません');
-      }
-
-      try {
-        // データを分割して送信
-        const chunkSize = 512;
-        
-        for (let i = 0; i < data.length; i += chunkSize) {
-          const chunk = data.slice(i, Math.min(i + chunkSize, data.length));
-          
-          if (window.bluetoothCharacteristic.properties.writeWithoutResponse) {
-            await window.bluetoothCharacteristic.writeValueWithoutResponse(chunk);
-          } else {
-            await window.bluetoothCharacteristic.writeValue(chunk);
-          }
-          
-          if (i + chunkSize < data.length) {
-            await new Promise(resolve => setTimeout(resolve, 50));
-          }
-        }
-        
-        console.log(`✅ ${data.length}バイト送信完了`);
-        
-      } catch (error) {
-        console.error('❌ 送信エラー:', error);
-        throw error;
-      }
-    }
-
-    // お会計伝票を Bluetooth で印刷
-    window.printBillToBluetooth = async function(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount) {
-      try {
-        console.log('🖨️ Bluetooth印刷開始');
-        
-        if (!window.bluetoothCharacteristic) {
-          await window.connectBluetoothPrinter();
-        }
-
-        const encoder = new TextEncoder();
-        let commands = new Uint8Array([0x1B, 0x40]); // ESC @ - 初期化
-
-        // ===== ヘッダー =====
-        commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        
-        // 店舗名（倍角）
-        commands = appendBytes(commands, [0x1D, 0x21, 0x11]); // 倍角
-        commands = appendBytes(commands, encoder.encode(`      ${storeName}\n`));
-        commands = appendBytes(commands, [0x1D, 0x21, 0x00]); // 通常サイズ
-        
-        commands = appendBytes(commands, encoder.encode(`      ${branchName}\n`));
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        
-        // 左揃え
-        commands = appendBytes(commands, [0x1B, 0x61, 0x00]);
-        
-        commands = appendBytes(commands, encoder.encode(`${dateStr}\n`));
-        commands = appendBytes(commands, encoder.encode(`テーブル: ${tableNumber}\n`));
-        commands = appendBytes(commands, encoder.encode('================================\n\n'));
-        
-        // ===== 商品リスト =====
-        let currentOrder = null;
-        itemsData.forEach(item => {
-          if (item.orderNumber !== currentOrder) {
-            commands = appendBytes(commands, encoder.encode(`\n[注文 #${item.orderNumber}]\n`));
-            currentOrder = item.orderNumber;
-          }
-          
-          // 商品名
-          const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
-          commands = appendBytes(commands, encoder.encode(itemName + '\n'));
-          
-          // 価格と数量
-          const priceInfo = `@${item.price} x${item.quantity}`;
-          const displaySubtotal = item.price * item.quantity;
-          const subtotalStr = `${displaySubtotal.toLocaleString()}円`;
-          const spaces = ' '.repeat(Math.max(1, 32 - priceInfo.length - subtotalStr.length));
-          commands = appendBytes(commands, encoder.encode(`${priceInfo}${spaces}${subtotalStr}\n`));
-          
-          // トッピング
-          if (item.toppingDetails && item.toppingDetails.length > 0) {
-            const groupedBySet = {};
-            item.toppingDetails.forEach(detail => {
-              if (!groupedBySet[detail.setName]) {
-                groupedBySet[detail.setName] = [];
-              }
-              groupedBySet[detail.setName].push(detail.optionName);
-            });
-            
-            Object.entries(groupedBySet).forEach(([setName, options]) => {
-              commands = appendBytes(commands, encoder.encode(` ${setName}\n`));
-              options.forEach(opt => {
-                commands = appendBytes(commands, encoder.encode(`  ・${opt}\n`));
-              });
-            });
-          } else if (item.toppings && item.toppings !== 'なし') {
-            commands = appendBytes(commands, encoder.encode(` TP:${item.toppings}\n`));
-          }
-        });
-        
-        // ===== 合計 =====
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        commands = appendBytes(commands, encoder.encode(`点数: ${itemCount}点\n`));
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        
-        // センター揃え
-        commands = appendBytes(commands, [0x1B, 0x61, 0x01]);
-        
-        // 合計金額（倍角）
-        commands = appendBytes(commands, [0x1D, 0x21, 0x11]);
-        commands = appendBytes(commands, encoder.encode(`合計 ${grandTotal.toLocaleString()}円\n`));
-        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
-        
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        commands = appendBytes(commands, encoder.encode('\n\nレジまでお持ちください\n\n\n'));
-        
-        // ===== カット =====
-        commands = appendBytes(commands, [0x1B, 0x64, 0x03]); // 3行フィード
-        commands = appendBytes(commands, [0x1D, 0x56, 0x01]); // 部分カット
-        
-        // 送信
-        await sendToBluetoothPrinter(commands);
-        
-        console.log('✅ Bluetooth印刷完了');
-        
-      } catch (error) {
-        console.error('❌ Bluetooth印刷エラー:', error);
-        throw error;
-      }
-    };
-
-    // 注文票（調理用）を Bluetooth で印刷
-    window.printOrderToBluetooth = async function(orderNumber, tableNumber, items, timestamp) {
-      try {
-        console.log('🖨️ 注文票印刷開始 (Bluetooth)');
-        
-        if (!window.bluetoothCharacteristic) {
-          await window.connectBluetoothPrinter();
-        }
-
-        const encoder = new TextEncoder();
-        let commands = new Uint8Array([0x1B, 0x40]); // 初期化
-
-        // ===== ヘッダー =====
-        commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
-        commands = appendBytes(commands, [0x1D, 0x21, 0x11]); // 倍角
-        commands = appendBytes(commands, encoder.encode('【 注文票 】\n'));
-        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
-        
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        
-        // 左揃え
-        commands = appendBytes(commands, [0x1B, 0x61, 0x00]);
-        
-        const now = new Date(timestamp);
-        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-        
-        commands = appendBytes(commands, encoder.encode(`注文番号: #${orderNumber}\n`));
-        commands = appendBytes(commands, encoder.encode(`テーブル: ${tableNumber}\n`));
-        commands = appendBytes(commands, encoder.encode(`時刻: ${timeStr}\n`));
-        commands = appendBytes(commands, encoder.encode('================================\n\n'));
-        
-        // ===== 商品リスト =====
-        items.forEach(item => {
-          // 商品名（太字）
-          commands = appendBytes(commands, [0x1B, 0x45, 0x01]); // 強調ON
-          commands = appendBytes(commands, encoder.encode(`${item.name}\n`));
-          commands = appendBytes(commands, [0x1B, 0x45, 0x00]); // 強調OFF
-          
-          // 数量（大きく）
-          commands = appendBytes(commands, [0x1D, 0x21, 0x11]); // 倍角
-          commands = appendBytes(commands, encoder.encode(`  数量: ${item.quantity}\n`));
-          commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
-          
-          // トッピング
-          if (item.toppingDetails && item.toppingDetails.length > 0) {
-            const groupedBySet = {};
-            item.toppingDetails.forEach(detail => {
-              if (!groupedBySet[detail.setName]) {
-                groupedBySet[detail.setName] = [];
-              }
-              groupedBySet[detail.setName].push(detail.optionName);
-            });
-            
-            Object.entries(groupedBySet).forEach(([setName, options]) => {
-              commands = appendBytes(commands, encoder.encode(`  ${setName}:\n`));
-              options.forEach(opt => {
-                commands = appendBytes(commands, encoder.encode(`    ・${opt}\n`));
-              });
-            });
-          } else if (item.toppings && item.toppings !== 'なし') {
-            commands = appendBytes(commands, encoder.encode(`  ${item.toppings}\n`));
-          }
-          
-          commands = appendBytes(commands, encoder.encode('\n'));
-        });
-        
-        commands = appendBytes(commands, encoder.encode('================================\n\n\n'));
-        
-        // カット
-        commands = appendBytes(commands, [0x1B, 0x64, 0x03]);
-        commands = appendBytes(commands, [0x1D, 0x56, 0x01]);
-        
-        await sendToBluetoothPrinter(commands);
-        
-        console.log('✅ 注文票印刷完了');
-        
-      } catch (error) {
-        console.error('❌ 注文票印刷エラー:', error);
-        throw error;
-      }
-    };
-
-    // レシート（領収書）を Bluetooth で印刷
-    window.printReceiptToBluetooth = async function(receiptData) {
-      try {
-        console.log('🖨️ レシート印刷開始 (Bluetooth)');
-        
-        if (!window.bluetoothCharacteristic) {
-          await window.connectBluetoothPrinter();
-        }
-
-        const encoder = new TextEncoder();
-        let commands = new Uint8Array([0x1B, 0x40]);
-
-        // ===== ヘッダー =====
-        // レシート設定から店名・支店名などを取得
-        const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
-        const branchName = window.receiptSettings?.branchName || '下赤塚店';
-        const address = window.receiptSettings?.address || '';
-        const phone = window.receiptSettings?.phone || '';
-        const postalCode = window.receiptSettings?.postalCode || '';
-        const receiptMessage = window.receiptSettings?.message || 'ありがとうございました\nまたのご来店をお待ちしております';
-        
-        commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        
-        commands = appendBytes(commands, [0x1D, 0x21, 0x11]);
-        commands = appendBytes(commands, encoder.encode(`${storeName}\n`));
-        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
-        
-        commands = appendBytes(commands, encoder.encode(`${branchName}\n`));
-        
-        if (postalCode) {
-          commands = appendBytes(commands, encoder.encode(`〒${postalCode}\n`));
-        }
-        if (address) {
-          commands = appendBytes(commands, encoder.encode(`${address}\n`));
-        }
-        if (phone) {
-          commands = appendBytes(commands, encoder.encode(`TEL: ${phone}\n`));
-        }
-        
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        
-        // 左揃え
-        commands = appendBytes(commands, [0x1B, 0x61, 0x00]);
-        
-        const now = new Date();
-        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-        
-        commands = appendBytes(commands, encoder.encode(`${dateStr}\n`));
-        commands = appendBytes(commands, encoder.encode(`領収書 No.${receiptData.receiptNumber || '0001'}\n`));
-        commands = appendBytes(commands, encoder.encode('================================\n\n'));
-        
-        // ===== 商品リスト =====
-        let subtotal = 0;
-        
-        receiptData.items.forEach(item => {
-          const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
-          commands = appendBytes(commands, encoder.encode(`${itemName}\n`));
-          
-          const itemTotal = item.price * item.quantity;
-          subtotal += itemTotal;
-          
-          const priceInfo = `@${item.price} x${item.quantity}`;
-          const totalStr = `${itemTotal.toLocaleString()}円`;
-          const spaces = ' '.repeat(Math.max(1, 32 - priceInfo.length - totalStr.length));
-          commands = appendBytes(commands, encoder.encode(`${priceInfo}${spaces}${totalStr}\n`));
-        });
-        
-        // ===== 合計 =====
-        commands = appendBytes(commands, encoder.encode('\n================================\n'));
-        commands = appendBytes(commands, encoder.encode(`小計: ${subtotal.toLocaleString()}円\n`));
-        
-        const tax = Math.floor(subtotal * 0.1);
-        const total = subtotal + tax;
-        
-        commands = appendBytes(commands, encoder.encode(`消費税(10%): ${tax.toLocaleString()}円\n`));
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        
-        // センター揃え
-        commands = appendBytes(commands, [0x1B, 0x61, 0x01]);
-        
-        commands = appendBytes(commands, [0x1D, 0x21, 0x11]);
-        commands = appendBytes(commands, encoder.encode(`合計 ${total.toLocaleString()}円\n`));
-        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
-        
-        commands = appendBytes(commands, encoder.encode('================================\n'));
-        
-        // お預かり・お釣り
-        if (receiptData.payment) {
-          commands = appendBytes(commands, [0x1B, 0x61, 0x00]); // 左揃え
-          commands = appendBytes(commands, encoder.encode(`\nお預かり: ${receiptData.payment.toLocaleString()}円\n`));
-          const change = receiptData.payment - total;
-          commands = appendBytes(commands, encoder.encode(`お釣り: ${change.toLocaleString()}円\n`));
-          commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
-        }
-        
-        // メッセージ（改行を反映）
-        commands = appendBytes(commands, encoder.encode('\n'));
-        const messageLines = receiptMessage.split('\n');
-        messageLines.forEach(line => {
-          commands = appendBytes(commands, encoder.encode(`${line}\n`));
-        });
-        commands = appendBytes(commands, encoder.encode('\n\n'));
-        
-        // カット
-        commands = appendBytes(commands, [0x1B, 0x64, 0x03]);
-        commands = appendBytes(commands, [0x1D, 0x56, 0x01]);
-        
-        await sendToBluetoothPrinter(commands);
-        
-        console.log('✅ レシート印刷完了');
-        
-      } catch (error) {
-        console.error('❌ レシート印刷エラー:', error);
-        throw error;
-      }
-    };
-
-    // ========================================
-    // 既存関数の上書き（Bluetooth優先）
-    // ========================================
-
-    // 元のprintBill関数を保存
-    const originalPrintBill = window.printBill;
-
-    // printBill を Bluetooth 優先版に置き換え
-    window.printBill = async function() {
-      // selectedTableまたはtableSelectから取得
-      let tableNumber = window.selectedTable;
-      if (!tableNumber) {
-        tableNumber = document.getElementById('tableSelect')?.value;
-      }
-      
-      // それでもない場合はcurrentOrdersから取得
-      if (!tableNumber && window.currentOrders && window.currentOrders.length > 0) {
-        tableNumber = window.currentOrders[0].tableNumber;
-        console.log('📋 currentOrdersからテーブル番号を取得:', tableNumber);
-      }
-      
-      if (!tableNumber) {
-        showCustomAlert('テーブルを選択してください', '📢 通知', '📢');
-        return;
-      }
-      
-      try {
-        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
-        const tableOrders = [];
-        
-        ordersSnapshot.forEach(doc => {
-          const order = doc.data();
-          if (order.tableNumber === tableNumber && !order.paidAt && !order.deleted && !order.cancelledAt) {
-            tableOrders.push({ id: doc.id, ...order });
-          }
-        });
-        
-        if (tableOrders.length === 0) {
-          showCustomAlert('このテーブルに未会計の注文がありません', '📢 通知', '📢');
-          return;
-        }
-        
-        tableOrders.sort((a, b) => (a.orderNumber || 0) - (b.orderNumber || 0));
-        
-        let grandTotal = 0;
-        let itemCount = 0;
-        const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
-        const branchName = window.receiptSettings?.branchName || '下赤塚店';
-        
-        const now = new Date();
-        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        
-        const itemsData = [];
-        tableOrders.forEach(order => {
-          order.items.forEach(item => {
-            const subtotal = item.price * item.quantity;
-            grandTotal += subtotal;
-            itemCount += item.quantity;
-            
-            let displayPrice = item.price;
-            if (item.taxType === 'exclusive') {
-              const taxRate = item.taxRate || 10;
-              displayPrice = Math.floor(item.price * (1 + taxRate / 100));
-            }
-            
-            itemsData.push({
-              name: item.name,
-              price: displayPrice,
-              quantity: item.quantity,
-              toppings: item.toppings,
-              toppingDetails: item.toppingDetails,
-              orderNumber: order.orderNumber
-            });
-          });
-        });
-        
-        // レシートプリンター自動検知
-        // 1. Bluetoothが接続されていればBluetooth
-        // 2. USBが接続されていればUSB
-        // 3. どちらもなければ接続を促す
-        if (window.bluetoothCharacteristic) {
-          await printBillToBluetooth(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
-        } else if (window.usbPrinter) {
-          await printBillToUSB(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
-        } else {
-          // どちらも接続されていない場合は自動検知
-          const confirmed = await showCustomConfirm({
-            icon: '🖨️',
-            title: 'プリンター接続',
-            message: 'プリンターが接続されていません。\n\nBluetoothプリンターを接続しますか？\n（キャンセルでUSBプリンター接続）',
-            confirmText: 'Bluetooth接続'
-          });
-          
-          if (confirmed) {
-            await window.connectBluetoothPrinter();
-            if (window.bluetoothCharacteristic) {
-              await printBillToBluetooth(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
-            }
-          } else {
-            await connectUSBPrinter();
-            if (window.usbPrinter) {
-              await printBillToUSB(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
-            }
-          }
-        }
-        
-        showCustomAlert('お会計伝票を印刷しました', '✅ 完了', '🖨️');
-        
-      } catch (e) {
-        console.error('印刷エラー:', e);
-        showCustomAlert('印刷に失敗しました: ' + e.message, '❌ エラー', '⚠️');
-      }
-    };
-
-    // ========================================
-    // テスト用関数
-    // ========================================
-
-    window.testBluetoothPrint = async function() {
-      try {
-        if (!window.bluetoothCharacteristic) {
-          await window.connectBluetoothPrinter();
-        }
-        
-        const encoder = new TextEncoder();
-        let commands = new Uint8Array([0x1B, 0x40]);
-        
-        commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
-        commands = appendBytes(commands, [0x1D, 0x21, 0x11]); // 倍角
-        commands = appendBytes(commands, encoder.encode('\nテスト印刷\n'));
-        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
-        commands = appendBytes(commands, encoder.encode('\nBluetooth接続\n'));
-        commands = appendBytes(commands, encoder.encode('正常に動作しています\n\n\n'));
-        commands = appendBytes(commands, [0x1B, 0x64, 0x03]);
-        commands = appendBytes(commands, [0x1D, 0x56, 0x01]);
-        
-        await sendToBluetoothPrinter(commands);
-        
-        if (typeof showToast === 'function') {
-          showToast('テスト印刷を送信しました', 'success');
-        } else {
-          alert('テスト印刷を送信しました');
-        }
-        
-      } catch (error) {
-        console.error('テスト印刷エラー:', error);
-        alert('テスト印刷に失敗しました: ' + error.message);
-      }
-    };
-
-    window.showBluetoothPrinterInfo = function() {
-      if (!window.bluetoothPrinter) {
-        alert('Bluetoothプリンターが接続されていません');
-        return;
-      }
-      
-      const device = window.bluetoothPrinter;
-      const info = `
-【接続中のBluetoothプリンター】
-
-プリンター名: ${device.name || '不明'}
-ID: ${device.id || '不明'}
-接続状態: ${device.gatt.connected ? '接続中' : '切断'}
-      `.trim();
-      
-      alert(info);
-      console.log('📋 Bluetoothプリンター情報:', device);
-    };
-
-    console.log('✅ Bluetooth プリンター対応モジュール読み込み完了');
-    console.log('💡 使い方:');
-    console.log('  - connectBluetoothPrinter() : Bluetoothプリンター接続');
-    console.log('  - testBluetoothPrint() : テスト印刷');
-    console.log('  - showBluetoothPrinterInfo() : プリンター情報表示');
-    console.log('  - printBill() : 自動でBluetooth/USB判定して印刷');
-  </script>
   
 </body>
 </html>
