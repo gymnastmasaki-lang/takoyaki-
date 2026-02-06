@@ -17,22 +17,7 @@
       to { transform: translateY(0); opacity: 1; }
     }
   </style>
-  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/v1.1.0/StarWebPrintTrader.js">
-    // 初回起動時にプリンター設定を確認
-    window.addEventListener('DOMContentLoaded', function() {
-      const settings = window.getPrinterSettings();
-      
-      // プリンターIPが未設定の場合は設定画面を表示
-      if (!settings.printerIP && settings.mode === 'direct') {
-        setTimeout(() => {
-          if (confirm('プリンターの設定がまだ完了していません。\n今すぐ設定しますか？\n\n（後から「プリンター設定」ボタンで設定できます）')) {
-            window.showPrinterSettings();
-          }
-        }, 1000);
-      }
-    });
-
-  </script>
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/v1.1.0/StarWebPrintTrader.js"></script>
   <script src="https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/v1.2.0/StarWebPrintBuilder.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
@@ -79,38 +64,76 @@
     window.setDoc = setDoc;
     window.limit = limit;
     window.deleteDoc = deleteDoc;
-
-    // StarWebPrintBuilderの代替：XMLビルダー
-    window.buildPrintXML = function(commands) {
-      let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<root>\n';
-      xml += '  <initialization/>\n';
+    // ============================================
+    // StarWebPrintBuilderの代替実装
+    // ============================================
+    
+    // 外部スクリプトが読み込めない場合のフォールバック
+    if (typeof StarWebPrintBuilder === 'undefined') {
+      console.warn('⚠️ StarWebPrintBuilderが読み込めませんでした。代替実装を使用します。');
       
-      commands.forEach(item => {
-        switch(item.type) {
-          case 'align':
-            xml += `  <alignment position="${item.position}"/>\n`;
-            break;
-          case 'text':
-            const textData = (item.data || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            let textTag = '<text';
-            if (item.emphasis) textTag += ' emphasis="true"';
-            if (item.width) textTag += ` width="${item.width}"`;
-            if (item.height) textTag += ` height="${item.height}"`;
-            textTag += `>${textData}</text>\n`;
-            xml += '  ' + textTag;
-            break;
-          case 'line':
-            xml += `  <ruledline thickness="${item.thickness || 'thin'}"/>\n`;
-            break;
-          case 'cut':
-            xml += '  <cutpaper feed="true"/>\n`;
-            break;
+      window.StarWebPrintBuilder = class {
+        constructor() {
+          this.commands = [];
         }
-      });
-      
-      xml += '</root>';
-      return xml;
-    };
+        
+        createInitializationElement() {
+          this.commands.push({ type: 'init' });
+        }
+        
+        createPeripheralElement(opts) {
+          // 周辺機器設定（無視）
+        }
+        
+        createAlignmentElement(opts) {
+          this.commands.push({ type: 'align', position: opts.position });
+        }
+        
+        createTextElement(opts) {
+          this.commands.push({ type: 'text', ...opts });
+        }
+        
+        createRuledLineElement(opts) {
+          this.commands.push({ type: 'line', thickness: opts.thickness });
+        }
+        
+        createCutPaperElement(opts) {
+          this.commands.push({ type: 'cut', feed: opts.feed });
+        }
+        
+        toString() {
+          let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<root>\n';
+          xml += '  <initialization/>\n';
+          
+          this.commands.forEach(cmd => {
+            switch (cmd.type) {
+              case 'align':
+                xml += `  <alignment position="${cmd.position}"/>\n`;
+                break;
+              case 'text':
+                let textData = (cmd.data || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                let textTag = '<text';
+                if (cmd.emphasis) textTag += ' emphasis="true"';
+                if (cmd.width) textTag += ` width="${cmd.width}"`;
+                if (cmd.height) textTag += ` height="${cmd.height}"`;
+                textTag += `>${textData}</text>\n`;
+                xml += '  ' + textTag;
+                break;
+              case 'line':
+                xml += `  <ruledline thickness="${cmd.thickness || 'thin'}"/>\n`;
+                break;
+              case 'cut':
+                xml += '  <cutpaper feed="true"/>\n';
+                break;
+            }
+          });
+          
+          xml += '</root>';
+          return xml;
+        }
+      };
+    }
+    
 
     
     // 店舗別コレクション参照を取得するヘルパー関数
@@ -1770,6 +1793,7 @@
         </div>
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <button onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kanri.html', '_blank')" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">設定•管理</button>
+          <button onclick="window.showPrinterSettings()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(102,126,234,0.3);">🖨️ プリンター設定</button>
           <button onclick="handleLogout()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">ログアウト</button>
         </div>
       </div>
@@ -2229,220 +2253,175 @@
     let isFirstOrderLoad = true;
     
     // プリンターIPアドレス（画像から）
-    const PRINTER_IP = '192.168.244.41';
-    
-    // 🆕 プロキシサーバーのURL（HTTPSからHTTPへの通信を中継）
-    // ローカル環境で起動したNode.jsサーバーのURL
 
     // ============================================
-    // プリンター設定（ユーザーが設定可能）
+    // 📱 ユーザーフレンドリー・プリンター設定
     // ============================================
     
-    // LocalStorageからプリンター設定を読み込み
-    let printerSettings = JSON.parse(localStorage.getItem('printerSettings') || '{}');
+    // LocalStorageから設定を読み込み
+    function loadPrinterSettings() {
+      const saved = localStorage.getItem('printerSettings');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {
+          console.error('設定の読み込みエラー:', e);
+        }
+      }
+      // デフォルト設定
+      return {
+        printerIP: '',
+        printerType: 'star',  // 'star' or 'other'
+        autoDetect: false
+      };
+    }
     
-    // デフォルト設定
-    const defaultPrinterSettings = {
-      mode: 'direct',  // 'direct' または 'proxy'
-      printerType: 'star',  // 'star' または 'escpos'
-      printerIP: '',  // プリンターのIPアドレス
-      useProxy: false,
-      proxyURL: 'http://localhost:3000/print'
-    };
+    // 設定を保存
+    function savePrinterSettings(settings) {
+      localStorage.setItem('printerSettings', JSON.stringify(settings));
+      console.log('✅ プリンター設定を保存しました:', settings);
+    }
     
-    // 設定がない場合はデフォルトを使用
-    printerSettings = { ...defaultPrinterSettings, ...printerSettings };
+    // グローバル設定
+    window.printerConfig = loadPrinterSettings();
     
-    // 設定を保存する関数
-    window.savePrinterSettings = function(settings) {
-      printerSettings = { ...printerSettings, ...settings };
-      localStorage.setItem('printerSettings', JSON.stringify(printerSettings));
-      console.log('✅ プリンター設定を保存しました:', printerSettings);
-      return printerSettings;
-    };
-    
-    // 設定を取得する関数
-    window.getPrinterSettings = function() {
-      return printerSettings;
-    };
-    
-    // プリンター設定画面を表示する関数
+    // 設定画面を表示
     window.showPrinterSettings = function() {
-      const currentSettings = window.getPrinterSettings();
-      
       const modal = document.createElement('div');
-      modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.7);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-      `;
+      modal.id = 'printerSettingsModal';
+      modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+      
+      const currentSettings = window.printerConfig;
       
       modal.innerHTML = `
-        <div style="background: white; padding: 30px; border-radius: 10px; max-width: 500px; width: 90%;">
-          <h2 style="margin-top: 0;">🖨️ プリンター設定</h2>
+        <div style="background: white; padding: 30px; border-radius: 15px; max-width: 500px; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+          <h2 style="margin: 0 0 20px 0; color: #333; font-size: 24px;">🖨️ プリンター設定</h2>
           
           <div style="margin-bottom: 20px;">
-            <label style="display: block; margin-bottom: 10px; font-weight: bold;">
-              接続方法:
-            </label>
-            <select id="printerMode" style="width: 100%; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 5px;">
-              <option value="direct">直接接続（推奨）</option>
-              <option value="proxy">プロキシサーバー経由</option>
-            </select>
-          </div>
-          
-          <div id="directSettings" style="margin-bottom: 20px;">
-            <label style="display: block; margin-bottom: 10px; font-weight: bold;">
-              プリンターの種類:
-            </label>
-            <select id="printerType" style="width: 100%; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 5px; margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #555;">プリンターの種類</label>
+            <select id="printerType" style="width: 100%; padding: 12px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; background: white;">
               <option value="star">Star（mC-Print3、TSP100など）</option>
-              <option value="escpos">その他（Epson、Citizen、汎用ESC/POS）</option>
+              <option value="other">その他（現在非対応）</option>
             </select>
-            
-            <label style="display: block; margin-bottom: 10px; font-weight: bold;">
-              プリンターのIPアドレス:
-            </label>
-            <input type="text" id="printerIP" placeholder="例: 192.168.1.100" 
-              style="width: 100%; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 5px;">
-            
-            <p style="color: #666; font-size: 14px; margin-top: 10px;">
-              💡 プリンターのIPアドレスは、プリンター本体の設定画面またはテスト印刷で確認できます
-            </p>
+            <p style="color: #999; font-size: 13px; margin: 5px 0 0 0;">※ Star製プリンターを推奨します</p>
           </div>
           
-          <div id="proxySettings" style="margin-bottom: 20px; display: none;">
-            <label style="display: block; margin-bottom: 10px; font-weight: bold;">
-              プロキシサーバーURL:
-            </label>
-            <input type="text" id="proxyURL" placeholder="例: http://192.168.1.50:3000/print" 
-              style="width: 100%; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 5px;">
+          <div style="margin-bottom: 25px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #555;">プリンターのIPアドレス</label>
+            <input type="text" id="printerIP" placeholder="例: 192.168.1.100" value="${currentSettings.printerIP || ''}"
+              style="width: 100%; padding: 12px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; box-sizing: border-box;">
+            <div style="margin-top: 10px; padding: 12px; background: #f0f7ff; border-radius: 8px; border-left: 4px solid #2196F3;">
+              <p style="margin: 0; font-size: 13px; color: #1976D2; line-height: 1.5;">
+                💡 <strong>IPアドレスの確認方法:</strong><br>
+                1. プリンター本体の設定画面<br>
+                2. フィードボタン長押しでテスト印刷<br>
+                3. Wi-Fiルーターの管理画面
+              </p>
+            </div>
           </div>
           
-          <div style="display: flex; gap: 10px; margin-top: 20px;">
-            <button id="testPrintBtn" style="flex: 1; padding: 15px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
+          <div style="display: flex; gap: 10px;">
+            <button id="testPrintBtn" style="flex: 1; padding: 15px; font-size: 16px; font-weight: bold; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s;">
               🧪 テスト印刷
             </button>
-            <button id="savePrinterBtn" style="flex: 1; padding: 15px; font-size: 16px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer;">
+            <button id="savePrinterBtn" style="flex: 1; padding: 15px; font-size: 16px; font-weight: bold; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s;">
               💾 保存
             </button>
-            <button id="closePrinterBtn" style="padding: 15px 20px; font-size: 16px; background: #999; color: white; border: none; border-radius: 5px; cursor: pointer;">
-              閉じる
+            <button id="closePrinterBtn" style="padding: 15px 20px; font-size: 16px; background: #999; color: white; border: none; border-radius: 10px; cursor: pointer;">
+              ✕
             </button>
           </div>
+          
+          <div id="statusMessage" style="margin-top: 15px; padding: 12px; border-radius: 8px; display: none;"></div>
         </div>
       `;
       
       document.body.appendChild(modal);
       
       // 現在の設定を反映
-      document.getElementById('printerMode').value = currentSettings.mode || 'direct';
       document.getElementById('printerType').value = currentSettings.printerType || 'star';
-      document.getElementById('printerIP').value = currentSettings.printerIP || '';
-      document.getElementById('proxyURL').value = currentSettings.proxyURL || 'http://localhost:3000/print';
       
-      // モード切り替え
-      const updateDisplay = () => {
-        const mode = document.getElementById('printerMode').value;
-        document.getElementById('directSettings').style.display = mode === 'direct' ? 'block' : 'none';
-        document.getElementById('proxySettings').style.display = mode === 'proxy' ? 'block' : 'none';
+      const showStatus = (message, type) => {
+        const statusEl = document.getElementById('statusMessage');
+        statusEl.style.display = 'block';
+        statusEl.textContent = message;
+        if (type === 'success') {
+          statusEl.style.background = '#d4edda';
+          statusEl.style.color = '#155724';
+          statusEl.style.border = '1px solid #c3e6cb';
+        } else {
+          statusEl.style.background = '#f8d7da';
+          statusEl.style.color = '#721c24';
+          statusEl.style.border = '1px solid #f5c6cb';
+        }
       };
-      
-      document.getElementById('printerMode').addEventListener('change', updateDisplay);
-      updateDisplay();
       
       // テスト印刷
       document.getElementById('testPrintBtn').addEventListener('click', async () => {
-        const settings = {
-          mode: document.getElementById('printerMode').value,
-          printerType: document.getElementById('printerType').value,
-          printerIP: document.getElementById('printerIP').value,
-          proxyURL: document.getElementById('proxyURL').value
-        };
+        const ip = document.getElementById('printerIP').value.trim();
+        const type = document.getElementById('printerType').value;
         
-        // 仮保存
-        window.savePrinterSettings(settings);
+        if (!ip) {
+          showStatus('❌ IPアドレスを入力してください', 'error');
+          return;
+        }
         
-        // テスト印刷実行
+        if (type !== 'star') {
+          showStatus('❌ 現在Star製プリンターのみ対応しています', 'error');
+          return;
+        }
+        
+        showStatus('🔄 テスト印刷中...', 'info');
+        
         try {
-          await window.testPrint();
-          alert('✅ テスト印刷が成功しました！');
+          await window.testPrintDirect(ip);
+          showStatus('✅ テスト印刷成功！プリンターが正常に動作しています', 'success');
         } catch (error) {
-          alert('❌ テスト印刷に失敗しました: ' + error.message);
+          showStatus('❌ テスト印刷失敗: ' + error.message, 'error');
         }
       });
       
       // 保存
       document.getElementById('savePrinterBtn').addEventListener('click', () => {
-        const settings = {
-          mode: document.getElementById('printerMode').value,
-          printerType: document.getElementById('printerType').value,
-          printerIP: document.getElementById('printerIP').value,
-          proxyURL: document.getElementById('proxyURL').value
+        const ip = document.getElementById('printerIP').value.trim();
+        const type = document.getElementById('printerType').value;
+        
+        if (!ip) {
+          showStatus('❌ IPアドレスを入力してください', 'error');
+          return;
+        }
+        
+        const newSettings = {
+          printerIP: ip,
+          printerType: type,
+          autoDetect: false
         };
         
-        window.savePrinterSettings(settings);
-        alert('✅ プリンター設定を保存しました！');
-        modal.remove();
+        savePrinterSettings(newSettings);
+        window.printerConfig = newSettings;
+        
+        showStatus('✅ 設定を保存しました', 'success');
+        
+        setTimeout(() => {
+          modal.remove();
+        }, 1500);
       });
       
       // 閉じる
       document.getElementById('closePrinterBtn').addEventListener('click', () => {
         modal.remove();
       });
+      
+      // モーダル外クリックで閉じる
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.remove();
+        }
+      });
     };
     
-
-    const PRINTER_PROXY_URL = 'http://localhost:3000/print';
-    
-    // プロキシを使用するかどうか（HTTPSサイトの場合はtrue）
-    const USE_PROXY = window.location.protocol === 'https:';
-    
-    // 🆕 プロキシ対応の印刷ヘルパー関数
-
-    // ============================================
-    // 直接印刷機能（Star WebPRNT & ESC/POS対応）
-    // ============================================
-    
-    // Star WebPRNTで直接印刷
-    async function printDirectStar(xmlData, printerIP) {
-      const url = `http://${printerIP}/StarWebPRNT/SendMessage`;
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/xml; charset=utf-8'
-        },
-        body: xmlData,
-        mode: 'no-cors'  // CORSエラーを回避
-      });
-      
-      return { status: 'success' };
-    }
-    
-    // ESC/POSで直接印刷（WebSocketまたはプロキシ経由が必要）
-    async function printDirectESCPOS(commands, printerIP) {
-      // ESC/POSは直接ブラウザから送信できないため、
-      // 簡易的なプロキシを使用するか、Starプリンターの使用を推奨
-      throw new Error('ESC/POSプリンターは直接接続できません。Starプリンターを使用するか、プロキシモードに変更してください。');
-    }
-    
-    // テスト印刷
-    window.testPrint = async function() {
-      const settings = window.getPrinterSettings();
-      
-      if (!settings.printerIP && settings.mode === 'direct') {
-        throw new Error('プリンターのIPアドレスを設定してください');
-      }
-      
-      // XMLデータを生成
+    // テスト印刷（直接）
+    window.testPrintDirect = async function(printerIP) {
       const testXML = `<?xml version="1.0" encoding="UTF-8"?>
 <root>
   <initialization/>
@@ -2462,7 +2441,7 @@
 日時: ${new Date().toLocaleString('ja-JP')}
 </text>
   <text>
-IPアドレス: ${settings.printerIP}
+IPアドレス: ${printerIP}
 </text>
   <text>
 
@@ -2471,52 +2450,94 @@ IPアドレス: ${settings.printerIP}
   <cutpaper feed="true"/>
 </root>`;
       
-      if (settings.mode === 'direct' && settings.printerType === 'star') {
-        console.log('🖨️ Star WebPRNTで直接印刷します');
-        await printDirectStar(testXML, settings.printerIP);
-      } else if (settings.mode === 'proxy') {
-        console.log('🔄 プロキシ経由で印刷します');
-        const response = await fetch(settings.proxyURL, {
+      const url = `http://${printerIP}/StarWebPRNT/SendMessage`;
+      
+      try {
+        const response = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'text/xml; charset=utf-8' },
-          body: testXML
+          headers: {
+            'Content-Type': 'text/xml; charset=utf-8'
+          },
+          body: testXML,
+          mode: 'no-cors'
         });
-        if (!response.ok) throw new Error('プロキシサーバーに接続できません');
-      } else {
-        throw new Error('現在の設定では印刷できません');
+        
+        // no-corsの場合、レスポンスは取得できないが、エラーがなければ成功と判断
+        return true;
+      } catch (error) {
+        throw new Error('プリンターに接続できません。IPアドレスとネットワーク接続を確認してください。');
       }
     };
     
+    // 初回起動時チェック
+    window.addEventListener('DOMContentLoaded', function() {
+      setTimeout(() => {
+        if (!window.printerConfig.printerIP) {
+          const shouldSetup = confirm(
+            '🖨️ プリンター設定\n\n' +
+            'プリンターの設定がまだ完了していません。\n' +
+            '今すぐ設定しますか？\n\n' +
+            '※ 後から画面右上の「プリンター設定」ボタンで設定できます'
+          );
+          
+          if (shouldSetup) {
+            window.showPrinterSettings();
+          }
+        }
+      }, 2000);
+    });
+    
 
-    async function sendPrintRequest(xmlTextOrBuilder, onSuccess, onError) {
-      const settings = window.getPrinterSettings();
-      const xmlText = typeof xmlTextOrBuilder === 'string' ? xmlTextOrBuilder : 
-                      (xmlTextOrBuilder.toString ? xmlTextOrBuilder.toString() : '');
+    const PRINTER_IP = '192.168.244.41';
+    
+    // 🆕 プロキシサーバーのURL（HTTPSからHTTPへの通信を中継）
+    // ローカル環境で起動したNode.jsサーバーのURL
+    const PRINTER_PROXY_URL = 'http://localhost:3000/print';
+    
+    // プロキシを使用するかどうか（HTTPSサイトの場合はtrue）
+    const USE_PROXY = window.location.protocol === 'https:';
+    
+    // 🆕 プロキシ対応の印刷ヘルパー関数
+        async function sendPrintRequest(builder, onSuccess, onError) {
+      const settings = window.printerConfig;
       
       try {
-        if (settings.mode === 'direct' && settings.printerType === 'star') {
-          // Star WebPRNT直接印刷
+        // builderからXMLを取得
+        const xmlRequest = builder.toString();
+        
+        if (settings.printerIP && settings.printerType === 'star') {
+          // Star WebPRNTで直接印刷
           console.log('🖨️ Star WebPRNTで直接印刷:', settings.printerIP);
-          await printDirectStar(xmlText, settings.printerIP);
-          console.log('✅ 印刷成功');
+          
+          const url = `http://${settings.printerIP}/StarWebPRNT/SendMessage`;
+          
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'text/xml; charset=utf-8'
+            },
+            body: xmlRequest,
+            mode: 'no-cors'
+          });
+          
+          console.log('✅ 印刷リクエスト送信完了');
           if (onSuccess) onSuccess({ status: 'success' });
           return;
-        } else if (settings.mode === 'proxy') {
-          // プロキシ経由
-          console.log('🔄 プロキシ経由で印刷:', settings.proxyURL);
-          const response = await fetch(settings.proxyURL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/xml; charset=utf-8' },
-            body: xmlText
-          });
-          if (response.ok) {
-            console.log('✅ 印刷成功');
-            if (onSuccess) onSuccess({ status: 'success' });
-          } else {
-            throw new Error('プロキシサーバーエラー: ' + response.statusText);
+        } else if (!settings.printerIP) {
+          // 設定がない場合
+          console.warn('⚠️ プリンター設定がありません');
+          const shouldSetup = confirm('プリンターが設定されていません。
+今すぐ設定しますか？');
+          if (shouldSetup) {
+            window.showPrinterSettings();
           }
+          if (onError) onError({ status: 'error', message: 'プリンター未設定' });
           return;
         }
+        
+        // その他の場合（将来の拡張用）
+        throw new Error('対応していないプリンター設定です');
+        
       } catch (error) {
         console.error('❌ 印刷エラー:', error);
         if (onError) {
@@ -2524,68 +2545,8 @@ IPアドレス: ${settings.printerIP}
         } else {
           alert('印刷に失敗しました: ' + error.message);
         }
-        return;
-      }
-      
-      // 以下は元のコード（後方互換性のため残す）{
-      try {
-        if (USE_PROXY) {
-          console.log('🔄 プロキシサーバー経由で印刷します');
-          
-          // XMLリクエストを取得
-          const request = builder.toString();
-          
-          // プロキシサーバーに送信
-          const response = await fetch(PRINTER_PROXY_URL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'text/xml; charset=utf-8'
-            },
-            body: request
-          });
-          
-          if (response.ok) {
-            console.log('✅ 印刷成功');
-            const data = await response.text();
-            if (onSuccess) onSuccess({ status: 'success', data: data });
-          } else {
-            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-            console.error('❌ 印刷エラー:', errorData);
-            if (onError) onError({ status: response.status, message: errorData.error || response.statusText });
-          }
-        } else {
-          console.log('🖨️ プリンターに直接印刷します');
-          
-          const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
-          const request = builder.toString();
-          
-          const trader = new StarWebPrintTrader({url: url});
-          trader.onReceive = function(response) {
-            console.log('印刷成功:', response);
-            if (onSuccess) onSuccess(response);
-          };
-          trader.onError = function(response) {
-            console.error('印刷エラー:', response);
-            if (onError) onError(response);
-          };
-          
-          trader.sendMessage({request: request});
-        }
-      } catch (error) {
-        console.error('❌ 印刷処理エラー:', error);
-        if (onError) onError({ status: 'error', message: error.message });
       }
     }
-    
-    // メニューデータ（Firebaseから取得）
-    let menuData = [];
-    let toppingsData = [];
-    
-        // 初期化
-    window.addEventListener('load', async () => {
-      await initializeSystem();
-    });
-    
     async function initializeSystem() {
       // Firebaseからメニューを取得
       try {
@@ -11283,17 +11244,8 @@ ${redSlipCount > 0 ? `
         // 注文番号でソート
         tableOrders.sort((a, b) => (a.orderNumber || 0) - (b.orderNumber || 0));
         
-        // StarWebPrintBuilderの代わりに配列でコマンドを管理
-        const printCommands = [];
-        const builder = {
-          createInitializationElement: () => {},
-          createPeripheralElement: () => {},
-          createAlignmentElement: (opts) => printCommands.push({type: 'align', position: opts.position}),
-          createTextElement: (opts) => printCommands.push({type: 'text', ...opts}),
-          createRuledLineElement: (opts) => printCommands.push({type: 'line', thickness: opts.thickness}),
-          createCutPaperElement: (opts) => printCommands.push({type: 'cut', feed: opts.feed}),
-          toString: () => window.buildPrintXML(printCommands)
-        };
+        const builder = new StarWebPrintBuilder();
+        const request = builder.createInitializationElement();
         
         // 58mm幅設定
         builder.createPeripheralElement({channel: 1, on: 100, off: 100});
@@ -11391,9 +11343,8 @@ ${redSlipCount > 0 ? `
         builder.createCutPaperElement({feed: true});
         
         // プロキシ対応の印刷処理
-        const printXML = window.buildPrintXML(printCommands);
         await sendPrintRequest(
-          printXML,
+          builder,
           (response) => {
             console.log('印刷成功:', response);
             showToast('お会計伝票を印刷しました');
@@ -11418,17 +11369,8 @@ ${redSlipCount > 0 ? `
       }
       
       try {
-        // StarWebPrintBuilderの代わりに配列でコマンドを管理
-        const printCommands = [];
-        const builder = {
-          createInitializationElement: () => {},
-          createPeripheralElement: () => {},
-          createAlignmentElement: (opts) => printCommands.push({type: 'align', position: opts.position}),
-          createTextElement: (opts) => printCommands.push({type: 'text', ...opts}),
-          createRuledLineElement: (opts) => printCommands.push({type: 'line', thickness: opts.thickness}),
-          createCutPaperElement: (opts) => printCommands.push({type: 'cut', feed: opts.feed}),
-          toString: () => window.buildPrintXML(printCommands)
-        };
+        const builder = new StarWebPrintBuilder();
+        const request = builder.createInitializationElement();
         
         // 58mm幅設定
         builder.createPeripheralElement({channel: 1, on: 100, off: 100});
@@ -11618,9 +11560,8 @@ ${redSlipCount > 0 ? `
         builder.createCutPaperElement({feed: true});
         
         // プロキシ対応の印刷処理
-        const printXML = window.buildPrintXML(printCommands);
         await sendPrintRequest(
-          printXML,
+          builder,
           (response) => {
             console.log('印刷成功:', response);
             closeReceiptModal();
@@ -11645,17 +11586,8 @@ ${redSlipCount > 0 ? `
       }
       
       try {
-        // StarWebPrintBuilderの代わりに配列でコマンドを管理
-        const printCommands = [];
-        const builder = {
-          createInitializationElement: () => {},
-          createPeripheralElement: () => {},
-          createAlignmentElement: (opts) => printCommands.push({type: 'align', position: opts.position}),
-          createTextElement: (opts) => printCommands.push({type: 'text', ...opts}),
-          createRuledLineElement: (opts) => printCommands.push({type: 'line', thickness: opts.thickness}),
-          createCutPaperElement: (opts) => printCommands.push({type: 'cut', feed: opts.feed}),
-          toString: () => window.buildPrintXML(printCommands)
-        };
+        const builder = new StarWebPrintBuilder();
+        const request = builder.createInitializationElement();
         
         // 58mm幅設定
         builder.createPeripheralElement({channel: 1, on: 100, off: 100});
@@ -11735,9 +11667,8 @@ ${redSlipCount > 0 ? `
         builder.createCutPaperElement({feed: true});
         
         // プロキシ対応の印刷処理
-        const printXML = window.buildPrintXML(printCommands);
         await sendPrintRequest(
-          printXML,
+          builder,
           (response) => {
             console.log('印刷成功:', response);
             closeReceiptModal();
