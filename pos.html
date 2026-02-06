@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex, nofollow, noarchive">
   <meta name="googlebot" content="noindex, nofollow, noarchive">
   <meta name="bingbot" content="noindex, nofollow, noarchive">
-  <title>レジシステム</title>
+  <title>レジシステム (Bluetooth対応)</title>
   <style>
     @keyframes fadeIn {
       from { opacity: 0; }
@@ -15863,119 +15863,68 @@ ${redSlipCount > 0 ? `
   </div>
   
   <!-- ========================================
-       汎用USBレシートプリンター対応パッチ
+       Bluetoothレシートプリンター対応（mCprint3対応）
        ======================================== -->
   <script>
     // グローバル変数
-    window.usbPrinter = null;
-    window.printerEndpoint = null;
+    window.bluetoothDevice = null;
+    window.bluetoothCharacteristic = null;
+    window.printerConnected = false;
+    
+    // Star mCprint3 用のサービスUUID
+    const STAR_SERVICE_UUID = '00001234-0000-1000-8000-00805f9b34fb';
+    const STAR_CHAR_UUID = '00001235-0000-1000-8000-00805f9b34fb';
 
-    // 汎用USBプリンターを検索して接続
+    // Bluetoothプリンターを検索して接続
     async function connectUSBPrinter() {
-      if (!navigator.usb) {
-        throw new Error('このブラウザはWebUSB APIに対応していません。ChromeまたはEdgeをご使用ください。');
+      if (!navigator.bluetooth) {
+        throw new Error('このブラウザはWeb Bluetooth APIに対応していません。Chrome、Edge、またはBluetoothがサポートされているブラウザをご使用ください。');
       }
       
       try {
-        console.log('🔍 USBプリンターを検索中...');
+        console.log('🔵 Bluetoothプリンターを検索中...');
         console.log('📱 デバイス情報:', navigator.userAgent);
         
-        // まず接続済みデバイスを確認
-        const devices = await navigator.usb.getDevices();
-        console.log('🔌 接続済みデバイス数:', devices.length);
-        
-        if (devices.length > 0) {
-          console.log('✅ 接続済みデバイスを使用:', devices[0]);
-          const device = devices[0];
-          
-          // デバイスを開く
-          if (!device.opened) {
-            await device.open();
-            console.log('📂 デバイスをオープンしました');
-            
-            // コンフィグレーションを選択
-            if (device.configuration === null) {
-              await device.selectConfiguration(1);
-              console.log('⚙️ コンフィグレーション選択完了');
-            }
-            
-            // インターフェースをクレーム
-            await device.claimInterface(0);
-            console.log('🔗 インターフェース #0 接続完了');
-          }
-          
-          // エンドポイント検索
-          const endpoint = findOutputEndpoint(device);
-          
-          window.usbPrinter = device;
-          window.printerEndpoint = endpoint;
-          
-          alert(`プリンターとの接続に成功しました!\n\n製品: ${device.productName || '不明'}\nメーカー: ${device.manufacturerName || '不明'}`);
-          return device;
-        }
-        
-        // 新規デバイスを要求（より広範なフィルター）
-        const device = await navigator.usb.requestDevice({
+        // デバイス選択ダイアログを表示
+        const device = await navigator.bluetooth.requestDevice({
           filters: [
-            // 主要なプリンターメーカーのVendor ID
-            { vendorId: 0x0519 }, // Star Micronics
-            { vendorId: 0x04b8 }, // EPSON/Seiko Epson
-            { vendorId: 0x1504 }, // Citizen
-            { vendorId: 0x0416 }, // Intermec
-            { vendorId: 0x1fc9 }, // Bixolon
-            { vendorId: 0x0dd4 }, // Custom Engineering
-            { vendorId: 0x0525 }, // NetChip Technology
-            { vendorId: 0x20d1 }, // RONGTA (中国製)
-            { vendorId: 0x6868 }, // Zjiang (中国製)
-            { vendorId: 0x0483 }, // 汎用チップ
-            { vendorId: 0x1a86 }, // QinHeng Electronics (CH340など)
-            { vendorId: 0x067b }, // Prolific
-            { vendorId: 0x0fe6 }, // ICS Advent
-            { vendorId: 0x28e9 }, // GD32
-            { vendorId: 0x2c7f }, // 中国製プリンター
-            { vendorId: 0x1fc9, productId: 0x2016 }, // Bixolon SPP-R200III
-          ]
+            { namePrefix: 'mC' },   // mCprint シリーズ
+            { namePrefix: 'Star' }, // Star プリンター
+            { services: [STAR_SERVICE_UUID] }
+          ],
+          optionalServices: [STAR_SERVICE_UUID]
         });
         
-        console.log('✅ USBデバイス検出:', device);
-        console.log('   製品名:', device.productName || '不明');
-        console.log('   メーカー:', device.manufacturerName || '不明');
-        console.log('   Vendor ID:', '0x' + device.vendorId.toString(16).padStart(4, '0'));
-        console.log('   Product ID:', '0x' + device.productId.toString(16).padStart(4, '0'));
+        console.log('✅ Bluetoothデバイス検出:', device);
+        console.log('   デバイス名:', device.name || '不明');
+        console.log('   デバイスID:', device.id);
         
-        // デバイスを開く
-        await device.open();
-        console.log('📂 デバイスをオープンしました');
+        // 切断イベントのリスナーを設定
+        device.addEventListener('gattserverdisconnected', onBluetoothDisconnected);
         
-        // コンフィグレーションを選択
-        if (device.configuration === null) {
-          await device.selectConfiguration(1);
-          console.log('⚙️ コンフィグレーション選択完了');
-        }
+        // GATTサーバーに接続
+        console.log('🔌 GATTサーバーに接続中...');
+        const server = await device.gatt.connect();
+        console.log('✅ GATT接続完了');
         
-        // 最初のインターフェースを取得
-        const interfaces = device.configuration.interfaces;
-        console.log('📋 利用可能なインターフェース数:', interfaces.length);
+        // サービスを取得
+        console.log('🔍 サービス取得中...');
+        const service = await server.getPrimaryService(STAR_SERVICE_UUID);
+        console.log('✅ サービス取得完了');
         
-        if (interfaces.length === 0) {
-          throw new Error('利用可能なインターフェースがありません');
-        }
+        // キャラクタリスティックを取得
+        console.log('📝 キャラクタリスティック取得中...');
+        const characteristic = await service.getCharacteristic(STAR_CHAR_UUID);
+        console.log('✅ キャラクタリスティック取得完了');
         
-        // インターフェースをクレーム
-        await device.claimInterface(0);
-        console.log('🔗 インターフェース #0 接続完了');
+        window.bluetoothDevice = device;
+        window.bluetoothCharacteristic = characteristic;
+        window.printerConnected = true;
         
-        // 出力エンドポイントを検索
-        const endpoint = findOutputEndpoint(device);
-        
-        window.usbPrinter = device;
-        window.printerEndpoint = endpoint;
-        
-        alert(`プリンターとの接続に成功しました!\n\n製品: ${device.productName || '不明'}\nメーカー: ${device.manufacturerName || '不明'}`);
-        return device;
+        alert(`プリンターとの接続に成功しました!\n\nデバイス: ${device.name || '不明'}`);
         
       } catch (error) {
-        console.error('❌ USB接続エラー:', error);
+        console.error('❌ Bluetooth接続エラー:', error);
         console.error('   エラー名:', error.name);
         console.error('   エラーメッセージ:', error.message);
         
@@ -15983,23 +15932,23 @@ ${redSlipCount > 0 ? `
         
         if (error.name === 'NotFoundError') {
           errorMsg += '確認事項:\n';
-          errorMsg += '1. USBケーブルが接続されているか\n';
-          errorMsg += '2. プリンターの電源が入っているか\n';
+          errorMsg += '1. mCprint3の電源が入っているか\n';
+          errorMsg += '2. Bluetoothがペアリングモードになっているか\n';
           errorMsg += '3. デバイス選択ダイアログでプリンターを選んだか\n\n';
-          errorMsg += '📱 スマートフォンの場合:\n';
-          errorMsg += '・USB OTGケーブルが必要です\n';
-          errorMsg += '・一部のAndroid端末では動作しない場合があります\n';
-          errorMsg += '・PCでの使用を推奨します';
+          errorMsg += '💡 ヒント:\n';
+          errorMsg += '・最初にデバイスのBluetooth設定でペアリングを試してください\n';
+          errorMsg += '・プリンターを再起動してみてください';
         } else if (error.name === 'SecurityError') {
           errorMsg += 'セキュリティエラー:\n';
-          errorMsg += 'ブラウザでUSBアクセスが許可されていません。\n';
+          errorMsg += 'ブラウザでBluetoothアクセスが許可されていません。\n';
           errorMsg += 'HTTPSまたはlocalhostで実行してください。';
         } else if (error.name === 'NotSupportedError') {
-          errorMsg += 'このデバイスではWebUSB APIがサポートされていません。\n\n';
-          errorMsg += '📱 Android版Chromeをお使いの場合:\n';
-          errorMsg += '・Chrome 61以降が必要です\n';
-          errorMsg += '・一部の端末では利用できません\n';
-          errorMsg += '・PCでの使用を推奨します';
+          errorMsg += 'このデバイスではWeb Bluetooth APIがサポートされていません。\n\n';
+          errorMsg += '📱 対応ブラウザ:\n';
+          errorMsg += '・Android版Chrome 56以降\n';
+          errorMsg += '・PC版Chrome\n';
+          errorMsg += '・PC版Edge\n';
+          errorMsg += '※ iOSのChromeには対応していません';
         } else {
           errorMsg += 'エラー: ' + error.message;
         }
@@ -16009,28 +15958,18 @@ ${redSlipCount > 0 ? `
       }
     }
     
-    // 出力エンドポイントを検索するヘルパー関数
-    function findOutputEndpoint(device) {
-      const iface = device.configuration.interfaces[0];
-      let endpoint = null;
+    // 切断イベントハンドラ
+    function onBluetoothDisconnected(event) {
+      console.log('⚠️ プリンターが切断されました:', event.target.name);
+      window.printerConnected = false;
+      window.bluetoothDevice = null;
+      window.bluetoothCharacteristic = null;
       
-      for (const alt of iface.alternates) {
-        for (const ep of alt.endpoints) {
-          console.log(`  エンドポイント: ${ep.endpointNumber} (${ep.direction}) - タイプ: ${ep.type}`);
-          if (ep.direction === 'out' && ep.type === 'bulk') {
-            endpoint = ep.endpointNumber;
-            console.log('✅ 出力エンドポイント発見:', endpoint);
-            return endpoint;
-          }
-        }
+      if (typeof showToast === 'function') {
+        showToast('プリンターが切断されました', 'warning');
       }
-      
-      // 見つからない場合はデフォルト
-      endpoint = 1;
-      console.warn('⚠️ 出力エンドポイントが見つかりません。デフォルト(1)を使用します');
-      return endpoint;
     }
-
+    
     // バイト配列を結合するヘルパー関数
     function appendBytes(array1, array2) {
       const tmp = new Uint8Array(array1.length + array2.length);
@@ -16039,33 +15978,42 @@ ${redSlipCount > 0 ? `
       return tmp;
     }
 
-    // ESC/POSコマンドでデータを送信
+    // Bluetoothプリンターにデータを送信
     async function sendToUSBPrinter(data) {
-      if (!window.usbPrinter) {
+      if (!window.bluetoothCharacteristic) {
         throw new Error('プリンターが接続されていません');
       }
       
-      const endpoint = window.printerEndpoint || 1;
-      
       try {
-        console.log(`📤 印刷データ送信中... (${data.length} bytes, endpoint: ${endpoint})`);
+        console.log(`📤 印刷データ送信中... (${data.length} bytes via Bluetooth)`);
         
-        // データを送信
-        const result = await window.usbPrinter.transferOut(endpoint, data);
+        // データを小さなチャンクに分割して送信（MTUサイズ制限対応）
+        const chunkSize = 512; // 安全なチャンクサイズ
+        let totalSent = 0;
         
-        if (result.status !== 'ok') {
-          throw new Error('データ送信に失敗: ' + result.status);
+        for (let i = 0; i < data.length; i += chunkSize) {
+          const chunk = data.slice(i, Math.min(i + chunkSize, data.length));
+          await window.bluetoothCharacteristic.writeValue(chunk);
+          totalSent += chunk.length;
+          
+          console.log(`  📨 チャンク送信: ${totalSent}/${data.length} bytes`);
+          
+          // 少し待機して確実に送信
+          if (i + chunkSize < data.length) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
         }
         
-        console.log('✅ 送信完了:', result.bytesWritten, 'bytes');
-        return result;
+        console.log('✅ 送信完了:', totalSent, 'bytes');
+        return { status: 'ok', bytesWritten: totalSent };
         
       } catch (error) {
         console.error('❌ 送信エラー:', error);
         
         // 接続が切れている可能性があるのでリセット
-        window.usbPrinter = null;
-        window.printerEndpoint = null;
+        window.bluetoothDevice = null;
+        window.bluetoothCharacteristic = null;
+        window.printerConnected = false;
         
         throw error;
       }
@@ -16280,7 +16228,7 @@ ${redSlipCount > 0 ? `
     // テスト印刷用の関数
     window.testUSBPrint = async function() {
       try {
-        if (!window.usbPrinter) {
+        if (!window.bluetoothCharacteristic) {
           await connectUSBPrinter();
         }
         
@@ -16295,7 +16243,12 @@ ${redSlipCount > 0 ? `
         commands = appendBytes(commands, [0x1D, 0x56, 0x01]); // カット
         
         await sendToUSBPrinter(commands);
-        alert('テスト印刷を送信しました');
+        
+        if (typeof showToast === 'function') {
+          showToast('テスト印刷を送信しました');
+        } else {
+          alert('テスト印刷を送信しました');
+        }
         
       } catch (error) {
         console.error('テスト印刷エラー:', error);
@@ -16305,27 +16258,25 @@ ${redSlipCount > 0 ? `
 
     // プリンター情報を表示
     window.showPrinterInfo = function() {
-      if (!window.usbPrinter) {
+      if (!window.bluetoothDevice) {
         alert('プリンターが接続されていません');
         return;
       }
       
-      const device = window.usbPrinter;
+      const device = window.bluetoothDevice;
       const info = `
 【接続中のプリンター情報】
 
-製品名: ${device.productName || '不明'}
-メーカー: ${device.manufacturerName || '不明'}
-Vendor ID: 0x${device.vendorId.toString(16).padStart(4, '0')}
-Product ID: 0x${device.productId.toString(16).padStart(4, '0')}
-出力エンドポイント: ${window.printerEndpoint || '不明'}
+デバイス名: ${device.name || '不明'}
+デバイスID: ${device.id}
+接続状態: ${device.gatt.connected ? '接続中' : '切断'}
       `.trim();
       
       alert(info);
       console.log('📋 プリンター情報:', device);
     };
 
-    console.log('✅ 汎用USBプリンター対応パッチを読み込みました');
+    console.log('✅ Bluetoothプリンター対応スクリプトを読み込みました (mCprint3対応)');
     console.log('💡 使い方:');
     console.log('  - testUSBPrinterConnection() : プリンター接続');
     console.log('  - testUSBPrint() : テスト印刷');
