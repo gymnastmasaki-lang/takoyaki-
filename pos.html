@@ -1709,11 +1709,8 @@
             <button onclick="increaseWaiting()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">待増</button>
             <button id="time-override-btn" onclick="toggleTimeOverride()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">時外</button>
             <button onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/order.html', '_blank')" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">発注</button>
-          </div>
-          
-          <div style="display: flex; gap: 10px;">
-            <button onclick="testUSBPrinterConnection()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;" title="USBプリンターに接続">🖨️接続</button>
-            <button onclick="testUSBPrint()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;" title="テスト印刷を実行">📄Test</button>
+            <button onclick="testUSBPrinterConnection()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;" title="USBプリンターに接続">接続</button>
+            <button onclick="testUSBPrint()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;" title="テスト印刷を実行">Test</button>
           </div>
           
           <div style="display: flex; gap: 10px;">
@@ -15881,8 +15878,43 @@ ${redSlipCount > 0 ? `
       
       try {
         console.log('🔍 USBプリンターを検索中...');
+        console.log('📱 デバイス情報:', navigator.userAgent);
         
-        // フィルターなしで全USBデバイスを表示（ユーザーが選択）
+        // まず接続済みデバイスを確認
+        const devices = await navigator.usb.getDevices();
+        console.log('🔌 接続済みデバイス数:', devices.length);
+        
+        if (devices.length > 0) {
+          console.log('✅ 接続済みデバイスを使用:', devices[0]);
+          const device = devices[0];
+          
+          // デバイスを開く
+          if (!device.opened) {
+            await device.open();
+            console.log('📂 デバイスをオープンしました');
+            
+            // コンフィグレーションを選択
+            if (device.configuration === null) {
+              await device.selectConfiguration(1);
+              console.log('⚙️ コンフィグレーション選択完了');
+            }
+            
+            // インターフェースをクレーム
+            await device.claimInterface(0);
+            console.log('🔗 インターフェース #0 接続完了');
+          }
+          
+          // エンドポイント検索
+          const endpoint = findOutputEndpoint(device);
+          
+          window.usbPrinter = device;
+          window.printerEndpoint = endpoint;
+          
+          alert(`プリンターとの接続に成功しました!\n\n製品: ${device.productName || '不明'}\nメーカー: ${device.manufacturerName || '不明'}`);
+          return device;
+        }
+        
+        // 新規デバイスを要求（より広範なフィルター）
         const device = await navigator.usb.requestDevice({
           filters: [
             // 主要なプリンターメーカーのVendor ID
@@ -15898,6 +15930,10 @@ ${redSlipCount > 0 ? `
             { vendorId: 0x0483 }, // 汎用チップ
             { vendorId: 0x1a86 }, // QinHeng Electronics (CH340など)
             { vendorId: 0x067b }, // Prolific
+            { vendorId: 0x0fe6 }, // ICS Advent
+            { vendorId: 0x28e9 }, // GD32
+            { vendorId: 0x2c7f }, // 中国製プリンター
+            { vendorId: 0x1fc9, productId: 0x2016 }, // Bixolon SPP-R200III
           ]
         });
         
@@ -15930,26 +15966,7 @@ ${redSlipCount > 0 ? `
         console.log('🔗 インターフェース #0 接続完了');
         
         // 出力エンドポイントを検索
-        const iface = interfaces[0];
-        let endpoint = null;
-        
-        for (const alt of iface.alternates) {
-          for (const ep of alt.endpoints) {
-            console.log(`  エンドポイント: ${ep.endpointNumber} (${ep.direction}) - タイプ: ${ep.type}`);
-            if (ep.direction === 'out' && ep.type === 'bulk') {
-              endpoint = ep.endpointNumber;
-              console.log('✅ 出力エンドポイント発見:', endpoint);
-              break;
-            }
-          }
-          if (endpoint) break;
-        }
-        
-        if (!endpoint) {
-          // 出力エンドポイントが見つからない場合はデフォルトで1を使用
-          endpoint = 1;
-          console.warn('⚠️ 出力エンドポイントが見つかりません。デフォルト(1)を使用します');
-        }
+        const endpoint = findOutputEndpoint(device);
         
         window.usbPrinter = device;
         window.printerEndpoint = endpoint;
@@ -15959,6 +15976,8 @@ ${redSlipCount > 0 ? `
         
       } catch (error) {
         console.error('❌ USB接続エラー:', error);
+        console.error('   エラー名:', error.name);
+        console.error('   エラーメッセージ:', error.message);
         
         let errorMsg = 'プリンターへの接続に失敗しました。\n\n';
         
@@ -15966,11 +15985,21 @@ ${redSlipCount > 0 ? `
           errorMsg += '確認事項:\n';
           errorMsg += '1. USBケーブルが接続されているか\n';
           errorMsg += '2. プリンターの電源が入っているか\n';
-          errorMsg += '3. デバイス選択ダイアログでプリンターを選んだか';
+          errorMsg += '3. デバイス選択ダイアログでプリンターを選んだか\n\n';
+          errorMsg += '📱 スマートフォンの場合:\n';
+          errorMsg += '・USB OTGケーブルが必要です\n';
+          errorMsg += '・一部のAndroid端末では動作しない場合があります\n';
+          errorMsg += '・PCでの使用を推奨します';
         } else if (error.name === 'SecurityError') {
           errorMsg += 'セキュリティエラー:\n';
           errorMsg += 'ブラウザでUSBアクセスが許可されていません。\n';
           errorMsg += 'HTTPSまたはlocalhostで実行してください。';
+        } else if (error.name === 'NotSupportedError') {
+          errorMsg += 'このデバイスではWebUSB APIがサポートされていません。\n\n';
+          errorMsg += '📱 Android版Chromeをお使いの場合:\n';
+          errorMsg += '・Chrome 61以降が必要です\n';
+          errorMsg += '・一部の端末では利用できません\n';
+          errorMsg += '・PCでの使用を推奨します';
         } else {
           errorMsg += 'エラー: ' + error.message;
         }
@@ -15978,6 +16007,28 @@ ${redSlipCount > 0 ? `
         alert(errorMsg);
         throw error;
       }
+    }
+    
+    // 出力エンドポイントを検索するヘルパー関数
+    function findOutputEndpoint(device) {
+      const iface = device.configuration.interfaces[0];
+      let endpoint = null;
+      
+      for (const alt of iface.alternates) {
+        for (const ep of alt.endpoints) {
+          console.log(`  エンドポイント: ${ep.endpointNumber} (${ep.direction}) - タイプ: ${ep.type}`);
+          if (ep.direction === 'out' && ep.type === 'bulk') {
+            endpoint = ep.endpointNumber;
+            console.log('✅ 出力エンドポイント発見:', endpoint);
+            return endpoint;
+          }
+        }
+      }
+      
+      // 見つからない場合はデフォルト
+      endpoint = 1;
+      console.warn('⚠️ 出力エンドポイントが見つかりません。デフォルト(1)を使用します');
+      return endpoint;
     }
 
     // バイト配列を結合するヘルパー関数
