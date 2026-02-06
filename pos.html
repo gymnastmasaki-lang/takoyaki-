@@ -1778,6 +1778,16 @@
             <button class="btn btn-primary" onclick="showPaymentModal()">会計処理</button>
             <button class="btn" onclick="printBill()" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white;">お会計伝票</button>
             <button class="btn btn-secondary" onclick="clearSelection()">← テーブル選択に戻る</button>
+            
+            <!-- 全体会計処理セクション -->
+            <div style="margin-top: 25px; padding: 20px; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); border-radius: 12px; border: 2px solid #2196F3;">
+              <div style="font-size: 16px; font-weight: bold; color: #1565C0; margin-bottom: 15px; text-align: center;">全体会計処理</div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <button class="btn" onclick="processAllCheckouts()" style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; font-weight: bold;">全会計処理</button>
+                <button class="btn" onclick="printAllBills()" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; font-weight: bold;">全お会計伝票</button>
+              </div>
+              <div style="margin-top: 10px; font-size: 12px; color: #666; text-align: center;">すべての未会計注文を一括で処理します</div>
+            </div>
           </div>
         </div>
       </div>
@@ -9625,6 +9635,7 @@ ${redSlipCount > 0 ? `
         </div>
         <div class="order-actions">
           ${!order.paidAt && !order.cancelledAt ? `<button class="order-action-btn pay-btn" onclick="payOrderIndividual('${order.id}', ${order.totalAmount || 0})">会計</button>` : ''}
+          ${!order.paidAt && !order.cancelledAt ? `<button class="order-action-btn" onclick="printBill('${order.id}')" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white;">お会計伝票</button>` : ''}
           ${!order.completedAt && !order.cancelledAt ? `<button class="order-action-btn complete-btn" onclick="completeOrder('${order.id}')">完了</button>` : ''}
           ${!order.completedAt && !order.cancelledAt ? `<button class="order-action-btn cancel-btn" onclick="cancelOrder('${order.id}')">キャンセル</button>` : ''}
           ${order.completedAt || order.cancelledAt ? `<button class="order-action-btn delete-btn" onclick="deleteOrder('${order.id}')">削除</button>` : ''}
@@ -16848,8 +16859,80 @@ Product ID: 0x${device.productId.toString(16).padStart(4, '0')}
     // 元のprintBill関数を保存
     const originalPrintBill = window.printBill;
 
-    // printBill を Bluetooth 優先版に置き換え
-    window.printBill = async function() {
+    // printBill を Bluetooth 優先版に置き換え（個別注文対応版）
+    window.printBill = async function(specificOrderId = null) {
+      // 特定の注文IDが指定されている場合は、その注文のみ印刷
+      if (specificOrderId) {
+        try {
+          const orderDoc = await window.getDoc(window.getStoreDoc('orders', specificOrderId));
+          if (!orderDoc.exists()) {
+            alert('注文が見つかりません');
+            return;
+          }
+          
+          const order = { id: orderDoc.id, ...orderDoc.data() };
+          const tableNumber = order.tableNumber;
+          
+          let grandTotal = 0;
+          let itemCount = 0;
+          const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
+          const branchName = window.receiptSettings?.branchName || '下赤塚店';
+          
+          const now = new Date();
+          const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+          
+          const itemsData = [];
+          order.items.forEach(item => {
+            const subtotal = item.price * item.quantity;
+            grandTotal += subtotal;
+            itemCount += item.quantity;
+            
+            let displayPrice = item.price;
+            if (item.taxType === 'exclusive') {
+              const taxRate = item.taxRate || 10;
+              displayPrice = Math.floor(item.price * (1 + taxRate / 100));
+            }
+            
+            itemsData.push({
+              name: item.name,
+              price: displayPrice,
+              quantity: item.quantity,
+              toppings: item.toppings,
+              toppingDetails: item.toppingDetails,
+              orderNumber: order.orderNumber
+            });
+          });
+          
+          // Bluetooth接続があればBluetooth印刷、なければUSB印刷
+          if (window.bluetoothCharacteristic) {
+            await printBillToBluetooth(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
+          } else if (window.usbPrinter) {
+            await printBillToUSB(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
+          } else {
+            const choice = confirm('プリンターが接続されていません。\n\nBluetoothプリンターを接続しますか？\n（キャンセルでUSBプリンター接続）');
+            if (choice) {
+              await window.connectBluetoothPrinter();
+              await printBillToBluetooth(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
+            } else {
+              await connectUSBPrinter();
+              await printBillToUSB(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
+            }
+          }
+          
+          if (typeof showToast === 'function') {
+            showToast('お会計伝票を印刷しました');
+          } else {
+            alert('お会計伝票を印刷しました');
+          }
+          return;
+          
+        } catch (e) {
+          console.error('印刷エラー:', e);
+          alert('印刷に失敗しました: ' + e.message);
+          return;
+        }
+      }
+      
       // selectedTableまたはtableSelectから取得
       let tableNumber = window.selectedTable;
       if (!tableNumber) {
@@ -16943,6 +17026,160 @@ Product ID: 0x${device.productId.toString(16).padStart(4, '0')}
       } catch (e) {
         console.error('印刷エラー:', e);
         alert('印刷に失敗しました: ' + e.message);
+      }
+    };
+
+    // ========================================
+    // 全伝票印刷機能
+    // ========================================
+    
+    window.printAllBills = async function() {
+      try {
+        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
+        const unpaidOrders = [];
+        
+        ordersSnapshot.forEach(doc => {
+          const order = doc.data();
+          if (!order.paidAt && !order.deleted && !order.cancelledAt) {
+            unpaidOrders.push({ id: doc.id, ...order });
+          }
+        });
+        
+        if (unpaidOrders.length === 0) {
+          alert('印刷する伝票がありません');
+          return;
+        }
+        
+        // 確認ダイアログ
+        if (!confirm(`全${unpaidOrders.length}件の未会計伝票を印刷しますか？`)) {
+          return;
+        }
+        
+        const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
+        const branchName = window.receiptSettings?.branchName || '下赤塚店';
+        
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        
+        // プリンター接続確認
+        if (!window.bluetoothCharacteristic && !window.usbPrinter) {
+          const choice = confirm('プリンターが接続されていません。\n\nBluetoothプリンターを接続しますか？\n（キャンセルでUSBプリンター接続）');
+          if (choice) {
+            await window.connectBluetoothPrinter();
+          } else {
+            await connectUSBPrinter();
+          }
+        }
+        
+        // 各注文の伝票を印刷
+        for (const order of unpaidOrders) {
+          let grandTotal = 0;
+          let itemCount = 0;
+          const itemsData = [];
+          
+          order.items.forEach(item => {
+            const subtotal = item.price * item.quantity;
+            grandTotal += subtotal;
+            itemCount += item.quantity;
+            
+            let displayPrice = item.price;
+            if (item.taxType === 'exclusive') {
+              const taxRate = item.taxRate || 10;
+              displayPrice = Math.floor(item.price * (1 + taxRate / 100));
+            }
+            
+            itemsData.push({
+              name: item.name,
+              price: displayPrice,
+              quantity: item.quantity,
+              toppings: item.toppings,
+              toppingDetails: item.toppingDetails,
+              orderNumber: order.orderNumber
+            });
+          });
+          
+          // Bluetooth接続があればBluetooth印刷、なければUSB印刷
+          if (window.bluetoothCharacteristic) {
+            await printBillToBluetooth(storeName, branchName, dateStr, order.tableNumber, itemsData, grandTotal, itemCount);
+          } else if (window.usbPrinter) {
+            await printBillToUSB(storeName, branchName, dateStr, order.tableNumber, itemsData, grandTotal, itemCount);
+          }
+          
+          // 印刷間隔を設ける
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
+        if (typeof showToast === 'function') {
+          showToast(`全${unpaidOrders.length}件の伝票を印刷しました`);
+        } else {
+          alert(`全${unpaidOrders.length}件の伝票を印刷しました`);
+        }
+        
+      } catch (e) {
+        console.error('全伝票印刷エラー:', e);
+        alert('全伝票印刷に失敗しました: ' + e.message);
+      }
+    };
+
+    // ========================================
+    // 全会計処理機能
+    // ========================================
+    
+    window.processAllCheckouts = async function() {
+      try {
+        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
+        const unpaidOrders = [];
+        
+        ordersSnapshot.forEach(doc => {
+          const order = doc.data();
+          if (!order.paidAt && !order.deleted && !order.cancelledAt) {
+            unpaidOrders.push({ id: doc.id, ...order });
+          }
+        });
+        
+        if (unpaidOrders.length === 0) {
+          alert('会計処理する注文がありません');
+          return;
+        }
+        
+        // 合計金額を計算
+        let totalAmount = 0;
+        unpaidOrders.forEach(order => {
+          order.items.forEach(item => {
+            totalAmount += item.price * item.quantity;
+          });
+        });
+        
+        // 確認ダイアログ
+        if (!confirm(`全${unpaidOrders.length}件の注文（合計¥${totalAmount.toLocaleString()}）の会計処理を実行しますか？\n\nこの操作により、すべての未会計注文が完了済みになります。`)) {
+          return;
+        }
+        
+        const now = window.Timestamp.now();
+        
+        // 各注文を会計済みに更新
+        for (const order of unpaidOrders) {
+          await window.updateDoc(window.getStoreDoc('orders', order.id), {
+            paidAt: now,
+            paymentMethod: '一括会計',
+            paymentAmount: order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+          });
+        }
+        
+        if (typeof showToast === 'function') {
+          showToast(`全${unpaidOrders.length}件の会計処理が完了しました`);
+        } else {
+          alert(`全${unpaidOrders.length}件の会計処理が完了しました`);
+        }
+        
+        // 画面を更新
+        if (typeof refreshOrderList === 'function') {
+          refreshOrderList();
+        }
+        
+      } catch (e) {
+        console.error('全会計処理エラー:', e);
+        alert('全会計処理に失敗しました: ' + e.message);
       }
     };
 
