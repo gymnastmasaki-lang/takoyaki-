@@ -1709,8 +1709,6 @@
             <button onclick="increaseWaiting()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">待増</button>
             <button id="time-override-btn" onclick="toggleTimeOverride()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">時外</button>
             <button onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/order.html', '_blank')" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">発注</button>
-            <button onclick="testUSBPrinterConnection()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;" title="USBプリンターに接続">接続</button>
-            <button onclick="testUSBPrint()" style="padding: 12px 24px; font-size: 16px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;" title="テスト印刷を実行">Test</button>
           </div>
           
           <div style="display: flex; gap: 10px;">
@@ -16696,20 +16694,31 @@ Product ID: 0x${device.productId.toString(16).padStart(4, '0')}
         let commands = new Uint8Array([0x1B, 0x40]);
 
         // ===== ヘッダー =====
+        // レシート設定から店名・支店名などを取得
+        const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
+        const branchName = window.receiptSettings?.branchName || '下赤塚店';
+        const address = window.receiptSettings?.address || '';
+        const phone = window.receiptSettings?.phone || '';
+        const postalCode = window.receiptSettings?.postalCode || '';
+        const receiptMessage = window.receiptSettings?.message || 'ありがとうございました\nまたのご来店をお待ちしております';
+        
         commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
         commands = appendBytes(commands, encoder.encode('================================\n'));
         
         commands = appendBytes(commands, [0x1D, 0x21, 0x11]);
-        commands = appendBytes(commands, encoder.encode(`${receiptData.storeName || '粉もん屋 八'}\n`));
+        commands = appendBytes(commands, encoder.encode(`${storeName}\n`));
         commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
         
-        commands = appendBytes(commands, encoder.encode(`${receiptData.branchName || '下赤塚店'}\n`));
+        commands = appendBytes(commands, encoder.encode(`${branchName}\n`));
         
-        if (receiptData.address) {
-          commands = appendBytes(commands, encoder.encode(`${receiptData.address}\n`));
+        if (postalCode) {
+          commands = appendBytes(commands, encoder.encode(`〒${postalCode}\n`));
         }
-        if (receiptData.tel) {
-          commands = appendBytes(commands, encoder.encode(`TEL: ${receiptData.tel}\n`));
+        if (address) {
+          commands = appendBytes(commands, encoder.encode(`${address}\n`));
+        }
+        if (phone) {
+          commands = appendBytes(commands, encoder.encode(`TEL: ${phone}\n`));
         }
         
         commands = appendBytes(commands, encoder.encode('================================\n'));
@@ -16768,8 +16777,13 @@ Product ID: 0x${device.productId.toString(16).padStart(4, '0')}
           commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
         }
         
-        commands = appendBytes(commands, encoder.encode('\n\nありがとうございました\n'));
-        commands = appendBytes(commands, encoder.encode('またのご来店をお待ちしております\n\n\n'));
+        // メッセージ（改行を反映）
+        commands = appendBytes(commands, encoder.encode('\n'));
+        const messageLines = receiptMessage.split('\n');
+        messageLines.forEach(line => {
+          commands = appendBytes(commands, encoder.encode(`${line}\n`));
+        });
+        commands = appendBytes(commands, encoder.encode('\n\n'));
         
         // カット
         commands = appendBytes(commands, [0x1B, 0x64, 0x03]);
