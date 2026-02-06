@@ -17,8 +17,7 @@
       to { transform: translateY(0); opacity: 1; }
     }
   </style>
-  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/v1.1.0/StarWebPrintTrader.js"></script>
-  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/v1.2.0/StarWebPrintBuilder.js"></script>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -64,77 +63,6 @@
     window.setDoc = setDoc;
     window.limit = limit;
     window.deleteDoc = deleteDoc;
-    // ============================================
-    // StarWebPrintBuilderの代替実装
-    // ============================================
-    
-    // 外部スクリプトが読み込めない場合のフォールバック
-    if (typeof StarWebPrintBuilder === 'undefined') {
-      console.warn('⚠️ StarWebPrintBuilderが読み込めませんでした。代替実装を使用します。');
-      
-      window.StarWebPrintBuilder = class {
-        constructor() {
-          this.commands = [];
-        }
-        
-        createInitializationElement() {
-          this.commands.push({ type: 'init' });
-        }
-        
-        createPeripheralElement(opts) {
-          // 周辺機器設定（無視）
-        }
-        
-        createAlignmentElement(opts) {
-          this.commands.push({ type: 'align', position: opts.position });
-        }
-        
-        createTextElement(opts) {
-          this.commands.push({ type: 'text', ...opts });
-        }
-        
-        createRuledLineElement(opts) {
-          this.commands.push({ type: 'line', thickness: opts.thickness });
-        }
-        
-        createCutPaperElement(opts) {
-          this.commands.push({ type: 'cut', feed: opts.feed });
-        }
-        
-        toString() {
-          let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<root>\n';
-          xml += '  <initialization/>\n';
-          
-          this.commands.forEach(cmd => {
-            switch (cmd.type) {
-              case 'align':
-                xml += `  <alignment position="${cmd.position}"/>\n`;
-                break;
-              case 'text':
-                let textData = (cmd.data || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                let textTag = '<text';
-                if (cmd.emphasis) textTag += ' emphasis="true"';
-                if (cmd.width) textTag += ` width="${cmd.width}"`;
-                if (cmd.height) textTag += ` height="${cmd.height}"`;
-                textTag += `>${textData}</text>\n`;
-                xml += '  ' + textTag;
-                break;
-              case 'line':
-                xml += `  <ruledline thickness="${cmd.thickness || 'thin'}"/>\n`;
-                break;
-              case 'cut':
-                xml += '  <cutpaper feed="true"/>\n';
-                break;
-            }
-          });
-          
-          xml += '</root>';
-          return xml;
-        }
-      };
-    }
-    
-
     
     // 店舗別コレクション参照を取得するヘルパー関数
     window.getStoreCollection = function(collectionName) {
@@ -1793,7 +1721,6 @@
         </div>
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <button onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kanri.html', '_blank')" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">設定•管理</button>
-          <button onclick="window.showPrinterSettings()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(102,126,234,0.3);">🖨️ プリンター設定</button>
           <button onclick="handleLogout()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">ログアウト</button>
         </div>
       </div>
@@ -2252,301 +2179,15 @@
     let lastOrderCount = 0;
     let isFirstOrderLoad = true;
     
-    // プリンターIPアドレス（画像から）
-
-    // ============================================
-    // 📱 ユーザーフレンドリー・プリンター設定
-    // ============================================
+    // メニューデータ（Firebaseから取得）
+    let menuData = [];
+    let toppingsData = [];
     
-    // LocalStorageから設定を読み込み
-    function loadPrinterSettings() {
-      const saved = localStorage.getItem('printerSettings');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch (e) {
-          console.error('設定の読み込みエラー:', e);
-        }
-      }
-      // デフォルト設定
-      return {
-        printerIP: '',
-        printerType: 'star',  // 'star' or 'other'
-        autoDetect: false
-      };
-    }
-    
-    // 設定を保存
-    function savePrinterSettings(settings) {
-      localStorage.setItem('printerSettings', JSON.stringify(settings));
-      console.log('✅ プリンター設定を保存しました:', settings);
-    }
-    
-    // グローバル設定
-    window.printerConfig = loadPrinterSettings();
-    
-    // 設定画面を表示
-    window.showPrinterSettings = function() {
-      const modal = document.createElement('div');
-      modal.id = 'printerSettingsModal';
-      modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-      
-      const currentSettings = window.printerConfig;
-      
-      modal.innerHTML = `
-        <div style="background: white; padding: 30px; border-radius: 15px; max-width: 500px; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
-          <h2 style="margin: 0 0 20px 0; color: #333; font-size: 24px;">🖨️ プリンター設定</h2>
-          
-          <div style="margin-bottom: 20px;">
-            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #555;">プリンターの種類</label>
-            <select id="printerType" style="width: 100%; padding: 12px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; background: white;">
-              <option value="star">Star（mC-Print3、TSP100など）</option>
-              <option value="other">その他（現在非対応）</option>
-            </select>
-            <p style="color: #999; font-size: 13px; margin: 5px 0 0 0;">※ Star製プリンターを推奨します</p>
-          </div>
-          
-          <div style="margin-bottom: 25px;">
-            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #555;">プリンターのIPアドレス</label>
-            <input type="text" id="printerIP" placeholder="例: 192.168.1.100" value="${currentSettings.printerIP || ''}"
-              style="width: 100%; padding: 12px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; box-sizing: border-box;">
-            <div style="margin-top: 10px; padding: 12px; background: #f0f7ff; border-radius: 8px; border-left: 4px solid #2196F3;">
-              <p style="margin: 0; font-size: 13px; color: #1976D2; line-height: 1.5;">
-                💡 <strong>IPアドレスの確認方法:</strong><br>
-                1. プリンター本体の設定画面<br>
-                2. フィードボタン長押しでテスト印刷<br>
-                3. Wi-Fiルーターの管理画面
-              </p>
-            </div>
-          </div>
-          
-          <div style="display: flex; gap: 10px;">
-            <button id="testPrintBtn" style="flex: 1; padding: 15px; font-size: 16px; font-weight: bold; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s;">
-              🧪 テスト印刷
-            </button>
-            <button id="savePrinterBtn" style="flex: 1; padding: 15px; font-size: 16px; font-weight: bold; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s;">
-              💾 保存
-            </button>
-            <button id="closePrinterBtn" style="padding: 15px 20px; font-size: 16px; background: #999; color: white; border: none; border-radius: 10px; cursor: pointer;">
-              ✕
-            </button>
-          </div>
-          
-          <div id="statusMessage" style="margin-top: 15px; padding: 12px; border-radius: 8px; display: none;"></div>
-        </div>
-      `;
-      
-      document.body.appendChild(modal);
-      
-      // 現在の設定を反映
-      document.getElementById('printerType').value = currentSettings.printerType || 'star';
-      
-      const showStatus = (message, type) => {
-        const statusEl = document.getElementById('statusMessage');
-        statusEl.style.display = 'block';
-        statusEl.textContent = message;
-        if (type === 'success') {
-          statusEl.style.background = '#d4edda';
-          statusEl.style.color = '#155724';
-          statusEl.style.border = '1px solid #c3e6cb';
-        } else {
-          statusEl.style.background = '#f8d7da';
-          statusEl.style.color = '#721c24';
-          statusEl.style.border = '1px solid #f5c6cb';
-        }
-      };
-      
-      // テスト印刷
-      document.getElementById('testPrintBtn').addEventListener('click', async () => {
-        const ip = document.getElementById('printerIP').value.trim();
-        const type = document.getElementById('printerType').value;
-        
-        if (!ip) {
-          showStatus('❌ IPアドレスを入力してください', 'error');
-          return;
-        }
-        
-        if (type !== 'star') {
-          showStatus('❌ 現在Star製プリンターのみ対応しています', 'error');
-          return;
-        }
-        
-        showStatus('🔄 テスト印刷中...', 'info');
-        
-        try {
-          await window.testPrintDirect(ip);
-          showStatus('✅ テスト印刷成功！プリンターが正常に動作しています', 'success');
-        } catch (error) {
-          showStatus('❌ テスト印刷失敗: ' + error.message, 'error');
-        }
-      });
-      
-      // 保存
-      document.getElementById('savePrinterBtn').addEventListener('click', () => {
-        const ip = document.getElementById('printerIP').value.trim();
-        const type = document.getElementById('printerType').value;
-        
-        if (!ip) {
-          showStatus('❌ IPアドレスを入力してください', 'error');
-          return;
-        }
-        
-        const newSettings = {
-          printerIP: ip,
-          printerType: type,
-          autoDetect: false
-        };
-        
-        savePrinterSettings(newSettings);
-        window.printerConfig = newSettings;
-        
-        showStatus('✅ 設定を保存しました', 'success');
-        
-        setTimeout(() => {
-          modal.remove();
-        }, 1500);
-      });
-      
-      // 閉じる
-      document.getElementById('closePrinterBtn').addEventListener('click', () => {
-        modal.remove();
-      });
-      
-      // モーダル外クリックで閉じる
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-          modal.remove();
-        }
-      });
-    };
-    
-    // テスト印刷（直接）
-    window.testPrintDirect = async function(printerIP) {
-      const testXML = `<?xml version="1.0" encoding="UTF-8"?>
-<root>
-  <initialization/>
-  <alignment position="center"/>
-  <text emphasis="true" width="2" height="2">テスト印刷</text>
-  <text>
-</text>
-  <text emphasis="false" width="1" height="1">粉もん屋 八</text>
-  <text>
-下赤塚店
-</text>
-  <ruledline thickness="thin"/>
-  <text>
-プリンター接続成功！
-</text>
-  <text>
-日時: ${new Date().toLocaleString('ja-JP')}
-</text>
-  <text>
-IPアドレス: ${printerIP}
-</text>
-  <text>
-
-
-</text>
-  <cutpaper feed="true"/>
-</root>`;
-      
-      const url = `http://${printerIP}/StarWebPRNT/SendMessage`;
-      
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'text/xml; charset=utf-8'
-          },
-          body: testXML,
-          mode: 'no-cors'
-        });
-        
-        // no-corsの場合、レスポンスは取得できないが、エラーがなければ成功と判断
-        return true;
-      } catch (error) {
-        throw new Error('プリンターに接続できません。IPアドレスとネットワーク接続を確認してください。');
-      }
-    };
-    
-    // 初回起動時チェック
-    window.addEventListener('DOMContentLoaded', function() {
-      setTimeout(() => {
-        if (!window.printerConfig.printerIP) {
-          const shouldSetup = confirm(
-            '🖨️ プリンター設定\n\n' +
-            'プリンターの設定がまだ完了していません。\n' +
-            '今すぐ設定しますか？\n\n' +
-            '※ 後から画面右上の「プリンター設定」ボタンで設定できます'
-          );
-          
-          if (shouldSetup) {
-            window.showPrinterSettings();
-          }
-        }
-      }, 2000);
+        // 初期化
+    window.addEventListener('load', async () => {
+      await initializeSystem();
     });
     
-
-    const PRINTER_IP = '192.168.244.41';
-    
-    // 🆕 プロキシサーバーのURL（HTTPSからHTTPへの通信を中継）
-    // ローカル環境で起動したNode.jsサーバーのURL
-    const PRINTER_PROXY_URL = 'http://localhost:3000/print';
-    
-    // プロキシを使用するかどうか（HTTPSサイトの場合はtrue）
-    const USE_PROXY = window.location.protocol === 'https:';
-    
-    // 🆕 プロキシ対応の印刷ヘルパー関数
-        async function sendPrintRequest(builder, onSuccess, onError) {
-      const settings = window.printerConfig;
-      
-      try {
-        // builderからXMLを取得
-        const xmlRequest = builder.toString();
-        
-        if (settings.printerIP && settings.printerType === 'star') {
-          // Star WebPRNTで直接印刷
-          console.log('🖨️ Star WebPRNTで直接印刷:', settings.printerIP);
-          
-          const url = `http://${settings.printerIP}/StarWebPRNT/SendMessage`;
-          
-          const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'text/xml; charset=utf-8'
-            },
-            body: xmlRequest,
-            mode: 'no-cors'
-          });
-          
-          console.log('✅ 印刷リクエスト送信完了');
-          if (onSuccess) onSuccess({ status: 'success' });
-          return;
-        } else if (!settings.printerIP) {
-          // 設定がない場合
-          console.warn('⚠️ プリンター設定がありません');
-          const shouldSetup = confirm('プリンターが設定されていません。
-今すぐ設定しますか？');
-          if (shouldSetup) {
-            window.showPrinterSettings();
-          }
-          if (onError) onError({ status: 'error', message: 'プリンター未設定' });
-          return;
-        }
-        
-        // その他の場合（将来の拡張用）
-        throw new Error('対応していないプリンター設定です');
-        
-      } catch (error) {
-        console.error('❌ 印刷エラー:', error);
-        if (onError) {
-          onError({ status: 'error', message: error.message });
-        } else {
-          alert('印刷に失敗しました: ' + error.message);
-        }
-      }
-    }
     async function initializeSystem() {
       // Firebaseからメニューを取得
       try {
@@ -11368,321 +11009,405 @@ ${redSlipCount > 0 ? `
         return;
       }
       
-      try {
-        const builder = new StarWebPrintBuilder();
-        const request = builder.createInitializationElement();
+      // レシート設定を取得
+      const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
+      const branchName = window.receiptSettings?.branchName || '下赤塚店';
+      const address = window.receiptSettings?.address || '東京都板橋区赤塚新町';
+      const phone = window.receiptSettings?.phone || '03-XXXX-XXXX';
+      const receiptMessage = window.receiptSettings?.message || 'ありがとうございました\nまたのご来店を\nお待ちしております';
+      
+      // 日時フォーマット
+      const now = lastPaymentData.timestamp;
+      const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      
+      // 商品明細と税額計算
+      let itemCount = 0;
+      let tax8Total = 0;
+      let tax10Total = 0;
+      let tax8Exclusive = 0;
+      let tax10Exclusive = 0;
+      let itemsHtml = '';
+      
+      lastPaymentData.items.forEach(item => {
+        const subtotal = item.price * item.quantity;
+        itemCount += item.quantity;
         
-        // 58mm幅設定
-        builder.createPeripheralElement({channel: 1, on: 100, off: 100});
+        const isExclusive = item.taxType === 'exclusive';
         
-        // レシート作成
-        builder.createAlignmentElement({position: 'center'});
-        builder.createTextElement({emphasis: true, width: 2, height: 2});
-        
-        // 🔧 修正: レシート設定から店舗名を取得
-        const storeName = window.receiptSettings.storeName || '粉もん屋 八';
-        builder.createTextElement({data: storeName + '\n'});
-        
-        builder.createTextElement({emphasis: false, width: 1, height: 1});
-        
-        // 🔧 修正: レシート設定から支店名を取得
-        const branchName = window.receiptSettings.branchName || '下赤塚店';
-        builder.createTextElement({data: branchName + '\n'});
-        
-        // 🔧 修正: レシート設定から住所と電話番号を取得
-        const address = window.receiptSettings.address || '東京都板橋区赤塚新町';
-        const phone = window.receiptSettings.phone || '03-XXXX-XXXX';
-        builder.createTextElement({data: address + '\n'});
-        builder.createTextElement({data: 'TEL: ' + phone + '\n'});
-        
-        // 🆕 印鑑画像を印刷（事前変換したCanvasを使用）
-        if (window.receiptSettings.stampCanvas) {
-          try {
-            console.log('🖼️ 印鑑画像を印刷します');
-            builder.createAlignmentElement({position: 'right'});
-            builder.createBitImageElement({
-              context: window.receiptSettings.stampCanvas,
-              x: 0,
-              y: 0,
-              width: window.receiptSettings.stampCanvas.canvas.width,
-              height: window.receiptSettings.stampCanvas.canvas.height
-            });
-            builder.createFeedElement({line: 1});
-            console.log('✅ 印鑑画像を追加しました');
-          } catch (error) {
-            console.error('❌ 印鑑画像印刷エラー:', error);
-          }
-        }
-        
-        builder.createRuledLineElement({thickness: 'thin'});
-        
-        builder.createAlignmentElement({position: 'left'});
-        const now = lastPaymentData.timestamp;
-        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        builder.createTextElement({data: `日時: ${dateStr}\n`});
-        builder.createTextElement({data: `担当: ${lastPaymentData.staffName || 'レジ係'}\n`});
-        builder.createTextElement({data: `テーブル: ${lastPaymentData.tableNumber}\n`});
-        builder.createTextElement({data: `注文No: ${lastPaymentData.orderNumbers.join(',')}\n`});
-        builder.createRuledLineElement({thickness: 'thin'});
-        
-        // 商品明細
-        let itemCount = 0;
-        let tax8Total = 0;
-        let tax10Total = 0;
-        let tax8Exclusive = 0;  // 🆕 外税8%の税抜金額
-        let tax10Exclusive = 0;  // 🆕 外税10%の税抜金額
-        
-        lastPaymentData.items.forEach(item => {
-          const subtotal = item.price * item.quantity;
-          itemCount += item.quantity;
-          
-          // 🆕 税込/税抜の判定
-          const isExclusive = item.taxType === 'exclusive';
-          
-          // 税率別集計
-          if (item.taxRate === 8) {
-            if (isExclusive) {
-              // 外税: 税抜価格を集計
-              tax8Exclusive += subtotal;
-            } else {
-              // 内税: 税込価格を集計
-              tax8Total += subtotal;
-            }
-          } else {
-            if (isExclusive) {
-              // 外税: 税抜価格を集計
-              tax10Exclusive += subtotal;
-            } else {
-              // 内税: 税込価格を集計
-              tax10Total += subtotal;
-            }
-          }
-          
-          // 商品名を32文字以内に調整
-          const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
-          builder.createTextElement({data: `${itemName}\n`});
-          
-          // 🆕 外税の場合は表示価格を税込に変換
-          let displayPrice = item.price;
+        if (item.taxRate === 8) {
           if (isExclusive) {
-            const taxRate = item.taxRate || 10;
-            displayPrice = Math.floor(item.price * (1 + taxRate / 100));
+            tax8Exclusive += subtotal;
+          } else {
+            tax8Total += subtotal;
           }
+        } else {
+          if (isExclusive) {
+            tax10Exclusive += subtotal;
+          } else {
+            tax10Total += subtotal;
+          }
+        }
+        
+        let displayPrice = item.price;
+        if (isExclusive) {
+          const taxRate = item.taxRate || 10;
+          displayPrice = Math.floor(item.price * (1 + taxRate / 100));
+        }
+        
+        const displaySubtotal = displayPrice * item.quantity;
+        
+        itemsHtml += `
+          <tr>
+            <td style="padding: 4px 8px;">${item.name}</td>
+            <td style="padding: 4px 8px; text-align: right;">¥${displayPrice.toLocaleString()}</td>
+            <td style="padding: 4px 8px; text-align: center;">×${item.quantity}</td>
+            <td style="padding: 4px 8px; text-align: right;">¥${displaySubtotal.toLocaleString()}</td>
+          </tr>`;
+        
+        // トッピング表示
+        if (item.toppingDetails && item.toppingDetails.length > 0) {
+          const groupedBySet = {};
+          item.toppingDetails.forEach(detail => {
+            if (!groupedBySet[detail.setName]) {
+              groupedBySet[detail.setName] = [];
+            }
+            groupedBySet[detail.setName].push(detail.optionName);
+          });
           
-          // 単価×数量＝小計の形式（58mm幅に最適化）
-          const priceInfo = `@${displayPrice} x${item.quantity}`;
-          const displaySubtotal = displayPrice * item.quantity;
-          const subtotalStr = `${displaySubtotal.toLocaleString()}円`;
-          const spaces = ' '.repeat(Math.max(1, 32 - priceInfo.length - subtotalStr.length));
-          builder.createTextElement({data: `${priceInfo}${spaces}${subtotalStr}\n`});
-          
-          // トッピング表示（toppingDetailsを優先）
-          if (item.toppingDetails && item.toppingDetails.length > 0) {
-            const groupedBySet = {};
-            item.toppingDetails.forEach(detail => {
-              if (!groupedBySet[detail.setName]) {
-                groupedBySet[detail.setName] = [];
-              }
-              groupedBySet[detail.setName].push(detail.optionName);
+          Object.entries(groupedBySet).forEach(([setName, options]) => {
+            itemsHtml += `<tr><td colspan="4" style="padding: 2px 8px 2px 24px; font-size: 0.9em; color: #666;">${setName}</td></tr>`;
+            options.forEach(opt => {
+              itemsHtml += `<tr><td colspan="4" style="padding: 2px 8px 2px 32px; font-size: 0.9em; color: #666;">・${opt}</td></tr>`;
             });
-            
-            Object.entries(groupedBySet).forEach(([setName, options]) => {
-              builder.createTextElement({data: ` ${setName}\n`});
-              options.forEach(opt => {
-                builder.createTextElement({data: `  ・${opt}\n`});
-              });
-            });
-          } else if (item.toppings && item.toppings !== 'なし') {
-            builder.createTextElement({data: ` TP:${item.toppings}\n`});
-          }
-        });
-        
-        builder.createRuledLineElement({thickness: 'thin'});
-        builder.createTextElement({data: `小計${' '.repeat(20)}${lastPaymentData.totalAmount.toLocaleString()}円\n`});
-        builder.createTextElement({data: `点数: ${itemCount}点\n`});
-        builder.createRuledLineElement({thickness: 'thin'});
-        
-        // 🆕 税額計算（内税と外税を分けて計算）
-        const tax8AmountInclusive = Math.floor(tax8Total * 8 / 108);  // 内税8%の税額
-        const tax10AmountInclusive = Math.floor(tax10Total * 10 / 110);  // 内税10%の税額
-        const tax8AmountExclusive = Math.floor(tax8Exclusive * 8 / 100);  // 外税8%の税額
-        const tax10AmountExclusive = Math.floor(tax10Exclusive * 10 / 100);  // 外税10%の税額
-        
-        // 合計税額
-        const totalTax8 = tax8AmountInclusive + tax8AmountExclusive;
-        const totalTax10 = tax10AmountInclusive + tax10AmountExclusive;
-        
-        // 税込合計
-        const total8WithTax = tax8Total + tax8Exclusive + tax8AmountExclusive;
-        const total10WithTax = tax10Total + tax10Exclusive + tax10AmountExclusive;
-        
-        if (total8WithTax > 0) {
-          builder.createTextElement({data: `8%対象${' '.repeat(16)}${total8WithTax.toLocaleString()}円\n`});
-          builder.createTextElement({data: `(内消費税${' '.repeat(15)}${totalTax8.toLocaleString()}円)\n`});
+          });
+        } else if (item.toppings && item.toppings !== 'なし') {
+          itemsHtml += `<tr><td colspan="4" style="padding: 2px 8px 2px 24px; font-size: 0.9em; color: #666;">TP:${item.toppings}</td></tr>`;
         }
-        if (total10WithTax > 0) {
-          builder.createTextElement({data: `10%対象${' '.repeat(15)}${total10WithTax.toLocaleString()}円\n`});
-          builder.createTextElement({data: `(内消費税${' '.repeat(15)}${totalTax10.toLocaleString()}円)\n`});
-        }
-        
-        builder.createRuledLineElement({thickness: 'medium'});
-        builder.createTextElement({emphasis: true, width: 2, height: 2});
-        builder.createTextElement({data: `合計 ${lastPaymentData.totalAmount.toLocaleString()}円\n`});
-        builder.createTextElement({emphasis: false, width: 1, height: 1});
-        builder.createRuledLineElement({thickness: 'medium'});
-        
-        // 支払い情報
-        let paymentMethodStr = '';
-        if (lastPaymentData.paymentMethod === 'cash') {
-          paymentMethodStr = '現金';
-          builder.createTextElement({data: `お預り${' '.repeat(18)}${lastPaymentData.cashReceived.toLocaleString()}円\n`});
-          builder.createTextElement({data: `おつり${' '.repeat(18)}${lastPaymentData.change.toLocaleString()}円\n`});
-        } else if (lastPaymentData.paymentMethod === 'emoney') {
-          paymentMethodStr = '電子マネー';
-        } else if (lastPaymentData.paymentMethod === 'credit') {
-          paymentMethodStr = 'クレジットカード';
-        }
-        builder.createTextElement({data: `支払: ${paymentMethodStr}\n`});
-        
-        builder.createRuledLineElement({thickness: 'thin'});
-        builder.createAlignmentElement({position: 'center'});
-        
-        // 🔧 修正: レシート設定からメッセージを取得
-        const receiptMessage = window.receiptSettings.message || 'ありがとうございました\nまたのご来店を\nお待ちしております';
-        const messageLines = receiptMessage.split('\n');
-        messageLines.forEach(line => {
-          if (line.trim()) {
-            builder.createTextElement({data: line + '\n'});
-          }
-        });
-        builder.createTextElement({data: '\n\n'});
-        
-        builder.createCutPaperElement({feed: true});
-        
-        // プロキシ対応の印刷処理
-        await sendPrintRequest(
-          builder,
-          (response) => {
-            console.log('印刷成功:', response);
-            closeReceiptModal();
-          },
-          (response) => {
-            console.error('印刷エラー:', response);
-            alert('印刷に失敗しました: ' + (response.message || response.status));
-          }
-        );
-        
-      } catch (e) {
-        console.error('印刷エラー:', e);
-        alert('印刷処理でエラーが発生しました: ' + e.message);
+      });
+      
+      // 税額計算
+      const tax8AmountInclusive = Math.floor(tax8Total * 8 / 108);
+      const tax10AmountInclusive = Math.floor(tax10Total * 10 / 110);
+      const tax8AmountExclusive = Math.floor(tax8Exclusive * 8 / 100);
+      const tax10AmountExclusive = Math.floor(tax10Exclusive * 10 / 100);
+      
+      const totalTax8 = tax8AmountInclusive + tax8AmountExclusive;
+      const totalTax10 = tax10AmountInclusive + tax10AmountExclusive;
+      
+      const total8WithTax = tax8Total + tax8Exclusive + tax8AmountExclusive;
+      const total10WithTax = tax10Total + tax10Exclusive + tax10AmountExclusive;
+      
+      let taxHtml = '';
+      if (total8WithTax > 0) {
+        taxHtml += `
+          <tr>
+            <td colspan="3" style="padding: 4px 8px;">8%対象</td>
+            <td style="padding: 4px 8px; text-align: right;">¥${total8WithTax.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td colspan="3" style="padding: 2px 8px 4px 24px; font-size: 0.9em; color: #666;">(内消費税</td>
+            <td style="padding: 2px 8px 4px 8px; text-align: right; font-size: 0.9em; color: #666;">¥${totalTax8.toLocaleString()})</td>
+          </tr>`;
       }
+      if (total10WithTax > 0) {
+        taxHtml += `
+          <tr>
+            <td colspan="3" style="padding: 4px 8px;">10%対象</td>
+            <td style="padding: 4px 8px; text-align: right;">¥${total10WithTax.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td colspan="3" style="padding: 2px 8px 4px 24px; font-size: 0.9em; color: #666;">(内消費税</td>
+            <td style="padding: 2px 8px 4px 8px; text-align: right; font-size: 0.9em; color: #666;">¥${totalTax10.toLocaleString()})</td>
+          </tr>`;
+      }
+      
+      // 支払い方法
+      let paymentMethodStr = '';
+      let paymentDetailsHtml = '';
+      if (lastPaymentData.paymentMethod === 'cash') {
+        paymentMethodStr = '現金';
+        paymentDetailsHtml = `
+          <tr>
+            <td colspan="3" style="padding: 4px 8px;">お預り</td>
+            <td style="padding: 4px 8px; text-align: right;">¥${lastPaymentData.cashReceived.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td colspan="3" style="padding: 4px 8px;">おつり</td>
+            <td style="padding: 4px 8px; text-align: right;">¥${lastPaymentData.change.toLocaleString()}</td>
+          </tr>`;
+      } else if (lastPaymentData.paymentMethod === 'emoney') {
+        paymentMethodStr = '電子マネー';
+      } else if (lastPaymentData.paymentMethod === 'credit') {
+        paymentMethodStr = 'クレジットカード';
+      }
+      
+      // 印刷用HTML作成
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>レシート - ${storeName} ${branchName}</title>
+          <style>
+            @media print {
+              @page {
+                size: 58mm auto;
+                margin: 0;
+              }
+              body {
+                margin: 0;
+                padding: 5mm;
+              }
+            }
+            body {
+              font-family: 'MS Gothic', 'Osaka-Mono', monospace;
+              font-size: 11px;
+              line-height: 1.4;
+              max-width: 58mm;
+              margin: 0 auto;
+              padding: 5mm;
+            }
+            h1 {
+              text-align: center;
+              font-size: 18px;
+              font-weight: bold;
+              margin: 0 0 8px 0;
+            }
+            h2 {
+              text-align: center;
+              font-size: 14px;
+              margin: 0 0 4px 0;
+            }
+            .header {
+              text-align: center;
+              border-bottom: 1px solid #000;
+              padding-bottom: 8px;
+              margin-bottom: 8px;
+            }
+            .info {
+              margin-bottom: 8px;
+              padding-bottom: 8px;
+              border-bottom: 1px dashed #000;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            .total-section {
+              border-top: 2px solid #000;
+              border-bottom: 2px solid #000;
+              margin: 8px 0;
+            }
+            .total {
+              font-size: 16px;
+              font-weight: bold;
+              padding: 8px !important;
+            }
+            .footer {
+              text-align: center;
+              margin-top: 16px;
+              padding-top: 8px;
+              border-top: 1px dashed #000;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>${storeName}</h1>
+            <h2>${branchName}</h2>
+            <div>${address}</div>
+            <div>TEL: ${phone}</div>
+          </div>
+          
+          <div class="info">
+            <div>日時: ${dateStr}</div>
+            <div>担当: ${lastPaymentData.staffName || 'レジ係'}</div>
+            <div>テーブル: ${lastPaymentData.tableNumber}</div>
+            <div>注文No: ${lastPaymentData.orderNumbers.join(',')}</div>
+          </div>
+          
+          <table>
+            ${itemsHtml}
+          </table>
+          
+          <table style="border-top: 1px dashed #000; margin-top: 8px;">
+            <tr>
+              <td colspan="3" style="padding: 4px 8px;">小計</td>
+              <td style="padding: 4px 8px; text-align: right;">¥${lastPaymentData.totalAmount.toLocaleString()}</td>
+            </tr>
+            <tr>
+              <td colspan="4" style="padding: 4px 8px;">点数: ${itemCount}点</td>
+            </tr>
+          </table>
+          
+          <table style="border-top: 1px dashed #000; margin-top: 4px;">
+            ${taxHtml}
+          </table>
+          
+          <table class="total-section">
+            <tr class="total">
+              <td colspan="3">合計</td>
+              <td style="text-align: right;">¥${lastPaymentData.totalAmount.toLocaleString()}</td>
+            </tr>
+          </table>
+          
+          <table>
+            ${paymentDetailsHtml}
+            <tr>
+              <td colspan="4" style="padding: 4px 8px;">支払: ${paymentMethodStr}</td>
+            </tr>
+          </table>
+          
+          <div class="footer">
+            ${receiptMessage.split('\n').map(line => `<div>${line}</div>`).join('')}
+          </div>
+        </body>
+        </html>
+      `);
+      
+      printWindow.document.close();
+      
+      // 印刷ダイアログを表示
+      setTimeout(() => {
+        printWindow.print();
+        closeReceiptModal();
+      }, 250);
     };
     
-    // 領収書印刷（印鑑欄付き・58mm幅対応）
+    // 領収書印刷
     window.printInvoice = async function() {
       if (!lastPaymentData) {
         alert('印刷するデータがありません');
         return;
       }
       
-      try {
-        const builder = new StarWebPrintBuilder();
-        const request = builder.createInitializationElement();
-        
-        // 58mm幅設定
-        builder.createPeripheralElement({channel: 1, on: 100, off: 100});
-        
-        builder.createAlignmentElement({position: 'center'});
-        builder.createTextElement({emphasis: true, width: 2, height: 2});
-        builder.createTextElement({data: '領 収 書\n\n'});
-        builder.createTextElement({emphasis: false, width: 1, height: 1});
-        
-        builder.createAlignmentElement({position: 'left'});
-        const now = lastPaymentData.timestamp;
-        const dateStr = `${now.getFullYear()}年${String(now.getMonth()+1).padStart(2,'0')}月${String(now.getDate()).padStart(2,'0')}日`;
-        builder.createTextElement({data: `${dateStr}\n\n`});
-        
-        builder.createTextElement({data: 'お客様\n\n'});
-        
-        builder.createRuledLineElement({thickness: 'thin'});
-        builder.createAlignmentElement({position: 'center'});
-        builder.createTextElement({emphasis: true, width: 2, height: 2});
-        builder.createTextElement({data: `¥${lastPaymentData.totalAmount.toLocaleString()}-\n`});
-        builder.createTextElement({emphasis: false, width: 1, height: 1});
-        builder.createRuledLineElement({thickness: 'thin'});
-        
-        builder.createAlignmentElement({position: 'left'});
-        builder.createTextElement({data: '\n上記正に領収いたしました\n\n'});
-        builder.createTextElement({data: '但し 飲食代として\n\n\n'});
-        
-        builder.createRuledLineElement({thickness: 'thin'});
-        builder.createAlignmentElement({position: 'right'});
-        
-        // 🔧 修正: レシート設定から店舗情報を取得
-        const storeName = window.receiptSettings.storeName || '粉もん屋 八';
-        const branchName = window.receiptSettings.branchName || '下赤塚店';
-        const address = window.receiptSettings.address || '東京都板橋区赤塚新町';
-        const phone = window.receiptSettings.phone || '03-XXXX-XXXX';
-        
-        builder.createTextElement({data: storeName + ' ' + branchName + '\n'});
-        builder.createTextElement({data: address + '\n'});
-        builder.createTextElement({data: 'TEL: ' + phone + '\n\n'});
-        
-        // 🆕 印鑑画像を印刷（事前変換したCanvasを使用）
-        if (window.receiptSettings.stampCanvas) {
-          try {
-            console.log('🖼️ 印鑑画像を印刷します（領収書）');
-            builder.createAlignmentElement({position: 'right'});
-            builder.createBitImageElement({
-              context: window.receiptSettings.stampCanvas,
-              x: 0,
-              y: 0,
-              width: window.receiptSettings.stampCanvas.canvas.width,
-              height: window.receiptSettings.stampCanvas.canvas.height
-            });
-            builder.createFeedElement({line: 1});
-            console.log('✅ 印鑑画像を追加しました（領収書）');
-          } catch (error) {
-            console.error('❌ 印鑑画像印刷エラー:', error);
-          }
-        } else {
-          // 印鑑画像がない場合は従来のテキスト印鑑欄を表示
-          builder.createAlignmentElement({position: 'right'});
-          builder.createTextElement({data: '        ◯◯◯\n'});
-          builder.createTextElement({data: '       ◯   ◯\n'});
-          builder.createTextElement({data: '      ◯  印 ◯\n'});
-          builder.createTextElement({data: '       ◯   ◯\n'});
-          builder.createTextElement({data: '        ◯◯◯\n\n'});
-        }
-        
-        builder.createAlignmentElement({position: 'left'});
-        builder.createRuledLineElement({thickness: 'thin'});
-        
-        builder.createTextElement({data: `\nテーブル: ${lastPaymentData.tableNumber}\n`});
-        builder.createTextElement({data: `注文No: ${lastPaymentData.orderNumbers.join(',')}\n`});
-        
-        builder.createAlignmentElement({position: 'center'});
-        builder.createTextElement({data: '\n\n'});
-        
-        builder.createCutPaperElement({feed: true});
-        
-        // プロキシ対応の印刷処理
-        await sendPrintRequest(
-          builder,
-          (response) => {
-            console.log('印刷成功:', response);
-            closeReceiptModal();
-          },
-          (response) => {
-            console.error('印刷エラー:', response);
-            alert('印刷に失敗しました: ' + (response.message || response.status));
-          }
-        );
-        
-      } catch (e) {
-        console.error('印刷エラー:', e);
-        alert('印刷処理でエラーが発生しました: ' + e.message);
-      }
+      // レシート設定を取得
+      const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
+      const branchName = window.receiptSettings?.branchName || '下赤塚店';
+      const address = window.receiptSettings?.address || '東京都板橋区赤塚新町';
+      const phone = window.receiptSettings?.phone || '03-XXXX-XXXX';
+      
+      // 日時フォーマット
+      const now = lastPaymentData.timestamp;
+      const dateStr = `${now.getFullYear()}年${String(now.getMonth()+1).padStart(2,'0')}月${String(now.getDate()).padStart(2,'0')}日`;
+      
+      // 印刷用HTML作成
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>領収書 - ${storeName} ${branchName}</title>
+          <style>
+            @media print {
+              @page {
+                size: 58mm auto;
+                margin: 0;
+              }
+              body {
+                margin: 0;
+                padding: 5mm;
+              }
+            }
+            body {
+              font-family: 'MS Gothic', 'Osaka-Mono', monospace;
+              font-size: 11px;
+              line-height: 1.6;
+              max-width: 58mm;
+              margin: 0 auto;
+              padding: 5mm;
+            }
+            h1 {
+              text-align: center;
+              font-size: 20px;
+              font-weight: bold;
+              margin: 0 0 16px 0;
+              letter-spacing: 8px;
+            }
+            .date {
+              margin-bottom: 12px;
+            }
+            .customer {
+              margin-bottom: 12px;
+            }
+            .amount-box {
+              border-top: 1px solid #000;
+              border-bottom: 1px solid #000;
+              padding: 12px 0;
+              margin: 16px 0;
+              text-align: center;
+            }
+            .amount {
+              font-size: 24px;
+              font-weight: bold;
+            }
+            .note {
+              margin: 16px 0;
+            }
+            .store-info {
+              text-align: right;
+              margin-top: 24px;
+              padding-top: 12px;
+              border-top: 1px solid #000;
+            }
+            .stamp-area {
+              text-align: right;
+              margin-top: 16px;
+              font-size: 16px;
+              line-height: 1.2;
+            }
+            .details {
+              margin-top: 16px;
+              padding-top: 12px;
+              border-top: 1px dashed #000;
+              font-size: 11px;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>領収書</h1>
+          
+          <div class="date">${dateStr}</div>
+          
+          <div class="customer">お客様</div>
+          
+          <div class="amount-box">
+            <div class="amount">¥${lastPaymentData.totalAmount.toLocaleString()}-</div>
+          </div>
+          
+          <div class="note">
+            上記正に領収いたしました<br><br>
+            但し 飲食代として
+          </div>
+          
+          <div class="store-info">
+            <div>${storeName} ${branchName}</div>
+            <div>${address}</div>
+            <div>TEL: ${phone}</div>
+            <div class="stamp-area">
+              ◯◯◯<br>
+              ◯ 印 ◯<br>
+              ◯◯◯
+            </div>
+          </div>
+          
+          <div class="details">
+            テーブル: ${lastPaymentData.tableNumber}<br>
+            注文No: ${lastPaymentData.orderNumbers.join(',')}
+          </div>
+        </body>
+        </html>
+      `);
+      
+      printWindow.document.close();
+      
+      // 印刷ダイアログを表示
+      setTimeout(() => {
+        printWindow.print();
+        closeReceiptModal();
+      }, 250);
     };
     
     // レシート完了モーダルを閉じる
