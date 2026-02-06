@@ -1834,14 +1834,6 @@
   <div id="paymentModal" class="modal-overlay hidden">
     <div class="modal">
       <h3>支払い方法を選択</h3>
-      <div style="margin-bottom: 20px; padding: 15px; background: #f0f8ff; border-radius: 10px; border-left: 4px solid #667eea;">
-        <button class="btn" style="width: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;" onclick="showSplitPaymentModal()">
-          分割会計
-        </button>
-        <div style="font-size: 12px; color: #666; margin-top: 8px; text-align: center;">
-          複数の注文を選択して一緒に会計
-        </div>
-      </div>
       <div id="taxRateSection" style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 10px; border-left: 4px solid #4CAF50; max-height: 200px; overflow-y: auto;">
         <h4 style="margin: 0 0 15px 0; color: #2e7d32; font-size: 16px;">各商品の税率を選択</h4>
         <div id="taxRateItemsList"></div>
@@ -1919,26 +1911,6 @@
       </div>
       <button class="btn btn-primary" onclick="confirmTopping()">決定</button>
       <button class="btn btn-secondary" onclick="closeToppingModal()">キャンセル</button>
-    </div>
-  </div>
-  <div id="splitPaymentModal" class="modal-overlay hidden">
-    <div class="modal" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
-      <h3>✂️ 分割会計</h3>
-      <p style="color: #666; margin-bottom: 20px;">一緒に会計する注文を選択してください</p>
-      
-      <div id="splitOrdersList" style="margin-bottom: 20px;">
-        
-      </div>
-      
-      <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; margin-bottom: 20px;">
-        <div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: bold;">
-          <span>選択した注文の合計:</span>
-          <span id="splitTotalAmount" style="color: #667eea;">¥0</span>
-        </div>
-      </div>
-      
-      <button class="btn btn-primary" onclick="proceedToSplitPayment()" id="splitPaymentBtn" disabled>選択した注文を会計</button>
-      <button class="btn btn-secondary" onclick="closeSplitPaymentModal()">キャンセル</button>
     </div>
   </div>
   <div id="historyModal" class="modal-overlay hidden">
@@ -2182,6 +2154,9 @@
     
     // プリンター設定（localStorageから読み込み）
     let PRINTER_IP = localStorage.getItem('printerIP') || '192.168.1.100';  // デフォルトIPアドレス
+    let PRINTER_CONNECTION_TYPE = localStorage.getItem('printerConnectionType') || 'ethernet'; // ethernet or bluetooth
+    let BLUETOOTH_DEVICE = null; // Bluetoothデバイス
+    let BLUETOOTH_CHARACTERISTIC = null; // Bluetooth通信用
     let autoPrintEnabled = localStorage.getItem('autoPrintEnabled') === 'true';
     
     // 🆕 プロキシサーバーのURL（HTTPSからHTTPへの通信を中継）
@@ -2192,8 +2167,36 @@
     const USE_PROXY = window.location.protocol === 'https:';
     
     // 🆕 プロキシ対応の印刷ヘルパー関数
+    // 🆕 プロキシ対応 + Bluetooth対応の印刷ヘルパー関数
     async function sendPrintRequest(builder, onSuccess, onError) {
       try {
+        // Bluetooth接続の場合
+        if (PRINTER_CONNECTION_TYPE === 'bluetooth') {
+          console.log('📱 Bluetooth経由で印刷します');
+          
+          if (!BLUETOOTH_CHARACTERISTIC) {
+            throw new Error('Bluetoothプリンタが接続されていません。プリンタ設定から接続してください。');
+          }
+          
+          // StarWebPrintBuilderから生テキストを抽出（簡易版）
+          // 注意: StarWebPrintBuilderはXMLを生成するので、テキストのみを抽出
+          const xmlString = builder.toString();
+          const textMatch = xmlString.match(/<text[^>]*>([^<]*)<\/text>/g);
+          let text = '';
+          if (textMatch) {
+            textMatch.forEach(match => {
+              const content = match.replace(/<[^>]+>/g, '');
+              text += content + '\n';
+            });
+          }
+          
+          await printViaBluetooth(text);
+          
+          if (onSuccess) onSuccess({ status: 'success', message: 'Bluetooth印刷完了' });
+          return;
+        }
+        
+        // Ethernet/WiFi接続の場合
         if (USE_PROXY) {
           console.log('🔄 プロキシサーバー経由で印刷します');
           
@@ -2830,106 +2833,6 @@
     
     // 予約メモモーダルを表示
     
-    // 分割会計モーダルを表示
-    let selectedSplitOrders = [];
-    window.showSplitPaymentModal = function() {
-      // 未払いの注文のみを表示
-      const unpaidOrders = currentOrders.filter(o => !o.paidAt && !o.cancelledAt);
-      
-      if (unpaidOrders.length === 0) {
-        alert('会計可能な注文がありません');
-        return;
-      }
-      
-      const list = document.getElementById('splitOrdersList');
-      list.innerHTML = '';
-      selectedSplitOrders = [];
-      
-      unpaidOrders.forEach(order => {
-        const div = document.createElement('div');
-        div.style.cssText = `
-          padding: 15px;
-          margin-bottom: 10px;
-          border: 2px solid #ddd;
-          border-radius: 10px;
-          cursor: pointer;
-          transition: all 0.2s;
-        `;
-        
-        div.innerHTML = `
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <input type="checkbox" id="split-${order.id}" style="width: 20px; height: 20px; margin-right: 10px;">
-              <strong style="font-size: 18px;">#${order.orderNumber}</strong>
-              <span style="color: #666; margin-left: 10px;">${new Date(order.timestamp.toDate()).toLocaleTimeString('ja-JP', {hour: '2-digit', minute: '2-digit'})}</span>
-            </div>
-            <div style="font-size: 20px; font-weight: bold; color: #667eea;">¥${order.totalAmount.toLocaleString()}</div>
-          </div>
-        `;
-        
-        const checkbox = div.querySelector('input');
-        div.onclick = () => {
-          checkbox.checked = !checkbox.checked;
-          updateSplitSelection();
-        };
-        checkbox.onclick = (e) => e.stopPropagation();
-        checkbox.onchange = updateSplitSelection;
-        
-        list.appendChild(div);
-      });
-      
-      document.getElementById('paymentModal').classList.add('hidden');
-      document.getElementById('splitPaymentModal').classList.remove('hidden');
-      updateSplitSelection();
-    };
-    
-    // 分割会計の選択を更新
-    function updateSplitSelection() {
-      selectedSplitOrders = [];
-      let total = 0;
-      
-      currentOrders.forEach(order => {
-        const checkbox = document.getElementById(`split-${order.id}`);
-        if (checkbox && checkbox.checked) {
-          selectedSplitOrders.push(order);
-          total += order.totalAmount || 0;
-        }
-      });
-      
-      document.getElementById('splitTotalAmount').textContent = `¥${total.toLocaleString()}`;
-      document.getElementById('splitPaymentBtn').disabled = selectedSplitOrders.length === 0;
-    }
-    
-    // 分割会計を実行
-    window.proceedToSplitPayment = function() {
-      if (selectedSplitOrders.length === 0) {
-        alert('注文を選択してください');
-        return;
-      }
-      
-      // 選択した注文をcurrentOrdersにセット
-      currentOrders = selectedSplitOrders;
-      totalAmountToPay = selectedSplitOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-      
-      // 分割会計モーダルを閉じて支払いモーダルを表示
-      document.getElementById('splitPaymentModal').classList.add('hidden');
-      document.getElementById('paymentModal').classList.remove('hidden');
-      
-      // 支払い方法をリセット
-      selectedPaymentMethod = null;
-      document.querySelectorAll('.payment-method-btn').forEach(btn => {
-        btn.classList.remove('selected');
-      });
-      document.getElementById('cashInputSection').classList.add('hidden');
-      document.getElementById('completePaymentBtn').disabled = true;
-    };
-    
-    // 分割会計モーダルを閉じる
-    window.closeSplitPaymentModal = function() {
-      document.getElementById('splitPaymentModal').classList.add('hidden');
-      document.getElementById('paymentModal').classList.remove('hidden');
-      selectedSplitOrders = [];
-    };
     
     // ========== 履歴機能 ==========
     
@@ -15777,9 +15680,143 @@ ${redSlipCount > 0 ? `
     
     // 🖨️ プリンタ設定関数群
     
+    // 接続方式を選択
+    window.selectConnectionType = function(type) {
+      PRINTER_CONNECTION_TYPE = type;
+      
+      const ethernetBtn = document.getElementById('connectionTypeEthernet');
+      const bluetoothBtn = document.getElementById('connectionTypeBluetooth');
+      const ethernetSettings = document.getElementById('ethernetSettings');
+      const bluetoothSettings = document.getElementById('bluetoothSettings');
+      
+      if (type === 'ethernet') {
+        ethernetBtn.style.background = '#667eea';
+        ethernetBtn.style.color = 'white';
+        bluetoothBtn.style.background = 'white';
+        bluetoothBtn.style.color = '#666';
+        ethernetSettings.style.display = 'block';
+        bluetoothSettings.style.display = 'none';
+      } else {
+        ethernetBtn.style.background = 'white';
+        ethernetBtn.style.color = '#666';
+        bluetoothBtn.style.background = '#667eea';
+        bluetoothBtn.style.color = 'white';
+        ethernetSettings.style.display = 'none';
+        bluetoothSettings.style.display = 'block';
+      }
+    };
+    
+    // Bluetoothプリンタを検索
+    window.searchBluetoothPrinter = async function() {
+      try {
+        console.log('🔍 Bluetoothプリンタを検索中...');
+        
+        // Web Bluetooth APIを使用してデバイスを検索
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [
+            { services: ['000018f0-0000-1000-8000-00805f9b34fb'] }, // ESC/POS Service
+          ],
+          optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb']
+        });
+        
+        console.log('✅ デバイス発見:', device.name);
+        
+        // デバイスに接続
+        const server = await device.gatt.connect();
+        console.log('✅ GATT接続成功');
+        
+        // プリンタサービスを取得
+        const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
+        console.log('✅ サービス取得成功');
+        
+        // 書き込み用Characteristicを取得
+        const characteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
+        console.log('✅ Characteristic取得成功');
+        
+        // グローバル変数に保存
+        BLUETOOTH_DEVICE = device;
+        BLUETOOTH_CHARACTERISTIC = characteristic;
+        
+        // デバイス名を表示
+        document.getElementById('bluetoothDeviceInfo').style.display = 'block';
+        document.getElementById('bluetoothDeviceName').textContent = device.name || '不明なデバイス';
+        
+        // localStorageに保存
+        localStorage.setItem('bluetoothDeviceName', device.name || '');
+        
+        alert('Bluetoothプリンタに接続しました\n' + (device.name || '不明なデバイス'));
+        
+      } catch (error) {
+        console.error('❌ Bluetooth接続エラー:', error);
+        alert('Bluetoothプリンタの検索に失敗しました\n\n' + 
+              'ブラウザがBluetooth対応か確認してください（Chrome、Edge推奨）\n' +
+              'プリンタの電源が入っているか確認してください');
+      }
+    };
+    
+    // ESC/POSコマンドを生成するヘルパー関数
+    function createESCPOSCommand(text) {
+      const encoder = new TextEncoder();
+      const commands = [];
+      
+      // 初期化
+      commands.push(new Uint8Array([0x1B, 0x40]));
+      
+      // テキストを追加
+      commands.push(encoder.encode(text));
+      
+      // 改行 + カット
+      commands.push(new Uint8Array([0x0A, 0x0A, 0x0A]));
+      commands.push(new Uint8Array([0x1D, 0x56, 0x00])); // カット
+      
+      // すべてのコマンドを結合
+      const totalLength = commands.reduce((sum, cmd) => sum + cmd.length, 0);
+      const result = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const cmd of commands) {
+        result.set(cmd, offset);
+        offset += cmd.length;
+      }
+      
+      return result;
+    }
+    
+    // Bluetooth印刷関数
+    async function printViaBluetooth(text) {
+      if (!BLUETOOTH_CHARACTERISTIC) {
+        throw new Error('Bluetoothプリンタが接続されていません');
+      }
+      
+      try {
+        const command = createESCPOSCommand(text);
+        
+        // 512バイトずつ送信（Bluetoothの制限）
+        const chunkSize = 512;
+        for (let i = 0; i < command.length; i += chunkSize) {
+          const chunk = command.slice(i, Math.min(i + chunkSize, command.length));
+          await BLUETOOTH_CHARACTERISTIC.writeValue(chunk);
+          await new Promise(resolve => setTimeout(resolve, 100)); // 少し待つ
+        }
+        
+        console.log('✅ Bluetooth印刷完了');
+      } catch (error) {
+        console.error('❌ Bluetooth印刷エラー:', error);
+        throw error;
+      }
+    }
+    
     // プリンタ設定モーダルを表示
     window.showPrinterSettings = function() {
       document.getElementById('printerIPInput').value = PRINTER_IP;
+      selectConnectionType(PRINTER_CONNECTION_TYPE);
+      
+      // 保存されているBluetoothデバイス名を表示
+      const savedDeviceName = localStorage.getItem('bluetoothDeviceName');
+      if (savedDeviceName && PRINTER_CONNECTION_TYPE === 'bluetooth') {
+        document.getElementById('bluetoothDeviceInfo').style.display = 'block';
+        document.getElementById('bluetoothDeviceName').textContent = savedDeviceName + ' (再接続が必要)';
+      }
+      
       document.getElementById('printerSettingsModal').style.display = 'flex';
       document.getElementById('printerTestResult').style.display = 'none';
     };
@@ -15791,26 +15828,36 @@ ${redSlipCount > 0 ? `
     
     // プリンタ設定を保存
     window.savePrinterSettings = function() {
-      const newIP = document.getElementById('printerIPInput').value.trim();
-      
-      // IPアドレスの簡易バリデーション
-      const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
-      if (!ipPattern.test(newIP)) {
-        alert('正しいIPアドレスを入力してください\n例: 192.168.1.100');
-        return;
+      if (PRINTER_CONNECTION_TYPE === 'ethernet') {
+        const newIP = document.getElementById('printerIPInput').value.trim();
+        
+        // IPアドレスの簡易バリデーション
+        const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+        if (!ipPattern.test(newIP)) {
+          alert('正しいIPアドレスを入力してください\n例: 192.168.1.100');
+          return;
+        }
+        
+        PRINTER_IP = newIP;
+        localStorage.setItem('printerIP', newIP);
+        localStorage.setItem('printerConnectionType', 'ethernet');
+        
+        alert('プリンタ設定を保存しました\n接続方式: WiFi/LAN\nIP: ' + newIP);
+      } else {
+        if (!BLUETOOTH_DEVICE) {
+          alert('Bluetoothプリンタを検索して接続してください');
+          return;
+        }
+        
+        localStorage.setItem('printerConnectionType', 'bluetooth');
+        alert('プリンタ設定を保存しました\n接続方式: Bluetooth\nデバイス: ' + (BLUETOOTH_DEVICE.name || '不明'));
       }
       
-      // IPアドレスを保存
-      PRINTER_IP = newIP;
-      localStorage.setItem('printerIP', newIP);
-      
-      alert('プリンタ設定を保存しました\nIP: ' + newIP);
       closePrinterSettings();
     };
     
     // プリンタ接続テスト
     window.testPrinterConnection = async function() {
-      const testIP = document.getElementById('printerIPInput').value.trim();
       const resultDiv = document.getElementById('printerTestResult');
       
       resultDiv.style.display = 'block';
@@ -15819,32 +15866,52 @@ ${redSlipCount > 0 ? `
       resultDiv.textContent = '接続テスト中...';
       
       try {
-        const builder = new StarWebPrintBuilder();
-        builder.createInitializationElement();
-        builder.createTextElement({data: '=== 接続テスト ===\n'});
-        builder.createTextElement({data: '印刷成功！\n\n'});
-        builder.createCutPaperElement({feed: true});
-        
-        const url = `http://${testIP}/StarWebPRNT/SendMessage`;
-        const request = builder.toString();
-        
-        const trader = new StarWebPrintTrader({url: url});
-        
-        trader.onReceive = function(response) {
-          console.log('✅ 接続テスト成功:', response);
+        if (PRINTER_CONNECTION_TYPE === 'bluetooth') {
+          // Bluetooth接続テスト
+          if (!BLUETOOTH_CHARACTERISTIC) {
+            resultDiv.style.background = '#FFCDD2';
+            resultDiv.style.color = '#C62828';
+            resultDiv.innerHTML = '❌ Bluetoothプリンタが未接続<br>先にプリンタを検索してください';
+            return;
+          }
+          
+          await printViaBluetooth('=== 接続テスト ===\n印刷成功！\n\n');
+          
           resultDiv.style.background = '#C8E6C9';
           resultDiv.style.color = '#2E7D32';
-          resultDiv.innerHTML = '✅ 接続成功！<br>プリンタと通信できました';
-        };
-        
-        trader.onError = function(response) {
-          console.error('❌ 接続テスト失敗:', response);
-          resultDiv.style.background = '#FFCDD2';
-          resultDiv.style.color = '#C62828';
-          resultDiv.innerHTML = `❌ 接続失敗<br>${response.status || 'プリンタに接続できません'}<br><small>IPアドレスとネットワーク接続を確認してください</small>`;
-        };
-        
-        trader.sendMessage({request: request});
+          resultDiv.innerHTML = '✅ 接続成功！<br>Bluetoothプリンタと通信できました';
+          
+        } else {
+          // Ethernet接続テスト
+          const testIP = document.getElementById('printerIPInput').value.trim();
+          
+          const builder = new StarWebPrintBuilder();
+          builder.createInitializationElement();
+          builder.createTextElement({data: '=== 接続テスト ===\n'});
+          builder.createTextElement({data: '印刷成功！\n\n'});
+          builder.createCutPaperElement({feed: true});
+          
+          const url = `http://${testIP}/StarWebPRNT/SendMessage`;
+          const request = builder.toString();
+          
+          const trader = new StarWebPrintTrader({url: url});
+          
+          trader.onReceive = function(response) {
+            console.log('✅ 接続テスト成功:', response);
+            resultDiv.style.background = '#C8E6C9';
+            resultDiv.style.color = '#2E7D32';
+            resultDiv.innerHTML = '✅ 接続成功！<br>プリンタと通信できました';
+          };
+          
+          trader.onError = function(response) {
+            console.error('❌ 接続テスト失敗:', response);
+            resultDiv.style.background = '#FFCDD2';
+            resultDiv.style.color = '#C62828';
+            resultDiv.innerHTML = `❌ 接続失敗<br>${response.status || 'プリンタに接続できません'}<br><small>IPアドレスとネットワーク接続を確認してください</small>`;
+          };
+          
+          trader.sendMessage({request: request});
+        }
         
       } catch (error) {
         console.error('❌ 接続テストエラー:', error);
@@ -15862,6 +15929,16 @@ ${redSlipCount > 0 ? `
       if (document.getElementById('autoPrintToggle')) {
         document.getElementById('autoPrintToggle').checked = savedAutoPrint;
         toggleAutoPrint();
+      }
+      
+      // プリンタ接続方式を復元
+      const savedConnectionType = localStorage.getItem('printerConnectionType') || 'ethernet';
+      PRINTER_CONNECTION_TYPE = savedConnectionType;
+      console.log('📱 プリンタ接続方式:', PRINTER_CONNECTION_TYPE);
+      
+      // Bluetoothの場合、自動再接続は行わない（ユーザーが手動で接続する必要がある）
+      if (PRINTER_CONNECTION_TYPE === 'bluetooth') {
+        console.log('ℹ️ Bluetooth接続モードです。プリンタ設定から接続してください。');
       }
     });
     
@@ -15935,29 +16012,57 @@ ${redSlipCount > 0 ? `
     <div class="modal-content" style="background: white; border-radius: 20px; padding: 40px; max-width: 600px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
       <div style="font-size: 64px; text-align: center; margin-bottom: 20px;">🖨️</div>
       <h3 style="font-size: 24px; font-weight: bold; text-align: center; margin-bottom: 15px; color: #333;">プリンタ設定</h3>
-      <p style="text-align: center; font-size: 16px; color: #666; margin-bottom: 30px;">TSP650II / mC-Print3 対応</p>
+      <p style="text-align: center; font-size: 16px; color: #666; margin-bottom: 30px;">TSP650II / mC-Print3 / Bluetooth対応</p>
       
+      <!-- 接続方式選択 -->
       <div style="margin-bottom: 25px;">
-        <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">📍 プリンタIPアドレス</label>
-        <input type="text" id="printerIPInput" placeholder="例: 192.168.1.100" 
-               style="width: 100%; padding: 15px; border: 2px solid #667eea; border-radius: 8px; font-size: 16px; box-sizing: border-box;">
-        <div style="margin-top: 8px; font-size: 14px; color: #666;">
-          ℹ️ プリンタのIPアドレスを入力してください<br>
-          <small style="color: #999;">※プリンタの設定印刷で確認できます</small>
+        <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">🔌 接続方式</label>
+        <div style="display: flex; gap: 10px;">
+          <button id="connectionTypeEthernet" onclick="selectConnectionType('ethernet')" 
+                  style="flex: 1; padding: 15px; border: 2px solid #667eea; background: #667eea; color: white; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+            WiFi / LAN
+          </button>
+          <button id="connectionTypeBluetooth" onclick="selectConnectionType('bluetooth')" 
+                  style="flex: 1; padding: 15px; border: 2px solid #ddd; background: white; color: #666; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+            Bluetooth
+          </button>
+        </div>
+      </div>
+      
+      <!-- Ethernet設定 -->
+      <div id="ethernetSettings" style="display: block;">
+        <div style="margin-bottom: 25px;">
+          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">📍 プリンタIPアドレス</label>
+          <input type="text" id="printerIPInput" placeholder="例: 192.168.1.100" 
+                 style="width: 100%; padding: 15px; border: 2px solid #667eea; border-radius: 8px; font-size: 16px; box-sizing: border-box;">
+          <div style="margin-top: 8px; font-size: 14px; color: #666;">
+            ℹ️ プリンタのIPアドレスを入力してください<br>
+            <small style="color: #999;">※プリンタの設定印刷で確認できます</small>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Bluetooth設定 -->
+      <div id="bluetoothSettings" style="display: none;">
+        <div style="margin-bottom: 25px;">
+          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">📡 Bluetoothプリンタ</label>
+          <button onclick="searchBluetoothPrinter()" 
+                  style="width: 100%; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; box-shadow: 0 4px 15px rgba(33,150,243,0.3);">
+            🔍 プリンタを検索
+          </button>
+          <div id="bluetoothDeviceInfo" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 8px; display: none;">
+            <div style="font-weight: bold; color: #333;">接続済みプリンタ:</div>
+            <div id="bluetoothDeviceName" style="color: #666; margin-top: 5px;">なし</div>
+          </div>
+          <div style="margin-top: 8px; font-size: 14px; color: #666;">
+            ℹ️ ESC/POS対応のBluetoothプリンタを検索します<br>
+            <small style="color: #999;">※Chrome、Edgeで利用可能</small>
+          </div>
         </div>
       </div>
       
       <div style="margin-bottom: 25px;">
-        <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">🔄 接続方式</label>
-        <div style="padding: 15px; background: #f5f5f5; border-radius: 8px; font-size: 14px; color: #666;">
-          <div style="margin-bottom: 5px;"><strong>Ethernet（有線LAN）:</strong> IPアドレスで接続</div>
-          <div style="margin-bottom: 5px;"><strong>WiFi:</strong> ルーターと同じネットワークに接続</div>
-          <div><strong>Bluetooth:</strong> 現在のバージョンでは未対応</div>
-        </div>
-      </div>
-      
-      <div style="margin-bottom: 25px;">
-        <button onclick="testPrinterConnection()" 
+        <button onclick="testPrinterConnection()" id="testConnectionBtn"
                 style="width: 100%; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; box-shadow: 0 4px 15px rgba(76,175,80,0.3);">
           ✅ 接続テスト
         </button>
