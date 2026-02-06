@@ -16331,6 +16331,616 @@ Product ID: 0x${device.productId.toString(16).padStart(4, '0')}
     console.log('  - testUSBPrint() : テスト印刷');
     console.log('  - showPrinterInfo() : プリンター情報表示');
   </script>
+
+  <script>
+    // ========================================
+    // 🔵 Bluetooth レシートプリンター対応
+    // Web Bluetooth API 使用
+    // Chrome/Edge 対応（HTTPS必須）
+    // ========================================
+
+    console.log('🔵 Bluetooth プリンターモジュール読み込み開始');
+
+    // グローバル変数
+    window.bluetoothPrinter = null;
+    window.bluetoothCharacteristic = null;
+
+    // Bluetooth プリンター接続
+    window.connectBluetoothPrinter = async function() {
+      try {
+        // Web Bluetooth 対応チェック
+        if (!navigator.bluetooth) {
+          throw new Error('このブラウザはWeb Bluetoothに対応していません。\n\nChrome/EdgeでHTTPS接続してください。');
+        }
+
+        console.log('🔍 Bluetoothプリンターを検索中...');
+        
+        // Bluetooth デバイス選択
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [
+            { services: ['000018f0-0000-1000-8000-00805f9b34fb'] }, // Star Micronics
+            { services: [0x1101] }, // SPP
+            { namePrefix: 'Star' },
+            { namePrefix: 'mC-' },
+            { namePrefix: 'SM-' },
+            { namePrefix: 'TSP' },
+            { namePrefix: 'TM-' },
+            { namePrefix: 'DPU' },
+            { namePrefix: 'RPP' },
+            { namePrefix: 'MTP' },
+            { namePrefix: 'POS' },
+            { namePrefix: 'PRINTER' },
+          ],
+          optionalServices: [
+            '000018f0-0000-1000-8000-00805f9b34fb',
+            '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+            '0000ff00-0000-1000-8000-00805f9b34fb',
+            0x1101,
+          ]
+        });
+
+        console.log('✅ デバイス検出:', device.name);
+
+        // GATT サーバーに接続
+        console.log('🔗 GATT接続中...');
+        const server = await device.gatt.connect();
+        console.log('✅ GATT接続成功');
+
+        // サービスを取得
+        console.log('🔍 サービス検索中...');
+        const services = await server.getPrimaryServices();
+        console.log(`📋 検出されたサービス数: ${services.length}`);
+
+        let characteristic = null;
+
+        // すべてのサービスをチェック
+        for (const service of services) {
+          console.log(`  サービスUUID: ${service.uuid}`);
+          
+          try {
+            const characteristics = await service.getCharacteristics();
+            
+            for (const char of characteristics) {
+              console.log(`      特性UUID: ${char.uuid}`);
+              
+              // 書き込み可能な特性を探す
+              if (char.properties.write || char.properties.writeWithoutResponse) {
+                characteristic = char;
+                console.log('✅ 書き込み可能な特性を発見:', char.uuid);
+                break;
+              }
+            }
+            
+            if (characteristic) break;
+            
+          } catch (e) {
+            console.warn('    特性取得エラー:', e.message);
+          }
+        }
+
+        if (!characteristic) {
+          throw new Error('書き込み可能な特性が見つかりませんでした。');
+        }
+
+        window.bluetoothPrinter = device;
+        window.bluetoothCharacteristic = characteristic;
+
+        // 切断時の処理
+        device.addEventListener('gattserverdisconnected', () => {
+          console.log('⚠️ Bluetooth プリンター切断');
+          window.bluetoothPrinter = null;
+          window.bluetoothCharacteristic = null;
+          if (typeof showToast === 'function') {
+            showToast('プリンターが切断されました', 'error');
+          }
+        });
+
+        console.log('✅ Bluetooth プリンター接続完了');
+        
+        if (typeof showToast === 'function') {
+          showToast(`接続成功: ${device.name}`, 'success');
+        } else {
+          alert(`プリンター接続成功!\n\n${device.name}`);
+        }
+
+        return device;
+
+      } catch (error) {
+        console.error('❌ Bluetooth接続エラー:', error);
+        
+        let errorMsg = 'Bluetoothプリンター接続に失敗しました。\n\n';
+        
+        if (error.name === 'NotFoundError') {
+          errorMsg += '確認事項:\n';
+          errorMsg += '1. プリンターの電源が入っているか\n';
+          errorMsg += '2. Bluetoothがペアリングモードか\n';
+          errorMsg += '3. 他のデバイスと接続していないか';
+        } else if (error.name === 'SecurityError') {
+          errorMsg += 'HTTPS接続が必要です。\n';
+          errorMsg += 'HTTPでは動作しません。';
+        } else {
+          errorMsg += error.message;
+        }
+        
+        alert(errorMsg);
+        throw error;
+      }
+    };
+
+    // Bluetooth にデータ送信
+    async function sendToBluetoothPrinter(data) {
+      if (!window.bluetoothCharacteristic) {
+        throw new Error('プリンターが接続されていません');
+      }
+
+      try {
+        // データを分割して送信
+        const chunkSize = 512;
+        
+        for (let i = 0; i < data.length; i += chunkSize) {
+          const chunk = data.slice(i, Math.min(i + chunkSize, data.length));
+          
+          if (window.bluetoothCharacteristic.properties.writeWithoutResponse) {
+            await window.bluetoothCharacteristic.writeValueWithoutResponse(chunk);
+          } else {
+            await window.bluetoothCharacteristic.writeValue(chunk);
+          }
+          
+          if (i + chunkSize < data.length) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+        }
+        
+        console.log(`✅ ${data.length}バイト送信完了`);
+        
+      } catch (error) {
+        console.error('❌ 送信エラー:', error);
+        throw error;
+      }
+    }
+
+    // お会計伝票を Bluetooth で印刷
+    window.printBillToBluetooth = async function(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount) {
+      try {
+        console.log('🖨️ Bluetooth印刷開始');
+        
+        if (!window.bluetoothCharacteristic) {
+          await window.connectBluetoothPrinter();
+        }
+
+        const encoder = new TextEncoder();
+        let commands = new Uint8Array([0x1B, 0x40]); // ESC @ - 初期化
+
+        // ===== ヘッダー =====
+        commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
+        commands = appendBytes(commands, encoder.encode('================================\n'));
+        
+        // 店舗名（倍角）
+        commands = appendBytes(commands, [0x1D, 0x21, 0x11]); // 倍角
+        commands = appendBytes(commands, encoder.encode(`      ${storeName}\n`));
+        commands = appendBytes(commands, [0x1D, 0x21, 0x00]); // 通常サイズ
+        
+        commands = appendBytes(commands, encoder.encode(`      ${branchName}\n`));
+        commands = appendBytes(commands, encoder.encode('================================\n'));
+        
+        // 左揃え
+        commands = appendBytes(commands, [0x1B, 0x61, 0x00]);
+        
+        commands = appendBytes(commands, encoder.encode(`${dateStr}\n`));
+        commands = appendBytes(commands, encoder.encode(`テーブル: ${tableNumber}\n`));
+        commands = appendBytes(commands, encoder.encode('================================\n\n'));
+        
+        // ===== 商品リスト =====
+        let currentOrder = null;
+        itemsData.forEach(item => {
+          if (item.orderNumber !== currentOrder) {
+            commands = appendBytes(commands, encoder.encode(`\n[注文 #${item.orderNumber}]\n`));
+            currentOrder = item.orderNumber;
+          }
+          
+          // 商品名
+          const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
+          commands = appendBytes(commands, encoder.encode(itemName + '\n'));
+          
+          // 価格と数量
+          const priceInfo = `@${item.price} x${item.quantity}`;
+          const displaySubtotal = item.price * item.quantity;
+          const subtotalStr = `${displaySubtotal.toLocaleString()}円`;
+          const spaces = ' '.repeat(Math.max(1, 32 - priceInfo.length - subtotalStr.length));
+          commands = appendBytes(commands, encoder.encode(`${priceInfo}${spaces}${subtotalStr}\n`));
+          
+          // トッピング
+          if (item.toppingDetails && item.toppingDetails.length > 0) {
+            const groupedBySet = {};
+            item.toppingDetails.forEach(detail => {
+              if (!groupedBySet[detail.setName]) {
+                groupedBySet[detail.setName] = [];
+              }
+              groupedBySet[detail.setName].push(detail.optionName);
+            });
+            
+            Object.entries(groupedBySet).forEach(([setName, options]) => {
+              commands = appendBytes(commands, encoder.encode(` ${setName}\n`));
+              options.forEach(opt => {
+                commands = appendBytes(commands, encoder.encode(`  ・${opt}\n`));
+              });
+            });
+          } else if (item.toppings && item.toppings !== 'なし') {
+            commands = appendBytes(commands, encoder.encode(` TP:${item.toppings}\n`));
+          }
+        });
+        
+        // ===== 合計 =====
+        commands = appendBytes(commands, encoder.encode('================================\n'));
+        commands = appendBytes(commands, encoder.encode(`点数: ${itemCount}点\n`));
+        commands = appendBytes(commands, encoder.encode('================================\n'));
+        
+        // センター揃え
+        commands = appendBytes(commands, [0x1B, 0x61, 0x01]);
+        
+        // 合計金額（倍角）
+        commands = appendBytes(commands, [0x1D, 0x21, 0x11]);
+        commands = appendBytes(commands, encoder.encode(`合計 ${grandTotal.toLocaleString()}円\n`));
+        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
+        
+        commands = appendBytes(commands, encoder.encode('================================\n'));
+        commands = appendBytes(commands, encoder.encode('\n\nレジまでお持ちください\n\n\n'));
+        
+        // ===== カット =====
+        commands = appendBytes(commands, [0x1B, 0x64, 0x03]); // 3行フィード
+        commands = appendBytes(commands, [0x1D, 0x56, 0x01]); // 部分カット
+        
+        // 送信
+        await sendToBluetoothPrinter(commands);
+        
+        console.log('✅ Bluetooth印刷完了');
+        
+      } catch (error) {
+        console.error('❌ Bluetooth印刷エラー:', error);
+        throw error;
+      }
+    };
+
+    // 注文票（調理用）を Bluetooth で印刷
+    window.printOrderToBluetooth = async function(orderNumber, tableNumber, items, timestamp) {
+      try {
+        console.log('🖨️ 注文票印刷開始 (Bluetooth)');
+        
+        if (!window.bluetoothCharacteristic) {
+          await window.connectBluetoothPrinter();
+        }
+
+        const encoder = new TextEncoder();
+        let commands = new Uint8Array([0x1B, 0x40]); // 初期化
+
+        // ===== ヘッダー =====
+        commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
+        commands = appendBytes(commands, [0x1D, 0x21, 0x11]); // 倍角
+        commands = appendBytes(commands, encoder.encode('【 注文票 】\n'));
+        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
+        
+        commands = appendBytes(commands, encoder.encode('================================\n'));
+        
+        // 左揃え
+        commands = appendBytes(commands, [0x1B, 0x61, 0x00]);
+        
+        const now = new Date(timestamp);
+        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        
+        commands = appendBytes(commands, encoder.encode(`注文番号: #${orderNumber}\n`));
+        commands = appendBytes(commands, encoder.encode(`テーブル: ${tableNumber}\n`));
+        commands = appendBytes(commands, encoder.encode(`時刻: ${timeStr}\n`));
+        commands = appendBytes(commands, encoder.encode('================================\n\n'));
+        
+        // ===== 商品リスト =====
+        items.forEach(item => {
+          // 商品名（太字）
+          commands = appendBytes(commands, [0x1B, 0x45, 0x01]); // 強調ON
+          commands = appendBytes(commands, encoder.encode(`${item.name}\n`));
+          commands = appendBytes(commands, [0x1B, 0x45, 0x00]); // 強調OFF
+          
+          // 数量（大きく）
+          commands = appendBytes(commands, [0x1D, 0x21, 0x11]); // 倍角
+          commands = appendBytes(commands, encoder.encode(`  数量: ${item.quantity}\n`));
+          commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
+          
+          // トッピング
+          if (item.toppingDetails && item.toppingDetails.length > 0) {
+            const groupedBySet = {};
+            item.toppingDetails.forEach(detail => {
+              if (!groupedBySet[detail.setName]) {
+                groupedBySet[detail.setName] = [];
+              }
+              groupedBySet[detail.setName].push(detail.optionName);
+            });
+            
+            Object.entries(groupedBySet).forEach(([setName, options]) => {
+              commands = appendBytes(commands, encoder.encode(`  ${setName}:\n`));
+              options.forEach(opt => {
+                commands = appendBytes(commands, encoder.encode(`    ・${opt}\n`));
+              });
+            });
+          } else if (item.toppings && item.toppings !== 'なし') {
+            commands = appendBytes(commands, encoder.encode(`  ${item.toppings}\n`));
+          }
+          
+          commands = appendBytes(commands, encoder.encode('\n'));
+        });
+        
+        commands = appendBytes(commands, encoder.encode('================================\n\n\n'));
+        
+        // カット
+        commands = appendBytes(commands, [0x1B, 0x64, 0x03]);
+        commands = appendBytes(commands, [0x1D, 0x56, 0x01]);
+        
+        await sendToBluetoothPrinter(commands);
+        
+        console.log('✅ 注文票印刷完了');
+        
+      } catch (error) {
+        console.error('❌ 注文票印刷エラー:', error);
+        throw error;
+      }
+    };
+
+    // レシート（領収書）を Bluetooth で印刷
+    window.printReceiptToBluetooth = async function(receiptData) {
+      try {
+        console.log('🖨️ レシート印刷開始 (Bluetooth)');
+        
+        if (!window.bluetoothCharacteristic) {
+          await window.connectBluetoothPrinter();
+        }
+
+        const encoder = new TextEncoder();
+        let commands = new Uint8Array([0x1B, 0x40]);
+
+        // ===== ヘッダー =====
+        commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
+        commands = appendBytes(commands, encoder.encode('================================\n'));
+        
+        commands = appendBytes(commands, [0x1D, 0x21, 0x11]);
+        commands = appendBytes(commands, encoder.encode(`${receiptData.storeName || '粉もん屋 八'}\n`));
+        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
+        
+        commands = appendBytes(commands, encoder.encode(`${receiptData.branchName || '下赤塚店'}\n`));
+        
+        if (receiptData.address) {
+          commands = appendBytes(commands, encoder.encode(`${receiptData.address}\n`));
+        }
+        if (receiptData.tel) {
+          commands = appendBytes(commands, encoder.encode(`TEL: ${receiptData.tel}\n`));
+        }
+        
+        commands = appendBytes(commands, encoder.encode('================================\n'));
+        
+        // 左揃え
+        commands = appendBytes(commands, [0x1B, 0x61, 0x00]);
+        
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        
+        commands = appendBytes(commands, encoder.encode(`${dateStr}\n`));
+        commands = appendBytes(commands, encoder.encode(`領収書 No.${receiptData.receiptNumber || '0001'}\n`));
+        commands = appendBytes(commands, encoder.encode('================================\n\n'));
+        
+        // ===== 商品リスト =====
+        let subtotal = 0;
+        
+        receiptData.items.forEach(item => {
+          const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
+          commands = appendBytes(commands, encoder.encode(`${itemName}\n`));
+          
+          const itemTotal = item.price * item.quantity;
+          subtotal += itemTotal;
+          
+          const priceInfo = `@${item.price} x${item.quantity}`;
+          const totalStr = `${itemTotal.toLocaleString()}円`;
+          const spaces = ' '.repeat(Math.max(1, 32 - priceInfo.length - totalStr.length));
+          commands = appendBytes(commands, encoder.encode(`${priceInfo}${spaces}${totalStr}\n`));
+        });
+        
+        // ===== 合計 =====
+        commands = appendBytes(commands, encoder.encode('\n================================\n'));
+        commands = appendBytes(commands, encoder.encode(`小計: ${subtotal.toLocaleString()}円\n`));
+        
+        const tax = Math.floor(subtotal * 0.1);
+        const total = subtotal + tax;
+        
+        commands = appendBytes(commands, encoder.encode(`消費税(10%): ${tax.toLocaleString()}円\n`));
+        commands = appendBytes(commands, encoder.encode('================================\n'));
+        
+        // センター揃え
+        commands = appendBytes(commands, [0x1B, 0x61, 0x01]);
+        
+        commands = appendBytes(commands, [0x1D, 0x21, 0x11]);
+        commands = appendBytes(commands, encoder.encode(`合計 ${total.toLocaleString()}円\n`));
+        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
+        
+        commands = appendBytes(commands, encoder.encode('================================\n'));
+        
+        // お預かり・お釣り
+        if (receiptData.payment) {
+          commands = appendBytes(commands, [0x1B, 0x61, 0x00]); // 左揃え
+          commands = appendBytes(commands, encoder.encode(`\nお預かり: ${receiptData.payment.toLocaleString()}円\n`));
+          const change = receiptData.payment - total;
+          commands = appendBytes(commands, encoder.encode(`お釣り: ${change.toLocaleString()}円\n`));
+          commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
+        }
+        
+        commands = appendBytes(commands, encoder.encode('\n\nありがとうございました\n'));
+        commands = appendBytes(commands, encoder.encode('またのご来店をお待ちしております\n\n\n'));
+        
+        // カット
+        commands = appendBytes(commands, [0x1B, 0x64, 0x03]);
+        commands = appendBytes(commands, [0x1D, 0x56, 0x01]);
+        
+        await sendToBluetoothPrinter(commands);
+        
+        console.log('✅ レシート印刷完了');
+        
+      } catch (error) {
+        console.error('❌ レシート印刷エラー:', error);
+        throw error;
+      }
+    };
+
+    // ========================================
+    // 既存関数の上書き（Bluetooth優先）
+    // ========================================
+
+    // 元のprintBill関数を保存
+    const originalPrintBill = window.printBill;
+
+    // printBill を Bluetooth 優先版に置き換え
+    window.printBill = async function() {
+      const tableNumber = document.getElementById('tableSelect')?.value;
+      if (!tableNumber) {
+        alert('テーブルを選択してください');
+        return;
+      }
+      
+      try {
+        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
+        const tableOrders = [];
+        
+        ordersSnapshot.forEach(doc => {
+          const order = doc.data();
+          if (order.tableNumber === tableNumber && !order.paidAt && !order.deleted && !order.cancelledAt) {
+            tableOrders.push({ id: doc.id, ...order });
+          }
+        });
+        
+        if (tableOrders.length === 0) {
+          alert('このテーブルに未会計の注文がありません');
+          return;
+        }
+        
+        tableOrders.sort((a, b) => (a.orderNumber || 0) - (b.orderNumber || 0));
+        
+        let grandTotal = 0;
+        let itemCount = 0;
+        const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
+        const branchName = window.receiptSettings?.branchName || '下赤塚店';
+        
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        
+        const itemsData = [];
+        tableOrders.forEach(order => {
+          order.items.forEach(item => {
+            const subtotal = item.price * item.quantity;
+            grandTotal += subtotal;
+            itemCount += item.quantity;
+            
+            let displayPrice = item.price;
+            if (item.taxType === 'exclusive') {
+              const taxRate = item.taxRate || 10;
+              displayPrice = Math.floor(item.price * (1 + taxRate / 100));
+            }
+            
+            itemsData.push({
+              name: item.name,
+              price: displayPrice,
+              quantity: item.quantity,
+              toppings: item.toppings,
+              toppingDetails: item.toppingDetails,
+              orderNumber: order.orderNumber
+            });
+          });
+        });
+        
+        // Bluetooth接続があればBluetooth印刷、なければUSB印刷
+        if (window.bluetoothCharacteristic) {
+          await printBillToBluetooth(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
+        } else if (window.usbPrinter) {
+          await printBillToUSB(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
+        } else {
+          // どちらも接続されていない場合は接続を促す
+          const choice = confirm('プリンターが接続されていません。\n\nBluetoothプリンターを接続しますか？\n（キャンセルでUSBプリンター接続）');
+          if (choice) {
+            await window.connectBluetoothPrinter();
+            await printBillToBluetooth(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
+          } else {
+            await connectUSBPrinter();
+            await printBillToUSB(storeName, branchName, dateStr, tableNumber, itemsData, grandTotal, itemCount);
+          }
+        }
+        
+        if (typeof showToast === 'function') {
+          showToast('お会計伝票を印刷しました');
+        } else {
+          alert('お会計伝票を印刷しました');
+        }
+        
+      } catch (e) {
+        console.error('印刷エラー:', e);
+        alert('印刷に失敗しました: ' + e.message);
+      }
+    };
+
+    // ========================================
+    // テスト用関数
+    // ========================================
+
+    window.testBluetoothPrint = async function() {
+      try {
+        if (!window.bluetoothCharacteristic) {
+          await window.connectBluetoothPrinter();
+        }
+        
+        const encoder = new TextEncoder();
+        let commands = new Uint8Array([0x1B, 0x40]);
+        
+        commands = appendBytes(commands, [0x1B, 0x61, 0x01]); // センター揃え
+        commands = appendBytes(commands, [0x1D, 0x21, 0x11]); // 倍角
+        commands = appendBytes(commands, encoder.encode('\nテスト印刷\n'));
+        commands = appendBytes(commands, [0x1D, 0x21, 0x00]);
+        commands = appendBytes(commands, encoder.encode('\nBluetooth接続\n'));
+        commands = appendBytes(commands, encoder.encode('正常に動作しています\n\n\n'));
+        commands = appendBytes(commands, [0x1B, 0x64, 0x03]);
+        commands = appendBytes(commands, [0x1D, 0x56, 0x01]);
+        
+        await sendToBluetoothPrinter(commands);
+        
+        if (typeof showToast === 'function') {
+          showToast('テスト印刷を送信しました', 'success');
+        } else {
+          alert('テスト印刷を送信しました');
+        }
+        
+      } catch (error) {
+        console.error('テスト印刷エラー:', error);
+        alert('テスト印刷に失敗しました: ' + error.message);
+      }
+    };
+
+    window.showBluetoothPrinterInfo = function() {
+      if (!window.bluetoothPrinter) {
+        alert('Bluetoothプリンターが接続されていません');
+        return;
+      }
+      
+      const device = window.bluetoothPrinter;
+      const info = `
+【接続中のBluetoothプリンター】
+
+プリンター名: ${device.name || '不明'}
+ID: ${device.id || '不明'}
+接続状態: ${device.gatt.connected ? '接続中' : '切断'}
+      `.trim();
+      
+      alert(info);
+      console.log('📋 Bluetoothプリンター情報:', device);
+    };
+
+    console.log('✅ Bluetooth プリンター対応モジュール読み込み完了');
+    console.log('💡 使い方:');
+    console.log('  - connectBluetoothPrinter() : Bluetoothプリンター接続');
+    console.log('  - testBluetoothPrint() : テスト印刷');
+    console.log('  - showBluetoothPrinterInfo() : プリンター情報表示');
+    console.log('  - printBill() : 自動でBluetooth/USB判定して印刷');
+  </script>
   
 </body>
 </html>
