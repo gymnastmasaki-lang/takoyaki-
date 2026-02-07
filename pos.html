@@ -15711,7 +15711,13 @@ ${redSlipCount > 0 ? `
     // Bluetoothプリンタを検索
     window.searchBluetoothPrinter = async function() {
       try {
-        console.log('🔍 Bluetoothプリンタを検索中...');
+        console.log('Bluetoothプリンタを検索中...');
+        
+        // カスタムローディングモーダルを表示
+        document.getElementById('bluetoothSearchModal').style.display = 'flex';
+        
+        // 少し待ってからBluetooth APIを呼び出し（モーダル表示のため）
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         // Web Bluetooth APIを使用してデバイスを検索
         const device = await navigator.bluetooth.requestDevice({
@@ -15721,19 +15727,19 @@ ${redSlipCount > 0 ? `
           optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb']
         });
         
-        console.log('✅ デバイス発見:', device.name);
+        console.log('デバイス発見:', device.name);
         
         // デバイスに接続
         const server = await device.gatt.connect();
-        console.log('✅ GATT接続成功');
+        console.log('GATT接続成功');
         
         // プリンタサービスを取得
         const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
-        console.log('✅ サービス取得成功');
+        console.log('サービス取得成功');
         
         // 書き込み用Characteristicを取得
         const characteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
-        console.log('✅ Characteristic取得成功');
+        console.log('Characteristic取得成功');
         
         // グローバル変数に保存
         BLUETOOTH_DEVICE = device;
@@ -15746,15 +15752,62 @@ ${redSlipCount > 0 ? `
         // localStorageに保存
         localStorage.setItem('bluetoothDeviceName', device.name || '');
         
-        alert('Bluetoothプリンタに接続しました\n' + (device.name || '不明なデバイス'));
+        // ローディングモーダルを閉じる
+        document.getElementById('bluetoothSearchModal').style.display = 'none';
+        
+        // 成功メッセージ
+        showCustomAlert('接続成功', 'Bluetoothプリンタに接続しました\n' + (device.name || '不明なデバイス'), 'success');
         
       } catch (error) {
-        console.error('❌ Bluetooth接続エラー:', error);
-        alert('Bluetoothプリンタの検索に失敗しました\n\n' + 
-              'ブラウザがBluetooth対応か確認してください（Chrome、Edge推奨）\n' +
-              'プリンタの電源が入っているか確認してください');
+        console.error('Bluetooth接続エラー:', error);
+        
+        // ローディングモーダルを閉じる
+        document.getElementById('bluetoothSearchModal').style.display = 'none';
+        
+        // エラーメッセージ
+        if (error.name === 'NotFoundError') {
+          showCustomAlert('デバイスが見つかりません', 'Bluetoothプリンタが見つかりませんでした。\n\nプリンタの電源が入っているか確認してください。', 'error');
+        } else if (error.name === 'SecurityError' || error.name === 'NotAllowedError') {
+          showCustomAlert('アクセス拒否', 'Bluetooth接続がキャンセルされました。', 'error');
+        } else {
+          showCustomAlert('接続エラー', 'Bluetoothプリンタの検索に失敗しました。\n\nブラウザがBluetooth対応か確認してください（Chrome、Edge推奨）', 'error');
+        }
       }
     };
+    
+    // カスタムアラート表示関数
+    function showCustomAlert(title, message, type = 'info') {
+      const iconMap = {
+        success: '✓',
+        error: '✕',
+        info: 'i'
+      };
+      
+      const colorMap = {
+        success: '#4CAF50',
+        error: '#f44336',
+        info: '#2196F3'
+      };
+      
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.style.cssText = 'display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center;';
+      
+      modal.innerHTML = `
+        <div style="background: white; border-radius: 20px; padding: 40px; max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3); text-align: center;">
+          <div style="width: 80px; height: 80px; margin: 0 auto 20px; border-radius: 50%; background: ${colorMap[type]}; color: white; display: flex; align-items: center; justify-content: center; font-size: 48px; font-weight: bold;">
+            ${iconMap[type]}
+          </div>
+          <h3 style="font-size: 22px; font-weight: bold; margin-bottom: 15px; color: #333;">${title}</h3>
+          <p style="font-size: 16px; color: #666; margin-bottom: 30px; white-space: pre-line;">${message}</p>
+          <button onclick="this.closest('.modal-overlay').remove()" style="padding: 15px 40px; font-size: 16px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: ${colorMap[type]}; color: white; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+            OK
+          </button>
+        </div>
+      `;
+      
+      document.body.appendChild(modal);
+    }
     
     // ESC/POSコマンドを生成するヘルパー関数
     function createESCPOSCommand(text) {
@@ -16009,6 +16062,25 @@ ${redSlipCount > 0 ? `
     </div>
   </div>
   
+  <!-- Bluetooth検索中モーダル -->
+  <div id="bluetoothSearchModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="background: white; border-radius: 20px; padding: 40px; max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3); text-align: center;">
+      <div style="font-size: 48px; margin-bottom: 20px; color: #2196F3;">
+        <div style="width: 60px; height: 60px; border: 4px solid #E3F2FD; border-top: 4px solid #2196F3; border-radius: 50%; margin: 0 auto; animation: spin 1s linear infinite;"></div>
+      </div>
+      <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #333;">デバイスをスキャン中</h3>
+      <p style="font-size: 16px; color: #666; margin-bottom: 20px;">Bluetoothプリンタを検索しています...</p>
+      <p style="font-size: 14px; color: #999;">ブラウザのペア設定画面が表示されます</p>
+    </div>
+  </div>
+  
+  <style>
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+  
   <!-- プリンタ設定モーダル -->
   <div id="printerSettingsModal" class="modal-overlay" style="display: none;">
     <div class="modal-content" style="background: white; border-radius: 20px; padding: 40px; max-width: 600px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
@@ -16017,7 +16089,7 @@ ${redSlipCount > 0 ? `
       
       <!-- 接続方式選択 -->
       <div style="margin-bottom: 25px;">
-        <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">🔌 接続方式</label>
+        <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">接続方式</label>
         <div style="display: flex; gap: 10px;">
           <button id="connectionTypeEthernet" onclick="selectConnectionType('ethernet')" 
                   style="flex: 1; padding: 15px; border: 2px solid #667eea; background: #667eea; color: white; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
@@ -16033,11 +16105,11 @@ ${redSlipCount > 0 ? `
       <!-- Ethernet設定 -->
       <div id="ethernetSettings" style="display: block;">
         <div style="margin-bottom: 25px;">
-          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">📍 プリンタIPアドレス</label>
+          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">プリンタIPアドレス</label>
           <input type="text" id="printerIPInput" placeholder="例: 192.168.1.100" 
                  style="width: 100%; padding: 15px; border: 2px solid #667eea; border-radius: 8px; font-size: 16px; box-sizing: border-box;">
           <div style="margin-top: 8px; font-size: 14px; color: #666;">
-            ℹ️ プリンタのIPアドレスを入力してください<br>
+            プリンタのIPアドレスを入力してください<br>
             <small style="color: #999;">※プリンタの設定印刷で確認できます</small>
           </div>
         </div>
@@ -16046,17 +16118,17 @@ ${redSlipCount > 0 ? `
       <!-- Bluetooth設定 -->
       <div id="bluetoothSettings" style="display: none;">
         <div style="margin-bottom: 25px;">
-          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">📡 Bluetoothプリンタ</label>
+          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">Bluetoothプリンタ</label>
           <button onclick="searchBluetoothPrinter()" 
                   style="width: 100%; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; box-shadow: 0 4px 15px rgba(33,150,243,0.3);">
-            🔍 プリンタを検索
+            プリンタを検索
           </button>
           <div id="bluetoothDeviceInfo" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 8px; display: none;">
             <div style="font-weight: bold; color: #333;">接続済みプリンタ:</div>
             <div id="bluetoothDeviceName" style="color: #666; margin-top: 5px;">なし</div>
           </div>
           <div style="margin-top: 8px; font-size: 14px; color: #666;">
-            ℹ️ ESC/POS対応のBluetoothプリンタを検索します<br>
+            ESC/POS対応のBluetoothプリンタを検索します<br>
             <small style="color: #999;">※Chrome、Edgeで利用可能</small>
           </div>
         </div>
@@ -16065,7 +16137,7 @@ ${redSlipCount > 0 ? `
       <div style="margin-bottom: 25px;">
         <button onclick="testPrinterConnection()" id="testConnectionBtn"
                 style="width: 100%; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; box-shadow: 0 4px 15px rgba(76,175,80,0.3);">
-          ✅ 接続テスト
+          接続テスト
         </button>
         <div id="printerTestResult" style="margin-top: 10px; padding: 10px; border-radius: 8px; display: none;"></div>
       </div>
