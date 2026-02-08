@@ -588,7 +588,7 @@
     
     .sidebar-button {
       width: 100%;
-      padding: 12px 10px;
+      padding: 18px 10px;
       margin-bottom: 8px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
@@ -10936,8 +10936,16 @@ ${redSlipCount > 0 ? `
           const orderTotal = order.totalAmount || 0;
           console.log(`  注文全体として追加: #${order.orderNumber}, 金額:${orderTotal}`);
           
-          // テーブル番号に基づいてデフォルト税率を決定
-          const defaultTaxRate = determineDefaultTaxRate(order.tableNumber);
+          // テーブル設定とテーブル番号に基づいてデフォルト税率を決定
+          let defaultTaxRate = 10;
+          if (currentTableSettings && currentTableSettings.taxRule) {
+            // テーブル設定がある場合はそれを使用
+            defaultTaxRate = (currentTableSettings.taxRule === 'takeout') ? 8 : 10;
+          } else {
+            // テーブル設定がない場合は旧ロジックを使用
+            defaultTaxRate = determineDefaultTaxRate(order.tableNumber);
+          }
+          
           addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, orderTotal, itemIndex, defaultTaxRate);
           itemIndex++;
         } else {
@@ -16854,10 +16862,10 @@ ${redSlipCount > 0 ? `
         
         container.innerHTML = '';
         
-        // 🆕 即会計ボタンを最初に追加
+        // 🆕 即会計ボタンを最初に追加（他のテーブルボタンと同じ色）
         const quickCheckoutCard = document.createElement('div');
         quickCheckoutCard.className = 'table-card';
-        quickCheckoutCard.style.cssText = 'background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); cursor: pointer;';
+        quickCheckoutCard.style.cssText = 'background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%); cursor: pointer;';
         quickCheckoutCard.onclick = () => quickCheckout();
         quickCheckoutCard.innerHTML = `
           <div class="table-name" style="color: white; font-size: 18px;">即会計</div>
@@ -16963,13 +16971,29 @@ ${redSlipCount > 0 ? `
           orderCard.style.cssText = 'background: white; border-radius: 12px; padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-left: 5px solid #667eea;';
           
           const items = order.items || [];
-          const itemsHTML = items.map(item => `
-            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
-              <span style="flex: 1;">${item.name} ${item.toppingName ? `(${item.toppingName})` : ''}</span>
-              <span style="width: 60px; text-align: center;">×${item.quantity || 1}</span>
-              <span style="width: 100px; text-align: right; font-weight: bold;">¥${((item.price + (item.toppingPrice || 0)) * (item.quantity || 1)).toLocaleString()}</span>
-            </div>
-          `).join('');
+          const itemsHTML = items.map(item => {
+            const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
+            let html = `
+            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; flex-direction: column;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="flex: 1; font-weight: 500;">${item.name}</span>
+                <span style="width: 60px; text-align: center;">×${item.quantity || 1}</span>
+                <span style="width: 100px; text-align: right; font-weight: bold;">¥${itemTotal.toLocaleString()}</span>
+              </div>`;
+            
+            // トッピング情報を表示
+            if (item.toppingName && item.toppingPrice) {
+              html += `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; padding-left: 10px; font-size: 13px; color: #666;">
+                <span style="flex: 1;">└ ${item.toppingName}</span>
+                <span style="width: 160px; text-align: right;">+¥${(item.toppingPrice * (item.quantity || 1)).toLocaleString()}</span>
+              </div>`;
+            }
+            
+            html += '</div>';
+            return html;
+          }).join('');
+
           
           const total = items.reduce((sum, item) => sum + (item.price + (item.toppingPrice || 0)) * (item.quantity || 1), 0);
           
@@ -17184,20 +17208,62 @@ ${redSlipCount > 0 ? `
     async function showPaymentFromTable() {
       if (!currentSelectedTableId) return;
       
-      // 旧UIの会計機能を使用するため、selectedTableを設定
-      selectedTable = currentSelectedTableId;
-      
-      // テーブル設定を読み込む
-      currentTableSettings = await getTableSettings(currentSelectedTableId);
-      console.log('📋 テーブル設定読み込み完了:', currentSelectedTableId);
-      console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
-      console.log('  設定全体:', currentTableSettings);
-      
-      // 注文を読み込んで会計モーダルを表示
-      await loadOrders(currentSelectedTableId);
-      
-      // 会計モーダルを表示（既存の関数を使用）
-      showPaymentModal();
+      try {
+        // テーブル設定を読み込む
+        currentTableSettings = await getTableSettings(currentSelectedTableId);
+        console.log('📋 テーブル全注文会計 - テーブル設定読み込み:', currentSelectedTableId);
+        console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
+        
+        // テーブルIDで注文を検索
+        const ordersRef = window.getStoreCollection('orders');
+        const snapshot = await window.getDocs(ordersRef);
+        
+        const orders = [];
+        let totalAmount = 0;
+        
+        snapshot.forEach(doc => {
+          const order = doc.data();
+          // このテーブルの未払い・未削除の注文のみを集計
+          if (order.tableId === currentSelectedTableId && !order.deleted && !order.paidAt && !order.cancelledAt) {
+            orders.push({
+              id: doc.id,
+              ...order
+            });
+            totalAmount += order.totalAmount || 0;
+          }
+        });
+        
+        if (orders.length === 0) {
+          alert('会計する注文がありません');
+          return;
+        }
+        
+        // 全注文を選択して会計モーダルを表示
+        currentOrders = orders;
+        selectedTable = currentSelectedTableId;
+        totalAmountToPay = totalAmount;
+        
+        // 値引き金額を初期化
+        document.getElementById('discountAmount').value = '0';
+        
+        // 税率選択リストを生成
+        buildTaxRateSelectionList();
+        
+        // 請求額を表示
+        updatePaymentTotal();
+        
+        document.getElementById('paymentModal').classList.remove('hidden');
+        selectedPaymentMethod = null;
+        document.querySelectorAll('.payment-method-btn').forEach(btn => {
+          btn.classList.remove('selected');
+        });
+        document.getElementById('cashInputSection').classList.add('hidden');
+        document.getElementById('completePaymentBtn').disabled = true;
+        
+      } catch (error) {
+        console.error('会計処理エラー:', error);
+        alert('会計処理に失敗しました: ' + error.message);
+      }
     }
     
     // 単一注文の会計（新UI用）
