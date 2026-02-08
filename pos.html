@@ -2057,6 +2057,7 @@
         </div>
         
         <button onclick="generatePeriodJournal()" style="padding: 12px 24px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">ジャーナル生成</button>
+        <button onclick="exportPeriodCSV()" style="padding: 12px 24px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">CSV出力</button>
       </div>
       
       <div id="monthlyReportContent">
@@ -5541,6 +5542,221 @@ ${totalRedSlipCount > 0 ? `
       } catch (e) {
         console.error('❌ 期間ジャーナル生成エラー:', e);
         alert('期間ジャーナルの生成に失敗しました: ' + e.message);
+      }
+    };
+    
+    // ===== 期間CSV出力 =====
+    window.exportPeriodCSV = async function() {
+      try {
+        const startDate = document.getElementById('reportStartDate').value;
+        const endDate = document.getElementById('reportEndDate').value;
+        
+        if (!startDate || !endDate) {
+          alert('開始日と終了日を選択してください');
+          return;
+        }
+        
+        if (startDate > endDate) {
+          alert('開始日は終了日より前の日付を選択してください');
+          return;
+        }
+        
+        console.log(`📊 期間CSV出力: ${startDate} ～ ${endDate}`);
+        
+        // 期間内の全日付を生成
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const dates = [];
+        
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          dates.push(dateStr);
+        }
+        
+        // 各日付の売上データを取得して合計
+        let totalCustomerCount = 0;
+        let totalItems = 0;
+        let totalCashSales = 0;
+        let totalEmoneSales = 0;
+        let totalCreditSales = 0;
+        let totalDiscount = 0;
+        let totalTax8 = 0;
+        let totalTax10 = 0;
+        let totalDrawerOpen = 0;
+        let totalRedSlipCount = 0;
+        let totalRedSlipAmount = 0;
+        let totalRedSlipTax8 = 0;
+        let totalRedSlipTax10 = 0;
+        let totalExpense = 0;
+        let totalLaborCost = 0;
+        const itemCounts = {};
+        const dailyData = [];
+        
+        // ordersコレクションから直接商品データを集計
+        const ordersQuery = window.query(
+          window.getStoreCollection('orders'),
+          window.where('paidAt', '!=', null)
+        );
+        const ordersSnapshot = await window.getDocs(ordersQuery);
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (!data.paidAt) return;
+          
+          const orderDate = data.paidAt.toDate();
+          let targetDate = new Date(orderDate);
+          if (orderDate.getHours() < 3) {
+            targetDate.setDate(targetDate.getDate() - 1);
+          }
+          
+          const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+          
+          if (dates.includes(orderDateStr) && data.items) {
+            data.items.forEach(item => {
+              itemCounts[item.name] = (itemCounts[item.name] || 0) + (item.quantity || 1);
+            });
+          }
+        });
+        
+        // 日別データを収集
+        for (const dateStr of dates) {
+          const dayData = { date: dateStr };
+          
+          // 売上データ
+          const salesDoc = await window.getDoc(window.getStoreDoc('dailySales', dateStr));
+          if (salesDoc.exists()) {
+            const data = salesDoc.data();
+            dayData.customerCount = data.customerCount || 0;
+            dayData.totalItems = data.totalItems || 0;
+            dayData.cashSales = data.cashSales || 0;
+            dayData.emoneSales = data.emoneSales || 0;
+            dayData.creditSales = data.creditSales || 0;
+            dayData.discount = data.totalDiscount || 0;
+            dayData.tax8 = data.tax8Total || 0;
+            dayData.tax10 = data.tax10Total || 0;
+            dayData.drawerOpen = data.drawerOpenCount || 0;
+            dayData.redSlipCount = data.redSlipCount || 0;
+            dayData.redSlipAmount = data.redSlipAmount || 0;
+            
+            totalCustomerCount += dayData.customerCount;
+            totalItems += dayData.totalItems;
+            totalCashSales += dayData.cashSales;
+            totalEmoneSales += dayData.emoneSales;
+            totalCreditSales += dayData.creditSales;
+            totalDiscount += dayData.discount;
+            totalTax8 += dayData.tax8;
+            totalTax10 += dayData.tax10;
+            totalDrawerOpen += dayData.drawerOpen;
+            totalRedSlipCount += dayData.redSlipCount;
+            totalRedSlipAmount += dayData.redSlipAmount;
+          } else {
+            dayData.customerCount = 0;
+            dayData.totalItems = 0;
+            dayData.cashSales = 0;
+            dayData.emoneSales = 0;
+            dayData.creditSales = 0;
+            dayData.discount = 0;
+            dayData.tax8 = 0;
+            dayData.tax10 = 0;
+            dayData.drawerOpen = 0;
+            dayData.redSlipCount = 0;
+            dayData.redSlipAmount = 0;
+          }
+          
+          // 支出データ
+          const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
+          if (expenseDoc.exists()) {
+            dayData.expense = expenseDoc.data().total || 0;
+            totalExpense += dayData.expense;
+          } else {
+            dayData.expense = 0;
+          }
+          
+          // 人件費データ
+          let dayLaborCost = 0;
+          const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
+          attendanceSnapshot.forEach(doc => {
+            const attData = doc.data();
+            if (attData.date === dateStr) {
+              if (attData.totalWage && attData.totalWage > 0) {
+                dayLaborCost += attData.totalWage;
+              }
+            }
+          });
+          dayData.laborCost = dayLaborCost;
+          totalLaborCost += dayLaborCost;
+          
+          dailyData.push(dayData);
+        }
+        
+        // CSVデータを生成
+        const totalSales = totalCashSales + totalEmoneSales + totalCreditSales;
+        const averageSpend = totalCustomerCount > 0 ? Math.round(totalSales / totalCustomerCount) : 0;
+        
+        const now = new Date();
+        const outputTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+        
+        let csvContent = '';
+        
+        // 基本情報
+        csvContent += '期間ジャーナル CSV出力\n';
+        csvContent += `期間,${startDate},～,${endDate}\n`;
+        csvContent += `出力日時,${outputTime}\n`;
+        csvContent += '\n';
+        
+        // サマリー
+        csvContent += '【売上サマリー】\n';
+        csvContent += '項目,金額\n';
+        csvContent += `客数,${totalCustomerCount.toLocaleString()}人\n`;
+        csvContent += `客単価,¥${averageSpend.toLocaleString()}\n`;
+        csvContent += `総売上,¥${totalSales.toLocaleString()}\n`;
+        csvContent += `現金売上,¥${totalCashSales.toLocaleString()}\n`;
+        csvContent += `emoney売上,¥${totalEmoneSales.toLocaleString()}\n`;
+        csvContent += `クレジット売上,¥${totalCreditSales.toLocaleString()}\n`;
+        csvContent += `値引き,¥${totalDiscount.toLocaleString()}\n`;
+        csvContent += `8%対象,¥${totalTax8.toLocaleString()}\n`;
+        csvContent += `10%対象,¥${totalTax10.toLocaleString()}\n`;
+        csvContent += `支出,¥${totalExpense.toLocaleString()}\n`;
+        csvContent += `人件費,¥${Math.round(totalLaborCost).toLocaleString()}\n`;
+        csvContent += `ドロア開,${totalDrawerOpen}回\n`;
+        csvContent += `赤伝票件数,${totalRedSlipCount}件\n`;
+        csvContent += `赤伝票金額,¥${totalRedSlipAmount.toLocaleString()}\n`;
+        csvContent += '\n';
+        
+        // 商品別売上
+        csvContent += '【商品別売上】\n';
+        csvContent += '商品名,販売数\n';
+        const sortedItems = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]);
+        sortedItems.forEach(([name, count]) => {
+          csvContent += `${name},${count}\n`;
+        });
+        csvContent += '\n';
+        
+        // 日別データ
+        csvContent += '【日別データ】\n';
+        csvContent += '日付,客数,売上合計,現金,emoney,クレジット,値引き,8%対象,10%対象,支出,人件費,ドロア開,赤伝票件数,赤伝票金額\n';
+        dailyData.forEach(day => {
+          const dayTotal = day.cashSales + day.emoneSales + day.creditSales;
+          csvContent += `${day.date},${day.customerCount},¥${dayTotal.toLocaleString()},¥${day.cashSales.toLocaleString()},¥${day.emoneSales.toLocaleString()},¥${day.creditSales.toLocaleString()},¥${day.discount.toLocaleString()},¥${day.tax8.toLocaleString()},¥${day.tax10.toLocaleString()},¥${day.expense.toLocaleString()},¥${Math.round(day.laborCost).toLocaleString()},${day.drawerOpen},${day.redSlipCount},¥${day.redSlipAmount.toLocaleString()}\n`;
+        });
+        
+        // BOMを追加してExcelで文字化けを防ぐ
+        const bom = '\uFEFF';
+        const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `期間ジャーナル_${startDate}_${endDate}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        showCustomAlert('CSV出力完了', `期間ジャーナルをCSV形式で出力しました`, 'success');
+        
+      } catch (e) {
+        console.error('❌ CSV出力エラー:', e);
+        showCustomAlert('CSV出力エラー', 'CSVの出力に失敗しました: ' + e.message, 'error');
       }
     };
     
