@@ -483,15 +483,14 @@
         return 10;
       }
       
-      // 🆕 foodTypeを決定（未設定の場合はcategoryから推測）
-      let foodType = item.foodType;
-      if (!foodType) {
-        // カテゴリが「包材」または商品名に「包材」を含む場合は食材以外
-        if (item.category === '包材' || item.name?.includes('包材')) {
+      // 🆕 foodTypeを決定（未設定の場合はデフォルトで'food'）
+      let foodType = item.foodType || 'food';  // デフォルトは食材
+      if (!item.foodType) {
+        // カテゴリが「包材」または商品名に「包材」「レジ袋」を含む場合は食材以外
+        if (item.category === '包材' || item.name?.includes('包材') || item.name?.includes('レジ袋') || item.name?.includes('🛍️') || item.name?.includes('袋')) {
           foodType = 'non-food';
           console.log(`⚠️ foodType未設定 → category/name(${item.category}/${item.name})から推測: non-food（食材以外）`);
         } else {
-          foodType = 'food';  // デフォルトは食材
           console.log(`⚠️ foodType未設定 → デフォルト: food（食材）, 商品名: ${item.name}`);
         }
       } else {
@@ -534,9 +533,10 @@
         return item.taxRate;
       }
       
-      // taxRateがない場合、foodTypeから推測（食材:8%, 食材以外:10%）
+      // taxRateがない場合、foodTypeから決定（食材:8%, 食材以外:10%）
       const inferredRate = (foodType === 'non-food') ? 10 : 8;
-      console.log(`[税率決定] テーブル設定なし、taxRate未設定 → foodType(${foodType})から推測: ${inferredRate}%`);
+      console.warn(`⚠️ [税率決定] 商品「${item.name}」にtaxRateが設定されていません → foodType(${foodType})から推測: ${inferredRate}%`);
+      console.warn(`  → kanri.htmlで商品にデフォルト消費税率を設定してください`);
       return inferredRate;
     }
   </script>
@@ -2167,6 +2167,11 @@
         <!-- 固定ボタン（1行目：4列） -->
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
           
+          <!-- 即会計ボタン（一番左上） -->
+          <button onclick="quickCheckout()" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; border: none; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); padding: 15px; font-size: 18px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+            即会計
+          </button>
+          
           <div style="background: linear-gradient(135deg, #81C784 0%, #66BB6A 100%); padding: 10px 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;">
             <label style="margin: 0; white-space: nowrap; font-size: 13px; font-weight: bold; color: white;">レシート自動発行</label>
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -2182,10 +2187,6 @@
             <div style="font-size: 24px; font-weight: bold; color: white;" id="manual-count">0</div>
             <button onclick="resetWaiting()" style="padding: 6px 15px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap;">リセット</button>
           </div>
-          <!-- 即会計ボタン -->
-          <button onclick="quickCheckout()" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; border: none; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); padding: 15px; font-size: 16px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center;">
-            即会計
-          </button>
           <!-- テイクアウトボタンがここに追加される -->
         </div>
         
@@ -10783,6 +10784,10 @@ ${redSlipCount > 0 ? `
     
     // 支払いモーダルを表示
     window.showPaymentModal = function() {
+      console.log('🔵 showPaymentModal開始');
+      console.log('  currentOrders.length:', currentOrders.length);
+      console.log('  currentOrders:', currentOrders);
+      
       if (currentOrders.length === 0) {
         alert('会計する注文がありません');
         return;
@@ -10830,6 +10835,8 @@ ${redSlipCount > 0 ? `
       console.log('🔵 buildTaxRateSelectionList開始');
       console.log('currentOrders:', currentOrders);
       console.log('currentOrders.length:', currentOrders.length);
+      console.log('🔧 currentTableSettings:', currentTableSettings);
+      console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
       
       if (!container) {
         console.error('❌ taxRateItemsListコンテナが見つかりません');
@@ -16766,6 +16773,17 @@ ${redSlipCount > 0 ? `
         
         container.innerHTML = '';
         
+        // 🆕 即会計ボタンを最初に追加
+        const quickCheckoutCard = document.createElement('div');
+        quickCheckoutCard.className = 'table-card';
+        quickCheckoutCard.style.cssText = 'background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); cursor: pointer;';
+        quickCheckoutCard.onclick = () => quickCheckout();
+        quickCheckoutCard.innerHTML = `
+          <div class="table-name" style="color: white; font-size: 18px;">即会計</div>
+          <div class="table-order-count" style="color: white; opacity: 0.9;">テーブル選択不要</div>
+        `;
+        container.appendChild(quickCheckoutCard);
+        
         tables.forEach(table => {
           const orderCount = orderCounts[table.id] || 0;
           const hasOrders = orderCount > 0;
@@ -16792,9 +16810,14 @@ ${redSlipCount > 0 ? `
     }
     
     // テーブルを選択
-    function selectNewTable(tableId, tableName, orderCount) {
+    async function selectNewTable(tableId, tableName, orderCount) {
       currentSelectedTableId = tableId;
       currentSelectedTableName = tableName;
+      
+      // 🆕 テーブル設定を読み込む
+      currentTableSettings = await getTableSettings(tableId);
+      console.log('📋 テーブル選択 - テーブル設定読み込み完了:', tableId);
+      console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
       
       // テーブル一覧を非表示、詳細を表示
       document.getElementById('tablesArea').style.display = 'none';
