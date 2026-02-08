@@ -791,10 +791,13 @@
     }
     
     .table-name {
-      font-size: 24px;
+      font-size: 14px !important;
       font-weight: bold;
       color: #333;
       margin-bottom: 10px;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      max-width: 100%;
     }
     
     .table-order-count {
@@ -2031,6 +2034,7 @@
           </div>
         </div>
         <div style="display: flex; gap: 10px; align-items: center;">
+          <button id="time-override-btn-new" onclick="toggleTimeOverride()" style="padding: 8px 15px; font-size: 13px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">時外</button>
           <div style="background: linear-gradient(135deg, #FFB74D 0%, #FFA726 100%); padding: 8px 15px; border-radius: 8px; display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 13px; font-weight: bold; color: white;">待ち</span>
             <span style="font-size: 20px; font-weight: bold; color: white;" id="newManualCount">0</span>
@@ -3323,12 +3327,7 @@
       
       let filtered = historyOrders.filter(order => {
         // 日付フィルタ
-        // timestampの存在確認
-        if (!order.timestamp) {
-          console.warn('タイムスタンプがない注文:', order);
-          return false;
-        }
-        const orderDate = order.timestamp.toDate ? order.timestamp.toDate() : new Date(order.timestamp);
+        const orderDate = order.timestamp?.toDate ? order.timestamp.toDate() : new Date(order.timestamp || Date.now());
         
         let dateMatch = true;
         if (dateFilter === 'today') {
@@ -3414,7 +3413,6 @@
         if (order.completedAt) badges.push('<span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">完了</span>');
         if (order.cancelledAt) badges.push('<span style="background: #f44336; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">キャンセル</span>');
         
-        // timestampの存在確認
         const orderDate = order.timestamp?.toDate ? order.timestamp.toDate() : new Date(order.timestamp || Date.now());
         const dateStr = orderDate.toLocaleString('ja-JP');
         
@@ -3541,7 +3539,7 @@
           staffName: orderData.staffName || 'レジ係',
           cashReceived: orderData.totalAmount,
           change: 0,
-          timestamp: orderData.paidAt ? (orderData.paidAt.toDate ? orderData.paidAt.toDate() : new Date(orderData.paidAt)) : (orderData.timestamp?.toDate ? orderData.timestamp.toDate() : new Date(orderData.timestamp || Date.now()))
+          timestamp: orderData.paidAt ? orderData.paidAt.toDate() : orderData.timestamp.toDate()
         };
         
         await printReceipt();
@@ -3602,7 +3600,7 @@
           staffName: orderData.staffName || 'レジ係',
           cashReceived: orderData.totalAmount,
           change: 0,
-          timestamp: orderData.paidAt ? (orderData.paidAt.toDate ? orderData.paidAt.toDate() : new Date(orderData.paidAt)) : (orderData.timestamp?.toDate ? orderData.timestamp.toDate() : new Date(orderData.timestamp || Date.now()))
+          timestamp: orderData.paidAt ? orderData.paidAt.toDate() : orderData.timestamp.toDate()
         };
         
         await printInvoice();
@@ -3929,7 +3927,7 @@
           }
           // paidAtがない場合はtimestampを使用
           else if (currentEditingOrder.timestamp) {
-            dateToUse = currentEditingOrder.timestamp.toDate ? currentEditingOrder.timestamp.toDate() : new Date(currentEditingOrder.timestamp);
+            dateToUse = currentEditingOrder.timestamp?.toDate ? currentEditingOrder.timestamp.toDate() : new Date(currentEditingOrder.timestamp || Date.now());
             useTimestamp = true;
             isUnpaidOrder = true;
             console.log('📅 timestampを使用:', dateToUse);
@@ -3990,9 +3988,8 @@
         // 🆕 未会計の注文を編集した場合は、会計済みにする
         if (isUnpaidOrder) {
           console.log('💡 未会計の注文なので、会計済みとして更新します');
-          const orderTimestamp = currentEditingOrder.timestamp.toDate ? currentEditingOrder.timestamp.toDate() : new Date(currentEditingOrder.timestamp);
-          console.log('   元の注文日時:', orderTimestamp.toLocaleString('ja-JP'));
-          console.log('   paidAtとして設定する日時:', orderTimestamp.toLocaleString('ja-JP'));
+          console.log('   元の注文日時:', currentEditingOrder.timestamp?.toDate ? currentEditingOrder.timestamp.toDate() : new Date(currentEditingOrder.timestamp || Date.now()).toLocaleString('ja-JP'));
+          console.log('   paidAtとして設定する日時:', currentEditingOrder.timestamp?.toDate ? currentEditingOrder.timestamp.toDate() : new Date(currentEditingOrder.timestamp || Date.now()).toLocaleString('ja-JP'));
           
           // timestampをpaidAtとして設定（元の注文日時で会計済みにする）
           orderUpdates.paidAt = currentEditingOrder.timestamp;
@@ -9545,10 +9542,10 @@ ${redSlipCount > 0 ? `
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
           
-          if (!data.deleted && data.timestamp) {
+          if (!data.deleted) {
             hasActiveOrders = true;
             
-            const orderDate = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
+            const orderDate = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp || Date.now());
             const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
             
             if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
@@ -9650,11 +9647,11 @@ ${redSlipCount > 0 ? `
           const data = doc.data();
           
           // 削除されていない注文があるかチェック
-          if (!data.deleted && data.timestamp) {
+          if (!data.deleted) {
             hasActiveOrders = true;
             
             // 削除されていない注文のみから最大番号を取得
-            const orderDate = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
+            const orderDate = data.timestamp?.toDate ? data.timestamp.toDate() : new Date(data.timestamp || Date.now());
             const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
             
             if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
@@ -9734,97 +9731,68 @@ ${redSlipCount > 0 ? `
     
     // 即会計クイックボタン - 商品がある場合は送信してから開く
     window.quickCheckout = async function() {
-      // 手入力レジに商品がある場合
-      if (manualCart.length > 0) {
-        // 即会計テーブルに送信
-        try {
-          const now = new Date();
-          const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-          
-          const todayStart = new Date(jstNow);
-          todayStart.setHours(1, 0, 0, 0);
-          if (jstNow < todayStart) {
-            todayStart.setDate(todayStart.getDate() - 1);
+      // 新UIで即会計用の特別なテーブルを開く
+      // まず即会計テーブルのIDを取得または作成
+      try {
+        const tablesSnapshot = await window.getDocs(window.getStoreCollection('tables'));
+        let quickCheckoutTable = null;
+        
+        tablesSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.name === '即会計') {
+            quickCheckoutTable = { id: doc.id, ...data };
           }
-          
-          const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
-          let maxOrderNumber = 618;
-          let hasActiveOrders = false;
-          
-          ordersSnapshot.forEach(doc => {
-            const data = doc.data();
-            if (!data.deleted && data.timestamp) {
-              hasActiveOrders = true;
-              const orderDate = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
-              const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-              if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
-                maxOrderNumber = data.orderNumber;
-              }
-            }
+        });
+        
+        // 即会計テーブルが存在しない場合は作成
+        if (!quickCheckoutTable) {
+          const docRef = await window.addDoc(window.getStoreCollection('tables'), {
+            name: '即会計',
+            order: 999,
+            createdAt: window.Timestamp.now()
           });
-          
-          const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
-          const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
-          
-          const orderData = {
-            orderNumber: orderNumber,
-            tableNumber: '即会計',
-            items: manualCart.map(item => {
-              const itemData = {
-                id: item.id,
-                name: item.name,
-                price: item.price,
-                toppingPrice: item.toppingPrice || 0,
-                quantity: item.quantity
-              };
-              
-              // undefinedでないフィールドのみ追加
-              if (item.taxRate !== undefined) itemData.taxRate = item.taxRate;
-              if (item.taxType !== undefined) itemData.taxType = item.taxType;  // 🆕 taxTypeも追加
-              if (item.foodType !== undefined) itemData.foodType = item.foodType;  // 🆕 foodTypeも追加
-              if (item.toppings) itemData.toppings = item.toppings;
-              if (item.toppingsData) itemData.toppingsData = item.toppingsData;
-              if (item.toppingDetails) itemData.toppingDetails = item.toppingDetails;
-              
-              return itemData;
-            }),
-            totalAmount: manualCart.reduce((sum, item) => {
-              // 🆕 外税の場合は税込価格を計算
-              let itemPrice = item.price;
-              if (item.taxType === 'exclusive') {
-                const taxRate = item.taxRate || 10;
-                itemPrice = Math.floor(item.price * (1 + taxRate / 100));
-              }
-              return sum + (itemPrice + (item.toppingPrice || 0)) * item.quantity;
-            }, 0),
-            timestamp: window.Timestamp.now(),
-            deleteAt: window.Timestamp.fromDate(deleteAt),
-            status: 'pending',
-            manualEntry: true
-          };
-          
-          const docRef = await window.addDoc(window.getStoreCollection('orders'), orderData);
-          await window.updateDoc(docRef, {
-            orderId: docRef.id
-          });
-          
-          console.log('✅ 即会計テーブルに注文を送信:', orderNumber);
-          
-          // 手入力レジをクリア
-          manualCart = [];
-          document.getElementById('manualTable').value = '';
-          document.querySelectorAll('#menuItemsList input[type="checkbox"]').forEach(cb => cb.checked = false);
-          updateManualCart();
-          
-        } catch (e) {
-          console.error('注文エラー:', e);
-          alert('注文の追加に失敗しました: ' + e.message);
-          return;
+          quickCheckoutTable = { id: docRef.id, name: '即会計', order: 999 };
+          console.log('✅ 即会計テーブルを作成しました');
         }
+        
+        // 即会計テーブルの未会計注文数を取得
+        const ordersRef = window.getStoreCollection('orders');
+        const ordersSnapshot = await window.getDocs(ordersRef);
+        let orderCount = 0;
+        ordersSnapshot.forEach(doc => {
+          const order = doc.data();
+          if (order.tableId === quickCheckoutTable.id && !order.deleted && !order.paidAt) {
+            orderCount++;
+          }
+        });
+        
+        // 即会計テーブルを開く（新UI）
+        currentSelectedTableId = quickCheckoutTable.id;
+        currentSelectedTableName = '即会計';
+        
+        // テーブル一覧を非表示、詳細を表示
+        document.getElementById('tablesArea').style.display = 'none';
+        document.getElementById('tableDetailArea').classList.add('show');
+        
+        // テーブル名と注文数を表示
+        document.getElementById('detailTableName').textContent = '即会計';
+        document.getElementById('detailOrderCount').textContent = `注文: ${orderCount}件`;
+        
+        // ボタンの有効/無効を設定
+        document.getElementById('paymentBtn').disabled = false;
+        document.getElementById('paymentBtn').style.opacity = '1';
+        document.getElementById('paymentBtn').style.cursor = 'pointer';
+        
+        // 注文一覧を読み込み
+        loadTableOrders(quickCheckoutTable.id);
+        
+        // メニューを表示
+        showMenuIframe();
+        
+      } catch (error) {
+        console.error('即会計エラー:', error);
+        alert('即会計の処理に失敗しました: ' + error.message);
       }
-      
-      // 即会計テーブルを開く
-      await selectTable('即会計');
     };
     
     // リアルタイム更新を開始
@@ -10001,7 +9969,7 @@ ${redSlipCount > 0 ? `
       let timeStr = '--:--';
       try {
         if (order.timestamp && order.timestamp.toDate) {
-          const timestamp = order.timestamp.toDate();
+          const timestamp = order.timestamp?.toDate ? order.timestamp.toDate() : new Date(order.timestamp || Date.now());
           timeStr = `${timestamp.getHours()}:${String(timestamp.getMinutes()).padStart(2, '0')}`;
         }
       } catch (e) {
@@ -12596,6 +12564,7 @@ ${redSlipCount > 0 ? `
     // 時間外設定切り替え
     window.toggleTimeOverride = async function() {
       const btn = document.getElementById('time-override-btn');
+      const btnNew = document.getElementById('time-override-btn-new');
       
       try {
         const settingsRef = window.getStoreDoc('settings', 'timeOverride');
@@ -12610,12 +12579,24 @@ ${redSlipCount > 0 ? `
         });
         
         if (newOverride) {
-          btn.textContent = '営業';
-          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          if (btn) {
+            btn.textContent = '営業';
+            btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          }
+          if (btnNew) {
+            btnNew.textContent = '営業';
+            btnNew.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          }
           showToast('営業時間外でも注文可能にしました');
         } else {
-          btn.textContent = '時外';
-          btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
+          if (btn) {
+            btn.textContent = '時外';
+            btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100())';
+          }
+          if (btnNew) {
+            btnNew.textContent = '時外';
+            btnNew.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
+          }
           showToast('営業時間外チェックを有効にしました');
         }
       } catch (e) {
@@ -12632,12 +12613,26 @@ ${redSlipCount > 0 ? `
         const overrideEnabled = settingsSnap.exists() ? settingsSnap.data().enabled : false;
         
         const btn = document.getElementById('time-override-btn');
+        const btnNew = document.getElementById('time-override-btn-new');
+        
         if (overrideEnabled) {
-          btn.textContent = '営業';
-          btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          if (btn) {
+            btn.textContent = '営業';
+            btn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          }
+          if (btnNew) {
+            btnNew.textContent = '営業';
+            btnNew.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          }
         } else {
-          btn.textContent = '時外';
-          btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
+          if (btn) {
+            btn.textContent = '時外';
+            btn.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
+          }
+          if (btnNew) {
+            btnNew.textContent = '時外';
+            btnNew.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
+          }
         }
       } catch (e) {
         console.error('時間オーバーライド読み込みエラー:', e);
@@ -16782,7 +16777,7 @@ ${redSlipCount > 0 ? `
           card.onclick = () => selectNewTable(table.id, table.name, orderCount);
           
           card.innerHTML = `
-            <div class="table-name">${table.name}</div>
+            <div class="table-name">${table.name.length > 10 ? table.name.substring(0, 10) : table.name}</div>
             <div class="table-order-count">${orderCount > 0 ? `注文 ${orderCount}件` : '空席'}</div>
           `;
           
@@ -16881,9 +16876,14 @@ ${redSlipCount > 0 ? `
           orderCard.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">
               <span style="font-weight: bold; font-size: 16px;">注文 ${orderTime}</span>
-              <span style="background: ${order.status === 'completed' ? '#4CAF50' : '#FF9800'}; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;">
-                ${order.status === 'completed' ? '完了' : '準備中'}
-              </span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <span style="background: ${order.status === 'completed' ? '#4CAF50' : '#FF9800'}; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;">
+                  ${order.status === 'completed' ? '完了' : '準備中'}
+                </span>
+                <button onclick="payForSingleOrder('${order.id}', ${total})" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; border: none; padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; white-space: nowrap;">
+                  この注文を会計
+                </button>
+              </div>
             </div>
             ${itemsHTML}
             <div style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #667eea; text-align: right; font-size: 18px; font-weight: bold; color: #667eea;">
@@ -17072,12 +17072,77 @@ ${redSlipCount > 0 ? `
       // 旧UIの会計機能を使用するため、selectedTableを設定
       selectedTable = currentSelectedTableId;
       
+      // テーブル設定を読み込む
+      if (selectedTable && selectedTable !== '即会計') {
+        currentTableSettings = await getTableSettings(selectedTable);
+        console.log('📋 テーブル設定読み込み完了:', selectedTable);
+        console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
+      } else {
+        currentTableSettings = await getTableSettings('即会計');
+        console.log('📋 即会計のテーブル設定:', currentTableSettings);
+      }
+      
       // 注文を読み込んで会計モーダルを表示
       await loadOrders(currentSelectedTableId);
       
       // 会計モーダルを表示（既存の関数を使用）
       showPaymentModal();
     }
+    
+    // 単一注文の会計（新UI用）
+    window.payForSingleOrder = async function(orderId, amount) {
+      try {
+        // 注文データを取得
+        const orderRef = window.getStoreDoc('orders', orderId);
+        const orderSnap = await window.getDoc(orderRef);
+        
+        if (!orderSnap.exists()) {
+          alert('注文が見つかりません');
+          return;
+        }
+        
+        const orderData = orderSnap.data();
+        const order = {
+          id: orderId,
+          ...orderData
+        };
+        
+        // 単一注文を選択して会計モーダルを表示
+        currentOrders = [order];
+        selectedTable = orderData.tableId || currentSelectedTableId;
+        totalAmountToPay = amount;
+        
+        // テーブル設定を読み込む
+        if (selectedTable && selectedTable !== '即会計') {
+          currentTableSettings = await getTableSettings(selectedTable);
+          console.log('📋 テーブル設定読み込み完了:', selectedTable);
+          console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
+        } else {
+          currentTableSettings = await getTableSettings('即会計');
+          console.log('📋 即会計のテーブル設定:', currentTableSettings);
+        }
+        
+        // 値引き金額を初期化
+        document.getElementById('discountAmount').value = '0';
+        
+        // 税率選択リストを生成
+        buildTaxRateSelectionList();
+        
+        // 請求額を表示
+        updatePaymentTotal();
+        
+        document.getElementById('paymentModal').classList.remove('hidden');
+        selectedPaymentMethod = null;
+        document.querySelectorAll('.payment-method-btn').forEach(btn => {
+          btn.classList.remove('selected');
+        });
+        document.getElementById('cashInputSection').classList.add('hidden');
+        document.getElementById('completePaymentBtn').disabled = true;
+      } catch (error) {
+        console.error('会計処理エラー:', error);
+        alert('会計処理に失敗しました: ' + error.message);
+      }
+    };
     
     // 売上メニューの開閉
     function toggleSalesMenu() {
