@@ -1949,11 +1949,22 @@
       if (orderData.deleted) {
         // 削除済みの場合はLocalStorageをクリア
         clearOrderFromStorage();
-      } else if (orderData.completedAt) {
+      } else if (orderData.completedAt && orderData.paidAt) {
+        // 完了かつ会計済み
         statusBox.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
         statusBox.style.borderColor = '#4CAF50';
         statusBox.style.color = 'white';
-        const readyText = statusDisplaySettings.ready ? statusDisplaySettings.ready : '';
+        statusBox.innerHTML = '完了　会計済';
+        // 完了時は1番目に変更
+        if (waitingElement) {
+          waitingElement.textContent = '1';
+        }
+      } else if (orderData.completedAt) {
+        // 完了のみ
+        statusBox.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+        statusBox.style.borderColor = '#4CAF50';
+        statusBox.style.color = 'white';
+        const readyText = statusDisplaySettings.ready ? statusDisplaySettings.ready : '完了';
         statusBox.innerHTML = readyText;
         // 完了時は1番目に変更
         if (waitingElement) {
@@ -1963,7 +1974,7 @@
         statusBox.style.background = 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)';
         statusBox.style.borderColor = '#f44336';
         statusBox.style.color = 'white';
-        const cancelledText = statusDisplaySettings.cancelled ? statusDisplaySettings.cancelled : '';
+        const cancelledText = statusDisplaySettings.cancelled ? statusDisplaySettings.cancelled : 'キャンセル';
         statusBox.innerHTML = cancelledText;
         // キャンセル時も1番目に変更
         if (waitingElement) {
@@ -1972,11 +1983,11 @@
         // LocalStorageをクリア
         clearOrderFromStorage();
       } else if (orderData.paidAt) {
+        // 会計済み
         statusBox.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
         statusBox.style.borderColor = '#2196F3';
         statusBox.style.color = 'white';
-        const completedText = statusDisplaySettings.completed ? statusDisplaySettings.completed : '';
-        statusBox.innerHTML = completedText;
+        statusBox.innerHTML = '会計済';
         // myPositionがあればそれを表示
         if (waitingElement && orderData.myPosition) {
           waitingElement.textContent = orderData.myPosition;
@@ -1985,7 +1996,7 @@
         statusBox.style.background = 'linear-gradient(135deg, #a8edea 0%, #89d4cf 100%)';
         statusBox.style.borderColor = '#89d4cf';
         statusBox.style.color = '#000';
-        const preparingText = statusDisplaySettings.preparing ? statusDisplaySettings.preparing : '';
+        const preparingText = statusDisplaySettings.preparing ? statusDisplaySettings.preparing : '準備中';
         statusBox.innerHTML = preparingText;
         // myPositionがあればそれを表示
         if (waitingElement && orderData.myPosition) {
@@ -2928,26 +2939,32 @@
           hasSoldOut = true;
         }
         
-        // トッピング表示の改善
+        // 商品の基本価格（トッピング抜き）
+        const basePrice = item.price * item.quantity;
+        
+        // トッピング表示の改善：縦に表示し、各トッピングの価格も表示
         let toppingsHtml = '';
         if (item.toppingsData && item.toppingsData.length > 0) {
-          const groupedBySet = {};
-          item.toppingsData.forEach(topping => {
-            const setName = topping.setName || 'トッピング';
-            if (!groupedBySet[setName]) {
-              groupedBySet[setName] = [];
-            }
-            groupedBySet[setName].push(topping.name);
-          });
-          
-          toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+          toppingsHtml = item.toppingsData.map(topping => {
+            const toppingSubtotal = (topping.price || 0) * item.quantity;
             return `
-              <div class="cart-item-details" style="color: #4CAF50; font-weight: bold; margin-top: 5px;">${setName}:</div>
-              ${options.map(opt => `<div class="cart-item-details" style="color: #4CAF50; margin-left: 10px;">・${opt}</div>`).join('')}
+              <div class="cart-item-details" style="display: flex; justify-content: space-between; color: #4CAF50; margin-top: 3px;">
+                <span>${topping.name}</span>
+                <span>¥${toppingSubtotal.toLocaleString()}</span>
+              </div>
             `;
           }).join('');
         } else if (item.toppings && item.toppings !== '標準トッピング') {
-          toppingsHtml = `<div class="cart-item-details" style="color: #4CAF50;">トッピング: ${item.toppings}</div>`;
+          // 古い形式のトッピング（後方互換性）
+          const toppingSubtotal = (item.toppingPrice || 0) * item.quantity;
+          if (toppingSubtotal > 0) {
+            toppingsHtml = `
+              <div class="cart-item-details" style="display: flex; justify-content: space-between; color: #4CAF50; margin-top: 3px;">
+                <span>${item.toppings}</span>
+                <span>¥${toppingSubtotal.toLocaleString()}</span>
+              </div>
+            `;
+          }
         }
         
         div.innerHTML = `
@@ -2956,10 +2973,14 @@
             <div class="cart-item-name">${item.name}</div>
             <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
           </div>
-          <div class="cart-item-details">
-            単価: ¥${item.price.toLocaleString()} × ${item.quantity}個
+          <div class="cart-item-details" style="display: flex; justify-content: space-between; margin-top: 3px;">
+            <span>${item.name} × ${item.quantity}</span>
+            <span>¥${basePrice.toLocaleString()}</span>
           </div>
           ${toppingsHtml}
+          <div class="cart-item-details" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee; font-weight: bold;">
+            合計: ¥${subtotal.toLocaleString()}
+          </div>
         `;
         list.appendChild(div);
       });
@@ -3537,26 +3558,32 @@
           const div = document.createElement('div');
           div.className = 'cart-item';
           
-          // トッピング表示の改善
+          // 商品の基本価格（トッピング抜き）
+          const basePrice = item.price * item.quantity;
+          
+          // トッピング表示の改善：縦に表示し、各トッピングの価格も表示
           let toppingsHtml = '';
           if (item.toppingsData && item.toppingsData.length > 0) {
-            const groupedBySet = {};
-            item.toppingsData.forEach(topping => {
-              const setName = topping.setName || 'トッピング';
-              if (!groupedBySet[setName]) {
-                groupedBySet[setName] = [];
-              }
-              groupedBySet[setName].push(topping.name);
-            });
-            
-            toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+            toppingsHtml = item.toppingsData.map(topping => {
+              const toppingSubtotal = (topping.price || 0) * item.quantity;
               return `
-                <div class="cart-item-details" style="color: #4CAF50; font-weight: bold; margin-top: 5px;">${setName}:</div>
-                ${options.map(opt => `<div class="cart-item-details" style="color: #4CAF50; margin-left: 10px;">・${opt}</div>`).join('')}
+                <div class="cart-item-details" style="display: flex; justify-content: space-between; color: #4CAF50; margin-top: 3px;">
+                  <span>${topping.name}</span>
+                  <span>¥${toppingSubtotal.toLocaleString()}</span>
+                </div>
               `;
             }).join('');
           } else if (item.toppings && item.toppings !== '標準トッピング') {
-            toppingsHtml = `<div class="cart-item-details" style="color: #4CAF50;">トッピング: ${item.toppings}</div>`;
+            // 古い形式のトッピング（後方互換性）
+            const toppingSubtotal = (item.toppingPrice || 0) * item.quantity;
+            if (toppingSubtotal > 0) {
+              toppingsHtml = `
+                <div class="cart-item-details" style="display: flex; justify-content: space-between; color: #4CAF50; margin-top: 3px;">
+                  <span>${item.toppings}</span>
+                  <span>¥${toppingSubtotal.toLocaleString()}</span>
+                </div>
+              `;
+            }
           }
           
           div.innerHTML = `
@@ -3564,8 +3591,14 @@
               <div class="cart-item-name">${item.name}</div>
               <div class="cart-item-price">¥${subtotal.toLocaleString()}</div>
             </div>
-            <div class="cart-item-details">数量: ${item.quantity}個</div>
+            <div class="cart-item-details" style="display: flex; justify-content: space-between; margin-top: 3px;">
+              <span>${item.name} × ${item.quantity}</span>
+              <span>¥${basePrice.toLocaleString()}</span>
+            </div>
             ${toppingsHtml}
+            <div class="cart-item-details" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee; font-weight: bold;">
+              合計: ¥${subtotal.toLocaleString()}
+            </div>
           `;
           list.appendChild(div);
         });
