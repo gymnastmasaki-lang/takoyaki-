@@ -9577,6 +9577,7 @@ ${redSlipCount > 0 ? `
         const orderData = {
           orderNumber: orderNumber,
           tableNumber: '即会計',
+          tableId: '即会計',  // 🆕 tableIdを追加
           items: manualCart.map(item => ({
             id: item.id,
             name: item.name,
@@ -9607,6 +9608,11 @@ ${redSlipCount > 0 ? `
         }];
         
         console.log('注文データ:', currentOrders[0]);
+        
+        // 🆕 即会計用のテーブル設定を読み込む（通常はtaxRule: noneとなる）
+        selectedTable = '即会計';
+        currentTableSettings = await getTableSettings('即会計');
+        console.log('📋 即会計 - テーブル設定:', currentTableSettings);
         
         // 🆕 在庫を減らす（即会計時）
         console.log('📦 即会計: 在庫減少処理を実行');
@@ -17289,12 +17295,59 @@ ${redSlipCount > 0 ? `
         submitBtn.disabled = true;
         submitBtn.textContent = '追加中...';
         
+        // 注文番号を生成
+        const now = new Date();
+        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        
+        const todayStart = new Date(jstNow);
+        todayStart.setHours(1, 0, 0, 0);
+        if (jstNow < todayStart) {
+          todayStart.setDate(todayStart.getDate() - 1);
+        }
+        
+        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
+        let maxOrderNumber = 618;
+        let hasActiveOrders = false;
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          
+          if (!data.deleted) {
+            hasActiveOrders = true;
+            
+            if (data.timestamp && data.timestamp.toDate) {
+              const orderDate = data.timestamp.toDate();
+              const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
+              
+              if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
+                maxOrderNumber = data.orderNumber;
+              }
+            } else if (data.orderNumber > maxOrderNumber) {
+              maxOrderNumber = data.orderNumber;
+            }
+          }
+        });
+        
+        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
+        
+        console.log('注文番号生成:', {
+          hasActiveOrders,
+          maxOrderNumber,
+          nextOrderNumber: orderNumber
+        });
+        
+        const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
+        
         // Firestoreに注文を追加
         await window.addDoc(window.getStoreCollection('orders'), {
+          orderNumber: orderNumber,
           tableId: currentSelectedTableId,
+          tableNumber: currentSelectedTableId,  // tableIdと同じ値を設定
           tableName: currentSelectedTableName,
           items: newUICart,
           orderedAt: window.Timestamp.now(),
+          timestamp: window.Timestamp.now(),
+          deleteAt: window.Timestamp.fromDate(deleteAt),
           status: 'pending',
           deleted: false,
           staff: document.getElementById('sidebarStaffSelect').value || '未設定'
