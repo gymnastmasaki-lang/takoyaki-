@@ -1997,7 +1997,7 @@
           <span>支出</span>
         </button>
         <button class="sidebar-button" id="settingsMenuBtn" onclick="toggleSettingsMenu()">
-          <span>設定•発注</span>
+          <span>設定・管理</span>
         </button>
         <!-- 設定サブメニュー -->
         <div id="settingsSubMenu" style="display: none; padding-left: 10px;">
@@ -16835,10 +16835,14 @@ ${redSlipCount > 0 ? `
         // テーブルデータを取得
         const tables = [];
         tablesSnapshot.forEach(doc => {
-          tables.push({
-            id: doc.id,
-            ...doc.data()
-          });
+          const tableData = doc.data();
+          // 「即会計」テーブルは一覧に表示しない（クイックボタンで代用）
+          if (tableData.name !== '即会計') {
+            tables.push({
+              id: doc.id,
+              ...tableData
+            });
+          }
         });
         
         // orderフィールドでソート
@@ -16871,10 +16875,10 @@ ${redSlipCount > 0 ? `
         // 🆕 即会計ボタンを最初に追加
         const quickCheckoutCard = document.createElement('div');
         quickCheckoutCard.className = 'table-card';
-        quickCheckoutCard.style.cssText = 'background: white; cursor: pointer; border: 2px solid #00BCD4;';
+        quickCheckoutCard.style.cssText = 'background: white; cursor: pointer; border: 2px solid #667eea;';
         quickCheckoutCard.onclick = () => quickCheckout();
         quickCheckoutCard.innerHTML = `
-          <div class="table-name" style="color: #00BCD4; font-size: 18px;">即会計</div>
+          <div class="table-name" style="color: #667eea; font-size: 18px;">即会計</div>
         `;
         container.appendChild(quickCheckoutCard);
         
@@ -16987,14 +16991,51 @@ ${redSlipCount > 0 ? `
               </div>`;
             
             // トッピング情報を表示
-            if (item.toppingName && item.toppingPrice) {
-              html += `
+            let toppingsHtml = '';
+            if (item.toppingDetails && Array.isArray(item.toppingDetails) && item.toppingDetails.length > 0) {
+              // 🆕 新形式: toppingDetailsがある場合（セット名でグループ化）
+              const groupedBySet = {};
+              item.toppingDetails.forEach(detail => {
+                const setName = detail.setName || 'トッピング';
+                if (!groupedBySet[setName]) {
+                  groupedBySet[setName] = [];
+                }
+                groupedBySet[setName].push(detail.optionName);
+              });
+              
+              toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+                return `
+                  <div style="font-size: 11px; color: #666; font-weight: bold; padding-left: 10px; margin-top: 3px;">${setName}</div>
+                  ${options.map(opt => `<div style="font-size: 11px; color: #666; padding-left: 20px;">　・${opt}</div>`).join('')}
+                `;
+              }).join('');
+            } else if (item.toppingsData && Array.isArray(item.toppingsData) && item.toppingsData.length > 0) {
+              // 🆕 menu.htmlからの形式: toppingsDataがある場合
+              const groupedBySet = {};
+              item.toppingsData.forEach(topping => {
+                const setName = topping.setName || 'トッピング';
+                if (!groupedBySet[setName]) {
+                  groupedBySet[setName] = [];
+                }
+                groupedBySet[setName].push(topping.name);
+              });
+              
+              toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+                return `
+                  <div style="font-size: 11px; color: #666; font-weight: bold; padding-left: 10px; margin-top: 3px;">${setName}</div>
+                  ${options.map(opt => `<div style="font-size: 11px; color: #666; padding-left: 20px;">　・${opt}</div>`).join('')}
+                `;
+              }).join('');
+            } else if (item.toppingName && item.toppingPrice) {
+              // 古い形式: toppingNameのみの場合
+              toppingsHtml = `
               <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; padding-left: 10px; font-size: 13px; color: #666;">
                 <span style="flex: 1;">└ ${item.toppingName}</span>
                 <span style="width: 160px; text-align: right;">+¥${(item.toppingPrice * (item.quantity || 1)).toLocaleString()}</span>
               </div>`;
             }
             
+            html += toppingsHtml;
             html += '</div>';
             return html;
           }).join('');
@@ -17111,17 +17152,42 @@ ${redSlipCount > 0 ? `
         
         // トッピングを縦に表示
         let toppingsHtml = '';
-        if (item.toppingsData && item.toppingsData.length > 0) {
-          toppingsHtml = item.toppingsData.map(topping => {
-            const toppingSubtotal = (topping.price || 0) * (item.quantity || 1);
+        if (item.toppingDetails && Array.isArray(item.toppingDetails) && item.toppingDetails.length > 0) {
+          // 🆕 新形式: toppingDetailsがある場合（セット名でグループ化）
+          const groupedBySet = {};
+          item.toppingDetails.forEach(detail => {
+            const setName = detail.setName || 'トッピング';
+            if (!groupedBySet[setName]) {
+              groupedBySet[setName] = [];
+            }
+            groupedBySet[setName].push(detail.optionName);
+          });
+          
+          toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
             return `
-              <div style="font-size: 13px; color: #4CAF50; display: flex; justify-content: space-between; margin-top: 3px;">
-                <span>${topping.name}</span>
-                <span>¥${toppingSubtotal.toLocaleString()}</span>
-              </div>
+              <div style="font-size: 12px; color: #666; font-weight: bold; margin-top: 3px;">${setName}</div>
+              ${options.map(opt => `<div style="font-size: 12px; color: #4CAF50; padding-left: 10px;">　・${opt}</div>`).join('')}
+            `;
+          }).join('');
+        } else if (item.toppingsData && item.toppingsData.length > 0) {
+          // menu.htmlからの形式: toppingsDataがある場合
+          const groupedBySet = {};
+          item.toppingsData.forEach(topping => {
+            const setName = topping.setName || 'トッピング';
+            if (!groupedBySet[setName]) {
+              groupedBySet[setName] = [];
+            }
+            groupedBySet[setName].push(topping.name);
+          });
+          
+          toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+            return `
+              <div style="font-size: 12px; color: #666; font-weight: bold; margin-top: 3px;">${setName}</div>
+              ${options.map(opt => `<div style="font-size: 12px; color: #4CAF50; padding-left: 10px;">　・${opt}</div>`).join('')}
             `;
           }).join('');
         } else if (item.toppingName && item.toppingName !== '標準トッピング') {
+          // 古い形式
           const toppingSubtotal = (item.toppingPrice || 0) * (item.quantity || 1);
           toppingsHtml = `
             <div style="font-size: 13px; color: #4CAF50; display: flex; justify-content: space-between; margin-top: 3px;">
