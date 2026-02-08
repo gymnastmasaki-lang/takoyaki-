@@ -3323,7 +3323,12 @@
       
       let filtered = historyOrders.filter(order => {
         // 日付フィルタ
-        const orderDate = order.timestamp.toDate();
+        // timestampの存在確認
+        if (!order.timestamp) {
+          console.warn('タイムスタンプがない注文:', order);
+          return false;
+        }
+        const orderDate = order.timestamp.toDate ? order.timestamp.toDate() : new Date(order.timestamp);
         
         let dateMatch = true;
         if (dateFilter === 'today') {
@@ -3409,7 +3414,8 @@
         if (order.completedAt) badges.push('<span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">完了</span>');
         if (order.cancelledAt) badges.push('<span style="background: #f44336; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">キャンセル</span>');
         
-        const orderDate = order.timestamp.toDate();
+        // timestampの存在確認
+        const orderDate = order.timestamp?.toDate ? order.timestamp.toDate() : new Date(order.timestamp || Date.now());
         const dateStr = orderDate.toLocaleString('ja-JP');
         
         // 支払方法を日本語に変換
@@ -3535,7 +3541,7 @@
           staffName: orderData.staffName || 'レジ係',
           cashReceived: orderData.totalAmount,
           change: 0,
-          timestamp: orderData.paidAt ? orderData.paidAt.toDate() : orderData.timestamp.toDate()
+          timestamp: orderData.paidAt ? (orderData.paidAt.toDate ? orderData.paidAt.toDate() : new Date(orderData.paidAt)) : (orderData.timestamp?.toDate ? orderData.timestamp.toDate() : new Date(orderData.timestamp || Date.now()))
         };
         
         await printReceipt();
@@ -3596,7 +3602,7 @@
           staffName: orderData.staffName || 'レジ係',
           cashReceived: orderData.totalAmount,
           change: 0,
-          timestamp: orderData.paidAt ? orderData.paidAt.toDate() : orderData.timestamp.toDate()
+          timestamp: orderData.paidAt ? (orderData.paidAt.toDate ? orderData.paidAt.toDate() : new Date(orderData.paidAt)) : (orderData.timestamp?.toDate ? orderData.timestamp.toDate() : new Date(orderData.timestamp || Date.now()))
         };
         
         await printInvoice();
@@ -3923,7 +3929,7 @@
           }
           // paidAtがない場合はtimestampを使用
           else if (currentEditingOrder.timestamp) {
-            dateToUse = currentEditingOrder.timestamp.toDate();
+            dateToUse = currentEditingOrder.timestamp.toDate ? currentEditingOrder.timestamp.toDate() : new Date(currentEditingOrder.timestamp);
             useTimestamp = true;
             isUnpaidOrder = true;
             console.log('📅 timestampを使用:', dateToUse);
@@ -3984,8 +3990,9 @@
         // 🆕 未会計の注文を編集した場合は、会計済みにする
         if (isUnpaidOrder) {
           console.log('💡 未会計の注文なので、会計済みとして更新します');
-          console.log('   元の注文日時:', currentEditingOrder.timestamp.toDate().toLocaleString('ja-JP'));
-          console.log('   paidAtとして設定する日時:', currentEditingOrder.timestamp.toDate().toLocaleString('ja-JP'));
+          const orderTimestamp = currentEditingOrder.timestamp.toDate ? currentEditingOrder.timestamp.toDate() : new Date(currentEditingOrder.timestamp);
+          console.log('   元の注文日時:', orderTimestamp.toLocaleString('ja-JP'));
+          console.log('   paidAtとして設定する日時:', orderTimestamp.toLocaleString('ja-JP'));
           
           // timestampをpaidAtとして設定（元の注文日時で会計済みにする）
           orderUpdates.paidAt = currentEditingOrder.timestamp;
@@ -4256,7 +4263,7 @@
           console.log('💰 会計済み注文のため、dailySalesを更新します');
           
           // 注文日を取得（JSTに変換）
-          const orderDate = currentEditingOrder.timestamp.toDate();
+          const orderDate = currentEditingOrder.timestamp?.toDate ? currentEditingOrder.timestamp.toDate() : new Date(currentEditingOrder.timestamp || Date.now());
           const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
           const dateStr = `${jstOrderDate.getFullYear()}-${String(jstOrderDate.getMonth() + 1).padStart(2, '0')}-${String(jstOrderDate.getDate()).padStart(2, '0')}`;
           
@@ -9538,10 +9545,10 @@ ${redSlipCount > 0 ? `
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
           
-          if (!data.deleted) {
+          if (!data.deleted && data.timestamp) {
             hasActiveOrders = true;
             
-            const orderDate = data.timestamp.toDate();
+            const orderDate = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
             const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
             
             if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
@@ -9643,11 +9650,11 @@ ${redSlipCount > 0 ? `
           const data = doc.data();
           
           // 削除されていない注文があるかチェック
-          if (!data.deleted) {
+          if (!data.deleted && data.timestamp) {
             hasActiveOrders = true;
             
             // 削除されていない注文のみから最大番号を取得
-            const orderDate = data.timestamp.toDate();
+            const orderDate = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
             const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
             
             if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
@@ -9746,9 +9753,9 @@ ${redSlipCount > 0 ? `
           
           ordersSnapshot.forEach(doc => {
             const data = doc.data();
-            if (!data.deleted) {
+            if (!data.deleted && data.timestamp) {
               hasActiveOrders = true;
-              const orderDate = data.timestamp.toDate();
+              const orderDate = data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp);
               const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
               if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
                 maxOrderNumber = data.orderNumber;
