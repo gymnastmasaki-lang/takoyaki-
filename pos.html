@@ -2058,6 +2058,7 @@
         
         <button onclick="generatePeriodJournal()" style="padding: 12px 24px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">ジャーナル生成</button>
         <button onclick="exportPeriodCSV()" style="padding: 12px 24px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">CSV出力</button>
+        <button onclick="exportYayoiCSV()" style="padding: 12px 24px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">弥生会計CSV</button>
       </div>
       
       <div id="monthlyReportContent">
@@ -5757,6 +5758,198 @@ ${totalRedSlipCount > 0 ? `
       } catch (e) {
         console.error('❌ CSV出力エラー:', e);
         showCustomAlert('CSV出力エラー', 'CSVの出力に失敗しました: ' + e.message, 'error');
+      }
+    };
+    
+    // ===== 弥生会計用CSV出力 =====
+    window.exportYayoiCSV = async function() {
+      try {
+        const startDate = document.getElementById('reportStartDate').value;
+        const endDate = document.getElementById('reportEndDate').value;
+        
+        if (!startDate || !endDate) {
+          alert('開始日と終了日を選択してください');
+          return;
+        }
+        
+        if (startDate > endDate) {
+          alert('開始日は終了日より前の日付を選択してください');
+          return;
+        }
+        
+        console.log(`📊 弥生会計CSV出力: ${startDate} ～ ${endDate}`);
+        
+        // 期間内の全日付を生成
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const dates = [];
+        
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          dates.push(dateStr);
+        }
+        
+        // CSV用の仕訳データを収集
+        const journalEntries = [];
+        
+        // 日別データを収集して仕訳作成
+        for (const dateStr of dates) {
+          const yayoiDate = dateStr.replace(/-/g, '/'); // yyyy/MM/dd形式に変換
+          
+          // 売上データ
+          const salesDoc = await window.getDoc(window.getStoreDoc('dailySales', dateStr));
+          if (salesDoc.exists()) {
+            const data = salesDoc.data();
+            
+            // 現金売上の仕訳
+            if (data.cashSales > 0) {
+              const tax8 = Math.floor((data.tax8Total || 0) - (data.tax8Total || 0) / 1.08);
+              const tax10 = Math.floor((data.tax10Total || 0) - (data.tax10Total || 0) / 1.10);
+              
+              journalEntries.push({
+                date: yayoiDate,
+                debitAccount: '現金',
+                debitAmount: data.cashSales,
+                creditAccount: '売上高',
+                creditTaxType: data.tax10Total > data.tax8Total ? '課税売上10%' : '課税売上8%',
+                creditTaxAmount: tax8 + tax10,
+                creditAmount: data.cashSales,
+                description: '現金売上'
+              });
+            }
+            
+            // 電子マネー売上の仕訳
+            if (data.emoneSales > 0) {
+              const tax8 = Math.floor((data.tax8Total || 0) - (data.tax8Total || 0) / 1.08);
+              const tax10 = Math.floor((data.tax10Total || 0) - (data.tax10Total || 0) / 1.10);
+              
+              journalEntries.push({
+                date: yayoiDate,
+                debitAccount: '普通預金',
+                debitAmount: data.emoneSales,
+                creditAccount: '売上高',
+                creditTaxType: data.tax10Total > data.tax8Total ? '課税売上10%' : '課税売上8%',
+                creditTaxAmount: tax8 + tax10,
+                creditAmount: data.emoneSales,
+                description: '電子マネー売上'
+              });
+            }
+            
+            // クレジット売上の仕訳
+            if (data.creditSales > 0) {
+              const tax8 = Math.floor((data.tax8Total || 0) - (data.tax8Total || 0) / 1.08);
+              const tax10 = Math.floor((data.tax10Total || 0) - (data.tax10Total || 0) / 1.10);
+              
+              journalEntries.push({
+                date: yayoiDate,
+                debitAccount: '売掛金',
+                debitAmount: data.creditSales,
+                creditAccount: '売上高',
+                creditTaxType: data.tax10Total > data.tax8Total ? '課税売上10%' : '課税売上8%',
+                creditTaxAmount: tax8 + tax10,
+                creditAmount: data.creditSales,
+                description: 'クレジット売上'
+              });
+            }
+            
+            // 値引きの仕訳
+            if (data.totalDiscount > 0) {
+              journalEntries.push({
+                date: yayoiDate,
+                debitAccount: '売上高',
+                debitAmount: data.totalDiscount,
+                creditAccount: '現金',
+                creditAmount: data.totalDiscount,
+                description: '売上値引'
+              });
+            }
+            
+            // 赤伝票（売上マイナス）の仕訳
+            if (data.redSlipAmount > 0) {
+              journalEntries.push({
+                date: yayoiDate,
+                debitAccount: '売上高',
+                debitAmount: data.redSlipAmount,
+                creditAccount: '現金',
+                creditAmount: data.redSlipAmount,
+                description: '赤伝票（売上取消）'
+              });
+            }
+          }
+          
+          // 支出データ
+          const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
+          if (expenseDoc.exists()) {
+            const expenseTotal = expenseDoc.data().total || 0;
+            if (expenseTotal > 0) {
+              journalEntries.push({
+                date: yayoiDate,
+                debitAccount: '仕入高',
+                debitAmount: expenseTotal,
+                creditAccount: '現金',
+                creditAmount: expenseTotal,
+                description: '仕入・経費'
+              });
+            }
+          }
+          
+          // 人件費データ
+          let dayLaborCost = 0;
+          const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
+          attendanceSnapshot.forEach(doc => {
+            const attData = doc.data();
+            if (attData.date === dateStr) {
+              if (attData.totalWage && attData.totalWage > 0) {
+                dayLaborCost += attData.totalWage;
+              }
+            }
+          });
+          
+          if (dayLaborCost > 0) {
+            journalEntries.push({
+              date: yayoiDate,
+              debitAccount: '給料手当',
+              debitAmount: Math.round(dayLaborCost),
+              creditAccount: '現金',
+              creditAmount: Math.round(dayLaborCost),
+              description: '人件費'
+            });
+          }
+        }
+        
+        // 弥生会計用CSV形式で出力
+        let csvContent = '';
+        
+        // ヘッダー行
+        csvContent += '識別フラグ,伝票日付,借方勘定科目,借方補助科目,借方部門,借方税区分,借方税金額,借方金額,貸方勘定科目,貸方補助科目,貸方部門,貸方税区分,貸方税金額,貸方金額,摘要\n';
+        
+        // データ行
+        journalEntries.forEach(entry => {
+          const debitTaxType = entry.debitTaxType || '対象外';
+          const creditTaxType = entry.creditTaxType || '対象外';
+          const debitTaxAmount = entry.debitTaxAmount || 0;
+          const creditTaxAmount = entry.creditTaxAmount || 0;
+          
+          csvContent += `2000,${entry.date},${entry.debitAccount},,,${debitTaxType},${debitTaxAmount},${entry.debitAmount},${entry.creditAccount},,,${creditTaxType},${creditTaxAmount},${entry.creditAmount},${entry.description}\n`;
+        });
+        
+        // BOMを追加してExcelで文字化けを防ぐ
+        const bom = '\uFEFF';
+        const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `弥生会計仕訳_${startDate}_${endDate}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        showCustomAlert('弥生会計CSV出力完了', `仕訳データを弥生会計形式で出力しました\n\n弥生会計での取込方法:\n1. ファイル → インポート → 仕訳日記帳\n2. ダウンロードしたCSVファイルを選択\n3. インポート実行`, 'success');
+        
+      } catch (e) {
+        console.error('❌ 弥生会計CSV出力エラー:', e);
+        showCustomAlert('CSV出力エラー', '弥生会計CSVの出力に失敗しました: ' + e.message, 'error');
       }
     };
     
