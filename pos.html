@@ -555,10 +555,9 @@
         return item.taxRate;
       }
       
-      // taxRateがない場合、グローバルデフォルト税率またはfoodTypeから決定
-      const inferredRate = (foodType === 'non-food') ? 10 : globalDefaultTaxRate;
-      console.warn(`⚠️ [税率決定] 商品「${item.name}」にtaxRateが設定されていません → グローバル設定/foodType(${foodType})から推測: ${inferredRate}%`);
-      console.warn(`  → kanri.htmlで商品にデフォルト消費税率を設定してください`);
+      // taxRateがない場合、foodTypeから推測（食材:8%, 食材以外:10%）
+      const inferredRate = (foodType === 'non-food') ? 10 : 8;
+      console.log(`[税率決定] テーブル設定なし、taxRate未設定 → foodType(${foodType})から推測: ${inferredRate}%`);
       return inferredRate;
     }
   </script>
@@ -9797,7 +9796,9 @@ ${redSlipCount > 0 ? `
         let orderCount = 0;
         ordersSnapshot.forEach(doc => {
           const order = doc.data();
-          if (order.tableId === quickCheckoutTable.id && !order.deleted && !order.paidAt) {
+          // 🔥 修正: tableId または tableNumber でマッチ
+          const matchesTable = (order.tableId === quickCheckoutTable.id) || (order.tableNumber === '即会計');
+          if (matchesTable && !order.deleted && !order.paidAt) {
             orderCount++;
           }
         });
@@ -16906,8 +16907,23 @@ ${redSlipCount > 0 ? `
         ordersSnapshot.forEach(doc => {
           const order = doc.data();
           if (!order.deleted && !order.paidAt) {
+            // 🔥 修正: tableId と tableNumber の両方を考慮
             const tableId = order.tableId;
-            orderCounts[tableId] = (orderCounts[tableId] || 0) + 1;
+            const tableNumber = order.tableNumber;
+            
+            // tableIdでカウント
+            if (tableId) {
+              orderCounts[tableId] = (orderCounts[tableId] || 0) + 1;
+            }
+            
+            // tableNumberでもカウント（menu.htmlからの注文に対応）
+            if (tableNumber) {
+              // tableNameと一致するテーブルを見つけてカウント
+              const matchingTable = tables.find(t => t.name === tableNumber);
+              if (matchingTable) {
+                orderCounts[matchingTable.id] = (orderCounts[matchingTable.id] || 0) + 1;
+              }
+            }
           }
         });
         
@@ -16998,7 +17014,9 @@ ${redSlipCount > 0 ? `
         const orders = [];
         snapshot.forEach(doc => {
           const order = doc.data();
-          if (order.tableId === tableId && !order.deleted && !order.paidAt) {
+          // 🔥 修正: tableId または tableNumber でマッチ（menu.htmlからの注文に対応）
+          const matchesTable = (order.tableId === tableId) || (order.tableNumber === currentSelectedTableName);
+          if (matchesTable && !order.deleted && !order.paidAt) {
             orders.push({
               id: doc.id,
               ...order
@@ -17430,8 +17448,10 @@ ${redSlipCount > 0 ? `
         
         snapshot.forEach(doc => {
           const order = doc.data();
+          // 🔥 修正: tableId または tableNumber でマッチ
+          const matchesTable = (order.tableId === currentSelectedTableId) || (order.tableNumber === currentSelectedTableName);
           // このテーブルの未払い・未削除の注文のみを集計
-          if (order.tableId === currentSelectedTableId && !order.deleted && !order.paidAt && !order.cancelledAt) {
+          if (matchesTable && !order.deleted && !order.paidAt && !order.cancelledAt) {
             orders.push({
               id: doc.id,
               ...order
