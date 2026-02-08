@@ -2167,25 +2167,20 @@
         <!-- 固定ボタン（1行目：4列） -->
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
           
-          <!-- 即会計ボタン（一番左上） -->
-          <button onclick="quickCheckout()" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; border: none; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); padding: 15px; font-size: 18px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center;">
-            即会計
-          </button>
-          
-          <div style="background: linear-gradient(135deg, #81C784 0%, #66BB6A 100%); padding: 10px 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;">
-            <label style="margin: 0; white-space: nowrap; font-size: 13px; font-weight: bold; color: white;">レシート自動発行</label>
+          <div style="background: linear-gradient(135deg, #81C784 0%, #66BB6A 100%); padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;">
+            <label style="margin: 0; white-space: nowrap; font-size: 15px; font-weight: bold; color: white;">レシート自動発行</label>
             <div style="display: flex; align-items: center; gap: 8px;">
               <label class="toggle-switch" style="margin: 0;">
                 <input type="checkbox" id="autoPrintToggle" onchange="toggleAutoPrint()">
                 <span class="toggle-slider"></span>
               </label>
-              <span class="toggle-status off" id="autoPrintStatus" style="margin: 0; font-size: 13px; font-weight: bold; color: white;">OFF</span>
+              <span class="toggle-status off" id="autoPrintStatus" style="margin: 0; font-size: 15px; font-weight: bold; color: white;">OFF</span>
             </div>
           </div>
-          <div style="background: linear-gradient(135deg, #FFB74D 0%, #FFA726 100%); padding: 10px 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;">
-            <div style="font-size: 13px; font-weight: bold; color: white;">手動待ち人数</div>
-            <div style="font-size: 24px; font-weight: bold; color: white;" id="manual-count">0</div>
-            <button onclick="resetWaiting()" style="padding: 6px 15px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap;">リセット</button>
+          <div style="background: linear-gradient(135deg, #FFB74D 0%, #FFA726 100%); padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;">
+            <div style="font-size: 15px; font-weight: bold; color: white;">手動待ち人数</div>
+            <div style="font-size: 28px; font-weight: bold; color: white;" id="manual-count">0</div>
+            <button onclick="resetWaiting()" style="padding: 8px 18px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; white-space: nowrap;">リセット</button>
           </div>
           <!-- テイクアウトボタンがここに追加される -->
         </div>
@@ -2193,6 +2188,12 @@
         <!-- テーブル選択（2行目以降：4列） -->
         <div id="tableButtonsGrid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
           <!-- 動的テーブルボタンがここに追加されます -->
+        </div>
+        
+        <!-- 全テーブル合計金額表示 -->
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 18px; font-weight: bold; color: white;">全テーブル合計:</span>
+          <span id="allTablesTotal" style="font-size: 24px; font-weight: bold; color: #FFD700;">¥0</span>
         </div>
         
         <div class="table-grid" id="tableGrid" style="display: none;">
@@ -9845,7 +9846,34 @@ ${redSlipCount > 0 ? `
         if (selectedTable === tableNum) {
           loadOrders(tableNum);
         }
+        
+        // 全テーブル合計を更新
+        updateAllTablesTotal();
       });
+    }
+    
+    // 全テーブルの合計金額を更新
+    async function updateAllTablesTotal() {
+      try {
+        const q = query(window.getStoreCollection('orders'));
+        const snapshot = await window.getDocs(q);
+        
+        let total = 0;
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          // 削除済み、会計済み、キャンセル済みを除外
+          if (!data.deleted && !data.paidAt && !data.cancelledAt) {
+            total += data.totalAmount || 0;
+          }
+        });
+        
+        const totalElement = document.getElementById('allTablesTotal');
+        if (totalElement) {
+          totalElement.textContent = `¥${total.toLocaleString()}`;
+        }
+      } catch (error) {
+        console.error('全テーブル合計計算エラー:', error);
+      }
     }
     
     // テーブルを選択
@@ -10783,7 +10811,7 @@ ${redSlipCount > 0 ? `
     };
     
     // 支払いモーダルを表示
-    window.showPaymentModal = function() {
+    window.showPaymentModal = async function() {
       console.log('🔵 showPaymentModal開始');
       console.log('  currentOrders.length:', currentOrders.length);
       console.log('  currentOrders:', currentOrders);
@@ -10791,6 +10819,13 @@ ${redSlipCount > 0 ? `
       if (currentOrders.length === 0) {
         alert('会計する注文がありません');
         return;
+      }
+      
+      // 🆕 テーブル設定を再読み込み（最新の税率設定を取得）
+      if (selectedTable && selectedTable !== '即会計') {
+        currentTableSettings = await getTableSettings(selectedTable);
+        console.log('📋 テーブル設定を再読み込み:', selectedTable);
+        console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
       }
       
       // 値引き金額を初期化
@@ -14553,6 +14588,9 @@ ${redSlipCount > 0 ? `
           monitorTable(table.name);
         });
         
+        // 全テーブル合計を初期表示
+        await updateAllTablesTotal();
+        
       } catch (error) {
         console.error('テーブルボタン読み込みエラー:', error);
       }
@@ -17170,8 +17208,6 @@ ${redSlipCount > 0 ? `
     
     // 注文を完了にする（新UI用）
     window.completeOrderFromNewUI = async function(orderId) {
-      if (!confirm('この注文を完了にしますか？')) return;
-      
       try {
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           status: 'completed',
@@ -17189,8 +17225,6 @@ ${redSlipCount > 0 ? `
     
     // 注文をキャンセルする（新UI用）
     window.cancelOrderFromNewUI = async function(orderId) {
-      if (!confirm('この注文をキャンセルしますか？')) return;
-      
       try {
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           cancelledAt: window.Timestamp.now()
@@ -17207,8 +17241,6 @@ ${redSlipCount > 0 ? `
     
     // 注文を削除する（新UI用）
     window.deleteOrderFromNewUI = async function(orderId) {
-      if (!confirm('この注文を削除しますか？')) return;
-      
       try {
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           deleted: true,
