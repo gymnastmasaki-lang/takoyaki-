@@ -460,11 +460,14 @@
       
       try {
         const tableSettingsRef = window.getStoreDoc('tableSettings', tableId);
-        const tableDoc = await getDoc(tableSettingsRef);
+        const tableDoc = await window.getDoc(tableSettingsRef);
         
         if (tableDoc.exists()) {
-          return tableDoc.data();
+          const settings = tableDoc.data();
+          console.log(`✅ テーブル設定取得成功: ${tableId}`, settings);
+          return settings;
         }
+        console.log(`⚠️ テーブル設定が見つかりません: ${tableId}`);
         return null;
       } catch (e) {
         console.error('テーブル設定取得エラー:', e);
@@ -10910,11 +10913,13 @@ ${redSlipCount > 0 ? `
       const container = document.getElementById('taxRateItemsList');
       container.innerHTML = '';
       
-      console.log('🔵 buildTaxRateSelectionList開始');
+      console.log('🔵🔵🔵 buildTaxRateSelectionList開始 🔵🔵🔵');
       console.log('currentOrders:', currentOrders);
       console.log('currentOrders.length:', currentOrders.length);
       console.log('🔧 currentTableSettings:', currentTableSettings);
       console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
+      console.log('  selectedTable:', selectedTable);
+      console.log('  currentSelectedTableId:', currentSelectedTableId);
       
       if (!container) {
         console.error('❌ taxRateItemsListコンテナが見つかりません');
@@ -10940,10 +10945,14 @@ ${redSlipCount > 0 ? `
           let defaultTaxRate = 10;
           if (currentTableSettings && currentTableSettings.taxRule) {
             // テーブル設定がある場合はそれを使用
+            console.log(`  ✅ テーブル設定あり: taxRule=${currentTableSettings.taxRule}`);
             defaultTaxRate = (currentTableSettings.taxRule === 'takeout') ? 8 : 10;
+            console.log(`  → デフォルト税率: ${defaultTaxRate}%`);
           } else {
             // テーブル設定がない場合は旧ロジックを使用
+            console.log(`  ⚠️ テーブル設定なし → 旧ロジック使用`);
             defaultTaxRate = determineDefaultTaxRate(order.tableNumber);
+            console.log(`  → デフォルト税率: ${defaultTaxRate}%`);
           }
           
           addTaxRateItem(container, `注文 #${order.orderNumber}`, 1, orderTotal, itemIndex, defaultTaxRate);
@@ -10957,12 +10966,16 @@ ${redSlipCount > 0 ? `
             const itemTotal = itemBasePrice * (item.quantity || 1);
             console.log(`  商品追加: ${item.name} x${item.quantity}, 本体価格:${itemTotal}, taxType:${item.taxType}`);
             
+            // 🆕 トッピング情報を商品名に追加
+            const toppingStr = item.toppingName || item.toppings || item.toppingDetails || 'なし';
+            const displayName = `${item.name} (${toppingStr})`;
+            
             // 🆕 テーブル設定とfoodTypeに基づいて税率を決定
             const defaultTaxRate = getApplicableTaxRate(item, currentTableSettings);
             console.log(`  ✅ 適用税率: ${defaultTaxRate}% (foodType: ${item.foodType || 'food'}, taxRule: ${currentTableSettings?.taxRule || 'none'})`);
             
             // 🆕 taxTypeを渡す
-            addTaxRateItem(container, item.name, item.quantity, itemTotal, itemIndex, defaultTaxRate, item.taxType || 'inclusive');
+            addTaxRateItem(container, displayName, item.quantity, itemTotal, itemIndex, defaultTaxRate, item.taxType || 'inclusive');
             itemIndex++;
           });
           
@@ -16903,10 +16916,12 @@ ${redSlipCount > 0 ? `
       currentSelectedTableId = tableId;
       currentSelectedTableName = tableName;
       
-      // 🆕 テーブル設定を読み込む
-      currentTableSettings = await getTableSettings(tableId);
-      console.log('📋 テーブル選択 - テーブル設定読み込み完了:', tableId);
+      // 🆕 テーブル設定を読み込む（テーブル名を使用）
+      currentTableSettings = await getTableSettings(tableName);
+      console.log('📋 テーブル選択 - テーブル設定読み込み完了:', tableName);
+      console.log('  tableId:', tableId);
       console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
+      console.log('  設定全体:', currentTableSettings);
       
       // テーブル一覧を非表示、詳細を表示
       document.getElementById('tablesArea').style.display = 'none';
@@ -17209,10 +17224,13 @@ ${redSlipCount > 0 ? `
       if (!currentSelectedTableId) return;
       
       try {
-        // テーブル設定を読み込む
-        currentTableSettings = await getTableSettings(currentSelectedTableId);
-        console.log('📋 テーブル全注文会計 - テーブル設定読み込み:', currentSelectedTableId);
+        // テーブル設定を読み込む（テーブル名を使用）
+        currentTableSettings = await getTableSettings(currentSelectedTableName);
+        console.log('📋📋📋 テーブル全注文会計 - テーブル設定読み込み 📋📋📋');
+        console.log('  tableId:', currentSelectedTableId);
+        console.log('  tableName:', currentSelectedTableName);
         console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
+        console.log('  設定全体:', currentTableSettings);
         
         // テーブルIDで注文を検索
         const ordersRef = window.getStoreCollection('orders');
@@ -17289,9 +17307,12 @@ ${redSlipCount > 0 ? `
         selectedTable = orderData.tableId || currentSelectedTableId;
         totalAmountToPay = amount;
         
-        // テーブル設定を読み込む
-        currentTableSettings = await getTableSettings(selectedTable);
-        console.log('📋 単一注文会計 - テーブル設定:', currentTableSettings);
+        // テーブル設定を読み込む（テーブル名を使用）
+        currentTableSettings = await getTableSettings(currentSelectedTableName);
+        console.log('📋 単一注文会計 - テーブル設定読み込み:');
+        console.log('  tableName:', currentSelectedTableName);
+        console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
+        console.log('  設定全体:', currentTableSettings);
         
         // 値引き金額を初期化
         document.getElementById('discountAmount').value = '0';
