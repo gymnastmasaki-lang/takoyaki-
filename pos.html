@@ -1997,7 +1997,7 @@
           <span>支出</span>
         </button>
         <button class="sidebar-button" id="settingsMenuBtn" onclick="toggleSettingsMenu()">
-          <span>設定・管理</span>
+          <span>発注・管理</span>
         </button>
         <!-- 設定サブメニュー -->
         <div id="settingsSubMenu" style="display: none; padding-left: 10px;">
@@ -2005,7 +2005,7 @@
             <span>発注</span>
           </button>
           <button class="sidebar-button" onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kanri.html', '_blank')" style="font-size: 12px; padding: 8px;">
-            <span>設定・管理</span>
+            <span>管理</span>
           </button>
         </div>
         <button class="sidebar-button" onclick="handleLogout()">
@@ -10071,10 +10071,8 @@ ${redSlipCount > 0 ? `
       if (order.items && Array.isArray(order.items) && order.items.length > 0) {
         order.items.forEach(item => {
           const itemBasePrice = item.price;
-          const toppingPricePerItem = item.toppingPrice || 0;
-          const basePriceTotal = itemBasePrice * item.quantity;
-          const toppingPriceTotal = toppingPricePerItem * item.quantity;
-          const itemTotal = basePriceTotal + toppingPriceTotal;
+          const itemWithTopping = itemBasePrice + (item.toppingPrice || 0);
+          const itemTotal = itemWithTopping * item.quantity;
           
           // トッピング表示（toppingDetailsまたはtoppingsDataを優先）
           let toppingsHtml = '';
@@ -10120,15 +10118,6 @@ ${redSlipCount > 0 ? `
             toppingsHtml = `<div style="font-size: 12px; color: #999; padding-left: 10px;">　標準トッピング</div>`;
           }
           
-          // トッピング価格がある場合は、トッピング合計を表示
-          if (toppingPricePerItem > 0) {
-            toppingsHtml += `
-              <div style="display: flex; justify-content: space-between; margin-top: 4px; padding: 5px 10px; background: #f0f8ff; border-radius: 4px;">
-                <span style="font-size: 12px; color: #2196F3; font-weight: bold;">トッピング小計</span>
-                <span style="font-size: 12px; color: #2196F3; font-weight: bold;">+¥${toppingPriceTotal.toLocaleString()}</span>
-              </div>`;
-          }
-          
           const itemIndex = order.items.indexOf(item);
           const isChecked = order.itemsChecked && order.itemsChecked[itemIndex];
           const checkboxId = `checkbox-${order.id}-${itemIndex}`;
@@ -10144,12 +10133,12 @@ ${redSlipCount > 0 ? `
                 <div style="flex: 1; display: flex; justify-content: space-between; cursor: pointer;" 
                      onclick="document.getElementById('${checkboxId}').click()">
                   <div style="font-weight: bold;">${item.name} ×${item.quantity}</div>
-                  <div>¥${basePriceTotal.toLocaleString()}</div>
+                  <div>¥${itemBasePrice.toLocaleString()}</div>
                 </div>
               </div>
               ${toppingsHtml}
               <div style="display: flex; justify-content: flex-end; margin-top: 5px; padding-top: 5px; border-top: 1px dashed #ddd;">
-                <div style="font-weight: bold; color: #667eea;">合計: ¥${itemTotal.toLocaleString()}</div>
+                <div style="font-weight: bold; color: #667eea;">¥${itemWithTopping.toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
               </div>
             </div>
           `;
@@ -16843,17 +16832,13 @@ ${redSlipCount > 0 ? `
         const tablesSnapshot = await window.getDocs(window.getStoreCollection('tables'));
         const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
         
-        // テーブルデータを取得（即会計テーブルは除外）
+        // テーブルデータを取得
         const tables = [];
         tablesSnapshot.forEach(doc => {
-          const tableData = doc.data();
-          // 「即会計」という名前のテーブルは一覧に表示しない
-          if (tableData.name !== '即会計') {
-            tables.push({
-              id: doc.id,
-              ...tableData
-            });
-          }
+          tables.push({
+            id: doc.id,
+            ...doc.data()
+          });
         });
         
         // orderフィールドでソート
@@ -16886,10 +16871,10 @@ ${redSlipCount > 0 ? `
         // 🆕 即会計ボタンを最初に追加
         const quickCheckoutCard = document.createElement('div');
         quickCheckoutCard.className = 'table-card';
-        quickCheckoutCard.style.cssText = 'background: white; cursor: pointer; border: 2px solid #667eea;';
+        quickCheckoutCard.style.cssText = 'background: white; cursor: pointer; border: 2px solid #00BCD4;';
         quickCheckoutCard.onclick = () => quickCheckout();
         quickCheckoutCard.innerHTML = `
-          <div class="table-name" style="color: #667eea; font-size: 18px;">即会計</div>
+          <div class="table-name" style="color: #00BCD4; font-size: 18px;">即会計</div>
         `;
         container.appendChild(quickCheckoutCard);
         
@@ -16992,21 +16977,74 @@ ${redSlipCount > 0 ? `
           
           const items = order.items || [];
           const itemsHTML = items.map(item => {
-            const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
+            const basePrice = item.price * (item.quantity || 1);
+            const toppingPrice = (item.toppingPrice || 0) * (item.quantity || 1);
+            const itemTotal = basePrice + toppingPrice;
+            
             let html = `
             <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; flex-direction: column;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <span style="flex: 1; font-weight: 500;">${item.name}</span>
                 <span style="width: 60px; text-align: center;">×${item.quantity || 1}</span>
-                <span style="width: 100px; text-align: right; font-weight: bold;">¥${itemTotal.toLocaleString()}</span>
+                <span style="width: 100px; text-align: right; font-weight: bold;">¥${basePrice.toLocaleString()}</span>
               </div>`;
             
             // トッピング情報を表示
-            if (item.toppingName && item.toppingPrice) {
-              html += `
+            let toppingsHtml = '';
+            if (item.toppingDetails && Array.isArray(item.toppingDetails) && item.toppingDetails.length > 0) {
+              // 新形式: toppingDetailsがある場合（セット名でグループ化）
+              const groupedBySet = {};
+              item.toppingDetails.forEach(detail => {
+                const setName = detail.setName || 'トッピング';
+                if (!groupedBySet[setName]) {
+                  groupedBySet[setName] = [];
+                }
+                groupedBySet[setName].push(detail.optionName);
+              });
+              
+              toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+                return `
+                  <div style="font-size: 11px; color: #666; font-weight: bold; padding-left: 10px; margin-top: 3px;">${setName}</div>
+                  ${options.map(opt => `<div style="font-size: 11px; color: #666; padding-left: 20px;">　・${opt}</div>`).join('')}
+                `;
+              }).join('');
+            } else if (item.toppingsData && Array.isArray(item.toppingsData) && item.toppingsData.length > 0) {
+              // menu.htmlからの形式: toppingsDataがある場合
+              const groupedBySet = {};
+              item.toppingsData.forEach(topping => {
+                const setName = topping.setName || 'トッピング';
+                if (!groupedBySet[setName]) {
+                  groupedBySet[setName] = [];
+                }
+                groupedBySet[setName].push(topping.name);
+              });
+              
+              toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+                return `
+                  <div style="font-size: 11px; color: #666; font-weight: bold; padding-left: 10px; margin-top: 3px;">${setName}</div>
+                  ${options.map(opt => `<div style="font-size: 11px; color: #666; padding-left: 20px;">　・${opt}</div>`).join('')}
+                `;
+              }).join('');
+            } else if (item.toppingName && item.toppingPrice) {
+              // 古い形式: toppingNameのみの場合
+              toppingsHtml = `
               <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; padding-left: 10px; font-size: 13px; color: #666;">
                 <span style="flex: 1;">└ ${item.toppingName}</span>
-                <span style="width: 160px; text-align: right;">+¥${(item.toppingPrice * (item.quantity || 1)).toLocaleString()}</span>
+                <span style="width: 160px; text-align: right;">+¥${toppingPrice.toLocaleString()}</span>
+              </div>`;
+            }
+            
+            html += toppingsHtml;
+            
+            // トッピング価格がある場合は合計行を表示
+            if (toppingPrice > 0) {
+              html += `
+              <div style="display: flex; justify-content: space-between; margin-top: 4px; padding: 5px 10px; background: #f0f8ff; border-radius: 4px;">
+                <span style="font-size: 12px; color: #2196F3; font-weight: bold;">トッピング小計</span>
+                <span style="font-size: 12px; color: #2196F3; font-weight: bold;">+¥${toppingPrice.toLocaleString()}</span>
+              </div>
+              <div style="display: flex; justify-content: flex-end; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #ddd;">
+                <span style="font-weight: bold; color: #667eea;">小計: ¥${itemTotal.toLocaleString()}</span>
               </div>`;
             }
             
@@ -17023,6 +17061,7 @@ ${redSlipCount > 0 ? `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">
               <span style="font-weight: bold; font-size: 16px;">注文 ${orderTime}</span>
               <div style="display: flex; gap: 8px; align-items: center;">
+                ${order.paidAt ? '<span style="background: #2196F3; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;">会計済</span>' : ''}
                 <span style="background: ${order.status === 'completed' ? '#4CAF50' : '#FF9800'}; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;">
                   ${order.status === 'completed' ? '完了' : '準備中'}
                 </span>
@@ -17034,7 +17073,7 @@ ${redSlipCount > 0 ? `
                 合計: ¥${total.toLocaleString()}
               </div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                <button onclick="payForSingleOrder('${order.id}', ${total})" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; border: none; padding: 8px; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer;">
+                <button onclick="payForSingleOrder('${order.id}', ${total})" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; border: none; padding: 8px; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; ${order.paidAt ? 'opacity: 0.5; pointer-events: none;' : ''}">
                   この注文を会計
                 </button>
                 <button onclick="completeOrderFromNewUI('${order.id}')" style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; padding: 8px; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer;">
