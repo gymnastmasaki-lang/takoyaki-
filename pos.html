@@ -10071,7 +10071,9 @@ ${redSlipCount > 0 ? `
       if (order.items && Array.isArray(order.items) && order.items.length > 0) {
         order.items.forEach(item => {
           const itemBasePrice = item.price;
-          const itemWithTopping = itemBasePrice + (item.toppingPrice || 0);
+          const toppingPricePerItem = item.toppingPrice || 0;
+          const toppingTotal = toppingPricePerItem * item.quantity;
+          const itemWithTopping = itemBasePrice + toppingPricePerItem;
           const itemTotal = itemWithTopping * item.quantity;
           
           // トッピング表示（toppingDetailsまたはtoppingsDataを優先）
@@ -10118,6 +10120,14 @@ ${redSlipCount > 0 ? `
             toppingsHtml = `<div style="font-size: 12px; color: #999; padding-left: 10px;">　標準トッピング</div>`;
           }
           
+          // トッピング価格がある場合は、トッピング合計を追加
+          if (toppingPricePerItem > 0) {
+            toppingsHtml += `
+              <div style="display: flex; justify-content: flex-end; margin-top: 4px; padding-left: 10px; font-size: 12px; color: #4CAF50;">
+                <span style="font-weight: bold;">トッピング計: +¥${toppingTotal.toLocaleString()}</span>
+              </div>`;
+          }
+          
           const itemIndex = order.items.indexOf(item);
           const isChecked = order.itemsChecked && order.itemsChecked[itemIndex];
           const checkboxId = `checkbox-${order.id}-${itemIndex}`;
@@ -10133,12 +10143,12 @@ ${redSlipCount > 0 ? `
                 <div style="flex: 1; display: flex; justify-content: space-between; cursor: pointer;" 
                      onclick="document.getElementById('${checkboxId}').click()">
                   <div style="font-weight: bold;">${item.name} ×${item.quantity}</div>
-                  <div>¥${itemBasePrice.toLocaleString()}</div>
+                  <div>¥${(itemBasePrice * item.quantity).toLocaleString()}</div>
                 </div>
               </div>
               ${toppingsHtml}
               <div style="display: flex; justify-content: flex-end; margin-top: 5px; padding-top: 5px; border-top: 1px dashed #ddd;">
-                <div style="font-weight: bold; color: #667eea;">¥${itemWithTopping.toLocaleString()} × ${item.quantity} = ¥${itemTotal.toLocaleString()}</div>
+                <div style="font-weight: bold; color: #667eea;">小計: ¥${itemTotal.toLocaleString()}</div>
               </div>
             </div>
           `;
@@ -16981,13 +16991,16 @@ ${redSlipCount > 0 ? `
           
           const items = order.items || [];
           const itemsHTML = items.map(item => {
-            const itemTotal = (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
+            const basePrice = item.price * (item.quantity || 1);
+            const toppingTotal = (item.toppingPrice || 0) * (item.quantity || 1);
+            const itemTotal = basePrice + toppingTotal;
+            
             let html = `
             <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; flex-direction: column;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <span style="flex: 1; font-weight: 500;">${item.name}</span>
                 <span style="width: 60px; text-align: center;">×${item.quantity || 1}</span>
-                <span style="width: 100px; text-align: right; font-weight: bold;">¥${itemTotal.toLocaleString()}</span>
+                <span style="width: 100px; text-align: right; font-weight: bold;">¥${basePrice.toLocaleString()}</span>
               </div>`;
             
             // トッピング情報を表示
@@ -17009,6 +17022,14 @@ ${redSlipCount > 0 ? `
                   ${options.map(opt => `<div style="font-size: 11px; color: #666; padding-left: 20px;">　・${opt}</div>`).join('')}
                 `;
               }).join('');
+              
+              // トッピング合計金額を表示
+              if (toppingTotal > 0) {
+                toppingsHtml += `
+                  <div style="display: flex; justify-content: flex-end; margin-top: 4px; padding-left: 10px; font-size: 12px; color: #4CAF50;">
+                    <span style="width: 160px; text-align: right; font-weight: bold;">トッピング計: +¥${toppingTotal.toLocaleString()}</span>
+                  </div>`;
+              }
             } else if (item.toppingsData && Array.isArray(item.toppingsData) && item.toppingsData.length > 0) {
               // 🆕 menu.htmlからの形式: toppingsDataがある場合
               const groupedBySet = {};
@@ -17026,13 +17047,29 @@ ${redSlipCount > 0 ? `
                   ${options.map(opt => `<div style="font-size: 11px; color: #666; padding-left: 20px;">　・${opt}</div>`).join('')}
                 `;
               }).join('');
+              
+              // トッピング合計金額を表示
+              if (toppingTotal > 0) {
+                toppingsHtml += `
+                  <div style="display: flex; justify-content: flex-end; margin-top: 4px; padding-left: 10px; font-size: 12px; color: #4CAF50;">
+                    <span style="width: 160px; text-align: right; font-weight: bold;">トッピング計: +¥${toppingTotal.toLocaleString()}</span>
+                  </div>`;
+              }
             } else if (item.toppingName && item.toppingPrice) {
               // 古い形式: toppingNameのみの場合
               toppingsHtml = `
               <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; padding-left: 10px; font-size: 13px; color: #666;">
                 <span style="flex: 1;">└ ${item.toppingName}</span>
-                <span style="width: 160px; text-align: right;">+¥${(item.toppingPrice * (item.quantity || 1)).toLocaleString()}</span>
+                <span style="width: 160px; text-align: right;">+¥${toppingTotal.toLocaleString()}</span>
               </div>`;
+            }
+            
+            // 小計を表示（本体+トッピング）
+            if (toppingTotal > 0) {
+              toppingsHtml += `
+                <div style="display: flex; justify-content: flex-end; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #ddd;">
+                  <span style="font-weight: bold; color: #667eea;">小計: ¥${itemTotal.toLocaleString()}</span>
+                </div>`;
             }
             
             html += toppingsHtml;
