@@ -15976,8 +15976,113 @@ ${redSlipCount > 0 ? `
       }
     }
     
+    // 🆕 URLパラメータから自動ログイン
+    async function checkAutoLogin() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const autoLogin = urlParams.get('autoLogin');
+      const storeId = urlParams.get('storeId');
+      const password = urlParams.get('password');
+      
+      if (autoLogin === 'true' && storeId && password) {
+        console.log('🔐 自動ログイン開始:', storeId);
+        
+        try {
+          // Firebaseの初期化を待つ
+          if (!window.firebaseReady) {
+            console.log('⏳ Firebase初期化待機中...');
+            await new Promise(resolve => {
+              window.addEventListener('firebaseReady', resolve, { once: true });
+            });
+          }
+          
+          // 店舗データを取得
+          const storeRef = window.doc(window.db, 'stores', storeId);
+          const storeDoc = await window.getDoc(storeRef);
+          
+          if (storeDoc.exists()) {
+            const storeData = storeDoc.data();
+            
+            // パスワード検証
+            if (storeData.storePassword === password || storeData.password === password) {
+              // 🔧 下赤塚店の特別処理
+              let actualStoreId = storeId;
+              if (storeId === 'shimoarekasuka' || storeId === 'shimoakatsuka') {
+                console.log('🔧 下赤塚店のIDを検出: ' + storeId + ' → null (旧パス使用)');
+                actualStoreId = null;
+              }
+              
+              currentStoreId = actualStoreId;
+              currentStoreName = storeData.storeName || storeData.name || storeId;
+              
+              window.currentStoreId = currentStoreId;
+              window.currentStoreName = currentStoreName;
+              
+              sessionStorage.setItem('posStoreId', currentStoreId || '');
+              sessionStorage.setItem('posStoreName', currentStoreName);
+              sessionStorage.setItem('posAuthenticated', 'true');
+              
+              const headerTitle = document.querySelector('.header-title');
+              if (headerTitle) {
+                headerTitle.textContent = currentStoreName + ' - レジシステム';
+              }
+              
+              console.log('✅ 自動ログイン成功:', currentStoreName);
+              
+              // ログイン画面を非表示にして日付選択モーダルを表示
+              document.getElementById('loginScreen').style.display = 'none';
+              
+              // URLパラメータでモーダルが指定されている場合は日付選択をスキップ
+              const openModal = urlParams.get('modal');
+              if (!openModal) {
+                showDateSelectionModal();
+              } else {
+                // モーダルを開く場合は営業日を今日に設定
+                const now = new Date();
+                let today = new Date(now);
+                if (now.getHours() < 3) {
+                  today.setDate(today.getDate() - 1);
+                }
+                window.selectedBusinessDate = formatDateISO(today);
+                sessionStorage.setItem('businessDate', window.selectedBusinessDate);
+                document.getElementById('mainContent').style.display = 'block';
+                updateBusinessDateDisplay();
+                
+                // 少し待ってからモーダルを開く
+                setTimeout(() => {
+                  window.checkURLParametersForModal();
+                }, 500);
+              }
+              
+              return true;
+            }
+          }
+          
+          console.warn('⚠️ 自動ログイン失敗: 認証情報が無効');
+        } catch (error) {
+          console.error('❌ 自動ログインエラー:', error);
+        }
+      }
+      
+      return false;
+    }
+    
+    // 日付フォーマット（ISO）- 自動ログイン用
+    function formatDateISO(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    
     // ページ読み込み時にセッションをチェック
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
+      // 🆕 URLパラメータでの自動ログインを試行
+      const autoLoggedIn = await checkAutoLogin();
+      if (autoLoggedIn) {
+        console.log('✅ 自動ログイン完了、通常のセッションチェックはスキップ');
+        return;
+      }
+      
       // ログインフォームのイベントリスナーを設定
       const loginForm = document.getElementById('posLoginForm');
       if (loginForm) {
