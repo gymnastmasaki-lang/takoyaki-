@@ -811,6 +811,52 @@
       color: #e65100;
     }
     
+    .table-card.has-pending-orders {
+      background: linear-gradient(135deg, #fff4e6 0%, #ffe0b2 100%);
+      border: 2px solid #ff9800;
+    }
+    
+    .table-card.has-pending-orders .table-name {
+      color: #f57c00;
+    }
+    
+    .table-card.has-pending-orders .pending-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #ff9800;
+      color: white;
+      font-size: 10px;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-weight: bold;
+    }
+    
+    .status-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      font-size: 10px;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-weight: bold;
+    }
+    
+    .unpaid-badge {
+      background: #f57c00;
+      color: white;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.7;
+      }
+    }
+    
     .table-name {
       font-size: 14px !important;
       font-weight: bold;
@@ -11581,6 +11627,9 @@ ${redSlipCount > 0 ? `
           if (currentSelectedTableId) {
             await loadTableOrders(currentSelectedTableId);
           }
+          
+          // 🔥 テーブル一覧も更新（色を即座に反映）
+          loadNewTablesList();
         }
         
         // 即会計モードをリセット
@@ -16917,7 +16966,6 @@ ${redSlipCount > 0 ? `
         container.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">読み込み中...</div>';
         
         const tablesSnapshot = await window.getDocs(window.getStoreCollection('tables'));
-        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
         
         // テーブルデータを取得
         const tables = [];
@@ -16938,32 +16986,6 @@ ${redSlipCount > 0 ? `
           return a.name.localeCompare(b.name);
         });
         
-        // 各テーブルの未精算注文数をカウント
-        const orderCounts = {};
-        ordersSnapshot.forEach(doc => {
-          const order = doc.data();
-          // 🔥 修正: 削除済み・会計済み・キャンセル済みを除外して未精算注文のみカウント
-          if (!order.deleted && !order.paidAt && !order.cancelledAt) {
-            // tableIdが優先、なければtableNumberで照合
-            if (order.tableId) {
-              orderCounts[order.tableId] = (orderCounts[order.tableId] || 0) + 1;
-              console.log('📊 tableIdでカウント:', order.tableId, '現在の件数:', orderCounts[order.tableId]);
-            } else if (order.tableNumber) {
-              // tableIdがない場合（menu/handyからの注文）、tableNumberで照合
-              console.log('🔍 tableNumber照合:', order.tableNumber);
-              const matchingTable = tables.find(t => t.name === order.tableNumber);
-              if (matchingTable) {
-                orderCounts[matchingTable.id] = (orderCounts[matchingTable.id] || 0) + 1;
-                console.log('✅ マッチング成功:', order.tableNumber, '→', matchingTable.id, '現在の件数:', orderCounts[matchingTable.id]);
-              } else {
-                console.warn('⚠️ マッチするテーブルが見つかりません:', order.tableNumber);
-              }
-            }
-          }
-        });
-        
-        console.log('📊 最終的な注文カウント:', orderCounts);
-        
         if (tables.length === 0) {
           container.innerHTML = '<div style="text-align: center; color: #999; padding: 40px;">テーブルが登録されていません<br>設定・管理画面からテーブルを追加してください</div>';
           return;
@@ -16971,58 +16993,164 @@ ${redSlipCount > 0 ? `
         
         container.innerHTML = '';
         
-        // 🆕 即会計テーブルを取得
-        let quickCheckoutTable = null;
-        let quickCheckoutOrderCount = 0;
-        tables.forEach(table => {
-          if (table.name === '即会計') {
-            quickCheckoutTable = table;
-            quickCheckoutOrderCount = orderCounts[table.id] || 0;
-          }
-        });
-        
         // 即会計カードを最初に追加
         const quickCheckoutCard = document.createElement('div');
-        quickCheckoutCard.className = 'table-card' + (quickCheckoutOrderCount > 0 ? ' has-orders' : '');
+        quickCheckoutCard.className = 'table-card';
+        quickCheckoutCard.setAttribute('data-table-name', '即会計');
+        quickCheckoutCard.setAttribute('data-table-id', 'quick-checkout');
         quickCheckoutCard.style.cssText = 'background: white; cursor: pointer; border: 2px solid #00BCD4;';
         quickCheckoutCard.onclick = () => {
-          // 🔧 修正: quickCheckout関数を呼び出す
           window.quickCheckout();
         };
         quickCheckoutCard.innerHTML = `
           <div class="table-name" style="color: #00BCD4; font-size: 18px;">即会計</div>
-          <div class="table-order-count">${quickCheckoutOrderCount > 0 ? `注文 ${quickCheckoutOrderCount}件` : '空席'}</div>
+          <div class="table-order-count">空席</div>
         `;
         container.appendChild(quickCheckoutCard);
         
         tables.forEach(table => {
-          // 即会計テーブルはスキップ（既に上で追加済み）
+          // 即会計テーブルはスキップ
           if (table.name === '即会計') {
             return;
           }
           
-          const orderCount = orderCounts[table.id] || 0;
-          const hasOrders = orderCount > 0;
-          
           const card = document.createElement('div');
-          card.className = 'table-card' + (hasOrders ? ' has-orders' : '');
-          card.onclick = () => selectNewTable(table.id, table.name, orderCount);
+          card.className = 'table-card';
+          card.setAttribute('data-table-name', table.name);
+          card.setAttribute('data-table-id', table.id);
+          card.onclick = () => selectNewTable(table.id, table.name, 0);
           
           card.innerHTML = `
             <div class="table-name">${table.name.length > 10 ? table.name.substring(0, 10) : table.name}</div>
-            <div class="table-order-count">${orderCount > 0 ? `注文 ${orderCount}件` : '空席'}</div>
+            <div class="table-order-count">空席</div>
           `;
           
           container.appendChild(card);
         });
         
+        // 注文状態を更新（初回）
+        updateNewTableStatus();
+        
       } catch (error) {
         console.error('テーブル一覧読み込みエラー:', error);
         const container = document.getElementById('newTablesGrid');
         if (container) {
-          container.innerHTML = '<div style="text-align: center; color: red; padding: 40px;">読み込みに失敗しました</div>';
+          container.innerHTML = '<div style="text-align: center; color: red; padding: 40px;">読み込みに失敗しました<br><small>' + error.message + '</small></div>';
         }
       }
+    }
+    
+    // テーブルの注文状態を更新（handyと同じロジック）
+    async function updateNewTableStatus() {
+      try {
+        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
+        
+        const unpaidTables = new Set();  // 注文あり（未会計）
+        const hasIncompleteOrders = new Set();  // 未完了の注文があるテーブル
+        const tableOrderCounts = {};  // テーブルごとの注文数
+        
+        console.log('🔄 テーブルステータス更新開始');
+        
+        ordersSnapshot.forEach(doc => {
+          const order = doc.data();
+          console.log('📋 注文チェック:', {
+            id: doc.id,
+            tableId: order.tableId,
+            tableNumber: order.tableNumber,
+            deleted: order.deleted,
+            cancelled: !!order.cancelledAt,
+            paid: !!order.paidAt,
+            completed: !!order.completedAt
+          });
+          
+          if (order.tableNumber && !order.deleted && !order.cancelledAt) {
+            // 会計済みでない注文
+            if (!order.paidAt) {
+              unpaidTables.add(order.tableNumber);
+              tableOrderCounts[order.tableNumber] = (tableOrderCounts[order.tableNumber] || 0) + 1;
+              
+              // 未完了の注文がある
+              if (!order.completedAt) {
+                hasIncompleteOrders.add(order.tableNumber);
+                console.log('📝 未完了注文あり:', order.tableNumber);
+              }
+            }
+          }
+        });
+        
+        console.log('📊 ステータス集計:', {
+          注文ありテーブル: Array.from(unpaidTables),
+          未完了注文あり: Array.from(hasIncompleteOrders),
+          注文数: tableOrderCounts
+        });
+        
+        // すべてのテーブルカードを更新
+        document.querySelectorAll('.table-card').forEach(card => {
+          const tableName = card.getAttribute('data-table-name');
+          
+          if (!tableName || tableName === '即会計') return;
+          
+          // 既存のバッジをすべて削除
+          card.querySelectorAll('.pending-badge, .status-badge, .unpaid-badge').forEach(badge => badge.remove());
+          
+          const orderCount = tableOrderCounts[tableName] || 0;
+          const orderCountElement = card.querySelector('.table-order-count');
+          
+          if (unpaidTables.has(tableName)) {
+            // 注文あり → 背景をオレンジに、クラス追加
+            card.classList.add('has-pending-orders');
+            
+            // 注文数を表示
+            if (orderCountElement) {
+              orderCountElement.textContent = `注文 ${orderCount}件`;
+            }
+            
+            // 「注文あり」バッジを追加（未完了の注文がある場合のみ）
+            if (hasIncompleteOrders.has(tableName)) {
+              const orderBadge = document.createElement('div');
+              orderBadge.className = 'pending-badge';
+              orderBadge.textContent = '注文あり';
+              orderBadge.style.cssText = 'position: absolute; top: 10px; right: 10px; background: #ff9800; color: white; font-size: 10px; padding: 4px 8px; border-radius: 12px; font-weight: bold;';
+              card.appendChild(orderBadge);
+              console.log('✅ 注文ありバッジ追加:', tableName);
+            }
+            
+            // 「未会計」バッジを追加（常に表示）
+            const unpaidBadge = document.createElement('div');
+            unpaidBadge.className = 'unpaid-badge';
+            unpaidBadge.textContent = '未会計';
+            unpaidBadge.style.cssText = 'position: absolute; top: 10px; left: 10px; background: #f57c00; color: white; font-size: 10px; padding: 4px 8px; border-radius: 12px; font-weight: bold; animation: pulse 2s infinite;';
+            card.appendChild(unpaidBadge);
+            console.log('✅ 未会計バッジ追加:', tableName);
+          } else {
+            // 空席 → バッジなし、クラス削除
+            card.classList.remove('has-pending-orders');
+            if (orderCountElement) {
+              orderCountElement.textContent = '空席';
+            }
+            console.log('ℹ️ 空席:', tableName);
+          }
+        });
+        
+      } catch (error) {
+        console.error('❌ テーブルステータス更新エラー:', error);
+      }
+    }
+    
+    // 注文のリアルタイム監視を開始
+    let newOrdersListener = null;
+    function startNewOrdersListener() {
+      if (newOrdersListener) {
+        newOrdersListener();  // 既存のリスナーを解除
+      }
+      const ordersRef = window.getStoreCollection('orders');
+      newOrdersListener = window.onSnapshot(ordersRef, (snapshot) => {
+        console.log('🔔 注文データが変更されました');
+        updateNewTableStatus();
+      });
+    }
+
+          }
     }
     
     // テーブルを選択
@@ -17529,6 +17657,9 @@ ${redSlipCount > 0 ? `
         
         loadTableOrders(currentSelectedTableId);
         
+        // 🔥 テーブル一覧も更新（色を即座に反映）
+        loadNewTablesList();
+        
         alert('注文を追加しました');
         
       } catch (error) {
@@ -17799,7 +17930,10 @@ ${redSlipCount > 0 ? `
       // テーブル一覧を読み込み
       loadNewTablesList();
       
-      // 定期的にテーブル一覧を更新（30秒ごと）
+      // 🔥 注文のリアルタイム監視を開始
+      startNewOrdersListener();
+      
+      // 定期的にテーブル一覧を更新（30秒ごと）- バックアップとして維持
       setInterval(() => {
         if (!document.getElementById('menuIframeContainer').classList.contains('show')) {
           loadNewTablesList();
