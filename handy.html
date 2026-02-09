@@ -618,8 +618,19 @@
         <h2 id="storeNameDisplay">店舗名</h2>
         <div class="store-info">テーブルを選択してください</div>
         <div class="header-buttons">
-          <button class="sales-btn" onclick="showSalesModal()">売上</button>
-          <button class="settings-btn" onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kanri.html', '_blank')">設定•管理</button>
+          <button class="sales-btn" onclick="toggleFunctionsMenu()">機能</button>
+          <!-- 機能サブメニュー -->
+          <div id="functionsSubMenu" style="display: none; position: absolute; top: 60px; right: 20px; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); padding: 10px; z-index: 1000; min-width: 200px;">
+            <button onclick="showKintaiModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">勤怠</button>
+            <button onclick="showSalesModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">売上</button>
+            <button onclick="showMonthlyModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">月次</button>
+            <button onclick="showHistoryModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">履歴</button>
+            <button onclick="openDrawer()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">ドロア開</button>
+            <button onclick="showExpenseModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">支出</button>
+            <button onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/order.html', '_blank')" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #FF5722 0%, #E64A19 100%); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">発注</button>
+            <button onclick="showPrinterSettings()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #607D8B 0%, #455A64 100%); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">プリンタ設定</button>
+          </div>
+          <button class="settings-btn" onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kanri.html', '_blank')">管理</button>
           <button class="logout-btn" onclick="handleLogout()">ログアウト</button>
         </div>
       </div>
@@ -1941,6 +1952,21 @@
     };
 
     window.addEventListener('DOMContentLoaded', async () => {
+      // タップ音のイベントリスナーを追加
+      document.addEventListener('click', function(e) {
+        if (e.target.closest('button') || 
+            e.target.closest('.table-card') || 
+            e.target.closest('.category-btn') ||
+            e.target.closest('.menu-item') ||
+            e.target.closest('.payment-method') ||
+            e.target.closest('a') ||
+            e.target.closest('[onclick]') ||
+            e.target.type === 'checkbox' ||
+            e.target.type === 'radio') {
+          playTapSound();
+        }
+      });
+      
       while (!window.firebaseReady || !window.db) await new Promise(r => setTimeout(r, 100));
       await loadStoreList();
       if (sessionStorage.getItem('handyStoreId')) {
@@ -2106,6 +2132,28 @@
       return unsubscribe;
     }
     
+    
+    // ========== 🎛️ 機能メニュー ==========
+    
+    // 機能メニューをトグル
+    function toggleFunctionsMenu() {
+      const menu = document.getElementById('functionsSubMenu');
+      if (menu.style.display === 'none') {
+        menu.style.display = 'block';
+      } else {
+        menu.style.display = 'none';
+      }
+    }
+    
+    // メニュー外をクリックしたら閉じる
+    document.addEventListener('click', function(e) {
+      const menu = document.getElementById('functionsSubMenu');
+      const btn = e.target.closest('.sales-btn');
+      if (menu && menu.style.display === 'block' && !menu.contains(e.target) && !btn) {
+        menu.style.display = 'none';
+      }
+    });
+    
     // ========== 💰 売上モーダル機能 ==========
     
     // 売上モーダルを表示
@@ -2175,6 +2223,76 @@
         console.error('売上計算エラー:', e);
         container.innerHTML = '<div style="text-align: center; color: red; padding: 20px;">エラーが発生しました</div>';
       }
+    };
+    
+    // ========== 📂 追加機能 ==========
+    
+    // ドロア開
+    window.openDrawer = async function() {
+      try {
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        
+        const salesRef = window.getStoreDoc('dailySales', dateStr);
+        const salesDoc = await window.getDoc(salesRef);
+        
+        if (salesDoc.exists()) {
+          const data = salesDoc.data();
+          const currentCount = data.drawerOpenCount || 0;
+          await window.updateDoc(salesRef, {
+            drawerOpenCount: currentCount + 1,
+            updatedAt: window.Timestamp.now()
+          });
+        } else {
+          await window.setDoc(salesRef, {
+            date: dateStr,
+            totalSales: 0,
+            customerCount: 0,
+            drawerOpenCount: 1,
+            createdAt: window.Timestamp.now(),
+            updatedAt: window.Timestamp.now()
+          });
+        }
+        
+        alert('ドロアを開きました');
+        document.getElementById('functionsSubMenu').style.display = 'none';
+      } catch (e) {
+        console.error('ドロア開エラー:', e);
+        alert('エラーが発生しました');
+      }
+    };
+    
+    // 支出
+    window.showExpenseModal = function() {
+      const posURL = 'https://gymnastmasaki-lang.github.io/takoyaki-/pos.html?modal=expense';
+      window.open(posURL, '_blank');
+      document.getElementById('functionsSubMenu').style.display = 'none';
+    };
+    
+    // 勤怠
+    window.showKintaiModal = function() {
+      window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kintai.html', '_blank');
+      document.getElementById('functionsSubMenu').style.display = 'none';
+    };
+    
+    // 月次
+    window.showMonthlyModal = function() {
+      alert('月次機能は管理画面からご利用ください');
+      document.getElementById('functionsSubMenu').style.display = 'none';
+    };
+    
+    // 履歴
+    window.showHistoryModal = function() {
+      const posURL = 'https://gymnastmasaki-lang.github.io/takoyaki-/pos.html?modal=history';
+      window.open(posURL, '_blank');
+      document.getElementById('functionsSubMenu').style.display = 'none';
+    };
+    
+    // プリンタ設定
+    window.showPrinterSettings = function() {
+      const posURL = 'https://gymnastmasaki-lang.github.io/takoyaki-/pos.html?modal=printer';
+      window.open(posURL, '_blank');
+      document.getElementById('functionsSubMenu').style.display = 'none';
     };
   
   </script>
