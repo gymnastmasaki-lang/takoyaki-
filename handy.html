@@ -535,79 +535,127 @@
     };
     
     // 初期化処理
-    loadStores();
+    window.addEventListener('DOMContentLoaded', async () => {
+      // Firebase初期化待機
+      while (!window.firebaseReady || !window.db) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      
+      await loadStoreList();
+      
+      // セッションから店舗情報を復元
+      const savedStoreId = sessionStorage.getItem('handyStoreId');
+      const savedStoreName = sessionStorage.getItem('handyStoreName');
+      
+      if (savedStoreId && savedStoreName) {
+        currentStoreId = savedStoreId;
+        window.currentStoreId = savedStoreId;
+        currentStoreName = savedStoreName;
+        
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📍 HANDY セッションから店舗ID復元');
+        console.log('   currentStoreId:', currentStoreId);
+        console.log('   window.currentStoreId:', window.currentStoreId);
+        console.log('   currentStoreName:', currentStoreName);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        
+        showTablesScreen();
+      }
+    });
   </script>
 
   <script>
     // グローバル変数
+    let currentStoreId = null;
+    let currentStoreName = null;
     let currentUser = null;
     let currentPassword = null;
     let unsubscribeOrders = null;
     let unsubscribeInventory = null;
+    let storesData = {};
 
     // 店舗一覧を読み込み
-    async function loadStores() {
+    async function loadStoreList() {
       try {
-        const storesRef = window.collection(window.db, 'stores');
-        const snapshot = await window.getDocs(storesRef);
-        const select = document.getElementById('storeSelect');
+        const storesQuery = window.query(
+          window.collection(window.db, 'stores'),
+          window.where('isActive', '==', true)
+        );
+        const storesSnapshot = await window.getDocs(storesQuery);
+        const storeSelect = document.getElementById('storeSelect');
         
-        snapshot.forEach(doc => {
+        storeSelect.innerHTML = '<option value="">店舗を選択してください</option>';
+        storesData = {};
+        
+        storesSnapshot.forEach(doc => {
+          const storeData = doc.data();
+          const storeId = doc.id;
+          const storeName = storeData.storeName || doc.id;
+          const password = storeData.storePassword || '';
+          
+          storesData[storeId] = {
+            storeName: storeName,
+            password: String(password),
+            isActive: true
+          };
+          
           const option = document.createElement('option');
-          option.value = doc.id;
-          option.textContent = doc.data().name || doc.id;
-          select.appendChild(option);
+          option.value = storeId;
+          option.textContent = storeName;
+          storeSelect.appendChild(option);
         });
-      } catch (e) {
-        console.error('店舗読み込みエラー:', e);
+      } catch (error) {
+        console.error('❌ 店舗リスト読み込みエラー:', error);
+        alert('店舗リストの読み込みに失敗しました');
       }
     }
 
     // ログイン処理
     async function login() {
-      const storeId = document.getElementById('storeSelect').value;
-      const password = document.getElementById('passwordInput').value;
+      const storeSelect = document.getElementById('storeSelect');
+      const passwordInput = document.getElementById('passwordInput');
+      const storeId = storeSelect.value;
+      const inputPassword = passwordInput.value.trim();
       
-      if (!storeId || !password) {
-        alert('店舗とパスワードを入力してください');
+      if (!storeId) {
+        alert('店舗を選択してください');
+        return;
+      }
+      if (!inputPassword) {
+        alert('パスワードを入力してください');
         return;
       }
       
-      try {
-        const storeRef = window.doc(window.db, 'stores', storeId);
-        const storeDoc = await window.getDoc(storeRef);
-        
-        if (!storeDoc.exists()) {
-          alert('店舗が存在しません');
-          return;
-        }
-        
-        const storeData = storeDoc.data();
-        if (storeData.password !== password) {
-          alert('パスワードが正しくありません');
-          return;
-        }
-        
-        window.currentStoreId = storeId;
-        currentUser = storeData.name || storeId;
-        currentPassword = password;
-        
-        // 🆕 ログイン情報を保存
-        window.saveLoginInfo(storeId, password);
-        
-        document.getElementById('storeInfo').textContent = `店舗: ${currentUser}`;
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('tablesScreen').style.display = 'block';
-        
-        loadTables();
-        startOrdersListener();
-        updateInventoryPanel();
-        unsubscribeInventory = watchInventoryChanges();
-        
-      } catch (e) {
-        console.error('ログインエラー:', e);
-        alert('ログインに失敗しました');
+      const storeInfo = storesData[storeId];
+      if (inputPassword !== storeInfo.password) {
+        alert('パスワードが正しくありません');
+        return;
       }
+      
+      currentStoreId = storeId;
+      window.currentStoreId = storeId;
+      currentStoreName = storeInfo.storeName;
+      sessionStorage.setItem('handyStoreId', storeId);
+      sessionStorage.setItem('handyStoreName', currentStoreName);
+      
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📍 HANDY 店舗ID設定完了');
+      console.log('   currentStoreId:', currentStoreId);
+      console.log('   window.currentStoreId:', window.currentStoreId);
+      console.log('   currentStoreName:', currentStoreName);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // 🆕 ログイン情報を保存
+      window.saveLoginInfo(storeId, inputPassword);
+      
+      document.getElementById('storeInfo').textContent = `店舗: ${currentStoreName}`;
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('tablesScreen').style.display = 'block';
+      
+      loadTables();
+      startOrdersListener();
+      updateInventoryPanel();
+      unsubscribeInventory = watchInventoryChanges();
     }
 
     // ログアウト
@@ -618,10 +666,27 @@
       window.currentStoreId = null;
       currentUser = null;
       currentPassword = null;
+      currentStoreId = null;
+      currentStoreName = null;
+      
+      sessionStorage.removeItem('handyStoreId');
+      sessionStorage.removeItem('handyStoreName');
       
       document.getElementById('tablesScreen').style.display = 'none';
       document.getElementById('loginScreen').style.display = 'block';
       document.getElementById('passwordInput').value = '';
+    }
+
+    // テーブル画面を表示
+    async function showTablesScreen() {
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('tablesScreen').style.display = 'block';
+      document.getElementById('storeInfo').textContent = `店舗: ${currentStoreName}`;
+      
+      await loadTables();
+      startOrdersListener();
+      updateInventoryPanel();
+      unsubscribeInventory = watchInventoryChanges();
     }
 
     // テーブル一覧を読み込み
