@@ -4,6 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ハンディシステム</title>
+  
+  <!-- 外部ライブラリ -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  
   <!-- タップ音 -->
   <script>
     // AudioContextを使用したタップ音生成
@@ -830,12 +836,12 @@
         <!-- 🆕 機能サブメニュー -->
         <div id="functionsSubMenu" class="functions-submenu" style="display: none;">
           <button onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kintai.html', '_blank')">勤怠</button>
-          <button onclick="showSalesModalDirect()">売上</button>
-          <button onclick="openPOSModal('history')">履歴</button>
-          <button onclick="openPOSModal('expense')">支出</button>
+          <button onclick="showSalesModal()">売上</button>
+          <button onclick="showHistoryModal()">履歴</button>
+          <button onclick="showExpenseModal()">支出</button>
           <button onclick="openDrawerDirect()">ドロア開</button>
-          <button onclick="openPOSModal('monthly')">月次</button>
-          <button onclick="openPOSModal('printer')">プリンタ設定</button>
+          <button onclick="showMonthlyReportModal()">月次</button>
+          <button onclick="showPrinterSettings()">プリンタ設定</button>
         </div>
       </div>
       
@@ -2456,9 +2462,30 @@
     };
     
     // 🆕 売上モーダルを直接表示
-    window.showSalesModalDirect = function() {
+    
+    // 🆕 売上モーダルを閉じる
+    window.closeSalesModal = function() {
+      document.getElementById('salesModal').style.display = 'none';
+    };
+    
+    // POSモーダルを閉じる
+    window.closePOSModal = function() {
+      const modal = document.getElementById('posIframeModal');
+      const iframe = document.getElementById('posIframe');
+      
+      modal.classList.remove('active');
+      // iframeをリセット（メモリ解放）
+      setTimeout(() => {
+        iframe.src = 'about:blank';
+      }, 300);
+    };
+    
+    // ========== 💰 売上モーダル機能 ==========
+    
+    // 売上モーダルを表示
+    window.showSalesModal = function() {
       document.getElementById('salesModal').style.display = 'flex';
-      calculateSalesDirect();
+      calculateSales();
       
       // 機能メニューを閉じる
       const menu = document.getElementById('functionsSubMenu');
@@ -2467,8 +2494,13 @@
       }
     };
     
-    // 🆕 売上を計算
-    window.calculateSalesDirect = async function() {
+    // 売上モーダルを閉じる
+    window.closeSalesModal = function() {
+      document.getElementById('salesModal').style.display = 'none';
+    };
+    
+    // 売上を計算（拡張版 - 支払方法別、目標達成率、純利益）
+    window.calculateSales = async function() {
       const container = document.getElementById('salesContent');
       container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
       
@@ -2504,32 +2536,127 @@
           console.log('⚠️ 売上データが存在しません');
         }
         
+        // 人件費を取得
+        let todayLaborCost = 0;
+        try {
+          const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
+          attendanceSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.date === dateStr) {
+              if (data.totalWage && data.totalWage > 0) {
+                todayLaborCost += data.totalWage;
+              } else if (data.clockIn && data.clockOut) {
+                const clockIn = new Date(`${dateStr} ${data.clockIn}`);
+                const clockOut = new Date(`${dateStr} ${data.clockOut}`);
+                let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
+                
+                if (data.breakStart1 && data.breakEnd1) {
+                  const breakStart1 = new Date(`${dateStr} ${data.breakStart1}`);
+                  const breakEnd1 = new Date(`${dateStr} ${data.breakEnd1}`);
+                  workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
+                }
+                if (data.breakStart2 && data.breakEnd2) {
+                  const breakStart2 = new Date(`${dateStr} ${data.breakStart2}`);
+                  const breakEnd2 = new Date(`${dateStr} ${data.breakEnd2}`);
+                  workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
+                }
+                
+                const hourlyRate = data.hourlyRate || 1150;
+                todayLaborCost += workHours * hourlyRate;
+              }
+            }
+          });
+        } catch (e) {
+          console.error('人件費取得エラー:', e);
+        }
+        
+        // 支出を取得
+        let todayExpense = 0;
+        try {
+          const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
+          if (expenseDoc.exists()) {
+            todayExpense = expenseDoc.data().total || 0;
+          }
+        } catch (e) {
+          console.error('支出取得エラー:', e);
+        }
+        
+        // 純利益計算
+        const grossProfit = totalSales - todayLaborCost;
+        const netProfit = totalSales - todayLaborCost - todayExpense;
+        const netProfitRate = totalSales > 0 ? (netProfit / totalSales * 100).toFixed(1) : 0;
+        const laborCostRate = totalSales > 0 ? (todayLaborCost / totalSales * 100).toFixed(1) : 0;
+        const expenseRate = totalSales > 0 ? (todayExpense / totalSales * 100).toFixed(1) : 0;
+        
+        // 売上目標達成率
+        const dayOfWeek = today.getDay();
+        const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+        const targetSales = isWeekend ? 70000 : 50000;
+        const achievementRate = Math.round((totalSales / targetSales) * 100);
+        const rateColor = achievementRate >= 100 ? '#4CAF50' : achievementRate >= 80 ? '#FF9800' : '#f44336';
+        const netProfitColor = netProfit >= 0 ? '#4CAF50' : '#f44336';
+        
         container.innerHTML = `
           <div style="background: white; border-radius: 12px; padding: 20px;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 20px; border-radius: 10px; text-align: center;">
-                <div style="font-size: 16px; opacity: 0.9; margin-bottom: 8px;">総売上</div>
-                <div style="font-size: 36px; font-weight: bold;">¥${totalSales.toLocaleString()}</div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 15px; border-radius: 10px; text-align: center;">
+                <div style="font-size: 14px; opacity: 0.9;">総売上</div>
+                <div style="font-size: 28px; font-weight: bold;">¥${totalSales.toLocaleString()}</div>
               </div>
-              <div style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center;">
-                <div style="font-size: 16px; opacity: 0.9; margin-bottom: 8px;">客数</div>
-                <div style="font-size: 36px; font-weight: bold;">${orderCount}件</div>
+              <div style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; padding: 15px; border-radius: 10px; text-align: center;">
+                <div style="font-size: 14px; opacity: 0.9;">客数</div>
+                <div style="font-size: 28px; font-weight: bold;">${orderCount}件</div>
               </div>
             </div>
             
-            <div style="background: #f5f5f5; padding: 15px; border-radius: 10px;">
-              <h4 style="margin-bottom: 10px; color: #333;">支払方法別</h4>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                <span>現金:</span>
-                <span style="font-weight: bold;">¥${cashSales.toLocaleString()}</span>
+            <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white;">
+              <h4 style="margin: 0 0 10px 0;">売上目標</h4>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <span>目標金額（${isWeekend ? '土日祝' : '平日'}）</span>
+                <strong>¥${targetSales.toLocaleString()}</strong>
               </div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                <span>電子マネー:</span>
-                <span style="font-weight: bold;">¥${emoneSales.toLocaleString()}</span>
+              <div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.2); border-radius: 8px; margin-top: 10px;">
+                <div style="font-size: 32px; font-weight: bold; color: ${rateColor};">${achievementRate}%</div>
+                <div style="font-size: 14px; opacity: 0.9;">達成率</div>
               </div>
-              <div style="display: flex; justify-content: space-between;">
-                <span>クレジット:</span>
-                <span style="font-weight: bold;">¥${creditSales.toLocaleString()}</span>
+            </div>
+            
+            <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #FF6B6B 0%, #C92A2A 100%); border-radius: 10px; color: white;">
+              <h4 style="margin: 0 0 15px 0;">本日の純利益</h4>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
+                <span>売上</span>
+                <strong>¥${totalSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
+                <span>− 人件費${totalSales > 0 ? '（' + laborCostRate + '%）' : ''}</span>
+                <strong>¥${Math.round(todayLaborCost).toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 14px;">
+                <span>− 支出${totalSales > 0 ? '（' + expenseRate + '%）' : ''}</span>
+                <strong>¥${Math.round(todayExpense).toLocaleString()}</strong>
+              </div>
+              <div style="border-top: 2px solid rgba(255,255,255,0.3); padding-top: 12px;">
+                <div style="text-align: center; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                  <div style="font-size: 16px; opacity: 0.9; margin-bottom: 5px;">純利益</div>
+                  <div style="font-size: 32px; font-weight: bold; color: ${netProfitColor};">¥${Math.round(netProfit).toLocaleString()}</div>
+                  <div style="font-size: 14px; opacity: 0.9; margin-top: 5px;">純利益率: ${netProfitRate}%</div>
+                </div>
+              </div>
+            </div>
+            
+            <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
+              <h4 style="margin: 0 0 15px 0;">支払い方法別</h4>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+                <span>現金</span>
+                <strong>¥${cashSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
+                <span>カード</span>
+                <strong>¥${creditSales.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 0;">
+                <span>電子マネー</span>
+                <strong>¥${emoneSales.toLocaleString()}</strong>
               </div>
             </div>
           </div>
@@ -2541,92 +2668,536 @@
       }
     };
     
-    // 🆕 売上モーダルを閉じる
-    window.closeSalesModal = function() {
-      document.getElementById('salesModal').style.display = 'none';
-    };
+    // ========== 💰 精算機能 ==========
     
-    // POSモーダルを閉じる
-    window.closePOSModal = function() {
-      const modal = document.getElementById('posIframeModal');
-      const iframe = document.getElementById('posIframe');
+    window.showSettlementModal = async function() {
+      // 機能メニューを閉じる
+      const menu = document.getElementById('functionsSubMenu');
+      if (menu) {
+        menu.style.display = 'none';
+      }
       
-      modal.classList.remove('active');
-      // iframeをリセット（メモリ解放）
-      setTimeout(() => {
-        iframe.src = 'about:blank';
-      }, 300);
+      document.getElementById('settlementModal').style.display = 'flex';
+      
+      // 本日の日付をデフォルトに設定
+      const now = new Date();
+      let today = new Date(now);
+      if (now.getHours() < 3) {
+        today.setDate(today.getDate() - 1);
+      }
+      const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+      document.getElementById('settlementDate').value = dateStr;
+      
+      // 売上サマリーを表示
+      await loadSettlementSummary(dateStr);
     };
     
-    // ========== 💰 売上モーダル機能 ==========
-    
-    // 売上モーダルを表示
-    window.showSalesModal = function() {
-      document.getElementById('salesModal').style.display = 'flex';
-      calculateSales();
+    window.closeSettlementModal = function() {
+      document.getElementById('settlementModal').style.display = 'none';
     };
     
-    // 売上モーダルを閉じる
-    window.closeSalesModal = function() {
-      document.getElementById('salesModal').style.display = 'none';
-    };
-    
-    // 売上を計算（客数と売上のみ）
-    window.calculateSales = async function() {
-      const container = document.getElementById('salesContent');
-      container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
+    async function loadSettlementSummary(dateStr) {
+      const container = document.getElementById('settlementSummary');
+      container.innerHTML = '<div style="text-align: center;">読み込み中...</div>';
       
       try {
-        // 本日の日付を取得（3時基準）
-        const now = new Date();
-        let today = new Date(now);
-        if (now.getHours() < 3) {
-          today.setDate(today.getDate() - 1);
-        }
-        const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-        
-        console.log('📊 売上取得日付:', dateStr);
-        
-        let salesRef;
-        if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
-          salesRef = window.doc(window.db, 'dailySales', dateStr);
-        } else {
-          salesRef = window.doc(window.db, 'stores', window.currentStoreId, 'dailySales', dateStr);
-        }
-        
+        const salesRef = window.getStoreDoc('dailySales', dateStr);
         const salesDoc = await window.getDoc(salesRef);
-        
-        let totalSales = 0;
-        let orderCount = 0;
         
         if (salesDoc.exists()) {
           const data = salesDoc.data();
-          console.log('💰 売上データ:', data);
-          totalSales = data.totalSales || 0;
-          orderCount = data.customerCount || 0;
-        } else {
-          console.log('⚠️ 売上データが存在しません');
-        }
-        
-        container.innerHTML = `
-          <div style="background: white; border-radius: 12px; padding: 20px;">
-            <div style="display: grid; grid-template-columns: 1fr; gap: 15px;">
-              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; padding: 20px; border-radius: 10px; text-align: center;">
-                <div style="font-size: 16px; opacity: 0.9; margin-bottom: 8px;">総売上</div>
-                <div style="font-size: 36px; font-weight: bold;">¥${totalSales.toLocaleString()}</div>
-              </div>
-              <div style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center;">
-                <div style="font-size: 16px; opacity: 0.9; margin-bottom: 8px;">客数</div>
-                <div style="font-size: 36px; font-weight: bold;">${orderCount}件</div>
+          const totalSales = data.totalSales || 0;
+          const cashSales = data.cashSales || 0;
+          const emoneSales = data.emoneSales || 0;
+          const creditSales = data.creditSales || 0;
+          const customerCount = data.customerCount || 0;
+          
+          container.innerHTML = `
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+              <h4 style="margin: 0 0 10px 0;">精算サマリー</h4>
+              <div style="display: grid; gap: 8px;">
+                <div style="display: flex; justify-content: space-between;">
+                  <span>総売上:</span>
+                  <strong>¥${totalSales.toLocaleString()}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span>客数:</span>
+                  <strong>${customerCount}件</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span>現金:</span>
+                  <strong>¥${cashSales.toLocaleString()}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span>カード:</span>
+                  <strong>¥${creditSales.toLocaleString()}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span>電子マネー:</span>
+                  <strong>¥${emoneSales.toLocaleString()}</strong>
+                </div>
               </div>
             </div>
+          `;
+        } else {
+          container.innerHTML = '<div style="text-align: center; color: #999;">この日付の売上データがありません</div>';
+        }
+      } catch (e) {
+        console.error('精算サマリー読み込みエラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red;">エラーが発生しました</div>';
+      }
+    }
+    
+    window.confirmSettlement = async function() {
+      const dateStr = document.getElementById('settlementDate').value;
+      if (!dateStr) {
+        alert('日付を選択してください');
+        return;
+      }
+      
+      const confirmed = confirm(`${dateStr}の精算を実行しますか？\n\n精算ジャーナルをダウンロードします。`);
+      if (!confirmed) return;
+      
+      try {
+        alert('精算ジャーナルの生成機能は準備中です。\n代わりに日計表出力をご利用ください。');
+        closeSettlementModal();
+      } catch (e) {
+        console.error('精算エラー:', e);
+        alert('精算に失敗しました: ' + e.message);
+      }
+    };
+    
+    window.generateDailyReport = async function() {
+      try {
+        alert('日計表出力機能は準備中です。\n\n現在、月次レポート機能で期間を指定して出力できます。');
+      } catch (e) {
+        console.error('日計表出力エラー:', e);
+        alert('日計表出力に失敗しました');
+      }
+    };
+    
+    // ========== 📋 履歴機能 ==========
+    
+    let historyOrders = [];
+    
+    window.showHistoryModal = async function() {
+      // 機能メニューを閉じる
+      const menu = document.getElementById('functionsSubMenu');
+      if (menu) {
+        menu.style.display = 'none';
+      }
+      
+      document.getElementById('historyModal').style.display = 'flex';
+      await loadHistory();
+    };
+    
+    window.closeHistoryModal = function() {
+      document.getElementById('historyModal').style.display = 'none';
+    };
+    
+    async function loadHistory() {
+      try {
+        const q = window.query(
+          window.getStoreCollection('orders'),
+          window.orderBy('timestamp', 'desc'),
+          window.limit(100)
+        );
+        const ordersSnapshot = await window.getDocs(q);
+        historyOrders = [];
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          historyOrders.push({
+            id: doc.id,
+            orderNumber: data.orderNumber || 0,
+            timestamp: data.timestamp,
+            tableNumber: data.tableNumber || '',
+            items: data.items || [],
+            totalAmount: data.totalAmount || 0,
+            paymentMethod: data.paymentMethod || 'cash',
+            paidAt: data.paidAt || null,
+            completedAt: data.completedAt || null
+          });
+        });
+        
+        filterHistory();
+      } catch (e) {
+        console.error('履歴読み込みエラー:', e);
+        alert('履歴の読み込みに失敗しました');
+      }
+    }
+    
+    window.filterHistory = function() {
+      const dateFilter = document.getElementById('historyDateFilter').value;
+      const statusFilter = document.getElementById('historyStatusFilter').value;
+      const now = new Date();
+      
+      let filtered = historyOrders.filter(order => {
+        const orderDate = order.timestamp.toDate();
+        
+        let dateMatch = true;
+        if (dateFilter === 'today') {
+          const todayStart = new Date(now);
+          todayStart.setHours(3, 0, 0, 0);
+          if (now.getHours() < 3) {
+            todayStart.setDate(todayStart.getDate() - 1);
+          }
+          const todayEnd = new Date(todayStart);
+          todayEnd.setDate(todayEnd.getDate() + 1);
+          dateMatch = orderDate >= todayStart && orderDate < todayEnd;
+        } else if (dateFilter === 'yesterday') {
+          const yesterdayStart = new Date(now);
+          yesterdayStart.setHours(3, 0, 0, 0);
+          if (now.getHours() < 3) {
+            yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          }
+          yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          const yesterdayEnd = new Date(yesterdayStart);
+          yesterdayEnd.setDate(yesterdayEnd.getDate() + 1);
+          dateMatch = orderDate >= yesterdayStart && orderDate < yesterdayEnd;
+        } else if (dateFilter === 'week') {
+          const weekAgo = new Date(now);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          dateMatch = orderDate >= weekAgo;
+        } else if (dateFilter === 'month') {
+          const monthStart = new Date(now);
+          monthStart.setDate(1);
+          monthStart.setHours(0, 0, 0, 0);
+          dateMatch = orderDate >= monthStart;
+        }
+        
+        let statusMatch = true;
+        if (statusFilter === 'paid') {
+          statusMatch = order.paidAt !== null;
+        } else if (statusFilter === 'completed') {
+          statusMatch = order.completedAt !== null;
+        }
+        
+        return dateMatch && statusMatch;
+      });
+      
+      displayHistory(filtered);
+    };
+    
+    function displayHistory(orders) {
+      const container = document.getElementById('historyList');
+      
+      if (orders.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">該当する履歴がありません</div>';
+        return;
+      }
+      
+      container.innerHTML = '';
+      
+      orders.forEach(order => {
+        const card = document.createElement('div');
+        card.style.cssText = `
+          background: white;
+          border-radius: 12px;
+          padding: 15px;
+          margin-bottom: 15px;
+          border: 2px solid #ddd;
+        `;
+        
+        const orderDate = order.timestamp.toDate();
+        const dateStr = orderDate.toLocaleString('ja-JP');
+        
+        const paymentMethodNames = {
+          'cash': '現金',
+          'emoney': '電子マネー',
+          'credit': 'クレジットカード'
+        };
+        const paymentMethodLabel = paymentMethodNames[order.paymentMethod] || '現金';
+        
+        let itemsHtml = '';
+        order.items.forEach(item => {
+          itemsHtml += `<div style="padding: 5px 0; border-bottom: 1px solid #eee;">
+            ${item.name} ×${item.quantity} - ¥${((item.price + (item.toppingPrice || 0)) * item.quantity).toLocaleString()}
+          </div>`;
+        });
+        
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+            <div>
+              <strong style="font-size: 18px; color: #667eea;">#${order.orderNumber}</strong>
+              <span style="margin-left: 10px; color: #666;">${order.tableNumber}</span>
+            </div>
+            <div>
+              ${order.paidAt ? '<span style="background: #2196F3; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px;">会計済</span>' : ''}
+              ${order.completedAt ? '<span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-left: 5px;">完了</span>' : ''}
+            </div>
+          </div>
+          <div style="font-size: 12px; color: #999; margin-bottom: 10px;">${dateStr}</div>
+          <div style="margin-bottom: 10px;">${itemsHtml}</div>
+          <div style="display: flex; justify-content: space-between; padding-top: 10px; border-top: 2px solid #eee;">
+            <span>支払方法: ${paymentMethodLabel}</span>
+            <strong style="font-size: 18px; color: #667eea;">¥${order.totalAmount.toLocaleString()}</strong>
           </div>
         `;
         
-      } catch (e) {
-        console.error('売上計算エラー:', e);
-        container.innerHTML = '<div style="text-align: center; color: red; padding: 20px;">エラーが発生しました</div>';
+        container.appendChild(card);
+      });
+    }
+    
+    window.refreshHistory = async function() {
+      await loadHistory();
+    };
+    
+    // ========== 💸 支出機能 ==========
+    
+    window.showExpenseModal = async function() {
+      // 機能メニューを閉じる
+      const menu = document.getElementById('functionsSubMenu');
+      if (menu) {
+        menu.style.display = 'none';
       }
+      
+      document.getElementById('expenseModal').style.display = 'flex';
+      
+      // 本日の日付をデフォルトに設定
+      const now = new Date();
+      let today = new Date(now);
+      if (now.getHours() < 3) {
+        today.setDate(today.getDate() - 1);
+      }
+      const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+      document.getElementById('expenseDateInput').value = dateStr;
+      
+      await loadExpensesByDate();
+    };
+    
+    window.closeExpenseModal = function() {
+      document.getElementById('expenseModal').style.display = 'none';
+    };
+    
+    window.loadExpensesByDate = async function() {
+      const dateStr = document.getElementById('expenseDateInput').value;
+      if (!dateStr) return;
+      
+      try {
+        const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
+        const tbody = document.getElementById('expenseTableBody');
+        tbody.innerHTML = '';
+        
+        if (expenseDoc.exists()) {
+          const data = expenseDoc.data();
+          const items = data.items || [];
+          
+          items.forEach(item => {
+            addExpenseRowWithData(item);
+          });
+        } else {
+          addExpenseRow();
+        }
+        
+        calculateExpenseTotal();
+      } catch (e) {
+        console.error('支出読み込みエラー:', e);
+        addExpenseRow();
+      }
+    };
+    
+    window.addExpenseRow = function() {
+      addExpenseRowWithData({});
+    };
+    
+    function addExpenseRowWithData(data) {
+      const tbody = document.getElementById('expenseTableBody');
+      const row = tbody.insertRow();
+      row.innerHTML = `
+        <td style="padding: 8px; border: 1px solid #ddd;">
+          <input type="text" value="${data.storeName || ''}" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;" placeholder="店名">
+        </td>
+        <td style="padding: 8px; border: 1px solid #ddd;">
+          <select style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="原材料費" ${data.category === '原材料費' ? 'selected' : ''}>原材料費</option>
+            <option value="光熱費" ${data.category === '光熱費' ? 'selected' : ''}>光熱費</option>
+            <option value="消耗品費" ${data.category === '消耗品費' ? 'selected' : ''}>消耗品費</option>
+            <option value="その他" ${data.category === 'その他' ? 'selected' : ''}>その他</option>
+          </select>
+        </td>
+        <td style="padding: 8px; border: 1px solid #ddd;">
+          <input type="text" value="${data.detail || ''}" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;" placeholder="詳細">
+        </td>
+        <td style="padding: 8px; border: 1px solid #ddd;">
+          <input type="number" value="${data.amount || ''}" style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;" placeholder="金額" onchange="calculateExpenseTotal()">
+        </td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">
+          <button onclick="this.closest('tr').remove(); calculateExpenseTotal();" style="background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">削除</button>
+        </td>
+      `;
+    }
+    
+    function calculateExpenseTotal() {
+      const tbody = document.getElementById('expenseTableBody');
+      const rows = tbody.querySelectorAll('tr');
+      let total = 0;
+      
+      rows.forEach(row => {
+        const amountInput = row.querySelector('input[type="number"]');
+        const amount = parseInt(amountInput.value) || 0;
+        total += amount;
+      });
+      
+      document.getElementById('expenseTotal').textContent = total.toLocaleString();
+    }
+    
+    window.saveExpenses = async function() {
+      const dateStr = document.getElementById('expenseDateInput').value;
+      if (!dateStr) {
+        alert('日付を選択してください');
+        return;
+      }
+      
+      const tbody = document.getElementById('expenseTableBody');
+      const rows = tbody.querySelectorAll('tr');
+      const items = [];
+      let total = 0;
+      
+      rows.forEach(row => {
+        const inputs = row.querySelectorAll('input, select');
+        const storeName = inputs[0].value;
+        const category = inputs[1].value;
+        const detail = inputs[2].value;
+        const amount = parseInt(inputs[3].value) || 0;
+        
+        if (storeName || category || detail || amount) {
+          items.push({ storeName, category, detail, amount });
+          total += amount;
+        }
+      });
+      
+      try {
+        await window.setDoc(window.getStoreDoc('expenses', dateStr), {
+          date: dateStr,
+          items: items,
+          total: total,
+          updatedAt: window.Timestamp.now()
+        });
+        
+        alert('支出を保存しました');
+      } catch (e) {
+        console.error('支出保存エラー:', e);
+        alert('支出の保存に失敗しました');
+      }
+    };
+    
+    // ========== 📊 月次レポート機能 ==========
+    
+    window.showMonthlyReportModal = function() {
+      // 機能メニューを閉じる
+      const menu = document.getElementById('functionsSubMenu');
+      if (menu) {
+        menu.style.display = 'none';
+      }
+      
+      document.getElementById('monthlyReportModal').style.display = 'flex';
+      
+      // デフォルトで今月の範囲を設定
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      
+      document.getElementById('reportStartDate').value = `${firstDay.getFullYear()}-${String(firstDay.getMonth()+1).padStart(2,'0')}-${String(firstDay.getDate()).padStart(2,'0')}`;
+      document.getElementById('reportEndDate').value = `${lastDay.getFullYear()}-${String(lastDay.getMonth()+1).padStart(2,'0')}-${String(lastDay.getDate()).padStart(2,'0')}`;
+    };
+    
+    window.closeMonthlyReportModal = function() {
+      document.getElementById('monthlyReportModal').style.display = 'none';
+    };
+    
+    window.generateMonthlyReport = async function() {
+      const startDate = document.getElementById('reportStartDate').value;
+      const endDate = document.getElementById('reportEndDate').value;
+      
+      if (!startDate || !endDate) {
+        alert('開始日と終了日を選択してください');
+        return;
+      }
+      
+      const container = document.getElementById('monthlyReportContent');
+      container.innerHTML = '<div style="text-align: center; padding: 40px;">集計中...</div>';
+      
+      try {
+        const salesSnapshot = await window.getDocs(window.getStoreCollection('dailySales'));
+        const salesByDate = {};
+        
+        salesSnapshot.forEach(doc => {
+          const data = doc.data();
+          const date = data.date;
+          if (date && date >= startDate && date <= endDate) {
+            salesByDate[date] = data;
+          }
+        });
+        
+        let totalSales = 0;
+        let totalCustomers = 0;
+        let html = `
+          <div style="background: white; padding: 20px; border-radius: 12px;">
+            <h4 style="margin: 0 0 20px 0;">期間: ${startDate} ～ ${endDate}</h4>
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                  <th style="padding: 12px; border: 1px solid #ddd;">日付</th>
+                  <th style="padding: 12px; border: 1px solid #ddd;">売上</th>
+                  <th style="padding: 12px; border: 1px solid #ddd;">客数</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+        
+        const dates = Object.keys(salesByDate).sort();
+        dates.forEach(date => {
+          const data = salesByDate[date];
+          const sales = data.totalSales || 0;
+          const customers = data.customerCount || 0;
+          
+          totalSales += sales;
+          totalCustomers += customers;
+          
+          html += `
+            <tr>
+              <td style="padding: 10px; border: 1px solid #ddd;">${date}</td>
+              <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">¥${sales.toLocaleString()}</td>
+              <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">${customers}件</td>
+            </tr>
+          `;
+        });
+        
+        html += `
+              </tbody>
+              <tfoot>
+                <tr style="background: #f5f5f5; font-weight: bold;">
+                  <td style="padding: 12px; border: 1px solid #ddd;">合計</td>
+                  <td style="padding: 12px; border: 1px solid #ddd; text-align: right;">¥${totalSales.toLocaleString()}</td>
+                  <td style="padding: 12px; border: 1px solid #ddd; text-align: right;">${totalCustomers}件</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        `;
+        
+        container.innerHTML = html;
+      } catch (e) {
+        console.error('月次レポート生成エラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red; padding: 40px;">エラーが発生しました</div>';
+      }
+    };
+    
+    // ========== 🖨 プリンタ設定機能 ==========
+    
+    window.showPrinterSettings = function() {
+      // 機能メニューを閉じる
+      const menu = document.getElementById('functionsSubMenu');
+      if (menu) {
+        menu.style.display = 'none';
+      }
+      
+      document.getElementById('printerSettingsModal').style.display = 'flex';
+    };
+    
+    window.closePrinterSettingsModal = function() {
+      document.getElementById('printerSettingsModal').style.display = 'none';
     };
   
   </script>
@@ -2665,8 +3236,163 @@
       <div id="salesContent" style="padding: 20px;">
         <div style="text-align: center; padding: 20px;">読み込み中...</div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button class="btn" style="background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white;" onclick="showSettlementModal()">🔄 精算</button>
         <button class="btn btn-secondary" onclick="closeSalesModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 精算モーダル -->
+  <div id="settlementModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3 style="color: #ff6b6b;">🔄 精算確認</h3>
+        <button class="modal-close" onclick="closeSettlementModal()">×</button>
+      </div>
+      <div style="padding: 20px;">
+        <div style="margin: 20px 0; padding: 20px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 8px;">
+          <p style="margin: 0 0 10px 0; font-weight: bold; color: #856404;">注意事項:</p>
+          <ul style="margin: 0; padding-left: 20px; color: #856404;">
+            <li>本日の売上データを確定します</li>
+            <li>精算ジャーナル（PNG画像）をダウンロードします</li>
+            <li>売上は午前3時に自動的にリセットされます</li>
+          </ul>
+        </div>
+        <div style="margin: 20px 0;">
+          <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">精算日付を選択</label>
+          <input type="date" id="settlementDate" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
+          <p style="font-size: 12px; color: #666; margin-top: 5px;">※ 昨日の精算を上げ忘れた場合など、過去の日付を選択できます</p>
+        </div>
+        <div id="settlementSummary" style="margin: 20px 0;"></div>
+      </div>
+      <div class="modal-footer" style="display: flex; flex-direction: column; gap: 10px;">
+        <button class="btn" style="width: 100%; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white;" onclick="confirmSettlement()">精算を実行</button>
+        <button class="btn" style="width: 100%; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="generateDailyReport()">日計表出力</button>
+        <button class="btn btn-secondary" style="width: 100%;" onclick="closeSettlementModal()">キャンセル</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 履歴モーダル -->
+  <div id="historyModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3>注文履歴</h3>
+        <button class="modal-close" onclick="closeHistoryModal()">×</button>
+      </div>
+      <div style="padding: 20px;">
+        <div style="margin: 20px 0; display: flex; gap: 10px; flex-wrap: wrap;">
+          <select id="historyDateFilter" onchange="filterHistory()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+            <option value="today">今日</option>
+            <option value="yesterday">昨日</option>
+            <option value="week">今週</option>
+            <option value="month">今月</option>
+            <option value="all">全期間</option>
+          </select>
+          <select id="historyStatusFilter" onchange="filterHistory()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+            <option value="all">すべて</option>
+            <option value="paid">会計済み</option>
+            <option value="completed">完了</option>
+          </select>
+          <button onclick="refreshHistory()" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">🔄 更新</button>
+        </div>
+        <div id="historyList" style="max-height: 60vh; overflow-y: auto;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeHistoryModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 支出モーダル -->
+  <div id="expenseModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3 style="color: #f093fb;">支出入力</h3>
+        <button class="modal-close" onclick="closeExpenseModal()">×</button>
+      </div>
+      <div style="padding: 20px;">
+        <div style="margin: 20px 0; padding: 15px; background: #f0f0f0; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
+          <label style="font-weight: bold; font-size: 16px;">日付:</label>
+          <input type="date" id="expenseDateInput" style="padding: 10px; border-radius: 8px; border: 2px solid #667eea; font-size: 16px; flex: 1;" onchange="loadExpensesByDate()" />
+        </div>
+        <div style="margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background: #f5f5f5;">
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">店名</th>
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">勘定科目</th>
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">詳細</th>
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">金額</th>
+                <th style="padding: 10px; border: 1px solid #ddd; width: 60px;"></th>
+              </tr>
+            </thead>
+            <tbody id="expenseTableBody"></tbody>
+          </table>
+          <button class="btn" style="margin-top: 10px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="addExpenseRow()">＋ 行を追加</button>
+          <div style="margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; text-align: right;">
+            <span style="font-size: 18px; font-weight: bold;">合計: ¥</span>
+            <span id="expenseTotal" style="font-size: 24px; font-weight: bold; color: #f093fb;">0</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end;">
+        <button class="btn" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;" onclick="saveExpenses()">保存</button>
+        <button class="btn btn-secondary" onclick="closeExpenseModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 月次レポートモーダル -->
+  <div id="monthlyReportModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3>月次レポート</h3>
+        <button class="modal-close" onclick="closeMonthlyReportModal()">×</button>
+      </div>
+      <div style="padding: 20px;">
+        <div style="margin: 20px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 200px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: bold;">開始日</label>
+            <input type="date" id="reportStartDate" style="width: 100%; padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          </div>
+          <div style="flex: 1; min-width: 200px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: bold;">終了日</label>
+            <input type="date" id="reportEndDate" style="width: 100%; padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
+          </div>
+          <button onclick="generateMonthlyReport()" style="padding: 12px 24px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">レポート生成</button>
+        </div>
+        <div id="monthlyReportContent"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeMonthlyReportModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- プリンタ設定モーダル -->
+  <div id="printerSettingsModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3>プリンタ設定</h3>
+        <button class="modal-close" onclick="closePrinterSettingsModal()">×</button>
+      </div>
+      <div style="padding: 20px;">
+        <div style="background: #f0f7ff; border-left: 4px solid #667eea; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <p style="margin: 0; color: #555; font-size: 14px; line-height: 1.8;">
+            ここでプリンタの設定を行います。<br>
+            Bluetoothプリンタの接続やネットワークプリンタの設定が可能です。
+          </p>
+        </div>
+        <div id="printerSettingsContent" style="min-height: 200px;">
+          <div style="text-align: center; padding: 40px; color: #999;">
+            プリンタ設定機能は準備中です
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closePrinterSettingsModal()">閉じる</button>
       </div>
     </div>
   </div>
