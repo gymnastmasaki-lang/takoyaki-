@@ -2880,6 +2880,120 @@
     
     // ==========  精算機能 ==========
     
+    // 🆕 自動バックアップ関数
+    window.createAutoBackup = async function() {
+      try {
+        console.log('🔄 自動バックアップ開始（7日ローテーション）');
+        
+        const { getDocs, setDoc, doc, Timestamp } = window;
+        const today = new Date();
+        const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+        
+        // バックアップデータを収集
+        const backupData = {
+          timestamp: Timestamp.now(),
+          date: dateStr,
+          type: 'auto',
+          data: {}
+        };
+        
+        // 1. 商品データ（menus）
+        const menusSnapshot = await getDocs(window.getStoreCollection('menus'));
+        backupData.data.menus = [];
+        menusSnapshot.forEach(docSnap => {
+          backupData.data.menus.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        console.log(`📦 商品: ${backupData.data.menus.length}件`);
+        
+        // 2. 従業員データ（employees）
+        const employeesSnapshot = await getDocs(window.getStoreCollection('employees'));
+        backupData.data.employees = [];
+        employeesSnapshot.forEach(docSnap => {
+          backupData.data.employees.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        console.log(`👥 従業員: ${backupData.data.employees.length}名`);
+        
+        // 3. 注文履歴（orders）- 最近1000件のみ
+        const ordersCollection = window.getStoreCollection('orders');
+        const ordersSnapshot = await getDocs(ordersCollection);
+        const ordersList = [];
+        ordersSnapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          ordersList.push({
+            id: docSnap.id,
+            ...data,
+            _timestamp: data.createdAt || data.timestamp || new Date(0)
+          });
+        });
+        
+        // 日付でソート（新しい順）
+        ordersList.sort((a, b) => {
+          const timeA = a._timestamp?.toDate ? a._timestamp.toDate() : new Date(a._timestamp);
+          const timeB = b._timestamp?.toDate ? b._timestamp.toDate() : new Date(b._timestamp);
+          return timeB - timeA;
+        });
+        
+        // 最新1000件のみ保存
+        backupData.data.orders = ordersList.slice(0, 1000).map(item => {
+          const { _timestamp, ...rest } = item;
+          return rest;
+        });
+        console.log(`📝 注文履歴: ${backupData.data.orders.length}件`);
+        
+        // 4. 勤怠データ（attendance）- 最近1000件のみ
+        const attendanceCollection = window.getStoreCollection('attendance');
+        const attendanceSnapshot = await getDocs(attendanceCollection);
+        const attendanceList = [];
+        attendanceSnapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          attendanceList.push({
+            id: docSnap.id,
+            ...data,
+            _timestamp: data.createdAt || data.timestamp || new Date(0)
+          });
+        });
+        
+        // 日付でソート（新しい順）
+        attendanceList.sort((a, b) => {
+          const timeA = a._timestamp?.toDate ? a._timestamp.toDate() : new Date(a._timestamp);
+          const timeB = b._timestamp?.toDate ? b._timestamp.toDate() : new Date(b._timestamp);
+          return timeB - timeA;
+        });
+        
+        // 最新1000件のみ保存
+        backupData.data.attendance = attendanceList.slice(0, 1000).map(item => {
+          const { _timestamp, ...rest } = item;
+          return rest;
+        });
+        console.log(`⏰ 勤怠: ${backupData.data.attendance.length}件`);
+        
+        // バックアップを保存（7日ローテーション）
+        const dayOfWeek = today.getDay(); // 0=日曜, 1=月曜, ..., 6=土曜
+        const backupId = `auto_day${dayOfWeek}`; // day0〜day6で7日ローテーション
+        
+        let backupRef;
+        if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+          backupRef = doc(window.db, 'stores', window.currentStoreId, 'backups', backupId);
+        } else {
+          backupRef = doc(window.db, 'backups', backupId);
+        }
+        
+        await setDoc(backupRef, backupData);
+        
+        console.log(`✅ 自動バックアップ完了: ${backupId} (${dateStr})`);
+        return true;
+      } catch (error) {
+        console.error('❌ 自動バックアップエラー:', error);
+        return false;
+      }
+    };
+    
     window.showSettlementModal = async function() {
       // 機能メニューを閉じる
       const menu = document.getElementById('functionsSubMenu');
@@ -2889,10 +3003,27 @@
       
       document.getElementById('settlementModal').style.display = 'flex';
       
+      // 🆕 日計表の月選択肢を生成（過去12ヶ月分）
+      const monthSelect = document.getElementById('dailyReportMonth');
+      if (monthSelect) {
+        monthSelect.innerHTML = '';
+        const now = new Date();
+        for (let i = 0; i < 12; i++) {
+          const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const year = targetDate.getFullYear();
+          const month = targetDate.getMonth() + 1;
+          const option = document.createElement('option');
+          option.value = `${year}-${String(month).padStart(2, '0')}`;
+          option.textContent = `${year}年${month}月`;
+          if (i === 0) option.selected = true;
+          monthSelect.appendChild(option);
+        }
+      }
+      
       // 本日の日付をデフォルトに設定
-      const now = new Date();
-      let today = new Date(now);
-      if (now.getHours() < 3) {
+      const now2 = new Date();
+      let today = new Date(now2);
+      if (now2.getHours() < 3) {
         today.setDate(today.getDate() - 1);
       }
       const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
@@ -5952,7 +6083,7 @@ ${redSlipCount > 0 ? `
 消費税の合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal + tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
 税抜合計: ¥${taxExcludedTotal.toLocaleString()}
 税込合計: ¥${taxIncludedTotal.toLocaleString()}
-${totalRedSlipCount > 0 ? `
+
 -------------------------------------
 赤伝票の税金内訳
 -------------------------------------
@@ -5990,7 +6121,6 @@ ${totalRedSlipCount > 0 ? `
 消費税の合計: ¥${(((totalTax8 - totalRedSlipTax8) - Math.floor((totalTax8 - totalRedSlipTax8) / 1.08)) + ((totalTax10 - totalRedSlipTax10) - Math.floor((totalTax10 - totalRedSlipTax10) / 1.10))).toLocaleString()}
 税抜合計: ¥${(Math.floor((totalTax8 - totalRedSlipTax8) / 1.08) + Math.floor((totalTax10 - totalRedSlipTax10) / 1.10)).toLocaleString()}
 税込合計: ¥${((totalTax8 - totalRedSlipTax8) + (totalTax10 - totalRedSlipTax10)).toLocaleString()}
-` : ''}
 支出: ¥${totalExpense.toLocaleString()}
 合計売上: ¥${(totalRedSlipCount > 0 ? ((totalTax8 - totalRedSlipTax8) + (totalTax10 - totalRedSlipTax10)) - totalExpense : taxIncludedTotal - totalExpense).toLocaleString()}
 
