@@ -2775,48 +2775,293 @@
     window.confirmSettlement = async function() {
       const dateStr = document.getElementById('settlementDate').value;
       if (!dateStr) {
-        await showCustomAlert({ icon: '', title: 'エラー', message: '日付を選択してください', btnClass: 'modal-btn-danger' });
+        alert('日付を選択してください');
         return;
       }
       
-      const confirmed = confirm(`${dateStr}の精算を実行しますか？\n\n精算ジャーナルをダウンロードします。`);
+      const confirmed = confirm(`${dateStr}の精算を実行しますか？\n\n精算ジャーナル（PNG画像）をダウンロードします。`);
       if (!confirmed) return;
       
       try {
-        await showCustomAlert({ 
-          icon: '', 
-          title: '準備中', 
-          message: '精算ジャーナルの生成機能は準備中です。\n代わりに日計表出力をご利用ください。', 
-          btnClass: 'modal-btn-primary' 
+        console.log('🔍 精算ジャーナル生成開始');
+        
+        // dailySalesデータを取得
+        const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+        const dailySalesDoc = await window.getDoc(dailySalesRef);
+        
+        if (!dailySalesDoc.exists()) {
+          alert('この日付の売上データが見つかりません');
+          return;
+        }
+        
+        const settlementData = dailySalesDoc.data();
+        
+        // 現在時刻
+        const now = new Date();
+        const outputTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+        
+        // データ取得
+        const customerCount = settlementData.customerCount || 0;
+        const totalItems = settlementData.totalItems || 0;
+        const totalSales = settlementData.totalSales || 0;
+        const averageSpend = customerCount > 0 ? Math.round(totalSales / customerCount) : 0;
+        
+        const cashSales = settlementData.cashSales || 0;
+        const emoneSales = settlementData.emoneSales || 0;
+        const creditSales = settlementData.creditSales || 0;
+        
+        const tax8Total = settlementData.tax8Total || 0;
+        const tax10Total = settlementData.tax10Total || 0;
+        
+        const redSlipCount = settlementData.redSlipCount || 0;
+        const redSlipAmount = settlementData.redSlipAmount || 0;
+        
+        // 税抜価格を計算
+        const tax8Excluded = Math.floor(tax8Total / 1.08);
+        const tax10Excluded = Math.floor(tax10Total / 1.10);
+        const tax8Amount = tax8Total - tax8Excluded;
+        const tax10Amount = tax10Total - tax10Excluded;
+        const totalTax = tax8Amount + tax10Amount;
+        
+        // 支出を取得
+        let expenseTotal = 0;
+        try {
+          const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
+          if (expenseDoc.exists()) {
+            expenseTotal = expenseDoc.data().total || 0;
+          }
+        } catch (e) {
+          console.error('支出取得エラー:', e);
+        }
+        
+        // 精算ジャーナルのテキスト生成
+        const journalText = `
+=====================================
+精算ジャーナル
+=====================================
+出力日時: ${outputTime}
+営業日: ${dateStr}
+
+-------------------------------------
+基本情報
+-------------------------------------
+客数: ${customerCount}人
+商品数: ${totalItems}個
+平均客単価: ¥${averageSpend.toLocaleString()}
+合計売上: ¥${totalSales.toLocaleString()}
+
+-------------------------------------
+売上内訳
+-------------------------------------
+現金: ¥${cashSales.toLocaleString()}
+電子マネー: ¥${emoneSales.toLocaleString()}
+クレジットカード: ¥${creditSales.toLocaleString()}
+
+-------------------------------------
+税金内訳
+-------------------------------------
+8%の商品合計（税抜）: ¥${tax8Excluded.toLocaleString()}
+8%の商品合計（税込）: ¥${tax8Total.toLocaleString()}
+8%の消費税: ¥${tax8Amount.toLocaleString()}
+
+10%の商品合計（税抜）: ¥${tax10Excluded.toLocaleString()}
+10%の商品合計（税込）: ¥${tax10Total.toLocaleString()}
+10%の消費税: ¥${tax10Amount.toLocaleString()}
+
+消費税の合計: ¥${totalTax.toLocaleString()}
+${redSlipCount > 0 ? `
+-------------------------------------
+赤伝票情報
+-------------------------------------
+赤伝票件数: ${redSlipCount}件
+赤伝票金額: ¥${redSlipAmount.toLocaleString()}
+` : ''}
+-------------------------------------
+支出・純売上
+-------------------------------------
+支出: ¥${expenseTotal.toLocaleString()}
+純売上: ¥${(totalSales - expenseTotal).toLocaleString()}
+
+=====================================
+`;
+        
+        // HTML要素を作成
+        const journalDiv = document.createElement('div');
+        journalDiv.style.cssText = `
+          font-family: 'Courier New', monospace;
+          font-size: 14px;
+          line-height: 1.6;
+          padding: 30px;
+          background: white;
+          color: black;
+          white-space: pre-wrap;
+          width: 800px;
+          position: absolute;
+          left: -9999px;
+        `;
+        
+        journalDiv.innerHTML = journalText
+          .replace(/^(支出: .+)$/gm, '<span style="color: #d32f2f; font-weight: bold;">$1</span>')
+          .replace(/^(純売上: .+)$/gm, '<span style="color: #d32f2f; font-weight: bold;">$1</span>');
+        
+        document.body.appendChild(journalDiv);
+        
+        // html2canvasで画像化
+        const canvas = await html2canvas(journalDiv, {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          logging: false
         });
+        
+        // PNG画像としてダウンロード
+        canvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `精算ジャーナル_${dateStr}.png`;
+          link.click();
+          URL.revokeObjectURL(url);
+          document.body.removeChild(journalDiv);
+        });
+        
+        alert('精算ジャーナルをダウンロードしました');
         closeSettlementModal();
+        
       } catch (e) {
         console.error('精算エラー:', e);
-        await showCustomAlert({ 
-          icon: '', 
-          title: 'エラー', 
-          message: '精算に失敗しました: ' + e.message, 
-          btnClass: 'modal-btn-danger' 
-        });
+        alert('精算に失敗しました: ' + e.message);
       }
     };
     
     window.generateDailyReport = async function() {
       try {
-        await showCustomAlert({ 
-          icon: '', 
-          title: '準備中', 
-          message: '日計表出力機能は準備中です。\n\n現在、月次レポート機能で期間を指定して出力できます。', 
-          btnClass: 'modal-btn-primary' 
+        console.log('📊 日計表生成開始');
+        alert('日計表の生成を開始します...');
+        
+        // Excel出力には XLSX ライブラリが必要
+        if (typeof XLSX === 'undefined') {
+          alert('XLSXライブラリが読み込まれていません');
+          return;
+        }
+        
+        // 現在の月の全データを取得
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        
+        // 月の最初の日と最後の日
+        const lastDay = new Date(year, month, 0);
+        const daysInMonth = lastDay.getDate();
+        
+        // Firestoreから当月のデータを取得
+        const dailySalesSnapshot = await window.getDocs(window.getStoreCollection('dailySales'));
+        
+        const salesByDate = {};
+        dailySalesSnapshot.forEach(doc => {
+          const data = doc.data();
+          const date = data.date;
+          if (date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
+            salesByDate[date] = data;
+          }
         });
+        
+        // Excelデータを作成
+        const excelData = [];
+        excelData.push(['', '売上日計表', '', '', '', '', '', '', '', '']);
+        excelData.push(['', '', '', '', '', '', '', '', '', '']);
+        excelData.push(['', `${year}-${String(month).padStart(2, '0')}-01`, '', '', '', '', '', '', '', '']);
+        excelData.push(['', '', '', '', '', '', '', '', '', '']);
+        excelData.push(['', '日', '曜日', '伝票数', '現金', 'カード', '電子マネー', '売上合計', '支払い', '純売上']);
+        
+        const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
+        
+        let sumCustomerCount = 0;
+        let sumCashSales = 0;
+        let sumCreditSales = 0;
+        let sumEmoneSales = 0;
+        let sumTotalSales = 0;
+        let sumPayment = 0;
+        let sumNetSales = 0;
+        
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const date = new Date(year, month - 1, day);
+          const weekDay = weekDays[date.getDay()];
+          
+          const data = salesByDate[dateStr];
+          
+          if (data) {
+            const customerCount = data.customerCount || 0;
+            const cashSales = data.cashSales || 0;
+            const creditSales = data.creditSales || 0;
+            const emoneSales = data.emoneSales || 0;
+            const totalSales = cashSales + creditSales + emoneSales;
+            
+            // 支出を取得
+            let payment = 0;
+            try {
+              const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
+              if (expenseDoc.exists()) {
+                payment = expenseDoc.data().total || 0;
+              }
+            } catch (e) {
+              console.error('支出取得エラー:', e);
+            }
+            
+            const netSales = totalSales - payment;
+            
+            sumCustomerCount += customerCount;
+            sumCashSales += cashSales;
+            sumCreditSales += creditSales;
+            sumEmoneSales += emoneSales;
+            sumTotalSales += totalSales;
+            sumPayment += payment;
+            sumNetSales += netSales;
+            
+            excelData.push([
+              '',
+              day,
+              weekDay,
+              customerCount,
+              cashSales,
+              creditSales,
+              emoneSales,
+              totalSales,
+              payment,
+              Math.round(netSales)
+            ]);
+          } else {
+            excelData.push(['', day, weekDay, '', '', '', '', '', '', '']);
+          }
+        }
+        
+        // 合計行
+        excelData.push(['']);
+        excelData.push([
+          '',
+          '合計',
+          '',
+          sumCustomerCount,
+          sumCashSales,
+          sumCreditSales,
+          sumEmoneSales,
+          sumTotalSales,
+          sumPayment,
+          Math.round(sumNetSales)
+        ]);
+        
+        // Excelファイルを生成
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, `${month}月売上`);
+        
+        XLSX.writeFile(wb, `売上日計表_${year}年${month}月.xlsx`);
+        
+        alert('日計表を出力しました');
+        
       } catch (e) {
         console.error('日計表出力エラー:', e);
-        await showCustomAlert({ 
-          icon: '', 
-          title: 'エラー', 
-          message: '日計表出力に失敗しました', 
-          btnClass: 'modal-btn-danger' 
-        });
+        alert('日計表出力に失敗しました: ' + e.message);
       }
     };
     
@@ -3842,6 +4087,43 @@
       }
     };
     
+    // 月次レポートをPNG出力
+    window.exportMonthlyReportAsPNG = async function() {
+      const content = document.getElementById('monthlyReportContent');
+      
+      if (!content.children.length || content.innerHTML.includes('集計中') || content.innerHTML.includes('エラー')) {
+        alert('先にレポートを生成してください');
+        return;
+      }
+      
+      try {
+        const startDate = document.getElementById('reportStartDate').value;
+        const endDate = document.getElementById('reportEndDate').value;
+        
+        // html2canvasで画像化
+        const canvas = await html2canvas(content, {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          logging: false
+        });
+        
+        // PNG画像としてダウンロード
+        canvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `月次レポート_${startDate}_${endDate}.png`;
+          link.click();
+          URL.revokeObjectURL(url);
+        });
+        
+        alert('月次レポートをPNG画像として出力しました');
+      } catch (e) {
+        console.error('PNG出力エラー:', e);
+        alert('PNG出力に失敗しました: ' + e.message);
+      }
+    };
+    
     // ========== 🖨 プリンタ設定機能 ==========
     
     // プリンタ設定のグローバル変数
@@ -4313,6 +4595,7 @@
             <input type="date" id="reportEndDate" style="width: 100%; padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
           </div>
           <button onclick="generateMonthlyReport()" style="padding: 12px 24px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">レポート生成</button>
+          <button onclick="exportMonthlyReportAsPNG()" style="padding: 12px 24px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">📸 PNG出力</button>
         </div>
         <div id="monthlyReportContent"></div>
       </div>
