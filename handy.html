@@ -2916,10 +2916,12 @@
         }
         
         let statusMatch = true;
-        if (statusFilter === 'paid') {
-          statusMatch = order.paidAt !== null;
+        if (statusFilter === 'deleted') {
+          statusMatch = order.deleted === true;
+        } else if (statusFilter === 'paid') {
+          statusMatch = order.paidAt !== null && !order.deleted;
         } else if (statusFilter === 'completed') {
-          statusMatch = order.completedAt !== null;
+          statusMatch = order.completedAt !== null && !order.deleted;
         }
         
         return dateMatch && statusMatch;
@@ -2965,42 +2967,48 @@
           </div>`;
         });
         
+        // ステータスバッジ
+        let badges = [];
+        if (order.deleted) badges.push('<span style="background: #666; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">削除済み</span>');
+        if (order.paidAt) badges.push('<span style="background: #2196F3; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">会計済</span>');
+        if (order.completedAt) badges.push('<span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">完了</span>');
+        if (order.cancelledAt) badges.push('<span style="background: #f44336; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">キャンセル</span>');
+        
         // ボタン作成
-        let buttonsHtml = '';
-        if (order.paidAt) {
-          // 会計済み：赤伝票、レシート再印刷、領収書再印刷
-          buttonsHtml = `
-            <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
-              <button onclick="redSlipFromHistory('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">赤伝票</button>
-              <button onclick="reprintReceipt('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">レシート再印刷</button>
-              <button onclick="reprintInvoice('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">領収書再印刷</button>
-            </div>
-          `;
-        } else {
-          // 未会計：編集ボタンのみ
-          buttonsHtml = `
-            <div style="display: flex; gap: 8px; margin-top: 12px;">
-              <button onclick="editOrderFromHistory('${order.id}')" style="flex: 1; padding: 8px 12px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">編集</button>
-            </div>
-          `;
-        }
+        let buttonsHtml = `
+          <div style="display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 2px solid #eee; flex-wrap: wrap;">
+            <button onclick="editOrderFromHistory('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">✏️ 編集</button>
+            ${order.paidAt ? `
+              <button onclick="redSlipFromHistory('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">🔴 赤伝票</button>
+            ` : `
+              ${!order.deleted ? `
+                <button onclick="deleteOrderFromHistory('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">🗑️ 取消</button>
+              ` : `
+                <button onclick="restoreOrderFromHistory('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">🔄 復元</button>
+              `}
+            `}
+            ${order.paidAt ? `
+              <button onclick="reprintReceipt('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">レシート再印刷</button>
+              <button onclick="reprintInvoice('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">領収書再印刷</button>
+            ` : ''}
+          </div>
+        `;
         
         card.innerHTML = `
-          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <div>
               <strong style="font-size: 18px; color: #667eea;">#${order.orderNumber}</strong>
               <span style="margin-left: 10px; color: #666;">${order.tableNumber}</span>
             </div>
-            <div>
-              ${order.paidAt ? '<span style="background: #2196F3; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px;">会計済</span>' : ''}
-              ${order.completedAt ? '<span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-left: 5px;">完了</span>' : ''}
-            </div>
+            <div>${badges.join('')}</div>
           </div>
-          <div style="font-size: 12px; color: #999; margin-bottom: 10px;">${dateStr}</div>
-          <div style="margin-bottom: 10px;">${itemsHtml}</div>
-          <div style="display: flex; justify-content: space-between; padding-top: 10px; border-top: 2px solid #eee;">
-            <span>支払方法: ${paymentMethodLabel}</span>
-            <strong style="font-size: 18px; color: #667eea;">¥${order.totalAmount.toLocaleString()}</strong>
+          <div style="font-size: 12px; color: #999; margin-bottom: 10px;">
+            ${dateStr}
+            ${order.paidAt ? `<span style="margin-left: 15px; padding: 4px 8px; background: #e3f2fd; color: #1976d2; border-radius: 4px; font-weight: bold;">💳 ${paymentMethodLabel}</span>` : ''}
+          </div>
+          <div style="margin-bottom: 10px; max-height: 150px; overflow-y: auto;">${itemsHtml}</div>
+          <div style="text-align: right; font-size: 18px; font-weight: bold; color: #667eea; padding-top: 10px; border-top: 2px solid #eee;">
+            合計: ¥${order.totalAmount.toLocaleString()}
           </div>
           ${buttonsHtml}
         `;
@@ -3143,9 +3151,445 @@
     };
     
     // ========== 履歴から注文編集 ==========
+    
+    let currentEditingOrder = null;
+    
     window.editOrderFromHistory = async function(orderId) {
-      alert('履歴からの注文編集機能\n\n現在この機能は開発中です。');
+      try {
+        const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
+        if (!orderDoc.exists()) {
+          alert('注文が見つかりません');
+          return;
+        }
+        
+        const orderData = orderDoc.data();
+        
+        currentEditingOrder = {
+          id: orderId,
+          ...orderData,
+          originalTotalAmount: orderData.totalAmount,
+          originalPaymentMethod: orderData.paymentMethod
+        };
+        
+        // 支払方法の選択肢
+        const paymentMethods = {
+          'cash': '現金',
+          'emoney': '電子マネー',
+          'credit': 'クレジットカード'
+        };
+        
+        let paymentMethodOptions = '';
+        Object.keys(paymentMethods).forEach(method => {
+          const selected = orderData.paymentMethod === method ? 'selected' : '';
+          paymentMethodOptions += `<option value="${method}" ${selected}>${paymentMethods[method]}</option>`;
+        });
+        
+        // 商品リスト
+        let itemsHtml = '';
+        if (orderData.items && orderData.items.length > 0) {
+          orderData.items.forEach((item, index) => {
+            // トッピング表示
+            let toppingsHtml = '';
+            if (item.toppingDetails && item.toppingDetails.length > 0) {
+              const groupedBySet = {};
+              item.toppingDetails.forEach(detail => {
+                if (!groupedBySet[detail.setName]) {
+                  groupedBySet[detail.setName] = [];
+                }
+                groupedBySet[detail.setName].push(detail.optionName);
+              });
+              
+              toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+                return `
+                  <div style="font-size: 12px; color: #666; font-weight: bold; margin-top: 5px;">${setName}</div>
+                  ${options.map(opt => `<div style="font-size: 12px; color: #666; margin-left: 10px;">・${opt}</div>`).join('')}
+                `;
+              }).join('');
+            } else if (item.toppingsData && item.toppingsData.length > 0) {
+              const groupedBySet = {};
+              item.toppingsData.forEach(topping => {
+                const setName = topping.setName || 'トッピング';
+                if (!groupedBySet[setName]) {
+                  groupedBySet[setName] = [];
+                }
+                groupedBySet[setName].push(topping.name);
+              });
+              
+              toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+                return `
+                  <div style="font-size: 12px; color: #666; font-weight: bold; margin-top: 5px;">${setName}</div>
+                  ${options.map(opt => `<div style="font-size: 12px; color: #666; margin-left: 10px;">・${opt}</div>`).join('')}
+                `;
+              }).join('');
+            } else if (item.toppings && item.toppings !== 'なし' && item.toppings !== '標準トッピング') {
+              toppingsHtml = `<div style="font-size: 12px; color: #666;">トッピング: ${item.toppings}</div>`;
+            }
+            
+            itemsHtml += `
+              <div style="padding: 10px; background: #f5f5f5; border-radius: 8px; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <strong>${item.name}</strong>
+                    ${toppingsHtml}
+                  </div>
+                  <button onclick="removeItemFromOrder(${index})" style="padding: 5px 10px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">削除</button>
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px;">
+                  <label>数量:</label>
+                  <input type="number" value="${item.quantity}" onchange="updateItemQuantity(${index}, this.value)" min="1" style="width: 80px; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+                  <span style="margin-left: auto; font-weight: bold;">¥${((item.price + (item.toppingPrice || 0)) * item.quantity).toLocaleString()}</span>
+                </div>
+              </div>
+            `;
+          });
+        }
+        
+        const content = document.getElementById('editOrderContent');
+        content.innerHTML = `
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: bold;">注文番号</label>
+            <div style="font-size: 24px; color: #667eea;">#${orderData.orderNumber || 0}</div>
+          </div>
+          
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: bold;">テーブル番号</label>
+            <input type="text" id="editTableNumber" value="${orderData.tableNumber || ''}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+          </div>
+          
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: bold;">支払方法</label>
+            <select id="editPaymentMethod" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+              ${paymentMethodOptions}
+            </select>
+          </div>
+          
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 10px; font-weight: bold;">注文商品</label>
+            ${itemsHtml || '<div style="text-align: center; padding: 20px; color: #999;">商品がありません</div>'}
+          </div>
+          
+          <div style="padding: 15px; background: #e3f2fd; border-radius: 8px; text-align: right;">
+            <span style="font-size: 18px; font-weight: bold;">合計: </span>
+            <span id="editTotalAmount" style="font-size: 24px; font-weight: bold; color: #1976d2;">¥${(orderData.totalAmount || 0).toLocaleString()}</span>
+          </div>
+        `;
+        
+        // ボタンを動的に生成
+        const buttonsContainer = document.getElementById('editOrderButtons');
+        if (orderData.paidAt) {
+          // 会計済み注文：赤伝票
+          buttonsContainer.innerHTML = `
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="redSlipFromEdit()">🔴 赤伝票</button>
+            <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+          `;
+        } else {
+          // 未会計注文
+          if (orderData.deleted) {
+            // 削除済み未会計注文：復元可能
+            buttonsContainer.innerHTML = `
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;" onclick="restoreOrder()">注文を復元</button>
+              <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+            `;
+          } else {
+            // 通常の未会計注文：取消可能
+            buttonsContainer.innerHTML = `
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrderFromEdit()">🗑️ 注文取消</button>
+              <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+            `;
+          }
+        }
+        
+        document.getElementById('editOrderModal').style.display = 'flex';
+        
+      } catch (e) {
+        console.error('注文編集エラー:', e);
+        alert('注文の読み込みに失敗しました: ' + e.message);
+      }
     };
+    
+    // 注文編集モーダルを閉じる
+    window.closeEditOrderModal = function() {
+      document.getElementById('editOrderModal').style.display = 'none';
+      currentEditingOrder = null;
+    };
+    
+    // 商品を注文から削除
+    window.removeItemFromOrder = async function(index) {
+      if (!currentEditingOrder) return;
+      
+      const item = currentEditingOrder.items[index];
+      const itemName = item.name || '商品';
+      const itemPrice = (item.price + (item.toppingPrice || 0)) * item.quantity;
+      
+      const confirmed = confirm(`${itemName}\n¥${itemPrice.toLocaleString()}\n\nこの商品を注文から削除しますか？`);
+      
+      if (confirmed) {
+        try {
+          // 商品を配列から削除
+          currentEditingOrder.items.splice(index, 1);
+          
+          // 合計金額を再計算
+          let total = 0;
+          let tax8Total = 0;
+          let tax10Total = 0;
+          
+          currentEditingOrder.items.forEach(item => {
+            const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+            total += itemTotal;
+            
+            // 税率別集計
+            if (item.taxRate === 8) {
+              tax8Total += itemTotal;
+            } else {
+              tax10Total += itemTotal;
+            }
+          });
+          
+          currentEditingOrder.totalAmount = total;
+          currentEditingOrder.tax8Total = tax8Total;
+          currentEditingOrder.tax10Total = tax10Total;
+          
+          // Firestoreに保存
+          await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
+            items: currentEditingOrder.items,
+            totalAmount: total,
+            tax8Total: tax8Total,
+            tax10Total: tax10Total,
+            updatedAt: window.Timestamp.now()
+          });
+          
+          // 表示を更新（モーダルを再描画）
+          editOrderFromHistory(currentEditingOrder.id);
+          
+          alert('商品を削除しました');
+          
+        } catch (e) {
+          console.error('商品削除エラー:', e);
+          alert('商品の削除に失敗しました: ' + e.message);
+        }
+      }
+    };
+    
+    // 商品の数量を更新
+    window.updateItemQuantity = function(index, newQuantity) {
+      if (!currentEditingOrder) return;
+      
+      const quantity = parseInt(newQuantity) || 1;
+      currentEditingOrder.items[index].quantity = quantity;
+      
+      // 合計金額を再計算
+      let total = 0;
+      currentEditingOrder.items.forEach(item => {
+        total += (item.price + (item.toppingPrice || 0)) * item.quantity;
+      });
+      currentEditingOrder.totalAmount = total;
+      
+      // 合計金額の表示を更新
+      document.getElementById('editTotalAmount').textContent = `¥${total.toLocaleString()}`;
+    };
+    
+    // 注文の変更を保存
+    window.saveOrderEdit = async function() {
+      if (!currentEditingOrder) return;
+      
+      try {
+        const tableNumber = document.getElementById('editTableNumber').value;
+        const paymentMethod = document.getElementById('editPaymentMethod').value;
+        
+        const oldPaymentMethod = currentEditingOrder.originalPaymentMethod || currentEditingOrder.paymentMethod;
+        const oldTotalAmount = currentEditingOrder.originalTotalAmount || currentEditingOrder.totalAmount;
+        const newTotalAmount = currentEditingOrder.totalAmount;
+        
+        // 元のpaidAtまたはtimestampから日付を取得
+        let originalDateStr = null;
+        let isUnpaidOrder = false;
+        
+        try {
+          let dateToUse = null;
+          
+          if (currentEditingOrder.paidAt) {
+            dateToUse = currentEditingOrder.paidAt.toDate();
+          } else if (currentEditingOrder.timestamp) {
+            dateToUse = currentEditingOrder.timestamp.toDate();
+            isUnpaidOrder = true;
+          }
+          
+          if (dateToUse) {
+            let targetDate = new Date(dateToUse);
+            
+            // 午前3時より前なら昨日扱い
+            if (dateToUse.getHours() < 3) {
+              targetDate.setDate(targetDate.getDate() - 1);
+            }
+            
+            originalDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
+          } else {
+            throw new Error('paidAtもtimestampも存在しません');
+          }
+        } catch (error) {
+          console.error('日付の変換エラー:', error);
+          alert('日付の取得に失敗しました。注文データのみ更新します。');
+          
+          await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
+            tableNumber: tableNumber,
+            paymentMethod: paymentMethod,
+            items: currentEditingOrder.items,
+            totalAmount: currentEditingOrder.totalAmount
+          });
+          
+          closeEditOrderModal();
+          await loadHistory();
+          return;
+        }
+        
+        // 注文を更新
+        const orderUpdates = {
+          tableNumber: tableNumber,
+          paymentMethod: paymentMethod,
+          items: currentEditingOrder.items,
+          totalAmount: currentEditingOrder.totalAmount,
+          tax8Total: currentEditingOrder.tax8Total || 0,
+          tax10Total: currentEditingOrder.tax10Total || 0
+        };
+        
+        // 未会計の注文を編集した場合は、会計済みにする
+        if (isUnpaidOrder) {
+          orderUpdates.paidAt = currentEditingOrder.timestamp;
+          orderUpdates.notifiedPaid = true;
+          
+          alert(`注文を更新し、会計済みとしました\n\n会計日時: ${originalDateStr}`);
+        }
+        
+        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), orderUpdates);
+        
+        // dailySalesデータの修正
+        if (currentEditingOrder.paidAt || isUnpaidOrder) {
+          await updateDailySalesForEdit(originalDateStr, oldPaymentMethod, oldTotalAmount, paymentMethod, newTotalAmount, currentEditingOrder);
+        }
+        
+        alert('注文を更新しました');
+        
+        closeEditOrderModal();
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('注文保存エラー:', e);
+        alert('注文の保存に失敗しました: ' + e.message);
+      }
+    };
+    
+    // dailySalesデータを編集時に更新
+    async function updateDailySalesForEdit(dateStr, oldMethod, oldAmount, newMethod, newAmount, order) {
+      try {
+        const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+        const dailySalesDoc = await window.getDoc(dailySalesRef);
+        
+        if (!dailySalesDoc.exists()) {
+          console.warn('dailySalesが見つかりません:', dateStr);
+          return;
+        }
+        
+        const dailyData = dailySalesDoc.data();
+        
+        // 旧データを減算
+        const oldCash = (oldMethod === 'cash') ? oldAmount : 0;
+        const oldEmone = (oldMethod === 'emoney') ? oldAmount : 0;
+        const oldCredit = (oldMethod === 'credit') ? oldAmount : 0;
+        
+        // 新データを加算
+        const newCash = (newMethod === 'cash') ? newAmount : 0;
+        const newEmone = (newMethod === 'emoney') ? newAmount : 0;
+        const newCredit = (newMethod === 'credit') ? newAmount : 0;
+        
+        // 税金の差分を計算
+        const oldTax8 = order.originalTax8Total || 0;
+        const oldTax10 = order.originalTax10Total || 0;
+        const newTax8 = order.tax8Total || 0;
+        const newTax10 = order.tax10Total || 0;
+        
+        const updateData = {
+          totalSales: (dailyData.totalSales || 0) - oldAmount + newAmount,
+          cashSales: (dailyData.cashSales || 0) - oldCash + newCash,
+          emoneSales: (dailyData.emoneSales || 0) - oldEmone + newEmone,
+          creditSales: (dailyData.creditSales || 0) - oldCredit + newCredit,
+          tax8Total: (dailyData.tax8Total || 0) - oldTax8 + newTax8,
+          tax10Total: (dailyData.tax10Total || 0) - oldTax10 + newTax10
+        };
+        
+        await window.updateDoc(dailySalesRef, updateData);
+      } catch (e) {
+        console.error('dailySales更新エラー:', e);
+      }
+    }
+    
+    // 編集画面から赤伝票
+    window.redSlipFromEdit = async function() {
+      if (!currentEditingOrder) return;
+      closeEditOrderModal();
+      await redSlipFromHistory(currentEditingOrder.id);
+    };
+    
+    // 編集画面から注文取消
+    window.deleteOrderFromEdit = async function() {
+      if (!currentEditingOrder) return;
+      const confirmed = confirm(`注文 #${currentEditingOrder.orderNumber} を取り消しますか？`);
+      if (confirmed) {
+        closeEditOrderModal();
+        await deleteOrderFromHistory(currentEditingOrder.id);
+      }
+    };
+    
+    // 注文を復元
+    window.restoreOrder = async function() {
+      if (!currentEditingOrder) return;
+      const confirmed = confirm(`注文 #${currentEditingOrder.orderNumber} を復元しますか？`);
+      if (confirmed) {
+        closeEditOrderModal();
+        await restoreOrderFromHistory(currentEditingOrder.id);
+      }
+    };
+    
+    // 注文を取消（削除済みフラグを立てる）
+    window.deleteOrderFromHistory = async function(orderId) {
+      try {
+        const confirmed = confirm('この注文を取り消しますか？');
+        if (!confirmed) return;
+        
+        await window.updateDoc(window.getStoreDoc('orders', orderId), {
+          deleted: true,
+          deletedAt: window.Timestamp.now()
+        });
+        
+        alert('注文を取り消しました');
+        await loadHistory();
+      } catch (e) {
+        console.error('注文取消エラー:', e);
+        alert('注文の取り消しに失敗しました: ' + e.message);
+      }
+    };
+    
+    // 注文を復元
+    window.restoreOrderFromHistory = async function(orderId) {
+      try {
+        const confirmed = confirm('この注文を復元しますか？');
+        if (!confirmed) return;
+        
+        await window.updateDoc(window.getStoreDoc('orders', orderId), {
+          deleted: false,
+          deletedAt: null
+        });
+        
+        alert('注文を復元しました');
+        await loadHistory();
+      } catch (e) {
+        console.error('注文復元エラー:', e);
+        alert('注文の復元に失敗しました: ' + e.message);
+      }
+    };
+    
     
     // ========== 💸 支出機能 ==========
     
@@ -3778,6 +4222,7 @@
           </select>
           <select id="historyStatusFilter" onchange="filterHistory()" style="padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
             <option value="all">すべて</option>
+            <option value="deleted">削除済み</option>
             <option value="paid">会計済み</option>
             <option value="completed">完了</option>
           </select>
@@ -3787,6 +4232,26 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeHistoryModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 注文編集モーダル -->
+  <div id="editOrderModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3>✏️ 注文編集</h3>
+        <button class="modal-close" onclick="closeEditOrderModal()">×</button>
+      </div>
+      <div style="padding: 20px;">
+        <div id="editOrderContent" style="margin: 20px 0;">
+          <!-- JavaScriptで動的に生成 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div id="editOrderButtons" style="display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap;">
+          <!-- JavaScriptで動的に生成 -->
+        </div>
       </div>
     </div>
   </div>
