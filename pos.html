@@ -120,16 +120,6 @@
         // モーダルを開く前に少し待つ（初期化が完了するまで）
         setTimeout(() => {
           switch(openModal) {
-            case 'sales':
-              if (typeof window.showSalesModal === 'function') {
-                window.showSalesModal();
-              }
-              break;
-            case 'monthly':
-              if (typeof window.showMonthlyReportModal === 'function') {
-                window.showMonthlyReportModal();
-              }
-              break;
             case 'expense':
               if (typeof window.showExpenseModal === 'function') {
                 window.showExpenseModal();
@@ -2559,7 +2549,13 @@
       </div>
       
       <button class="btn" style="width: 100%; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; margin-bottom: 10px;" onclick="confirmSettlement()">精算を実行</button>
-      <button class="btn" style="width: 100%; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; margin-bottom: 10px;" onclick="generateDailyReport()">日計表出力</button>
+      <div style="margin-bottom: 10px;">
+        <label style="display: block; margin-bottom: 5px; color: #333; font-weight: bold;">日計表出力する月を選択:</label>
+        <select id="dailyReportMonth" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 10px;">
+          <!-- 過去12ヶ月分の選択肢を動的に生成 -->
+        </select>
+        <button class="btn" style="width: 100%; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="generateDailyReportForSelectedMonth()">日計表出力</button>
+      </div>
       <button class="btn" style="width: 100%; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; margin-bottom: 10px;" onclick="window.open('arari.html', '_blank')">納税額/粗利早見表</button>
       <button class="btn btn-secondary" onclick="closeSettlementModal()">キャンセル</button>
     </div>
@@ -5652,12 +5648,6 @@
     // 月次レポートモーダルを閉じる
     window.closeMonthlyReportModal = function() {
       document.getElementById('monthlyReportModal').classList.add('hidden');
-      
-      // URLパラメータでモーダルを開いた場合はタブを閉じる
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('modal') === 'monthly') {
-        window.close();
-      }
     };
     
     // ===== 期間ジャーナル生成 =====
@@ -7013,12 +7003,6 @@ ${totalRedSlipCount > 0 ? `
     // 売上モーダルを閉じる
     window.closeSalesModal = function() {
       document.getElementById('salesModal').classList.add('hidden');
-      
-      // URLパラメータでモーダルを開いた場合はタブを閉じる
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('modal') === 'sales') {
-        window.close();
-      }
     };
     
     // ========== ドロアオープン機能 ==========
@@ -7567,6 +7551,23 @@ ${totalRedSlipCount > 0 ? `
       container.innerHTML = '<div style="text-align: center; padding: 20px;">集計中...</div>';
       
       document.getElementById('settlementModal').classList.remove('hidden');
+      
+      // 🆕 日計表の月選択肢を生成（過去12ヶ月分）
+      const monthSelect = document.getElementById('dailyReportMonth');
+      if (monthSelect) {
+        monthSelect.innerHTML = '';
+        const now = new Date();
+        for (let i = 0; i < 12; i++) {
+          const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const year = targetDate.getFullYear();
+          const month = targetDate.getMonth() + 1;
+          const option = document.createElement('option');
+          option.value = `${year}-${String(month).padStart(2, '0')}`;
+          option.textContent = `${year}年${month}月`;
+          if (i === 0) option.selected = true;
+          monthSelect.appendChild(option);
+        }
+      }
       
       // 日付変更時にサマリーを更新
       document.getElementById('settlementDate').onchange = updateSettlementSummary;
@@ -9008,14 +9009,31 @@ ${redSlipCount > 0 ? `
     };
     
     // ===== 日計表生成機能 =====
-    window.generateDailyReport = async function() {
+    // 🆕 選択された月の日計表を出力
+    window.generateDailyReportForSelectedMonth = async function() {
+      try {
+        const monthSelect = document.getElementById('dailyReportMonth');
+        if (!monthSelect || !monthSelect.value) {
+          alert('月を選択してください');
+          return;
+        }
+        
+        const [year, month] = monthSelect.value.split('-').map(Number);
+        await generateDailyReport(year, month);
+      } catch (e) {
+        console.error('❌ 日計表生成エラー:', e);
+        alert('日計表の生成に失敗しました: ' + e.message);
+      }
+    };
+    
+    window.generateDailyReport = async function(targetYear = null, targetMonth = null) {
       try {
         console.log('📊 日計表生成開始');
         
-        // 当月の全ての日次売上データを取得
+        // 🆕 引数で年月が指定されていない場合は当月を使用
         const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
+        const year = targetYear !== null ? targetYear : now.getFullYear();
+        const month = targetMonth !== null ? targetMonth : (now.getMonth() + 1);
         
         // 月の最初の日と最後の日を計算
         const firstDay = new Date(year, month - 1, 1);
@@ -15976,164 +15994,8 @@ ${redSlipCount > 0 ? `
       }
     }
     
-    // 🆕 URLパラメータから自動ログイン
-    async function checkAutoLogin() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const autoLogin = urlParams.get('autoLogin');
-      const storeId = urlParams.get('storeId');
-      const password = urlParams.get('password');
-      
-      if (autoLogin === 'true' && storeId && password) {
-        console.log('🔐 自動ログイン開始:', storeId);
-        
-        try {
-          // Firebaseの初期化を待つ
-          if (!window.firebaseReady) {
-            console.log('⏳ Firebase初期化待機中...');
-            await new Promise(resolve => {
-              window.addEventListener('firebaseReady', resolve, { once: true });
-            });
-          }
-          
-          // 店舗データを取得
-          const storeRef = window.doc(window.db, 'stores', storeId);
-          const storeDoc = await window.getDoc(storeRef);
-          
-          if (storeDoc.exists()) {
-            const storeData = storeDoc.data();
-            
-            // パスワード検証
-            if (storeData.storePassword === password || storeData.password === password) {
-              // 🔧 下赤塚店の特別処理
-              let actualStoreId = storeId;
-              if (storeId === 'shimoarekasuka' || storeId === 'shimoakatsuka') {
-                console.log('🔧 下赤塚店のIDを検出: ' + storeId + ' → null (旧パス使用)');
-                actualStoreId = null;
-              }
-              
-              currentStoreId = actualStoreId;
-              currentStoreName = storeData.storeName || storeData.name || storeId;
-              
-              window.currentStoreId = currentStoreId;
-              window.currentStoreName = currentStoreName;
-              
-              sessionStorage.setItem('posStoreId', currentStoreId || '');
-              sessionStorage.setItem('posStoreName', currentStoreName);
-              sessionStorage.setItem('posAuthenticated', 'true');
-              
-              const headerTitle = document.querySelector('.header-title');
-              if (headerTitle) {
-                headerTitle.textContent = currentStoreName + ' - レジシステム';
-              }
-              
-              console.log('✅ 自動ログイン成功:', currentStoreName);
-              
-              // ログイン画面を非表示にして日付選択モーダルを表示
-              document.getElementById('loginScreen').style.display = 'none';
-              
-              // URLパラメータでモーダルが指定されている場合は日付選択をスキップ
-              const openModal = urlParams.get('modal');
-              if (!openModal) {
-                showDateSelectionModal();
-              } else {
-                // モーダルを開く場合は営業日を今日に設定
-                const now = new Date();
-                let today = new Date(now);
-                if (now.getHours() < 3) {
-                  today.setDate(today.getDate() - 1);
-                }
-                window.selectedBusinessDate = formatDateISO(today);
-                sessionStorage.setItem('businessDate', window.selectedBusinessDate);
-                document.getElementById('mainContent').style.display = 'block';
-                updateBusinessDateDisplay();
-                
-                // スタッフリストを読み込む
-                await loadStaffList();
-                
-                console.log('🎯 モーダル表示準備完了。2秒後にモーダルを開きます:', openModal);
-                
-                // DOMが完全に準備できるまで十分な時間待機してからモーダルを開く
-                setTimeout(() => {
-                  console.log('🎯 モーダルを開きます:', openModal);
-                  
-                  // 直接モーダル関数を呼び出す
-                  switch(openModal) {
-                    case 'sales':
-                      if (typeof window.showSalesModal === 'function') {
-                        console.log('✅ showSalesModal呼び出し');
-                        window.showSalesModal();
-                      } else {
-                        console.error('❌ showSalesModal関数が見つかりません');
-                      }
-                      break;
-                    case 'monthly':
-                      if (typeof window.showMonthlyReportModal === 'function') {
-                        console.log('✅ showMonthlyReportModal呼び出し');
-                        window.showMonthlyReportModal();
-                      } else {
-                        console.error('❌ showMonthlyReportModal関数が見つかりません');
-                      }
-                      break;
-                    case 'expense':
-                      if (typeof window.showExpenseModal === 'function') {
-                        console.log('✅ showExpenseModal呼び出し');
-                        window.showExpenseModal();
-                      } else {
-                        console.error('❌ showExpenseModal関数が見つかりません');
-                      }
-                      break;
-                    case 'history':
-                      if (typeof window.showHistoryModal === 'function') {
-                        console.log('✅ showHistoryModal呼び出し');
-                        window.showHistoryModal();
-                      } else {
-                        console.error('❌ showHistoryModal関数が見つかりません');
-                      }
-                      break;
-                    case 'printer':
-                      if (typeof window.showPrinterSettings === 'function') {
-                        console.log('✅ showPrinterSettings呼び出し');
-                        window.showPrinterSettings();
-                      } else {
-                        console.error('❌ showPrinterSettings関数が見つかりません');
-                      }
-                      break;
-                    default:
-                      console.warn('⚠️ 不明なモーダルタイプ:', openModal);
-                  }
-                }, 2000);
-              }
-              
-              return true;
-            }
-          }
-          
-          console.warn('⚠️ 自動ログイン失敗: 認証情報が無効');
-        } catch (error) {
-          console.error('❌ 自動ログインエラー:', error);
-        }
-      }
-      
-      return false;
-    }
-    
-    // 日付フォーマット（ISO）- 自動ログイン用
-    function formatDateISO(date) {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    }
-    
     // ページ読み込み時にセッションをチェック
-    window.addEventListener('DOMContentLoaded', async () => {
-      // 🆕 URLパラメータでの自動ログインを試行
-      const autoLoggedIn = await checkAutoLogin();
-      if (autoLoggedIn) {
-        console.log('✅ 自動ログイン完了、通常のセッションチェックはスキップ');
-        return;
-      }
-      
+    window.addEventListener('DOMContentLoaded', () => {
       // ログインフォームのイベントリスナーを設定
       const loginForm = document.getElementById('posLoginForm');
       if (loginForm) {
@@ -17613,17 +17475,17 @@ ${redSlipCount > 0 ? `
               <div style="text-align: right; font-size: 18px; font-weight: bold; color: #667eea; margin-bottom: 10px;">
                 合計: ¥${total.toLocaleString()}
               </div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" id="buttonArea_${order.id}">
                 <button onclick="payForSingleOrder('${order.id}', ${total})" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; ${order.paidAt ? 'opacity: 0.5; pointer-events: none;' : ''}">
                   この注文を会計
                 </button>
-                <button onclick="completeOrderFromNewUI('${order.id}')" style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer;">
+                <button id="completeBtn_${order.id}" onclick="completeOrderFromNewUI('${order.id}')" style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; ${order.status === 'completed' || order.status === 'cancelled' ? 'display: none;' : ''}">
                   完了
                 </button>
-                <button onclick="cancelOrderFromNewUI('${order.id}')" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer;">
+                <button id="cancelBtn_${order.id}" onclick="cancelOrderFromNewUI('${order.id}')" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; ${order.status === 'completed' || order.status === 'cancelled' ? 'display: none;' : ''}">
                   キャンセル
                 </button>
-                <button onclick="deleteOrderFromNewUI('${order.id}')" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer;">
+                <button id="deleteBtn_${order.id}" onclick="deleteOrderFromNewUI('${order.id}')" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; ${order.status === 'completed' || order.status === 'cancelled' ? '' : 'display: none;'}">
                   削除
                 </button>
               </div>
@@ -18036,6 +17898,15 @@ ${redSlipCount > 0 ? `
     // 注文を完了にする（新UI用）
     window.completeOrderFromNewUI = async function(orderId) {
       try {
+        // ボタン表示を切り替え（完了・キャンセルを非表示、削除を表示）
+        const completeBtn = document.getElementById(`completeBtn_${orderId}`);
+        const cancelBtn = document.getElementById(`cancelBtn_${orderId}`);
+        const deleteBtn = document.getElementById(`deleteBtn_${orderId}`);
+        
+        if (completeBtn) completeBtn.style.display = 'none';
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        if (deleteBtn) deleteBtn.style.display = 'block';
+        
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           status: 'completed',
           completedAt: window.Timestamp.now()
@@ -18053,7 +17924,17 @@ ${redSlipCount > 0 ? `
     // 注文をキャンセルする（新UI用）
     window.cancelOrderFromNewUI = async function(orderId) {
       try {
+        // ボタン表示を切り替え（完了・キャンセルを非表示、削除を表示）
+        const completeBtn = document.getElementById(`completeBtn_${orderId}`);
+        const cancelBtn = document.getElementById(`cancelBtn_${orderId}`);
+        const deleteBtn = document.getElementById(`deleteBtn_${orderId}`);
+        
+        if (completeBtn) completeBtn.style.display = 'none';
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        if (deleteBtn) deleteBtn.style.display = 'block';
+        
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
+          status: 'cancelled',
           cancelledAt: window.Timestamp.now()
         });
         

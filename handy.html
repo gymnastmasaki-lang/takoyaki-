@@ -2662,6 +2662,24 @@
     // 売上モーダルを表示
     window.showSalesModal = function() {
       document.getElementById('salesModal').style.display = 'flex';
+      
+      // 🆕 日計表の月選択肢を生成（過去12ヶ月分）
+      const monthSelect = document.getElementById('dailyReportMonth');
+      if (monthSelect) {
+        monthSelect.innerHTML = '';
+        const now = new Date();
+        for (let i = 0; i < 12; i++) {
+          const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const year = targetDate.getFullYear();
+          const month = targetDate.getMonth() + 1;
+          const option = document.createElement('option');
+          option.value = `${year}-${String(month).padStart(2, '0')}`;
+          option.textContent = `${year}年${month}月`;
+          if (i === 0) option.selected = true;
+          monthSelect.appendChild(option);
+        }
+      }
+      
       calculateSales();
       
       // 機能メニューを閉じる
@@ -2841,9 +2859,15 @@
               <button onclick="executeDailySettlement()" style="width: 100%; padding: 15px; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(255,107,107,0.3);">
                 精算を実行
               </button>
-              <button onclick="generateDailyReport()" style="width: 100%; padding: 15px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(76,175,80,0.3);">
-                日計表出力
-              </button>
+              <div style="margin-bottom: 10px;">
+                <label style="display: block; margin-bottom: 5px; color: #333; font-weight: bold;">日計表出力する月を選択:</label>
+                <select id="dailyReportMonth" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 10px;">
+                  <!-- 過去12ヶ月分の選択肢を動的に生成 -->
+                </select>
+                <button onclick="generateDailyReportForSelectedMonth()" style="width: 100%; padding: 15px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(76,175,80,0.3);">
+                  日計表出力
+                </button>
+              </div>
             </div>
           </div>
         `;
@@ -4313,14 +4337,31 @@ ${redSlipCount > 0 ? `
     };
     
     // ===== 日計表生成機能 =====
-    window.generateDailyReport = async function() {
+    // 🆕 選択された月の日計表を出力
+    window.generateDailyReportForSelectedMonth = async function() {
+      try {
+        const monthSelect = document.getElementById('dailyReportMonth');
+        if (!monthSelect || !monthSelect.value) {
+          alert('月を選択してください');
+          return;
+        }
+        
+        const [year, month] = monthSelect.value.split('-').map(Number);
+        await generateDailyReport(year, month);
+      } catch (e) {
+        console.error('❌ 日計表生成エラー:', e);
+        alert('日計表の生成に失敗しました: ' + e.message);
+      }
+    };
+    
+    window.generateDailyReport = async function(targetYear = null, targetMonth = null) {
       try {
         console.log('📊 日計表生成開始');
         
-        // 当月の全ての日次売上データを取得
+        // 🆕 引数で年月が指定されていない場合は当月を使用
         const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
+        const year = targetYear !== null ? targetYear : now.getFullYear();
+        const month = targetMonth !== null ? targetMonth : (now.getMonth() + 1);
         
         // 月の最初の日と最後の日を計算
         const firstDay = new Date(year, month - 1, 1);
