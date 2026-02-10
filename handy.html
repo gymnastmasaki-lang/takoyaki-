@@ -823,23 +823,59 @@
       to { opacity: 1; }
     }
   </style>
+  
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, query, getDocs, doc, getDoc, setDoc, where, onSnapshot, updateDoc, deleteDoc, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    
+    const firebaseConfig = {
+      apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
+      authDomain: "takoyaki-order-system-bacd7.firebaseapp.com",
+      projectId: "takoyaki-order-system-bacd7",
+      storageBucket: "takoyaki-order-system-bacd7.firebasestorage.app",
+      messagingSenderId: "104494752890",
+      appId: "1:104494752890:web:c0a25d62f42ffca01687c3"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    
+    // グローバルに公開
+    window.db = db;
+    window.collection = collection;
+    window.query = query;
+    window.where = where;
+    window.getDocs = getDocs;
+    window.getDoc = getDoc;
+    window.setDoc = setDoc;
+    window.doc = doc;
+    window.onSnapshot = onSnapshot;
+    window.updateDoc = updateDoc;
+    window.deleteDoc = deleteDoc;
+    window.Timestamp = Timestamp;
+    
+    console.log('✅ Firebase初期化完了');
+    window.firebaseReady = true;
+  </script>
 </head>
 <body>
   <!-- ログイン画面 -->
   <div id="loginScreen" class="container login-screen">
     <h1>ハンディシステム</h1>
+    <div id="errorMessage" style="display: none; background: #ffebee; color: #c62828; padding: 12px; border-radius: 8px; margin-bottom: 20px; text-align: center; font-weight: bold;"></div>
     <div class="form-group">
       <label>店舗選択</label>
       <select id="storeSelect">
         <option value="">店舗を選択...</option>
         <option value="shimoakatsuka">下赤塚</option>
         <option value="eiwashokuhin">栄和食品</option>
-        <parameter name="takada">高田</option>
+        <option value="takada">高田</option>
       </select>
     </div>
     <div class="form-group">
-      <label>スタッフ名</label>
-      <input type="text" id="staffName" placeholder="名前を入力">
+      <label>パスワード</label>
+      <input type="password" id="passwordInput" placeholder="パスワードを入力">
     </div>
     <button class="login-btn" onclick="login()">ログイン</button>
   </div>
@@ -1171,6 +1207,9 @@
     // グローバル変数
     let currentStaff = '';
     let currentStore = '';
+    let currentStoreId = '';
+    let currentStoreName = '';
+    let storesData = {};
     let currentTableId = null;
     let cart = [];
     let menuData = {
@@ -1194,35 +1233,92 @@
     let selectedTopping = null;
     let allOrders = []; // 履歴データ保存用
 
-    // ログイン処理
-    function login() {
-      const store = document.getElementById('storeSelect').value;
-      const staff = document.getElementById('staffName').value;
+    // 店舗リストをFirebaseから読み込み
+    async function loadStoreList() {
+      try {
+        const storesQuery = query(collection(window.db, 'stores'));
+        const storesSnapshot = await getDocs(storesQuery);
+        const storeSelect = document.getElementById('storeSelect');
+        
+        storeSelect.innerHTML = '<option value="">店舗を選択...</option>';
+        storesData = {};
+        
+        storesSnapshot.forEach(doc => {
+          const storeData = doc.data();
+          const storeId = doc.id;
+          const storeName = storeData.storeName || doc.id;
+          const password = storeData.storePassword || '';
+          
+          storesData[storeId] = {
+            storeName: storeName,
+            password: String(password),
+            isActive: true
+          };
+          
+          const option = document.createElement('option');
+          option.value = storeId;
+          option.textContent = storeName;
+          storeSelect.appendChild(option);
+        });
+      } catch (error) {
+        console.error('❌ 店舗リスト読み込みエラー:', error);
+        showError('店舗リストの読み込みに失敗しました');
+      }
+    }
 
-      if (!store || !staff) {
-        alert('店舗とスタッフ名を入力してください');
+    // ログイン処理
+    async function login() {
+      const storeId = document.getElementById('storeSelect').value;
+      const inputPassword = document.getElementById('passwordInput').value.trim();
+      
+      if (!storeId) {
+        showError('店舗を選択してください');
         return;
       }
-
-      currentStore = store;
-      currentStaff = staff;
-
+      if (!inputPassword) {
+        showError('パスワードを入力してください');
+        return;
+      }
+      
+      const storeInfo = storesData[storeId];
+      if (inputPassword !== storeInfo.password) {
+        showError('パスワードが正しくありません');
+        return;
+      }
+      
+      currentStoreId = storeId;
+      currentStoreName = storeInfo.storeName;
+      currentStore = storeId;
+      
       document.getElementById('loginScreen').style.display = 'none';
       document.getElementById('tablesScreen').style.display = 'block';
       
-      document.getElementById('staffWelcome').textContent = `${staff}さん、おかえりなさい`;
-      
-      // 店舗名を日本語で表示
-      let storeName = '';
-      if (store === 'shimoakatsuka') storeName = '下赤塚';
-      else if (store === 'eiwashokuhin') storeName = '栄和食品';
-      else if (store === 'takada') storeName = '高田';
-      
-      document.getElementById('storeInfo').textContent = storeName;
+      document.getElementById('staffWelcome').textContent = currentStoreName;
+      document.getElementById('storeInfo').textContent = currentStoreName;
 
       loadTables();
-      loadOrderHistory(); // 履歴データを読み込み
+      loadOrderHistory();
     }
+    
+    // エラー表示関数
+    function showError(message) {
+      const errorDiv = document.getElementById('errorMessage');
+      errorDiv.textContent = message;
+      errorDiv.style.display = 'block';
+      setTimeout(() => {
+        errorDiv.style.display = 'none';
+      }, 3000);
+    }
+    
+    // ページ読み込み時に店舗リストを取得
+    window.addEventListener('DOMContentLoaded', async function() {
+      // Firebaseの準備を待つ
+      while (!window.firebaseReady) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      await loadStoreList();
+      loadOrderHistory();
+    });
 
     // ログアウト
     function logout() {
@@ -1859,9 +1955,6 @@
     }
 
     // 初期化
-    document.addEventListener('DOMContentLoaded', function() {
-      loadOrderHistory();
-    });
   </script>
 </body>
 </html>
