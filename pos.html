@@ -3756,6 +3756,287 @@
       }
     };
     
+    // ========== 🔴 赤伝票機能 ==========
+    
+    // 赤伝票を切る
+    window.redSlip = async function(orderId) {
+      try {
+        // 確認ダイアログ
+        if (!confirm('赤伝票を発行しますか？\n\nこの操作により：\n・売上がマイナス計上されます\n・在庫が設定されている商品は在庫が戻ります\n・赤伝票レシートが印刷されます')) {
+          return;
+        }
+        
+        console.log('🔴 赤伝票処理開始:', orderId);
+        
+        // 注文データを取得
+        const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
+        if (!orderDoc.exists()) {
+          alert('注文が見つかりません');
+          return;
+        }
+        
+        const orderData = orderDoc.data();
+        
+        // 会計済みチェック
+        if (!orderData.paidAt) {
+          alert('会計済みの注文のみ赤伝票を発行できます');
+          return;
+        }
+        
+        // すでに赤伝票が切られていないかチェック
+        if (orderData.redSlip) {
+          alert('この注文はすでに赤伝票が発行されています');
+          return;
+        }
+        
+        // 赤伝票データを作成
+        const redSlipData = {
+          redSlip: true,
+          redSlipAt: window.Timestamp.now(),
+          redSlipBy: window.currentStaffName || 'スタッフ'
+        };
+        
+        // 注文を赤伝票としてマーク
+        await window.updateDoc(window.getStoreDoc('orders', orderId), redSlipData);
+        
+        console.log('✅ 注文を赤伝票としてマーク完了');
+        
+        // 在庫を戻す処理
+        await restoreInventoryFromRedSlip(orderData.items);
+        
+        // 赤伝票レシートを印刷
+        await printRedSlipReceipt(orderData);
+        
+        // 売上データを更新（赤伝票分をマイナス）
+        await updateSalesForRedSlip(orderData);
+        
+        alert('赤伝票を発行しました');
+        
+        // 履歴を再読み込み
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('❌ 赤伝票エラー:', e);
+        alert('赤伝票の発行に失敗しました: ' + e.message);
+      }
+    };
+    
+    // 在庫を戻す処理
+    async function restoreInventoryFromRedSlip(items) {
+      try {
+        console.log('📦 在庫を戻す処理開始');
+        
+        // 在庫設定を取得
+        const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+        const inventoryDoc = await window.getDoc(inventoryRef);
+        
+        if (!inventoryDoc.exists()) {
+          console.log('⚠️ 在庫設定が存在しないため、在庫を戻す処理をスキップ');
+          return;
+        }
+        
+        const inventorySettings = inventoryDoc.data().items || {};
+        let updated = false;
+        
+        // 各商品の在庫を戻す
+        items.forEach(item => {
+          const menuItemId = item.menuItemId || item.id;
+          if (!menuItemId) {
+            console.warn('⚠️ menuItemIdが見つかりません:', item);
+            return;
+          }
+          
+          if (inventorySettings[menuItemId] && inventorySettings[menuItemId].stock !== null && inventorySettings[menuItemId].stock !== undefined) {
+            const currentStock = inventorySettings[menuItemId].stock;
+            const returnQuantity = item.quantity || 1;
+            inventorySettings[menuItemId].stock = currentStock + returnQuantity;
+            updated = true;
+            console.log(`✅ ${item.name}: ${currentStock} → ${inventorySettings[menuItemId].stock} (+${returnQuantity})`);
+          }
+        });
+        
+        // 在庫設定を保存
+        if (updated) {
+          await window.setDoc(inventoryRef, {
+            items: inventorySettings,
+            updatedAt: window.Timestamp.now()
+          });
+          console.log('✅ 在庫を戻しました');
+        } else {
+          console.log('⚠️ 戻す在庫がありませんでした');
+        }
+        
+      } catch (e) {
+        console.error('❌ 在庫を戻す処理エラー:', e);
+        // エラーが発生しても処理は続行
+      }
+    }
+    
+    // 赤伝票レシートを印刷
+    async function printRedSlipReceipt(orderData) {
+      try {
+        console.log('🖨️ 赤伝票レシート印刷開始');
+        
+        const builder = new StarWebPrintBuilder();
+        const request = builder.createInitializationElement();
+        
+        // 58mm幅設定
+        builder.createPeripheralElement({channel: 1, on: 100, off: 100});
+        
+        // ヘッダー
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2, invert: true});
+        builder.createTextElement({data: '  赤伝票  \n'});
+        builder.createTextElement({emphasis: false, width: 1, height: 1, invert: false});
+        
+        const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
+        const branchName = window.receiptSettings?.branchName || '下赤塚店';
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: storeName + '\n'});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        builder.createTextElement({data: branchName + '\n'});
+        
+        const address = window.receiptSettings?.address || '東京都板橋区赤塚新町';
+        const phone = window.receiptSettings?.phone || '03-XXXX-XXXX';
+        builder.createTextElement({data: address + '\n'});
+        builder.createTextElement({data: 'TEL: ' + phone + '\n'});
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        // 日時情報
+        builder.createAlignmentElement({position: 'left'});
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        builder.createTextElement({data: `発行日時: ${dateStr}\n`});
+        
+        const orderDate = orderData.timestamp?.toDate() || new Date();
+        const orderDateStr = `${orderDate.getFullYear()}/${String(orderDate.getMonth()+1).padStart(2,'0')}/${String(orderDate.getDate()).padStart(2,'0')} ${String(orderDate.getHours()).padStart(2,'0')}:${String(orderDate.getMinutes()).padStart(2, '0')}`;
+        builder.createTextElement({data: `元注文日時: ${orderDateStr}\n`});
+        builder.createTextElement({data: `テーブル: ${orderData.tableNumber}\n`});
+        builder.createTextElement({data: `注文No: ${orderData.orderNumber}\n`});
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        // 商品明細（マイナス表示）
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 1, height: 1});
+        builder.createTextElement({data: '返品商品\n'});
+        builder.createTextElement({emphasis: false});
+        builder.createAlignmentElement({position: 'left'});
+        
+        let total = 0;
+        orderData.items.forEach(item => {
+          const subtotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+          total += subtotal;
+          
+          const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
+          builder.createTextElement({data: `${itemName}\n`});
+          
+          const priceInfo = `-@${item.price} x${item.quantity}`;
+          const subtotalStr = `-${subtotal.toLocaleString()}円`;
+          const spaces = ' '.repeat(Math.max(1, 32 - priceInfo.length - subtotalStr.length));
+          builder.createTextElement({data: `${priceInfo}${spaces}${subtotalStr}\n`});
+          
+          // トッピング表示
+          if (item.toppings && item.toppings !== 'なし') {
+            builder.createTextElement({data: ` TP:${item.toppings}\n`});
+          }
+        });
+        
+        builder.createRuledLineElement({thickness: 'medium'});
+        
+        // 合計（マイナス表示）
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: `返金額 -${total.toLocaleString()}円\n`});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        
+        builder.createRuledLineElement({thickness: 'medium'});
+        
+        // フッター
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({data: '\n赤伝票\n'});
+        builder.createTextElement({data: '売上取消\n\n\n'});
+        
+        builder.createCutPaperElement({feed: true});
+        
+        // 印刷実行
+        await sendPrintRequest(
+          builder,
+          (response) => {
+            console.log('✅ 赤伝票レシート印刷成功');
+          },
+          (response) => {
+            console.error('❌ 赤伝票レシート印刷エラー:', response);
+          }
+        );
+        
+      } catch (e) {
+        console.error('❌ 赤伝票レシート印刷エラー:', e);
+        // 印刷エラーでも処理は続行
+      }
+    }
+    
+    // 売上データを更新（赤伝票分をマイナス）
+    async function updateSalesForRedSlip(orderData) {
+      try {
+        console.log('📊 売上データ更新開始');
+        
+        // 営業日を計算（午前3時基準）
+        const orderDate = orderData.paidAt?.toDate() || orderData.timestamp?.toDate() || new Date();
+        let businessDate = new Date(orderDate);
+        if (orderDate.getHours() < 3) {
+          businessDate.setDate(businessDate.getDate() - 1);
+        }
+        businessDate.setHours(0, 0, 0, 0);
+        
+        const dateKey = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
+        
+        // 売上データを取得
+        const salesRef = window.getStoreDoc('daily_sales', dateKey);
+        const salesDoc = await window.getDoc(salesRef);
+        
+        if (!salesDoc.exists()) {
+          console.warn('⚠️ 売上データが見つかりません:', dateKey);
+          return;
+        }
+        
+        const salesData = salesDoc.data();
+        
+        // 赤伝票のカウントと金額を更新
+        const redSlipCount = (salesData.redSlipCount || 0) + 1;
+        const redSlipAmount = (salesData.redSlipAmount || 0) + orderData.totalAmount;
+        
+        // 税率別の赤伝票金額を計算
+        let redSlipTax8Total = salesData.redSlipTax8Total || 0;
+        let redSlipTax10Total = salesData.redSlipTax10Total || 0;
+        
+        orderData.items.forEach(item => {
+          const subtotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+          if (item.taxRate === 8) {
+            redSlipTax8Total += subtotal;
+          } else {
+            redSlipTax10Total += subtotal;
+          }
+        });
+        
+        // 売上データを更新
+        await window.updateDoc(salesRef, {
+          redSlipCount: redSlipCount,
+          redSlipAmount: redSlipAmount,
+          redSlipTax8Total: redSlipTax8Total,
+          redSlipTax10Total: redSlipTax10Total,
+          updatedAt: window.Timestamp.now()
+        });
+        
+        console.log('✅ 売上データ更新完了');
+        
+      } catch (e) {
+        console.error('❌ 売上データ更新エラー:', e);
+        // エラーが発生しても処理は続行
+      }
+    }
+    
     // ===== 注文編集機能 =====
     let currentEditingOrder = null;
     
