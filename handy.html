@@ -2872,6 +2872,23 @@
           </div>
         `;
         
+        // 🆕 月選択肢を再生成（HTMLを再構築した後）
+        const monthSelect = document.getElementById('dailyReportMonth');
+        if (monthSelect) {
+          monthSelect.innerHTML = '';
+          const now = new Date();
+          for (let i = 0; i < 12; i++) {
+            const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const year = targetDate.getFullYear();
+            const month = targetDate.getMonth() + 1;
+            const option = document.createElement('option');
+            option.value = `${year}-${String(month).padStart(2, '0')}`;
+            option.textContent = `${year}年${month}月`;
+            if (i === 0) option.selected = true;
+            monthSelect.appendChild(option);
+          }
+        }
+        
       } catch (e) {
         console.error('売上計算エラー:', e);
         container.innerHTML = '<div style="text-align: center; color: red; padding: 20px;">エラーが発生しました</div>';
@@ -6257,6 +6274,104 @@ ${redSlipCount > 0 ? `
     // 🆕 本日の精算を直接実行（売上モーダルから）
     window.executeDailySettlement = async function() {
       try {
+        // 🆕 バックアップ確認ダイアログ
+        const shouldBackup = await new Promise((resolve) => {
+          const modal = document.createElement('div');
+          modal.id = 'backupConfirmModal';
+          modal.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.7); display: flex; align-items: center; 
+            justify-content: center; z-index: 999999; animation: fadeIn 0.2s;
+          `;
+          
+          modal.innerHTML = `
+            <div style="
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              border-radius: 24px; padding: 0; max-width: 500px; width: 90%;
+              box-shadow: 0 25px 60px rgba(0,0,0,0.4); overflow: hidden;
+              animation: slideUp 0.3s;
+            ">
+              <div style="background: white; padding: 32px; border-radius: 0 0 24px 24px;">
+                <div style="text-align: center; margin-bottom: 24px;">
+                  <h3 style="font-size: 24px; font-weight: bold; color: #333; margin-bottom: 8px;">
+                    精算を実行する前に、データの自動バックアップを作成しますか？
+                  </h3>
+                </div>
+                
+                <div style="background: #f0f7ff; border-left: 4px solid #667eea; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                  <div style="font-weight: bold; color: #667eea; margin-bottom: 12px; font-size: 16px;">【推奨: はい】</div>
+                  <div style="color: #555; font-size: 14px; line-height: 1.8;">
+                    以下がバックアップされます：<br>
+                    • 商品<br>
+                    • 従業員<br>
+                    • 注文履歴<br>
+                    • 勤怠データ<br>
+                    • 商品カテゴリ設定<br>
+                    • レシート設定<br>
+                    • 在庫設定<br>
+                    • アラート設定<br>
+                    • 営業時間設定<br>
+                    • テーブル設定<br><br>
+                    誤って削除した場合に復元できます。<br>
+                    過去7日分のバックアップが自動保持されます。
+                  </div>
+                </div>
+                
+                <div style="background: #fff9e6; border-left: 4px solid #ff9800; padding: 16px; border-radius: 8px; margin-bottom: 24px;">
+                  <div style="font-weight: bold; color: #ff9800; margin-bottom: 8px; font-size: 15px;">【いいえを選択した場合】</div>
+                  <div style="color: #666; font-size: 14px;">バックアップなしで精算を実行します</div>
+                </div>
+                
+                <div style="display: flex; gap: 12px;">
+                  <button id="backupNoBtn" style="
+                    flex: 1; padding: 16px; font-size: 16px; font-weight: bold;
+                    border: 2px solid #ddd; border-radius: 12px; cursor: pointer;
+                    background: white; color: #666; transition: all 0.2s;
+                  " onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='white'">
+                    いいえ
+                  </button>
+                  <button id="backupYesBtn" style="
+                    flex: 1; padding: 16px; font-size: 16px; font-weight: bold;
+                    border: none; border-radius: 12px; cursor: pointer;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+                    transition: all 0.2s;
+                  " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.5)'" 
+                     onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(102, 126, 234, 0.4)'">
+                    はい（推奨）
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+          
+          document.body.appendChild(modal);
+          
+          document.getElementById('backupYesBtn').onclick = () => {
+            modal.remove();
+            resolve(true);
+          };
+          document.getElementById('backupNoBtn').onclick = () => {
+            modal.remove();
+            resolve(false);
+          };
+        });
+        
+        if (shouldBackup) {
+          console.log('💾 バックアップを作成します');
+          const backupSuccess = await window.createAutoBackup();
+          if (!backupSuccess) {
+            const continueAnyway = confirm('バックアップの作成に失敗しました。\n\nそれでも精算を続けますか？');
+            if (!continueAnyway) {
+              return;
+            }
+          } else {
+            console.log('✅ バックアップ作成完了 - 精算を続行します');
+          }
+        } else {
+          console.log('⚠️ バックアップをスキップして精算を実行します');
+        }
+        
         // 本日の日付を取得（3時基準）
         const now = new Date();
         let today = new Date(now);
@@ -6818,18 +6933,6 @@ ${redSlipCount > 0 ? `
   </script>
   
   <!-- 売上モーダル -->
-  <div id="salesModal" class="sales-modal">
-    <div class="sales-modal-content">
-      <div class="sales-modal-header">
-        <h2 class="sales-modal-title" id="salesModalTitle">本日の売上</h2>
-        <button class="sales-modal-close" onclick="closeSalesModal()">×</button>
-      </div>
-      <div id="salesContent">
-        <div style="text-align: center; padding: 20px;">読み込み中...</div>
-      </div>
-    </div>
-  </div>
-  
   <!-- リアルタイム在庫パネル -->
   <div id="inventoryPanel" style="position: fixed; bottom: 20px; right: 20px; width: 300px; max-height: 400px; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 9999; overflow: hidden; transition: all 0.3s ease;">
     <div id="inventoryPanelBar" onclick="toggleInventoryPanel()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 12px 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background 0.3s ease;">
