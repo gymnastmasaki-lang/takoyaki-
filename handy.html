@@ -2823,6 +2823,7 @@
     // ========== 📋 履歴機能 ==========
     
     let historyOrders = [];
+    let currentEditingOrder = null;
     
     window.showHistoryModal = async function() {
       // 機能メニューを閉じる
@@ -3013,27 +3014,324 @@
       await loadHistory();
     };
     
-    // ========== 赤伝票機能 ==========
-    window.redSlipFromHistory = async function(orderId) {
+    // ========== 注文編集機能 ==========
+    
+    let currentEditingOrder = null;
+    
+    window.editOrderFromHistory = async function(orderId) {
       try {
         const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
         if (!orderDoc.exists()) {
-          alert('注文が見つかりません');
+          await showCustomAlert({ 
+            icon: '', 
+            title: 'エラー', 
+            message: '注文が見つかりません', 
+            btnClass: 'modal-btn-danger' 
+          });
           return;
         }
         
-        const orderData = { id: orderDoc.id, ...orderDoc.data() };
+        const orderData = orderDoc.data();
         
-        if (!orderData.paidAt) {
-          alert('会計済みの注文のみ赤伝票できます');
-          return;
+        currentEditingOrder = {
+          id: orderId,
+          ...orderData,
+          originalTotalAmount: orderData.totalAmount,
+          originalPaymentMethod: orderData.paymentMethod
+        };
+        
+        // 支払方法の選択肢
+        const paymentMethods = {
+          'cash': '現金',
+          'emoney': '電子マネー',
+          'credit': 'クレジットカード'
+        };
+        
+        let paymentMethodOptions = '';
+        Object.keys(paymentMethods).forEach(method => {
+          const selected = orderData.paymentMethod === method ? 'selected' : '';
+          paymentMethodOptions += `<option value="${method}" ${selected}>${paymentMethods[method]}</option>`;
+        });
+        
+        // 商品リスト
+        let itemsHtml = '';
+        if (orderData.items && orderData.items.length > 0) {
+          orderData.items.forEach((item, index) => {
+            let toppingsHtml = '';
+            if (item.toppingDetails && item.toppingDetails.length > 0) {
+              const groupedBySet = {};
+              item.toppingDetails.forEach(detail => {
+                if (!groupedBySet[detail.setName]) {
+                  groupedBySet[detail.setName] = [];
+                }
+                groupedBySet[detail.setName].push(detail.optionName);
+              });
+              
+              toppingsHtml = Object.entries(groupedBySet).map(([setName, options]) => {
+                return `
+                  <div style="font-size: 12px; color: #666; font-weight: bold; margin-top: 5px;">${setName}</div>
+                  ${options.map(opt => `<div style="font-size: 12px; color: #666; margin-left: 10px;">・${opt}</div>`).join('')}
+                `;
+              }).join('');
+            } else if (item.toppings && item.toppings !== 'なし') {
+              toppingsHtml = `<div style="font-size: 12px; color: #666;">トッピング: ${item.toppings}</div>`;
+            }
+            
+            itemsHtml += `
+              <div style="padding: 10px; background: #f5f5f5; border-radius: 8px; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <strong>${item.name}</strong>
+                    ${toppingsHtml}
+                  </div>
+                  <button onclick="removeItemFromOrder(${index})" style="padding: 5px 10px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">削除</button>
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px;">
+                  <label>数量:</label>
+                  <input type="number" value="${item.quantity}" onchange="updateItemQuantity(${index}, this.value)" min="1" style="width: 80px; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+                  <span style="margin-left: auto; font-weight: bold;">¥${((item.price + (item.toppingPrice || 0)) * item.quantity).toLocaleString()}</span>
+                </div>
+              </div>
+            `;
+          });
         }
         
-        const confirmed = confirm(`注文 #${orderData.orderNumber} を赤伝票で完全取消しますか？\n\n金額: ¥${orderData.totalAmount.toLocaleString()}\n\n⚠️ 重要な注意事項:\n• 売上から完全に除外されます\n• 客数も減少します\n• 復元できません\n• この操作は取り消せません`);
+        const content = document.getElementById('editOrderContent');
+        content.innerHTML = `
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: bold;">注文番号</label>
+            <div style="font-size: 24px; color: #667eea;">#${orderData.orderNumber || 0}</div>
+          </div>
+          
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: bold;">テーブル番号</label>
+            <input type="text" id="editTableNumber" value="${orderData.tableNumber || ''}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+          </div>
+          
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: bold;">支払方法</label>
+            <select id="editPaymentMethod" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+              ${paymentMethodOptions}
+            </select>
+          </div>
+          
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 10px; font-weight: bold;">注文商品</label>
+            ${itemsHtml || '<div style="text-align: center; padding: 20px; color: #999;">商品がありません</div>'}
+          </div>
+          
+          <div style="padding: 15px; background: #e3f2fd; border-radius: 8px; text-align: right;">
+            <span style="font-size: 18px; font-weight: bold;">合計: </span>
+            <span id="editTotalAmount" style="font-size: 24px; font-weight: bold; color: #1976d2;">¥${(orderData.totalAmount || 0).toLocaleString()}</span>
+          </div>
+        `;
         
-        if (!confirmed) return;
+        // ボタンを動的に生成
+        const buttonsContainer = document.getElementById('editOrderButtons');
+        if (orderData.paidAt) {
+          buttonsContainer.innerHTML = `
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+            <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="redSlipFromEdit()">赤伝票</button>
+            <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+          `;
+        } else {
+          if (orderData.deleted) {
+            buttonsContainer.innerHTML = `
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;" onclick="restoreOrder()">注文を復元</button>
+              <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+            `;
+          } else {
+            buttonsContainer.innerHTML = `
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="saveOrderEdit()">保存</button>
+              <button class="btn" style="flex: 1; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white;" onclick="deleteOrderFromEdit()">注文取消</button>
+              <button class="btn btn-secondary" style="flex: 1;" onclick="closeEditOrderModal()">キャンセル</button>
+            `;
+          }
+        }
         
-        // 会計日時から営業日を計算（3時基準）
+        document.getElementById('editOrderModal').style.display = 'flex';
+        
+      } catch (e) {
+        console.error('注文編集エラー:', e);
+        await showCustomAlert({ 
+          icon: '', 
+          title: 'エラー', 
+          message: '注文の読み込みに失敗しました', 
+          btnClass: 'modal-btn-danger' 
+        });
+      }
+    };
+    
+    window.closeEditOrderModal = function() {
+      document.getElementById('editOrderModal').style.display = 'none';
+      currentEditingOrder = null;
+    };
+    
+    window.updateItemQuantity = function(index, newQuantity) {
+      const qty = parseInt(newQuantity);
+      if (qty < 1) return;
+      
+      currentEditingOrder.items[index].quantity = qty;
+      
+      // 合計金額を再計算
+      let total = 0;
+      currentEditingOrder.items.forEach(item => {
+        total += (item.price + (item.toppingPrice || 0)) * item.quantity;
+      });
+      currentEditingOrder.totalAmount = total;
+      
+      document.getElementById('editTotalAmount').textContent = `¥${total.toLocaleString()}`;
+    };
+    
+    window.removeItemFromOrder = function(index) {
+      currentEditingOrder.items.splice(index, 1);
+      
+      // 合計金額を再計算
+      let total = 0;
+      currentEditingOrder.items.forEach(item => {
+        total += (item.price + (item.toppingPrice || 0)) * item.quantity;
+      });
+      currentEditingOrder.totalAmount = total;
+      
+      // 再表示
+      editOrderFromHistory(currentEditingOrder.id);
+    };
+    
+    window.saveOrderEdit = async function() {
+      if (!currentEditingOrder) return;
+      
+      try {
+        const tableNumber = document.getElementById('editTableNumber').value;
+        const paymentMethod = document.getElementById('editPaymentMethod').value;
+        
+        const orderUpdates = {
+          tableNumber: tableNumber,
+          paymentMethod: paymentMethod,
+          items: currentEditingOrder.items,
+          totalAmount: currentEditingOrder.totalAmount
+        };
+        
+        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), orderUpdates);
+        
+        await showCustomAlert({ 
+          icon: '', 
+          title: '完了', 
+          message: '注文を更新しました', 
+          btnClass: 'modal-btn-success' 
+        });
+        
+        closeEditOrderModal();
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('注文更新エラー:', e);
+        await showCustomAlert({ 
+          icon: '', 
+          title: 'エラー', 
+          message: '注文の更新に失敗しました', 
+          btnClass: 'modal-btn-danger' 
+        });
+      }
+    };
+    
+    window.deleteOrderFromEdit = async function() {
+      if (!currentEditingOrder) return;
+      
+      const confirmed = await showCustomConfirm({
+        icon: '',
+        title: '注文取消',
+        message: `注文 #${currentEditingOrder.orderNumber} を取り消しますか？\n\n※ 削除しても復元できます`,
+        btnText: '取消',
+        btnClass: 'modal-btn-danger'
+      });
+      
+      if (!confirmed) return;
+      
+      try {
+        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
+          deleted: true,
+          deletedAt: window.Timestamp.now()
+        });
+        
+        await showCustomAlert({ 
+          icon: '', 
+          title: '完了', 
+          message: '注文を取り消しました', 
+          btnClass: 'modal-btn-success' 
+        });
+        
+        closeEditOrderModal();
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('注文取消エラー:', e);
+        await showCustomAlert({ 
+          icon: '', 
+          title: 'エラー', 
+          message: '注文の取消に失敗しました', 
+          btnClass: 'modal-btn-danger' 
+        });
+      }
+    };
+    
+    window.restoreOrder = async function() {
+      if (!currentEditingOrder) return;
+      
+      try {
+        await window.updateDoc(window.getStoreDoc('orders', currentEditingOrder.id), {
+          deleted: false,
+          deletedAt: null
+        });
+        
+        await showCustomAlert({ 
+          icon: '', 
+          title: '完了', 
+          message: '注文を復元しました', 
+          btnClass: 'modal-btn-success' 
+        });
+        
+        closeEditOrderModal();
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('注文復元エラー:', e);
+        await showCustomAlert({ 
+          icon: '', 
+          title: 'エラー', 
+          message: '注文の復元に失敗しました', 
+          btnClass: 'modal-btn-danger' 
+        });
+      }
+    };
+    
+    window.redSlipFromEdit = async function() {
+      if (!currentEditingOrder) return;
+      
+      const orderData = currentEditingOrder;
+      
+      if (!orderData.paidAt) {
+        await showCustomAlert({ 
+          icon: '', 
+          title: '警告', 
+          message: '会計済みの注文のみ赤伝票できます', 
+          btnClass: 'modal-btn-danger' 
+        });
+        return;
+      }
+      
+      const confirmed = await showCustomConfirm({
+        icon: '',
+        title: '赤伝票（完全取消）',
+        message: `注文 #${orderData.orderNumber} を赤伝票で完全取消しますか？\n\n金額: ¥${orderData.totalAmount.toLocaleString()}\n\n重要な注意事項:\n• 売上から完全に除外されます\n• 客数も減少します\n• 復元できません\n• この操作は取り消せません`,
+        btnText: '赤伝票で取消',
+        btnClass: 'modal-btn-danger'
+      });
+      
+      if (!confirmed) return;
+      
+      try {
+        // 会計日時から営業日を計算
         const paidDate = orderData.paidAt.toDate();
         let businessDate = new Date(paidDate);
         
@@ -3048,7 +3346,12 @@
         const dailySalesDoc = await window.getDoc(dailySalesRef);
         
         if (!dailySalesDoc.exists()) {
-          alert('この営業日のdailySalesが見つかりません');
+          await showCustomAlert({ 
+            icon: '', 
+            title: '警告', 
+            message: `この営業日のdailySalesが見つかりません\n営業日: ${dateStr}`, 
+            btnClass: 'modal-btn-danger' 
+          });
           return;
         }
         
@@ -3122,29 +3425,195 @@
         // 注文を削除
         await window.deleteDoc(window.getStoreDoc('orders', orderData.id));
         
-        alert(`注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n\n売上・客数から除外されました`);
+        await showCustomAlert({ 
+          icon: '', 
+          title: '赤伝票完了', 
+          message: `注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n\n売上・客数から除外されました`, 
+          btnClass: 'modal-btn-success' 
+        });
+        
+        closeEditOrderModal();
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('赤伝票エラー:', e);
+        await showCustomAlert({ 
+          icon: '', 
+          title: 'エラー', 
+          message: `赤伝票処理に失敗しました: ${e.message}`, 
+          btnClass: 'modal-btn-danger' 
+        });
+      }
+    };
+    
+    // ========== 赤伝票機能 ==========
+    window.redSlipFromHistory = async function(orderId) {
+      try {
+        const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
+        if (!orderDoc.exists()) {
+          await showCustomAlert({ 
+            icon: '', 
+            title: 'エラー', 
+            message: '注文が見つかりません', 
+            btnClass: 'modal-btn-danger' 
+          });
+          return;
+        }
+        
+        const orderData = { id: orderDoc.id, ...orderDoc.data() };
+        
+        if (!orderData.paidAt) {
+          await showCustomAlert({ 
+            icon: '', 
+            title: '警告', 
+            message: '会計済みの注文のみ赤伝票できます', 
+            btnClass: 'modal-btn-danger' 
+          });
+          return;
+        }
+        
+        const confirmed = await showCustomConfirm({
+          icon: '',
+          title: '赤伝票（完全取消）',
+          message: `注文 #${orderData.orderNumber} を赤伝票で完全取消しますか？\n\n金額: ¥${orderData.totalAmount.toLocaleString()}\n\n重要な注意事項:\n• 売上から完全に除外されます\n• 客数も減少します\n• 復元できません\n• この操作は取り消せません`,
+          btnText: '赤伝票で取消',
+          btnClass: 'modal-btn-danger'
+        });
+        
+        if (!confirmed) return;
+        
+        // 会計日時から営業日を計算（3時基準）
+        const paidDate = orderData.paidAt.toDate();
+        let businessDate = new Date(paidDate);
+        
+        if (paidDate.getHours() < 3) {
+          businessDate.setDate(businessDate.getDate() - 1);
+        }
+        
+        const dateStr = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
+        
+        // dailySalesを取得
+        const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+        const dailySalesDoc = await window.getDoc(dailySalesRef);
+        
+        if (!dailySalesDoc.exists()) {
+          await showCustomAlert({ 
+            icon: '', 
+            title: '警告', 
+            message: `この営業日のdailySalesが見つかりません\n営業日: ${dateStr}`, 
+            btnClass: 'modal-btn-danger' 
+          });
+          return;
+        }
+        
+        const dailyData = dailySalesDoc.data();
+        const totalAmount = orderData.totalAmount || 0;
+        
+        // 税率計算
+        let tax8Total = 0;
+        let tax10Total = 0;
+        
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+            let itemTaxRate = item.taxRate || (item.takeout ? 8 : 10);
+            
+            if (itemTaxRate === 8) {
+              tax8Total += itemTotal;
+            } else {
+              tax10Total += itemTotal;
+            }
+          });
+        }
+        
+        // 支払い方法別の金額
+        let cashSales = 0, emoneSales = 0, creditSales = 0;
+        const paymentMethod = orderData.paymentMethod || '';
+        if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
+        else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
+        else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
+        
+        // 商品数を計算
+        let totalItems = 0;
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            totalItems += item.quantity || 0;
+          });
+        }
+        
+        // dailySalesから減算
+        const updateData = {
+          totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
+          customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+          totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
+          cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
+          emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
+          creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
+          tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
+          tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total),
+          redSlipCount: (dailyData.redSlipCount || 0) + 1,
+          redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount,
+          redSlipTax8Total: (dailyData.redSlipTax8Total || 0) + tax8Total,
+          redSlipTax10Total: (dailyData.redSlipTax10Total || 0) + tax10Total
+        };
+        
+        await window.updateDoc(dailySalesRef, updateData);
+        
+        // redSlipsコレクションに保存
+        const redSlipData = {
+          ...orderData,
+          redSlippedAt: window.Timestamp.now(),
+          redSlippedBy: window.currentStoreId,
+          businessDate: dateStr,
+          originalOrderId: orderData.id,
+          calculatedTax8Total: tax8Total,
+          calculatedTax10Total: tax10Total
+        };
+        
+        const redSlipRef = window.doc(window.collection(window.db, 'stores', window.currentStoreId, 'redSlips'));
+        await window.setDoc(redSlipRef, redSlipData);
+        
+        // 注文を削除
+        await window.deleteDoc(window.getStoreDoc('orders', orderData.id));
+        
+        await showCustomAlert({ 
+          icon: '', 
+          title: '赤伝票完了', 
+          message: `注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n\n売上・客数から除外されました`, 
+          btnClass: 'modal-btn-success' 
+        });
         
         // 履歴を再読み込み
         await loadHistory();
         
       } catch (e) {
         console.error('赤伝票エラー:', e);
-        alert('赤伝票処理に失敗しました: ' + e.message);
+        await showCustomAlert({ 
+          icon: '', 
+          title: 'エラー', 
+          message: `赤伝票処理に失敗しました: ${e.message}`, 
+          btnClass: 'modal-btn-danger' 
+        });
       }
     };
     
     // ========== レシート・領収書再印刷機能 ==========
     window.reprintReceipt = async function(orderId) {
-      alert('レシート再印刷機能\n（プリンター連携が必要です）\n\n現在この機能は開発中です。');
+      await showCustomAlert({ 
+        icon: '', 
+        title: 'レシート再印刷', 
+        message: 'レシート再印刷機能\n（プリンター連携が必要です）\n\n現在この機能は開発中です。', 
+        btnClass: 'modal-btn-primary' 
+      });
     };
     
     window.reprintInvoice = async function(orderId) {
-      alert('領収書再印刷機能\n（プリンター連携が必要です）\n\n現在この機能は開発中です。');
-    };
-    
-    // ========== 履歴から注文編集 ==========
-    window.editOrderFromHistory = async function(orderId) {
-      alert('履歴からの注文編集機能\n\n現在この機能は開発中です。');
+      await showCustomAlert({ 
+        icon: '', 
+        title: '領収書再印刷', 
+        message: '領収書再印刷機能\n（プリンター連携が必要です）\n\n現在この機能は開発中です。', 
+        btnClass: 'modal-btn-primary' 
+      });
     };
     
     // ========== 💸 支出機能 ==========
@@ -3942,5 +4411,18 @@
     </div>
   </div>
   
+  
+  <!-- 注文編集モーダル -->
+  <div id="editOrderModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3>注文編集</h3>
+        <button class="modal-close" onclick="closeEditOrderModal()">×</button>
+      </div>
+      <div id="editOrderContent" style="padding: 20px;"></div>
+      <div id="editOrderButtons" class="modal-footer" style="display: flex; gap: 10px;"></div>
+    </div>
+  </div>
+
 </body>
 </html>
