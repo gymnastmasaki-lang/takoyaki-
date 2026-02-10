@@ -6253,31 +6253,7 @@ ${redSlipCount > 0 ? `
     };
     
     // 🆕 精算を実行（CSVダウンロード）
-    window.confirmSettlement = async function() {
-      try {
-        // 精算日付を取得
-        const dateStr = document.getElementById('settlementDate').value;
-        if (!dateStr) {
-          await showCustomAlert({
-            title: 'エラー',
-            message: '精算日付を選択してください',
-            type: 'error'
-          });
-          return;
-        }
-        
-        await executeSettlement(dateStr);
-        
-      } catch (e) {
-        console.error('❌ 精算エラー:', e);
-        await showCustomAlert({
-          title: 'エラー',
-          message: '精算処理に失敗しました',
-          type: 'error'
-        });
-      }
-    };
-    
+
     // 🆕 本日の精算を直接実行（売上モーダルから）
     window.executeDailySettlement = async function() {
       try {
@@ -6549,219 +6525,6 @@ ${redSlipCount > 0 ? `
     }
     
     // 🆕 日計表出力
-    window.generateDailyReport = async function() {
-      try {
-        console.log('📊 日計表生成開始');
-        
-        // 当月の全ての日次売上データを取得
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
-        
-        const firstDay = new Date(year, month - 1, 1);
-        const lastDay = new Date(year, month, 0);
-        const daysInMonth = lastDay.getDate();
-        
-        console.log(`${year}年${month}月のデータを取得中...`);
-        
-        // Firestoreから当月のデータを取得
-        const dailySalesSnapshot = await window.getDocs(window.getStoreCollection('dailySales'));
-        
-        // 日付ごとにデータを整理
-        const salesByDate = {};
-        dailySalesSnapshot.forEach(doc => {
-          const data = doc.data();
-          const date = data.date;
-          
-          if (date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
-            salesByDate[date] = data;
-          }
-        });
-        
-        // Excelデータを作成
-        const excelData = [];
-        
-        // ヘッダー
-        excelData.push(['', '売上日計表', '', '', '', '', '', '', '', '', 'ハンディシステム', '', '', '']);
-        excelData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
-        excelData.push(['', `${year}-${String(month).padStart(2, '0')}-01`, '', '', '', '', '', '', '', '', '', '', '', '']);
-        excelData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
-        excelData.push(['', '日', '曜日', '伝票数', '現金', 'カード', '電子マネー', '売上合計', '人件費', '人件費%', '支払い', '純売上', 'TOTAL粗利', '天気']);
-        
-        const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
-        let totalGrossProfit = 0;
-        let sumCustomerCount = 0;
-        let sumCashSales = 0;
-        let sumCreditSales = 0;
-        let sumEmoneSales = 0;
-        let sumTotalSales = 0;
-        let sumLaborCost = 0;
-        let sumPayment = 0;
-        let sumNetSales = 0;
-        
-        // 各日のデータ
-        for (let day = 1; day <= daysInMonth; day++) {
-          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          const date = new Date(year, month - 1, day);
-          const weekDay = weekDays[date.getDay()];
-          
-          const data = salesByDate[dateStr];
-          
-          if (data) {
-            const customerCount = data.customerCount || 0;
-            const cashSales = data.cashSales || 0;
-            const creditSales = data.creditSales || 0;
-            const emoneSales = data.emoneSales || 0;
-            const totalSales = cashSales + creditSales + emoneSales;
-            
-            // 人件費を取得
-            let laborCost = 0;
-            try {
-              const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
-              attendanceSnapshot.forEach(docData => {
-                const attData = docData.data();
-                if (attData.date === dateStr && attData.totalWage) {
-                  laborCost += attData.totalWage;
-                }
-              });
-            } catch (e) {
-              console.error('人件費取得エラー:', e);
-            }
-            
-            const laborCostPercent = totalSales > 0 ? Math.round(laborCost / totalSales * 100) : 0;
-            
-            // 支出を取得
-            let payment = 0;
-            try {
-              const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
-              if (expenseDoc.exists()) {
-                payment = expenseDoc.data().total || 0;
-              }
-            } catch (e) {
-              console.error('支出取得エラー:', e);
-            }
-            
-            const netSales = totalSales - laborCost - payment;
-            totalGrossProfit += netSales;
-            
-            sumCustomerCount += customerCount;
-            sumCashSales += cashSales;
-            sumCreditSales += creditSales;
-            sumEmoneSales += emoneSales;
-            sumTotalSales += totalSales;
-            sumLaborCost += laborCost;
-            sumPayment += payment;
-            sumNetSales += netSales;
-            
-            excelData.push([
-              '',
-              date,
-              weekDay,
-              customerCount,
-              cashSales,
-              creditSales,
-              emoneSales,
-              totalSales,
-              Math.round(laborCost),
-              laborCostPercent + '%',
-              payment,
-              Math.round(netSales),
-              Math.round(totalGrossProfit),
-              ''
-            ]);
-          } else {
-            excelData.push(['', date, weekDay, '', '', '', '', '', '', '', '', '', '', '']);
-          }
-        }
-        
-        // 合計行
-        const avgLaborCostPercent = sumTotalSales > 0 ? Math.round(sumLaborCost / sumTotalSales * 100) : 0;
-        excelData.push([
-          '',
-          '',
-          '合計',
-          sumCustomerCount,
-          sumCashSales,
-          sumCreditSales,
-          sumEmoneSales,
-          sumTotalSales,
-          Math.round(sumLaborCost),
-          avgLaborCostPercent + '%',
-          sumPayment,
-          Math.round(sumNetSales),
-          '',
-          ''
-        ]);
-        
-        // SheetJSでExcelファイルを生成
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet(excelData);
-        
-        // 列幅を設定
-        ws['!cols'] = [
-          { wch: 3 }, { wch: 12 }, { wch: 5 }, { wch: 8 }, { wch: 10 },
-          { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
-          { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 10 }
-        ];
-        
-        // スタイル設定
-        const range = XLSX.utils.decode_range(ws['!ref']);
-        for (let R = range.s.r; R <= range.e.r; R++) {
-          for (let C = range.s.c; C <= range.e.c; C++) {
-            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-            if (!ws[cellAddress]) {
-              ws[cellAddress] = { t: 's', v: '' };
-            }
-            if (!ws[cellAddress].s) {
-              ws[cellAddress].s = {};
-            }
-            ws[cellAddress].s.border = {
-              top: { style: 'thin', color: { rgb: '000000' } },
-              bottom: { style: 'thin', color: { rgb: '000000' } },
-              left: { style: 'thin', color: { rgb: '000000' } },
-              right: { style: 'thin', color: { rgb: '000000' } }
-            };
-            
-            if (R === 4) {
-              ws[cellAddress].s.fill = { patternType: 'solid', fgColor: { rgb: 'D3D3D3' } };
-              ws[cellAddress].s.font = { bold: true, sz: 11 };
-              ws[cellAddress].s.alignment = { horizontal: 'center', vertical: 'center' };
-            }
-            
-            if (R === range.e.r) {
-              ws[cellAddress].s.fill = { patternType: 'solid', fgColor: { rgb: 'FFFFCC' } };
-              ws[cellAddress].s.font = { bold: true, sz: 11 };
-            }
-            
-            if (C >= 3 && C <= 12 && R >= 5) {
-              if (!ws[cellAddress].s.alignment) {
-                ws[cellAddress].s.alignment = {};
-              }
-              ws[cellAddress].s.alignment.horizontal = 'right';
-            }
-          }
-        }
-        
-        XLSX.utils.book_append_sheet(wb, ws, '売上日計表');
-        
-        const fileName = `日計表${year}年${month}月.xlsx`;
-        XLSX.writeFile(wb, fileName);
-        
-        await showCustomAlert({
-          title: '完了',
-          message: `日計表を出力しました\n${fileName}`,
-          type: 'success'
-        });
-        
-      } catch (e) {
-        console.error('❌ 日計表生成エラー:', e);
-        await showCustomAlert({
-          title: 'エラー',
-          message: '日計表の生成に失敗しました',
-          type: 'error'
-        });
-      }
-    };
 
     
     // ========== 🖨 プリンタ設定機能 ==========
@@ -7119,7 +6882,13 @@ ${redSlipCount > 0 ? `
       </div>
       <div class="modal-footer" style="display: flex; flex-direction: column; gap: 10px;">
         <button class="btn" style="width: 100%; background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%); color: white;" onclick="confirmSettlement()">精算を実行</button>
-        <button class="btn" style="width: 100%; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="generateDailyReport()">日計表出力</button>
+        <div style="margin-bottom: 10px;">
+          <label style="display: block; margin-bottom: 5px; color: #333; font-weight: bold;">日計表出力する月を選択:</label>
+          <select id="dailyReportMonth" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 10px;">
+            <!-- 過去12ヶ月分の選択肢を動的に生成 -->
+          </select>
+          <button class="btn" style="width: 100%; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;" onclick="generateDailyReportForSelectedMonth()">日計表出力</button>
+        </div>
         <button class="btn btn-secondary" style="width: 100%;" onclick="closeSettlementModal()">キャンセル</button>
       </div>
     </div>
