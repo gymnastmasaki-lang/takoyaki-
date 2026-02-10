@@ -3311,10 +3311,14 @@
         let tax10InclusiveTotal = 0;
         let tax8ExclusiveTotal = 0;
         let tax10ExclusiveTotal = 0;
-        let redSlipTax8Inclusive = 0;
-        let redSlipTax10Inclusive = 0;
-        let redSlipTax8Exclusive = 0;
-        let redSlipTax10Exclusive = 0;
+        // 🆕 赤伝票の内税・外税はdailySalesから取得（ordersから計算すると削除済みの赤伝が含まれない）
+        let redSlipTax8Inclusive = settlementData.redSlipTax8Inclusive || 0;
+        let redSlipTax10Inclusive = settlementData.redSlipTax10Inclusive || 0;
+        let redSlipTax8Exclusive = settlementData.redSlipTax8Exclusive || 0;
+        let redSlipTax10Exclusive = settlementData.redSlipTax10Exclusive || 0;
+        
+        // dailySalesに保存されていない場合のみordersから計算（後方互換性）
+        const needCalculateRedSlip = !settlementData.redSlipTax8Inclusive && !settlementData.redSlipTax10Inclusive;
         
         try {
           const ordersQuery = window.query(
@@ -3345,18 +3349,18 @@
                 if ((item.taxRate || 10) === 8) {
                   if (taxType === 'exclusive') {
                     tax8ExclusiveTotal += taxAmount;
-                    if (isRedSlip) redSlipTax8Exclusive += taxAmount;
+                    if (isRedSlip && needCalculateRedSlip) redSlipTax8Exclusive += taxAmount;
                   } else {
                     tax8InclusiveTotal += taxAmount;
-                    if (isRedSlip) redSlipTax8Inclusive += taxAmount;
+                    if (isRedSlip && needCalculateRedSlip) redSlipTax8Inclusive += taxAmount;
                   }
                 } else {
                   if (taxType === 'exclusive') {
                     tax10ExclusiveTotal += taxAmount;
-                    if (isRedSlip) redSlipTax10Exclusive += taxAmount;
+                    if (isRedSlip && needCalculateRedSlip) redSlipTax10Exclusive += taxAmount;
                   } else {
                     tax10InclusiveTotal += taxAmount;
-                    if (isRedSlip) redSlipTax10Inclusive += taxAmount;
+                    if (isRedSlip && needCalculateRedSlip) redSlipTax10Inclusive += taxAmount;
                   }
                 }
               });
@@ -5375,16 +5379,33 @@ ${fileName}`,
         // 税率計算
         let tax8Total = 0;
         let tax10Total = 0;
+        // 🆕 内税・外税を区別して計算
+        let tax8Inclusive = 0;
+        let tax10Inclusive = 0;
+        let tax8Exclusive = 0;
+        let tax10Exclusive = 0;
         
         if (orderData.items && Array.isArray(orderData.items)) {
           orderData.items.forEach(item => {
             const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
             let itemTaxRate = item.taxRate || (item.takeout ? 8 : 10);
+            const taxType = item.taxType || 'inclusive';  // デフォルトは内税
+            const taxAmount = getTaxAmount(item, item.quantity || 1);
             
             if (itemTaxRate === 8) {
               tax8Total += itemTotal;
+              if (taxType === 'exclusive') {
+                tax8Exclusive += taxAmount;
+              } else {
+                tax8Inclusive += taxAmount;
+              }
             } else {
               tax10Total += itemTotal;
+              if (taxType === 'exclusive') {
+                tax10Exclusive += taxAmount;
+              } else {
+                tax10Inclusive += taxAmount;
+              }
             }
           });
         }
@@ -5420,7 +5441,12 @@ ${fileName}`,
           redSlipCount: (dailyData.redSlipCount || 0) + 1,
           redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount,
           redSlipTax8Total: (dailyData.redSlipTax8Total || 0) + tax8Total,
-          redSlipTax10Total: (dailyData.redSlipTax10Total || 0) + tax10Total
+          redSlipTax10Total: (dailyData.redSlipTax10Total || 0) + tax10Total,
+          // 🆕 内税・外税を保存
+          redSlipTax8Inclusive: (dailyData.redSlipTax8Inclusive || 0) + tax8Inclusive,
+          redSlipTax10Inclusive: (dailyData.redSlipTax10Inclusive || 0) + tax10Inclusive,
+          redSlipTax8Exclusive: (dailyData.redSlipTax8Exclusive || 0) + tax8Exclusive,
+          redSlipTax10Exclusive: (dailyData.redSlipTax10Exclusive || 0) + tax10Exclusive
         };
         
         await window.updateDoc(dailySalesRef, updateData);
@@ -6156,6 +6182,10 @@ ${fileName}`,
         let totalRedSlipAmount = 0;  // 🆕 赤伝票金額
         let totalRedSlipTax8 = 0;  // 🆕 赤伝票8%税金
         let totalRedSlipTax10 = 0;  // 🆕 赤伝票10%税金
+        let totalRedSlipTax8Inclusive = 0;  // 🆕 赤伝票8%内税
+        let totalRedSlipTax10Inclusive = 0;  // 🆕 赤伝票10%内税
+        let totalRedSlipTax8Exclusive = 0;  // 🆕 赤伝票8%外税
+        let totalRedSlipTax10Exclusive = 0;  // 🆕 赤伝票10%外税
         let totalExpense = 0;
         let totalLaborCost = 0;
         const itemCounts = {}; // 商品別カウント
@@ -6210,6 +6240,10 @@ ${fileName}`,
             totalRedSlipAmount += data.redSlipAmount || 0;  // 🆕 赤伝票金額
             totalRedSlipTax8 += data.redSlipTax8Total || 0;  // 🆕 赤伝票8%税金
             totalRedSlipTax10 += data.redSlipTax10Total || 0;  // 🆕 赤伝票10%税金
+            totalRedSlipTax8Inclusive += data.redSlipTax8Inclusive || 0;  // 🆕 赤伝票8%内税
+            totalRedSlipTax10Inclusive += data.redSlipTax10Inclusive || 0;  // 🆕 赤伝票10%内税
+            totalRedSlipTax8Exclusive += data.redSlipTax8Exclusive || 0;  // 🆕 赤伝票8%外税
+            totalRedSlipTax10Exclusive += data.redSlipTax10Exclusive || 0;  // 🆕 赤伝票10%外税
           }
           
           // 支出データ
@@ -6315,11 +6349,9 @@ ${fileName}`,
         let tax10InclusiveTotal = 0;
         let tax8ExclusiveTotal = 0;
         let tax10ExclusiveTotal = 0;
-        // 🆕 赤伝票の内税・外税
-        let redSlipTax8Inclusive = 0;
-        let redSlipTax10Inclusive = 0;
-        let redSlipTax8Exclusive = 0;
-        let redSlipTax10Exclusive = 0;
+        // 🆕 赤伝票の内税・外税は既にdailySalesから取得済み
+        // (totalRedSlipTax8Inclusive, totalRedSlipTax10Inclusive, 
+        //  totalRedSlipTax8Exclusive, totalRedSlipTax10Exclusive)
         
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
@@ -6334,8 +6366,6 @@ ${fileName}`,
           const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
           
           if (dates.includes(orderDateStr)) {
-            const isRedSlip = data.isRedSlip || false;  // 🆕 赤伝票判定
-            
             data.items.forEach(item => {
               const taxType = item.taxType || 'inclusive';
               const taxAmount = getTaxAmount(item, item.quantity || 1);
@@ -6343,18 +6373,14 @@ ${fileName}`,
               if ((item.taxRate || 10) === 8) {
                 if (taxType === 'exclusive') {
                   tax8ExclusiveTotal += taxAmount;
-                  if (isRedSlip) redSlipTax8Exclusive += taxAmount;  // 🆕
                 } else {
                   tax8InclusiveTotal += taxAmount;
-                  if (isRedSlip) redSlipTax8Inclusive += taxAmount;  // 🆕
                 }
               } else {
                 if (taxType === 'exclusive') {
                   tax10ExclusiveTotal += taxAmount;
-                  if (isRedSlip) redSlipTax10Exclusive += taxAmount;  // 🆕
                 } else {
                   tax10InclusiveTotal += taxAmount;
-                  if (isRedSlip) redSlipTax10Inclusive += taxAmount;  // 🆕
                 }
               }
             });
@@ -6420,14 +6446,14 @@ ${fileName}`,
 8%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax8 / 1.08).toLocaleString()}
 8%の赤伝票（税込）: -¥${totalRedSlipTax8.toLocaleString()}
 8%の赤伝票の消費税: -¥${(totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / 1.08)).toLocaleString()}
-  内税: -¥${redSlipTax8Inclusive.toLocaleString()}
-  外税: -¥${redSlipTax8Exclusive.toLocaleString()}
+  内税: -¥${totalRedSlipTax8Inclusive.toLocaleString()}
+  外税: -¥${totalRedSlipTax8Exclusive.toLocaleString()}
 
 10%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax10 / 1.10).toLocaleString()}
 10%の赤伝票（税込）: -¥${totalRedSlipTax10.toLocaleString()}
 10%の赤伝票の消費税: -¥${(totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / 1.10)).toLocaleString()}
-  内税: -¥${redSlipTax10Inclusive.toLocaleString()}
-  外税: -¥${redSlipTax10Exclusive.toLocaleString()}
+  内税: -¥${totalRedSlipTax10Inclusive.toLocaleString()}
+  外税: -¥${totalRedSlipTax10Exclusive.toLocaleString()}
 
 赤伝票消費税の合計: -¥${((totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / 1.08)) + (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / 1.10))).toLocaleString()}
 赤伝票税抜合計: -¥${(Math.floor(totalRedSlipTax8 / 1.08) + Math.floor(totalRedSlipTax10 / 1.10)).toLocaleString()}
