@@ -3311,14 +3311,16 @@
         let tax10InclusiveTotal = 0;
         let tax8ExclusiveTotal = 0;
         let tax10ExclusiveTotal = 0;
-        // 🆕 赤伝票の内税・外税はdailySalesから取得（ordersから計算すると削除済みの赤伝が含まれない）
+        // 🆕 赤伝票の内税・外税はdailySalesから取得
         let redSlipTax8Inclusive = settlementData.redSlipTax8Inclusive || 0;
         let redSlipTax10Inclusive = settlementData.redSlipTax10Inclusive || 0;
         let redSlipTax8Exclusive = settlementData.redSlipTax8Exclusive || 0;
         let redSlipTax10Exclusive = settlementData.redSlipTax10Exclusive || 0;
         
-        // dailySalesに保存されていない場合のみordersから計算（後方互換性）
-        const needCalculateRedSlip = !settlementData.redSlipTax8Inclusive && !settlementData.redSlipTax10Inclusive;
+        // dailySalesに保存されていない場合はredSlipsコレクションから計算（後方互換性）
+        const needCalculateRedSlip = (redSlipTax8Inclusive === 0 && redSlipTax8Exclusive === 0 && 
+                                      redSlipTax10Inclusive === 0 && redSlipTax10Exclusive === 0) &&
+                                     (settlementData.redSlipCount > 0);
         
         try {
           const ordersQuery = window.query(
@@ -3340,8 +3342,6 @@
             const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
             
             if (orderDateStr === dateStr) {
-              const isRedSlip = data.isRedSlip || false;
-              
               data.items.forEach(item => {
                 const taxType = item.taxType || 'inclusive';
                 const taxAmount = getTaxAmount(item, item.quantity || 1);
@@ -3349,23 +3349,58 @@
                 if ((item.taxRate || 10) === 8) {
                   if (taxType === 'exclusive') {
                     tax8ExclusiveTotal += taxAmount;
-                    if (isRedSlip && needCalculateRedSlip) redSlipTax8Exclusive += taxAmount;
                   } else {
                     tax8InclusiveTotal += taxAmount;
-                    if (isRedSlip && needCalculateRedSlip) redSlipTax8Inclusive += taxAmount;
                   }
                 } else {
                   if (taxType === 'exclusive') {
                     tax10ExclusiveTotal += taxAmount;
-                    if (isRedSlip && needCalculateRedSlip) redSlipTax10Exclusive += taxAmount;
                   } else {
                     tax10InclusiveTotal += taxAmount;
-                    if (isRedSlip && needCalculateRedSlip) redSlipTax10Inclusive += taxAmount;
                   }
                 }
               });
             }
           });
+          
+          // 🆕 赤伝票の内税・外税をredSlipsコレクションから計算（dailySalesに保存されていない場合）
+          if (needCalculateRedSlip) {
+            console.log('⚠️ dailySalesに赤伝票の内税・外税が保存されていないため、redSlipsから計算します');
+            try {
+              const redSlipsSnapshot = await window.getDocs(window.getStoreCollection('redSlips'));
+              redSlipsSnapshot.forEach(doc => {
+                const data = doc.data();
+                if (!data.businessDate || data.businessDate !== dateStr || !data.items) return;
+                
+                data.items.forEach(item => {
+                  const taxType = item.taxType || 'inclusive';
+                  const taxAmount = getTaxAmount(item, item.quantity || 1);
+                  
+                  if ((item.taxRate || 10) === 8) {
+                    if (taxType === 'exclusive') {
+                      redSlipTax8Exclusive += taxAmount;
+                    } else {
+                      redSlipTax8Inclusive += taxAmount;
+                    }
+                  } else {
+                    if (taxType === 'exclusive') {
+                      redSlipTax10Exclusive += taxAmount;
+                    } else {
+                      redSlipTax10Inclusive += taxAmount;
+                    }
+                  }
+                });
+              });
+              console.log('✅ redSlipsから計算完了:', {
+                redSlipTax8Inclusive,
+                redSlipTax8Exclusive,
+                redSlipTax10Inclusive,
+                redSlipTax10Exclusive
+              });
+            } catch (e) {
+              console.error('redSlips取得エラー:', e);
+            }
+          }
           
           console.log(' 内税・外税の内訳:', {
             tax8Inclusive: tax8InclusiveTotal,
@@ -6386,6 +6421,47 @@ ${fileName}`,
             });
           }
         });
+        
+        // 🆕 赤伝票の内税・外税がdailySalesに保存されていない場合はredSlipsから計算
+        if ((totalRedSlipTax8Inclusive === 0 && totalRedSlipTax8Exclusive === 0 && 
+             totalRedSlipTax10Inclusive === 0 && totalRedSlipTax10Exclusive === 0) &&
+            totalRedSlipCount > 0) {
+          console.log('⚠️ dailySalesに赤伝票の内税・外税が保存されていないため、redSlipsから計算します');
+          try {
+            const redSlipsSnapshot = await window.getDocs(window.getStoreCollection('redSlips'));
+            redSlipsSnapshot.forEach(doc => {
+              const data = doc.data();
+              if (!data.businessDate || !dates.includes(data.businessDate) || !data.items) return;
+              
+              data.items.forEach(item => {
+                const taxType = item.taxType || 'inclusive';
+                const taxAmount = getTaxAmount(item, item.quantity || 1);
+                
+                if ((item.taxRate || 10) === 8) {
+                  if (taxType === 'exclusive') {
+                    totalRedSlipTax8Exclusive += taxAmount;
+                  } else {
+                    totalRedSlipTax8Inclusive += taxAmount;
+                  }
+                } else {
+                  if (taxType === 'exclusive') {
+                    totalRedSlipTax10Exclusive += taxAmount;
+                  } else {
+                    totalRedSlipTax10Inclusive += taxAmount;
+                  }
+                }
+              });
+            });
+            console.log('✅ redSlipsから計算完了:', {
+              totalRedSlipTax8Inclusive,
+              totalRedSlipTax8Exclusive,
+              totalRedSlipTax10Inclusive,
+              totalRedSlipTax10Exclusive
+            });
+          } catch (e) {
+            console.error('redSlips取得エラー:', e);
+          }
+        }
         
         // 旧計算（互換性のため残す）
         const tax8Excluded = Math.floor(totalTax8 / 1.08);
