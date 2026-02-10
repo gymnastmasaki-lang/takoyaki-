@@ -1084,6 +1084,159 @@
     let changeAmount = 0;
     let customModalResolve = null;
     
+    // 🆕 グローバルデフォルト税率
+    let globalDefaultTaxRate = 10;
+    
+    // 🆕 カスタムアラート関数（オシャレ版・絵文字なし）
+    window.showCustomAlert = function(options) {
+      return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.id = 'customAlertModal';
+        modal.style.cssText = `
+          position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+          background: rgba(0,0,0,0.7); display: flex; align-items: center; 
+          justify-content: center; z-index: 999999; animation: fadeIn 0.2s;
+        `;
+        
+        const title = options.title || '通知';
+        const message = options.message || '';
+        const type = options.type || 'info'; // 'success', 'error', 'warning', 'info'
+        const confirmText = options.confirmText || 'OK';
+        const cancelText = options.cancelText;
+        const showCancel = !!cancelText;
+        
+        // タイプによる色分け
+        let gradient = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+        let iconColor = '#667eea';
+        if (type === 'success') {
+          gradient = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+          iconColor = '#4CAF50';
+        } else if (type === 'error') {
+          gradient = 'linear-gradient(135deg, #f44336 0%, #c62828 100%)';
+          iconColor = '#f44336';
+        } else if (type === 'warning') {
+          gradient = 'linear-gradient(135deg, #FF9800 0%, #F57C00 100%)';
+          iconColor = '#FF9800';
+        }
+        
+        modal.innerHTML = `
+          <div style="
+            background: ${gradient};
+            border-radius: 24px; padding: 0; max-width: 500px; width: 90%;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.4); overflow: hidden;
+            animation: slideUp 0.3s;
+          ">
+            <div style="background: white; padding: 32px; border-radius: 0 0 24px 24px;">
+              <div style="text-align: center; margin-bottom: 24px;">
+                <div style="width: 60px; height: 60px; margin: 0 auto 16px; background: ${iconColor}20; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                  <div style="width: 30px; height: 30px; border: 4px solid ${iconColor}; border-radius: 50%;"></div>
+                </div>
+                <h3 style="font-size: 24px; font-weight: bold; color: #333; margin-bottom: 8px;">
+                  ${title}
+                </h3>
+                <div style="color: #666; font-size: 16px; line-height: 1.6;">
+                  ${message}
+                </div>
+              </div>
+              
+              <div style="display: flex; gap: 12px; margin-top: 24px;">
+                ${showCancel ? `
+                  <button id="customAlertCancel" style="
+                    flex: 1; padding: 16px; font-size: 16px; font-weight: bold;
+                    border: 2px solid #ddd; border-radius: 12px; cursor: pointer;
+                    background: white; color: #666; transition: all 0.2s;
+                  " onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='white'">
+                    ${cancelText}
+                  </button>
+                ` : ''}
+                <button id="customAlertConfirm" style="
+                  flex: 1; padding: 16px; font-size: 16px; font-weight: bold;
+                  border: none; border-radius: 12px; cursor: pointer;
+                  background: ${gradient};
+                  color: white; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+                  transition: all 0.2s;
+                " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.5)'" 
+                   onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(102, 126, 234, 0.4)'">
+                  ${confirmText}
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        document.getElementById('customAlertConfirm').onclick = () => {
+          modal.remove();
+          resolve(true);
+        };
+        
+        if (showCancel) {
+          document.getElementById('customAlertCancel').onclick = () => {
+            modal.remove();
+            resolve(false);
+          };
+        }
+      });
+    };
+    
+    // 🆕 税額計算関数
+    function getTaxAmount(item, quantity = 1) {
+      const taxType = item.taxType || 'inclusive';
+      const basePrice = item.price + (item.toppingPrice || 0);
+      
+      // テーブル設定に基づいて適用税率を決定
+      const taxRate = getApplicableTaxRate(item, currentTableSettings);
+      
+      if (taxType === 'exclusive') {
+        return Math.floor(basePrice * quantity * taxRate / 100);
+      } else {
+        const totalWithTax = basePrice * quantity;
+        const totalWithoutTax = Math.floor(totalWithTax / (1 + taxRate / 100));
+        return totalWithTax - totalWithoutTax;
+      }
+    }
+    
+    // 🆕 適用税率を決定する関数
+    function getApplicableTaxRate(item, tableSettings) {
+      // レジ袋は常に10%
+      if (item.name?.includes('レジ袋') || item.name?.includes('袋')) {
+        return 10;
+      }
+      
+      // foodTypeを決定
+      let foodType = item.foodType || 'food';
+      if (!item.foodType) {
+        if (item.category === '包材' || item.name?.includes('包材') || item.name?.includes('レジ袋') || item.name?.includes('袋')) {
+          foodType = 'non-food';
+        }
+      }
+      
+      // テーブル設定が有効な場合
+      if (tableSettings && tableSettings.taxRule && tableSettings.taxRule !== 'none') {
+        const taxRule = tableSettings.taxRule;
+        
+        switch(taxRule) {
+          case 'takeout':
+            return (foodType === 'food') ? 8 : 10;
+          case 'dine-in':
+            return 10;
+          default:
+            if (item.taxRate !== undefined && item.taxRate !== null) {
+              return item.taxRate;
+            }
+            return (foodType === 'non-food') ? globalDefaultTaxRate : 8;
+        }
+      }
+      
+      // テーブル設定がない場合
+      if (item.taxRate !== undefined && item.taxRate !== null) {
+        return item.taxRate;
+      }
+      
+      return (foodType === 'non-food') ? 10 : 8;
+    }
+    
     function showCustomConfirm(options) {
       return new Promise((resolve) => {
         customModalResolve = resolve;
@@ -2720,7 +2873,7 @@
       document.getElementById('settlementModal').style.display = 'none';
     };
     
-    async function loadSettlementSummary(dateStr) {
+    window.loadSettlementSummary = async function(dateStr) {
       const container = document.getElementById('settlementSummary');
       container.innerHTML = '<div style="text-align: center;">読み込み中...</div>';
       
@@ -5911,9 +6064,498 @@ ${totalRedSlipCount > 0 ? `
         
       } catch (e) {
         console.error('❌ 期間ジャーナル生成エラー:', e);
-        alert('期間ジャーナルの生成に失敗しました: ' + e.message);
+        await showCustomAlert({
+          title: 'エラー',
+          message: '期間ジャーナルの生成に失敗しました',
+          type: 'error'
+        });
       }
     };
+    
+    // 🆕 精算を実行（CSVダウンロード）
+    window.confirmSettlement = async function() {
+      try {
+        // 精算日付を取得
+        const dateStr = document.getElementById('settlementDate').value;
+        if (!dateStr) {
+          await showCustomAlert({
+            title: 'エラー',
+            message: '精算日付を選択してください',
+            type: 'error'
+          });
+          return;
+        }
+        
+        // 確認ダイアログ
+        const confirmed = await showCustomAlert({
+          title: '精算を実行',
+          message: `${dateStr}の精算を実行しますか？\nジャーナルファイル（PNG形式）がダウンロードされます。`,
+          type: 'warning',
+          confirmText: '実行',
+          cancelText: 'キャンセル'
+        });
+        
+        if (!confirmed) return;
+        
+        // 売上データを取得
+        const salesRef = window.getStoreDoc('dailySales', dateStr);
+        const salesDoc = await window.getDoc(salesRef);
+        
+        if (!salesDoc.exists()) {
+          await showCustomAlert({
+            title: 'エラー',
+            message: '指定日の売上データが見つかりません',
+            type: 'error'
+          });
+          return;
+        }
+        
+        const settlementData = salesDoc.data();
+        
+        // 現在時刻を取得
+        const now = new Date();
+        const outputTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+        
+        // 基本データを取得
+        const customerCount = settlementData.customerCount || 0;
+        const totalItems = settlementData.totalItems || 0;
+        const totalSales = settlementData.totalSales || 0;
+        const averageSpend = customerCount > 0 ? Math.round(totalSales / customerCount) : 0;
+        
+        const cashSales = settlementData.cashSales || 0;
+        const emoneSales = settlementData.emoneSales || 0;
+        const creditSales = settlementData.creditSales || 0;
+        const discountTotal = settlementData.totalDiscount || 0;
+        
+        const tax8Total = settlementData.tax8Total || 0;
+        const tax10Total = settlementData.tax10Total || 0;
+        
+        // 内税・外税の内訳を注文データから集計
+        let tax8InclusiveTotal = 0;
+        let tax10InclusiveTotal = 0;
+        let tax8ExclusiveTotal = 0;
+        let tax10ExclusiveTotal = 0;
+        
+        const ordersQuery = window.query(
+          window.getStoreCollection('orders'),
+          window.where('paidAt', '!=', null)
+        );
+        const ordersSnapshot = await window.getDocs(ordersQuery);
+        
+        ordersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (!data.paidAt || !data.items) return;
+          
+          const orderDate = data.paidAt.toDate();
+          let targetDate = new Date(orderDate);
+          if (orderDate.getHours() < 3) {
+            targetDate.setDate(targetDate.getDate() - 1);
+          }
+          
+          const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+          
+          if (orderDateStr === dateStr) {
+            data.items.forEach(item => {
+              const taxType = item.taxType || 'inclusive';
+              const taxAmount = getTaxAmount(item, item.quantity || 1);
+              
+              if ((item.taxRate || 10) === 8) {
+                if (taxType === 'exclusive') {
+                  tax8ExclusiveTotal += taxAmount;
+                } else {
+                  tax8InclusiveTotal += taxAmount;
+                }
+              } else {
+                if (taxType === 'exclusive') {
+                  tax10ExclusiveTotal += taxAmount;
+                } else {
+                  tax10InclusiveTotal += taxAmount;
+                }
+              }
+            });
+          }
+        });
+        
+        // 税金計算
+        const tax8Excluded = Math.floor(tax8Total / 1.08);
+        const tax10Excluded = Math.floor(tax10Total / 1.10);
+        const tax8Amount = tax8Total - tax8Excluded;
+        const tax10Amount = tax10Total - tax10Excluded;
+        const totalTax = tax8Amount + tax10Amount;
+        const taxExcludedTotal = tax8Excluded + tax10Excluded;
+        const taxIncludedTotal = tax8Total + tax10Total;
+        
+        // ジャーナルHTML生成
+        const journalHtml = `
+          <div style="font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.6; padding: 30px; background: white; width: 600px;">
+            <div style="text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 20px;">
+              精算ジャーナル
+            </div>
+            <div style="text-align: center; margin-bottom: 30px; color: #666;">
+              出力日時: ${outputTime}
+            </div>
+            
+            <div style="border-top: 2px solid #333; border-bottom: 2px solid #333; padding: 15px 0; margin: 20px 0;">
+              <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                <span>営業日:</span>
+                <strong>${dateStr}</strong>
+              </div>
+            </div>
+            
+            <div style="margin: 20px 0;">
+              <div style="font-weight: bold; margin-bottom: 10px;">基本情報</div>
+              <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                <span>客数:</span>
+                <span>${customerCount}人</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                <span>商品数:</span>
+                <span>${totalItems}個</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                <span>客単価:</span>
+                <span>¥${averageSpend.toLocaleString()}</span>
+              </div>
+            </div>
+            
+            <div style="margin: 20px 0; border-top: 1px dashed #999; padding-top: 15px;">
+              <div style="font-weight: bold; margin-bottom: 10px;">売上内訳</div>
+              <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                <span>現金:</span>
+                <span>¥${cashSales.toLocaleString()}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                <span>電子マネー:</span>
+                <span>¥${emoneSales.toLocaleString()}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                <span>クレジットカード:</span>
+                <span>¥${creditSales.toLocaleString()}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                <span>値引:</span>
+                <span>-¥${discountTotal.toLocaleString()}</span>
+              </div>
+            </div>
+            
+            <div style="margin: 20px 0; border-top: 1px dashed #999; padding-top: 15px;">
+              <div style="font-weight: bold; margin-bottom: 10px;">税金内訳</div>
+              <div style="margin-left: 10px;">
+                <div style="font-weight: bold; margin: 10px 0;">8%の商品</div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　税抜:</span>
+                  <span>¥${tax8Excluded.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　税込:</span>
+                  <span>¥${tax8Total.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　消費税:</span>
+                  <span>¥${tax8Amount.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0; margin-left: 15px;">
+                  <span>内税:</span>
+                  <span>¥${tax8InclusiveTotal.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0; margin-left: 15px;">
+                  <span>外税:</span>
+                  <span>¥${tax8ExclusiveTotal.toLocaleString()}</span>
+                </div>
+                
+                <div style="font-weight: bold; margin: 10px 0;">10%の商品</div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　税抜:</span>
+                  <span>¥${tax10Excluded.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　税込:</span>
+                  <span>¥${tax10Total.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　消費税:</span>
+                  <span>¥${tax10Amount.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0; margin-left: 15px;">
+                  <span>内税:</span>
+                  <span>¥${tax10InclusiveTotal.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0; margin-left: 15px;">
+                  <span>外税:</span>
+                  <span>¥${tax10ExclusiveTotal.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div style="margin: 20px 0; border-top: 2px solid #333; padding-top: 15px;">
+              <div style="display: flex; justify-content: space-between; margin: 8px 0; font-size: 16px;">
+                <span>消費税の合計:</span>
+                <strong>¥${totalTax.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin: 8px 0; font-size: 16px;">
+                <span>税抜合計:</span>
+                <strong>¥${taxExcludedTotal.toLocaleString()}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin: 8px 0; font-size: 18px; font-weight: bold;">
+                <span>税込合計:</span>
+                <strong style="font-size: 24px;">¥${taxIncludedTotal.toLocaleString()}</strong>
+              </div>
+            </div>
+          </div>
+        `;
+        
+        // HTML2Canvasで画像化
+        const journalDiv = document.createElement('div');
+        journalDiv.innerHTML = journalHtml;
+        journalDiv.style.position = 'absolute';
+        journalDiv.style.left = '-9999px';
+        document.body.appendChild(journalDiv);
+        
+        const canvas = await html2canvas(journalDiv, {
+          backgroundColor: '#ffffff',
+          scale: 2
+        });
+        
+        document.body.removeChild(journalDiv);
+        
+        const link = document.createElement('a');
+        link.download = `精算ジャーナル_${dateStr}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
+        
+        await showCustomAlert({
+          title: '完了',
+          message: '精算ジャーナルをダウンロードしました',
+          type: 'success'
+        });
+        
+        closeSettlementModal();
+        
+      } catch (e) {
+        console.error('❌ 精算エラー:', e);
+        await showCustomAlert({
+          title: 'エラー',
+          message: '精算処理に失敗しました',
+          type: 'error'
+        });
+      }
+    };
+    
+    // 🆕 日計表出力
+    window.generateDailyReport = async function() {
+      try {
+        console.log('📊 日計表生成開始');
+        
+        // 当月の全ての日次売上データを取得
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        
+        const firstDay = new Date(year, month - 1, 1);
+        const lastDay = new Date(year, month, 0);
+        const daysInMonth = lastDay.getDate();
+        
+        console.log(`${year}年${month}月のデータを取得中...`);
+        
+        // Firestoreから当月のデータを取得
+        const dailySalesSnapshot = await window.getDocs(window.getStoreCollection('dailySales'));
+        
+        // 日付ごとにデータを整理
+        const salesByDate = {};
+        dailySalesSnapshot.forEach(doc => {
+          const data = doc.data();
+          const date = data.date;
+          
+          if (date && date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
+            salesByDate[date] = data;
+          }
+        });
+        
+        // Excelデータを作成
+        const excelData = [];
+        
+        // ヘッダー
+        excelData.push(['', '売上日計表', '', '', '', '', '', '', '', '', 'ハンディシステム', '', '', '']);
+        excelData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        excelData.push(['', `${year}-${String(month).padStart(2, '0')}-01`, '', '', '', '', '', '', '', '', '', '', '', '']);
+        excelData.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        excelData.push(['', '日', '曜日', '伝票数', '現金', 'カード', '電子マネー', '売上合計', '人件費', '人件費%', '支払い', '純売上', 'TOTAL粗利', '天気']);
+        
+        const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
+        let totalGrossProfit = 0;
+        let sumCustomerCount = 0;
+        let sumCashSales = 0;
+        let sumCreditSales = 0;
+        let sumEmoneSales = 0;
+        let sumTotalSales = 0;
+        let sumLaborCost = 0;
+        let sumPayment = 0;
+        let sumNetSales = 0;
+        
+        // 各日のデータ
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const date = new Date(year, month - 1, day);
+          const weekDay = weekDays[date.getDay()];
+          
+          const data = salesByDate[dateStr];
+          
+          if (data) {
+            const customerCount = data.customerCount || 0;
+            const cashSales = data.cashSales || 0;
+            const creditSales = data.creditSales || 0;
+            const emoneSales = data.emoneSales || 0;
+            const totalSales = cashSales + creditSales + emoneSales;
+            
+            // 人件費を取得
+            let laborCost = 0;
+            try {
+              const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
+              attendanceSnapshot.forEach(docData => {
+                const attData = docData.data();
+                if (attData.date === dateStr && attData.totalWage) {
+                  laborCost += attData.totalWage;
+                }
+              });
+            } catch (e) {
+              console.error('人件費取得エラー:', e);
+            }
+            
+            const laborCostPercent = totalSales > 0 ? Math.round(laborCost / totalSales * 100) : 0;
+            
+            // 支出を取得
+            let payment = 0;
+            try {
+              const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
+              if (expenseDoc.exists()) {
+                payment = expenseDoc.data().total || 0;
+              }
+            } catch (e) {
+              console.error('支出取得エラー:', e);
+            }
+            
+            const netSales = totalSales - laborCost - payment;
+            totalGrossProfit += netSales;
+            
+            sumCustomerCount += customerCount;
+            sumCashSales += cashSales;
+            sumCreditSales += creditSales;
+            sumEmoneSales += emoneSales;
+            sumTotalSales += totalSales;
+            sumLaborCost += laborCost;
+            sumPayment += payment;
+            sumNetSales += netSales;
+            
+            excelData.push([
+              '',
+              date,
+              weekDay,
+              customerCount,
+              cashSales,
+              creditSales,
+              emoneSales,
+              totalSales,
+              Math.round(laborCost),
+              laborCostPercent + '%',
+              payment,
+              Math.round(netSales),
+              Math.round(totalGrossProfit),
+              ''
+            ]);
+          } else {
+            excelData.push(['', date, weekDay, '', '', '', '', '', '', '', '', '', '', '']);
+          }
+        }
+        
+        // 合計行
+        const avgLaborCostPercent = sumTotalSales > 0 ? Math.round(sumLaborCost / sumTotalSales * 100) : 0;
+        excelData.push([
+          '',
+          '',
+          '合計',
+          sumCustomerCount,
+          sumCashSales,
+          sumCreditSales,
+          sumEmoneSales,
+          sumTotalSales,
+          Math.round(sumLaborCost),
+          avgLaborCostPercent + '%',
+          sumPayment,
+          Math.round(sumNetSales),
+          '',
+          ''
+        ]);
+        
+        // SheetJSでExcelファイルを生成
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+        
+        // 列幅を設定
+        ws['!cols'] = [
+          { wch: 3 }, { wch: 12 }, { wch: 5 }, { wch: 8 }, { wch: 10 },
+          { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+          { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 10 }
+        ];
+        
+        // スタイル設定
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        for (let R = range.s.r; R <= range.e.r; R++) {
+          for (let C = range.s.c; C <= range.e.c; C++) {
+            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+            if (!ws[cellAddress]) {
+              ws[cellAddress] = { t: 's', v: '' };
+            }
+            if (!ws[cellAddress].s) {
+              ws[cellAddress].s = {};
+            }
+            ws[cellAddress].s.border = {
+              top: { style: 'thin', color: { rgb: '000000' } },
+              bottom: { style: 'thin', color: { rgb: '000000' } },
+              left: { style: 'thin', color: { rgb: '000000' } },
+              right: { style: 'thin', color: { rgb: '000000' } }
+            };
+            
+            if (R === 4) {
+              ws[cellAddress].s.fill = { patternType: 'solid', fgColor: { rgb: 'D3D3D3' } };
+              ws[cellAddress].s.font = { bold: true, sz: 11 };
+              ws[cellAddress].s.alignment = { horizontal: 'center', vertical: 'center' };
+            }
+            
+            if (R === range.e.r) {
+              ws[cellAddress].s.fill = { patternType: 'solid', fgColor: { rgb: 'FFFFCC' } };
+              ws[cellAddress].s.font = { bold: true, sz: 11 };
+            }
+            
+            if (C >= 3 && C <= 12 && R >= 5) {
+              if (!ws[cellAddress].s.alignment) {
+                ws[cellAddress].s.alignment = {};
+              }
+              ws[cellAddress].s.alignment.horizontal = 'right';
+            }
+          }
+        }
+        
+        XLSX.utils.book_append_sheet(wb, ws, '売上日計表');
+        
+        const fileName = `日計表${year}年${month}月.xlsx`;
+        XLSX.writeFile(wb, fileName);
+        
+        await showCustomAlert({
+          title: '完了',
+          message: `日計表を出力しました\n${fileName}`,
+          type: 'success'
+        });
+        
+      } catch (e) {
+        console.error('❌ 日計表生成エラー:', e);
+        await showCustomAlert({
+          title: 'エラー',
+          message: '日計表の生成に失敗しました',
+          type: 'error'
+        });
+      }
+    };
+
     
     // ========== 🖨 プリンタ設定機能 ==========
     
@@ -6264,7 +6906,7 @@ ${totalRedSlipCount > 0 ? `
         </div>
         <div style="margin: 20px 0;">
           <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">精算日付を選択</label>
-          <input type="date" id="settlementDate" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
+          <input type="date" id="settlementDate" onchange="loadSettlementSummary(this.value)" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;">
           <p style="font-size: 12px; color: #666; margin-top: 5px;">※ 昨日の精算を上げ忘れた場合など、過去の日付を選択できます</p>
         </div>
         <div id="settlementSummary" style="margin: 20px 0;"></div>
