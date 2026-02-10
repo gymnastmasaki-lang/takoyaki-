@@ -862,7 +862,7 @@
           <button onclick="showHistoryModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">履歴</button>
           <button onclick="showExpenseModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">支出</button>
           <button onclick="openDrawerDirect()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">ドロア開</button>
-          <button onclick="showMonthlyReportModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">期間ジャーナル生成</button>
+          <button onclick="showMonthlyReportModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">月次</button>
           <button onclick="showPrinterSettings()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">プリンタ設定</button>
         </div>
       </div>
@@ -2805,6 +2805,97 @@
       }
     }
     
+    // ========== ヘルパー関数（pos.htmlより） ==========
+    
+    function getApplicableTaxRate(item, tableSettings) {
+      // 🔥 特別処理: レジ袋は常に10%（最優先）
+      if (item.name?.includes('レジ袋') || item.name?.includes('🛍️') || item.name?.includes('袋')) {
+        console.log(`🔥 レジ袋判定: ${item.name} → 強制的に10%`);
+        return 10;
+      }
+      
+      // 🆕 foodTypeを決定（未設定の場合はデフォルトで'food'）
+      let foodType = item.foodType || 'food';  // デフォルトは食材
+      if (!item.foodType) {
+        // カテゴリが「包材」または商品名に「包材」「レジ袋」を含む場合は食材以外
+        if (item.category === '包材' || item.name?.includes('包材') || item.name?.includes('レジ袋') || item.name?.includes('🛍️') || item.name?.includes('袋')) {
+          foodType = 'non-food';
+          console.log(`⚠️ foodType未設定 → category/name(${item.category}/${item.name})から推測: non-food（食材以外）`);
+        } else {
+          console.log(`⚠️ foodType未設定 → デフォルト: food（食材）, 商品名: ${item.name}`);
+        }
+      } else {
+        console.log(`✅ foodType設定済み: ${foodType} (商品: ${item.name})`);
+      }
+      
+      // 🔥 改善: テーブル設定が有効（takeout/dine-in）な場合、foodTypeを優先
+      if (tableSettings && tableSettings.taxRule && tableSettings.taxRule !== 'none') {
+        const taxRule = tableSettings.taxRule;
+        console.log(`[税率決定] 商品: ${item.name}, foodType: ${foodType}, taxRule: ${taxRule}`);
+        
+        switch(taxRule) {
+          case 'takeout':
+            // テイクアウト: 食材は8%、食材以外は10%
+            const takeoutRate = (foodType === 'food') ? 8 : 10;
+            console.log(`  → テイクアウトモード: ${foodType === 'food' ? '食材(8%)' : '食材以外(10%)'} = ${takeoutRate}%`);
+            return takeoutRate;
+          
+          case 'dine-in':
+            // 店内飲食及び食材以外: 全部10%
+            console.log(`  → 店内飲食及び食材以外モード: 10%`);
+            return 10;
+          
+          default:
+            // 不明なtaxRule: 商品のtaxRateを優先、未設定ならfoodTypeから推測
+            if (item.taxRate !== undefined && item.taxRate !== null) {
+              console.log(`  → 不明なtaxRule: ${taxRule} → 商品のtaxRate: ${item.taxRate}%`);
+              return item.taxRate;
+            }
+            const defaultRate = (foodType === 'non-food') ? globalDefaultTaxRate : 8;
+            console.log(`  → 不明なtaxRule: ${taxRule}, taxRate未設定 → foodType(${foodType})から: ${defaultRate}%`);
+            return defaultRate;
+        }
+      }
+      
+      // テーブル設定がない、またはtaxRuleが'none'の場合は商品のデフォルト税率を使用
+      // 商品のtaxRateを優先使用
+      if (item.taxRate !== undefined && item.taxRate !== null) {
+        console.log(`[税率決定] テーブル設定なし → 商品のtaxRate: ${item.taxRate}%`);
+        return item.taxRate;
+      }
+      
+      // taxRateがない場合、foodTypeから推測（食材:8%, 食材以外:10%）
+      const inferredRate = (foodType === 'non-food') ? 10 : 8;
+      console.log(`[税率決定] テーブル設定なし、taxRate未設定 → foodType(${foodType})から推測: ${inferredRate}%`);
+      return inferredRate;
+    }
+  </script>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    function getTaxAmount(item, quantity = 1) {
+      const taxType = item.taxType || 'inclusive';
+      const basePrice = item.price + (item.toppingPrice || 0);
+      
+      // 🆕 テーブル設定に基づいて適用税率を決定
+      const taxRate = getApplicableTaxRate(item, currentTableSettings);
+      
+      if (taxType === 'exclusive') {
+        return Math.floor(basePrice * quantity * taxRate / 100);
+      } else {
+        const totalWithTax = basePrice * quantity;
+        const totalWithoutTax = Math.floor(totalWithTax / (1 + taxRate / 100));
+        return totalWithTax - totalWithoutTax;
+      }
+    }
+    
+    // ==========
+    
     // 精算を実行（CSVダウンロード）
     window.confirmSettlement = async function() {
       // Firebase初期化を待つ
@@ -2910,7 +3001,7 @@
           console.log('✅ バックアップ作成完了 - 精算を続行します');
         }
       } else {
-        console.log('⚠ バックアップをスキップして精算を実行します');
+        console.log('⚠️ バックアップをスキップして精算を実行します');
       }
       
       try {
@@ -2918,7 +3009,7 @@
         const dateStr = window.currentSettlementDate;
         
         if (!settlementData) {
-          alert('精算データが見つかりません');
+          await showCustomAlert({ icon: '!', title: 'エラー', message: '精算データが見つかりません', btnClass: 'modal-btn-danger' });
           return;
         }
         
@@ -3019,7 +3110,7 @@
             }
           });
           
-          console.log(' 内税・外税の内訳:', {
+          console.log('💰 内税・外税の内訳:', {
             tax8Inclusive: tax8InclusiveTotal,
             tax8Exclusive: tax8ExclusiveTotal,
             tax10Inclusive: tax10InclusiveTotal,
@@ -3039,10 +3130,10 @@
         const redSlipAmount = settlementData.redSlipAmount || 0;
         const redSlipTax8Total = settlementData.redSlipTax8Total || 0;
         const redSlipTax10Total = settlementData.redSlipTax10Total || 0;
-        console.log(' 赤伝票件数:', redSlipCount);
-        console.log(' 赤伝票金額:', redSlipAmount);
-        console.log(' 赤伝票8%税金:', redSlipTax8Total);
-        console.log(' 赤伝票10%税金:', redSlipTax10Total);
+        console.log('🔴 赤伝票件数:', redSlipCount);
+        console.log('🔴 赤伝票金額:', redSlipAmount);
+        console.log('🔴 赤伝票8%税金:', redSlipTax8Total);
+        console.log('🔴 赤伝票10%税金:', redSlipTax10Total);
         
         // ===== 支出を取得 =====
         let expenseTotal = 0;
@@ -3156,8 +3247,8 @@
         console.log('📅 日付:', dateStr);
         console.log('🕐 出力時刻:', outputTime);
         console.log('👥 客数:', customerCount);
-        console.log(' 総売上点数:', totalItems);
-        console.log(' 平均客単価:', averageSpend);
+        console.log('📦 総売上点数:', totalItems);
+        console.log('💰 平均客単価:', averageSpend);
         console.log('💵 合計売上:', totalSales);
         console.log('💸 値引き:', discountTotal);
         console.log('🏪 8%商品（税込）:', tax8TotalWithTax);
@@ -3337,7 +3428,7 @@ ${redSlipCount > 0 ? `
         
       } catch (e) {
         console.error('❌ 精算エラー:', e);
-        alert('精算に失敗しました: ' + e.message);
+        await showCustomAlert({ icon: '!', title: 'エラー', message: '精算に失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -3383,7 +3474,7 @@ ${redSlipCount > 0 ? `
     window.loadExpensesByDate = async function() {
       const selectedDate = document.getElementById('expenseDateInput').value;
       if (!selectedDate) {
-        console.warn('⚠ 日付が選択されていません');
+        console.warn('⚠️ 日付が選択されていません');
         return;
       }
       
@@ -3545,12 +3636,12 @@ ${redSlipCount > 0 ? `
         });
         
         console.log('✅ 支出保存完了 - 日付:', currentExpenseDate, '件数:', validRows.length, '合計:', total);
-        alert(`支出を保存しました\n日付: ${currentExpenseDate}\n件数: ${validRows.length}件\n合計: ¥${total.toLocaleString()}`);
+        await showCustomAlert({ icon: '✓', title: '完了', message: `支出を保存しました\n日付: ${currentExpenseDate}\n件数: ${validRows.length}件\n合計: ¥${total.toLocaleString()}`, btnClass: 'modal-btn-success' });
         closeExpenseModal();
         
       } catch (e) {
         console.error('❌ 支出保存エラー:', e);
-        alert('支出の保存に失敗しました: ' + e.message);
+        await showCustomAlert({ icon: '!', title: 'エラー', message: '支出の保存に失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -3560,7 +3651,7 @@ ${redSlipCount > 0 ? `
         console.log('📄 支出Excel出力開始');
         
         if (expenseRows.length === 0) {
-          alert('出力する支出データがありません');
+          await showCustomAlert({ icon: '!', title: 'エラー', message: '出力する支出データがありません', btnClass: 'modal-btn-danger' });
           return;
         }
         
@@ -3799,11 +3890,11 @@ ${redSlipCount > 0 ? `
         XLSX.writeFile(wb, fileName);
         
         console.log('✅ 経費Excel出力完了:', fileName);
-        alert(`経費を出力しました！\n${fileName}`);
+        await showCustomAlert({ icon: '✓', title: '完了', message: `経費を出力しました！\n${fileName}`, btnClass: 'modal-btn-success' });
         
       } catch (e) {
         console.error('❌ 経費出力エラー:', e);
-        alert('経費の出力に失敗しました: ' + e.message);
+        await showCustomAlert({ icon: '!', title: 'エラー', message: '経費の出力に失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -3861,7 +3952,7 @@ ${redSlipCount > 0 ? `
         console.log('取得したデータ:', monthlyExpenses.length, '件');
         
         if (monthlyExpenses.length === 0) {
-          alert('出力する経費データがありません');
+          await showCustomAlert({ icon: '!', title: 'エラー', message: '出力する経費データがありません', btnClass: 'modal-btn-danger' });
           return;
         }
         
@@ -4106,11 +4197,11 @@ ${redSlipCount > 0 ? `
         XLSX.writeFile(wb, fileName);
         
         console.log('✅ 月次経費Excel出力完了:', fileName);
-        alert(`月次経費を出力しました！\n${fileName}\n\n集計期間: ${year}年${month}月1日〜現在`);
+        await showCustomAlert({ icon: '✓', title: '完了', message: `月次経費を出力しました！\n${fileName}\n\n集計期間: ${year}年${month}月1日〜現在`, btnClass: 'modal-btn-success' });
         
       } catch (e) {
         console.error('❌ 月次経費出力エラー:', e);
-        alert('月次経費の出力に失敗しました: ' + e.message);
+        await showCustomAlert({ icon: '!', title: 'エラー', message: '月次経費の出力に失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -4498,11 +4589,11 @@ ${redSlipCount > 0 ? `
         XLSX.writeFile(wb, fileName);
         
         console.log('✅ 日計表出力完了:', fileName);
-        alert(`日計表を出力しました！\n${fileName}`);
+        await showCustomAlert({ icon: '✓', title: '完了', message: `日計表を出力しました！\n${fileName}`, btnClass: 'modal-btn-success' });
         
       } catch (e) {
         console.error('❌ 日計表生成エラー:', e);
-        alert('日計表の生成に失敗しました: ' + e.message);
+        await showCustomAlert({ icon: '!', title: 'エラー', message: '日計表の生成に失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -4823,7 +4914,7 @@ ${redSlipCount > 0 ? `
         
       } catch (e) {
         console.error('赤伝票エラー:', e);
-        alert('赤伝票処理に失敗しました: ' + e.message);
+        await showCustomAlert({ icon: '!', title: 'エラー', message: '赤伝票処理に失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -4992,7 +5083,7 @@ ${redSlipCount > 0 ? `
         
       } catch (e) {
         console.error('注文編集エラー:', e);
-        alert('注文の読み込みに失敗しました: ' + e.message);
+        await showCustomAlert({ icon: '!', title: 'エラー', message: '注文の読み込みに失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -5054,7 +5145,7 @@ ${redSlipCount > 0 ? `
           
         } catch (e) {
           console.error('商品削除エラー:', e);
-          alert('商品の削除に失敗しました: ' + e.message);
+          await showCustomAlert({ icon: '!', title: 'エラー', message: '商品の削除に失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
         }
       }
     };
@@ -5163,7 +5254,7 @@ ${redSlipCount > 0 ? `
         
       } catch (e) {
         console.error('注文保存エラー:', e);
-        alert('注文の保存に失敗しました: ' + e.message);
+        await showCustomAlert({ icon: '!', title: 'エラー', message: '注文の保存に失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -5253,7 +5344,7 @@ ${redSlipCount > 0 ? `
         await loadHistory();
       } catch (e) {
         console.error('注文取消エラー:', e);
-        alert('注文の取り消しに失敗しました: ' + e.message);
+        await showCustomAlert({ icon: '!', title: 'エラー', message: '注文の取り消しに失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -5272,7 +5363,7 @@ ${redSlipCount > 0 ? `
         await loadHistory();
       } catch (e) {
         console.error('注文復元エラー:', e);
-        alert('注文の復元に失敗しました: ' + e.message);
+        await showCustomAlert({ icon: '!', title: 'エラー', message: '注文の復元に失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -5450,468 +5541,121 @@ ${redSlipCount > 0 ? `
       document.getElementById('monthlyReportModal').style.display = 'none';
     };
     
-    // ===== 期間ジャーナル生成 =====
-    window.generatePeriodJournal = async function() {
+    window.generateMonthlyReport = async function() {
+      const startDate = document.getElementById('reportStartDate').value;
+      const endDate = document.getElementById('reportEndDate').value;
+      
+      if (!startDate || !endDate) {
+        await showCustomAlert({ icon: '', title: 'エラー', message: '開始日と終了日を選択してください', btnClass: 'modal-btn-danger' }); return;
+        return;
+      }
+      
+      const container = document.getElementById('monthlyReportContent');
+      container.innerHTML = '<div style="text-align: center; padding: 40px;">集計中...</div>';
+      
+      try {
+        const salesSnapshot = await window.getDocs(window.getStoreCollection('dailySales'));
+        const salesByDate = {};
+        
+        salesSnapshot.forEach(doc => {
+          const data = doc.data();
+          const date = data.date;
+          if (date && date >= startDate && date <= endDate) {
+            salesByDate[date] = data;
+          }
+        });
+        
+        let totalSales = 0;
+        let totalCustomers = 0;
+        let html = `
+          <div style="background: white; padding: 20px; border-radius: 12px;">
+            <h4 style="margin: 0 0 20px 0;">期間: ${startDate} ～ ${endDate}</h4>
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                  <th style="padding: 12px; border: 1px solid #ddd;">日付</th>
+                  <th style="padding: 12px; border: 1px solid #ddd;">売上</th>
+                  <th style="padding: 12px; border: 1px solid #ddd;">客数</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+        
+        const dates = Object.keys(salesByDate).sort();
+        dates.forEach(date => {
+          const data = salesByDate[date];
+          const sales = data.totalSales || 0;
+          const customers = data.customerCount || 0;
+          
+          totalSales += sales;
+          totalCustomers += customers;
+          
+          html += `
+            <tr>
+              <td style="padding: 10px; border: 1px solid #ddd;">${date}</td>
+              <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">¥${sales.toLocaleString()}</td>
+              <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">${customers}件</td>
+            </tr>
+          `;
+        });
+        
+        html += `
+              </tbody>
+              <tfoot>
+                <tr style="background: #f5f5f5; font-weight: bold;">
+                  <td style="padding: 12px; border: 1px solid #ddd;">合計</td>
+                  <td style="padding: 12px; border: 1px solid #ddd; text-align: right;">¥${totalSales.toLocaleString()}</td>
+                  <td style="padding: 12px; border: 1px solid #ddd; text-align: right;">${totalCustomers}件</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        `;
+        
+        container.innerHTML = html;
+      } catch (e) {
+        console.error('月次レポート生成エラー:', e);
+        container.innerHTML = '<div style="text-align: center; color: red; padding: 40px;">エラーが発生しました</div>';
+      }
+    };
+    
+    // 月次レポートをPNG出力
+    window.exportMonthlyReportAsPNG = async function() {
+      const content = document.getElementById('monthlyReportContent');
+      
+      if (!content.children.length || content.innerHTML.includes('集計中') || content.innerHTML.includes('エラー')) {
+        await showCustomAlert({ icon: '⚠', title: 'エラー', message: '先にレポートを生成してください', btnClass: 'modal-btn-danger' });
+        return;
+      }
+      
       try {
         const startDate = document.getElementById('reportStartDate').value;
         const endDate = document.getElementById('reportEndDate').value;
         
-        if (!startDate || !endDate) {
-          alert('開始日と終了日を選択してください');
-          return;
-        }
-        
-        if (startDate > endDate) {
-          alert('開始日は終了日より前の日付を選択してください');
-          return;
-        }
-        
-        console.log(`📊 期間ジャーナル生成: ${startDate} ～ ${endDate}`);
-        
-        const container = document.getElementById('monthlyReportContent');
-        container.innerHTML = '<div style="text-align: center; padding: 40px;">ジャーナル生成中...</div>';
-        
-        // 期間内の全日付を生成
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const dates = [];
-        
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          dates.push(dateStr);
-        }
-        
-        // 各日付の売上データを取得して合計
-        let totalCustomerCount = 0;
-        let totalItems = 0;
-        let totalCashSales = 0;
-        let totalEmoneSales = 0;
-        let totalCreditSales = 0;
-        let totalDiscount = 0;
-        let totalTax8 = 0;
-        let totalTax10 = 0;
-        let totalDrawerOpen = 0;
-        let totalRedSlipCount = 0;  // 🆕 赤伝票件数
-        let totalRedSlipAmount = 0;  // 🆕 赤伝票金額
-        let totalRedSlipTax8 = 0;  // 🆕 赤伝票8%税金
-        let totalRedSlipTax10 = 0;  // 🆕 赤伝票10%税金
-        let totalExpense = 0;
-        let totalLaborCost = 0;
-        const itemCounts = {}; // 商品別カウント
-        
-        // ordersコレクションから直接商品データを集計
-        const ordersQuery = window.query(
-          window.getStoreCollection('orders'),
-          window.where('paidAt', '!=', null)
-        );
-        const ordersSnapshot = await window.getDocs(ordersQuery);
-        
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          // paidAtを使用して会計日時を取得
-          if (!data.paidAt) return;
-          
-          const orderDate = data.paidAt.toDate();
-          
-          // 3時基準の営業日計算
-          let targetDate = new Date(orderDate);
-          if (orderDate.getHours() < 3) {
-            targetDate.setDate(targetDate.getDate() - 1);
-          }
-          
-          const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
-          
-          // 期間内の注文のみ
-          if (dates.includes(orderDateStr) && data.items) {
-            data.items.forEach(item => {
-              itemCounts[item.name] = (itemCounts[item.name] || 0) + (item.quantity || 1);
-            });
-          }
-        });
-        
-        console.log(' ordersから集計した商品データ:', itemCounts);
-        
-        for (const dateStr of dates) {
-          // 売上データ
-          const salesDoc = await window.getDoc(window.getStoreDoc('dailySales', dateStr));
-          if (salesDoc.exists()) {
-            const data = salesDoc.data();
-            totalCustomerCount += data.customerCount || 0;
-            totalItems += data.totalItems || 0;
-            totalCashSales += data.cashSales || 0;
-            totalEmoneSales += data.emoneSales || 0;
-            totalCreditSales += data.creditSales || 0;
-            totalDiscount += data.totalDiscount || 0;
-            totalTax8 += data.tax8Total || 0;
-            totalTax10 += data.tax10Total || 0;
-            totalDrawerOpen += data.drawerOpenCount || 0;
-            totalRedSlipCount += data.redSlipCount || 0;  // 🆕 赤伝票件数
-            totalRedSlipAmount += data.redSlipAmount || 0;  // 🆕 赤伝票金額
-            totalRedSlipTax8 += data.redSlipTax8Total || 0;  // 🆕 赤伝票8%税金
-            totalRedSlipTax10 += data.redSlipTax10Total || 0;  // 🆕 赤伝票10%税金
-          }
-          
-          // 支出データ
-          const expenseDoc = await window.getDoc(window.getStoreDoc('expenses', dateStr));
-          if (expenseDoc.exists()) {
-            totalExpense += expenseDoc.data().total || 0;
-          }
-          
-          // 人件費データ
-          const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
-          attendanceSnapshot.forEach(doc => {
-            const attData = doc.data();
-            if (attData.date === dateStr) {
-              // 既に計算済みの総賃金がある場合はそれを使用
-              if (attData.totalWage && attData.totalWage > 0) {
-                totalLaborCost += attData.totalWage;
-              } else if (attData.clockIn && attData.clockOut) {
-                // 総賃金がない場合は計算する
-                const clockIn = new Date(`${dateStr} ${attData.clockIn}`);
-                const clockOut = new Date(`${dateStr} ${attData.clockOut}`);
-                let workHours = (clockOut - clockIn) / (1000 * 60 * 60);
-                
-                if (attData.breakStart1 && attData.breakEnd1) {
-                  const breakStart1 = new Date(`${dateStr} ${attData.breakStart1}`);
-                  const breakEnd1 = new Date(`${dateStr} ${attData.breakEnd1}`);
-                  workHours -= (breakEnd1 - breakStart1) / (1000 * 60 * 60);
-                }
-                if (attData.breakStart2 && attData.breakEnd2) {
-                  const breakStart2 = new Date(`${dateStr} ${attData.breakStart2}`);
-                  const breakEnd2 = new Date(`${dateStr} ${attData.breakEnd2}`);
-                  workHours -= (breakEnd2 - breakStart2) / (1000 * 60 * 60);
-                }
-                
-                const hourlyRate = attData.hourlyRate || 1150;
-                
-                // 割増賃金の計算
-                let totalWage = 0;
-                const isHoliday = attData.isHoliday || false;
-                
-                // 時間ごとに割増率を計算
-                let currentTime = new Date(clockIn);
-                const endTime = new Date(clockOut);
-                
-                while (currentTime < endTime) {
-                  const nextHour = new Date(currentTime.getTime() + 60 * 60 * 1000);
-                  const segmentEnd = nextHour > endTime ? endTime : nextHour;
-                  
-                  // 休憩時間を除外
-                  let isBreak = false;
-                  if (attData.breakStart1 && attData.breakEnd1) {
-                    const breakStart1 = new Date(`${dateStr} ${attData.breakStart1}`);
-                    const breakEnd1 = new Date(`${dateStr} ${attData.breakEnd1}`);
-                    if (currentTime >= breakStart1 && currentTime < breakEnd1) {
-                      isBreak = true;
-                    }
-                  }
-                  if (attData.breakStart2 && attData.breakEnd2) {
-                    const breakStart2 = new Date(`${dateStr} ${attData.breakStart2}`);
-                    const breakEnd2 = new Date(`${dateStr} ${attData.breakEnd2}`);
-                    if (currentTime >= breakStart2 && currentTime < breakEnd2) {
-                      isBreak = true;
-                    }
-                  }
-                  
-                  if (!isBreak) {
-                    const segmentHours = (segmentEnd - currentTime) / (1000 * 60 * 60);
-                    const hour = currentTime.getHours();
-                    
-                    let rate = 1.0;
-                    if (isHoliday) {
-                      // 休日出勤: 基本35%増
-                      rate = 1.35;
-                      // 22時～5時は深夜割増25%を追加（合計60%増）
-                      if (hour >= 22 || hour < 5) {
-                        rate = 1.60;
-                      }
-                    } else {
-                      // 平日: 22時～5時は深夜割増25%
-                      if (hour >= 22 || hour < 5) {
-                        rate = 1.25;
-                      }
-                    }
-                    
-                    totalWage += segmentHours * hourlyRate * rate;
-                  }
-                  
-                  currentTime = segmentEnd;
-                }
-                
-                totalLaborCost += totalWage;
-              }
-            }
-          });
-        }
-        
-        // 計算
-        const totalSales = totalCashSales + totalEmoneSales + totalCreditSales;
-        const averageSpend = totalCustomerCount > 0 ? Math.round(totalSales / totalCustomerCount) : 0;
-        
-        // 🆕 外税・内税を区別して計算
-        // 注文データから外税と内税を分離
-        let tax8InclusiveTotal = 0;
-        let tax10InclusiveTotal = 0;
-        let tax8ExclusiveTotal = 0;
-        let tax10ExclusiveTotal = 0;
-        // 🆕 赤伝票の内税・外税
-        let redSlipTax8Inclusive = 0;
-        let redSlipTax10Inclusive = 0;
-        let redSlipTax8Exclusive = 0;
-        let redSlipTax10Exclusive = 0;
-        
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (!data.paidAt || !data.items) return;
-          
-          const orderDate = data.paidAt.toDate();
-          let targetDate = new Date(orderDate);
-          if (orderDate.getHours() < 3) {
-            targetDate.setDate(targetDate.getDate() - 1);
-          }
-          
-          const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
-          
-          if (dates.includes(orderDateStr)) {
-            const isRedSlip = data.isRedSlip || false;  // 🆕 赤伝票判定
-            
-            data.items.forEach(item => {
-              const taxType = item.taxType || 'inclusive';
-              const taxAmount = getTaxAmount(item, item.quantity || 1);
-              
-              if ((item.taxRate || 10) === 8) {
-                if (taxType === 'exclusive') {
-                  tax8ExclusiveTotal += taxAmount;
-                  if (isRedSlip) redSlipTax8Exclusive += taxAmount;  // 🆕
-                } else {
-                  tax8InclusiveTotal += taxAmount;
-                  if (isRedSlip) redSlipTax8Inclusive += taxAmount;  // 🆕
-                }
-              } else {
-                if (taxType === 'exclusive') {
-                  tax10ExclusiveTotal += taxAmount;
-                  if (isRedSlip) redSlipTax10Exclusive += taxAmount;  // 🆕
-                } else {
-                  tax10InclusiveTotal += taxAmount;
-                  if (isRedSlip) redSlipTax10Inclusive += taxAmount;  // 🆕
-                }
-              }
-            });
-          }
-        });
-        
-        // 旧計算（互換性のため残す）
-        const tax8Excluded = Math.floor(totalTax8 / 1.08);
-        const tax10Excluded = Math.floor(totalTax10 / 1.10);
-        const tax8Amount = totalTax8 - tax8Excluded;
-        const tax10Amount = totalTax10 - tax10Excluded;
-        const totalTax = tax8Amount + tax10Amount;
-        const taxExcludedTotal = tax8Excluded + tax10Excluded;
-        const taxIncludedTotal = totalTax8 + totalTax10;
-        const finalTotalSales = taxIncludedTotal - totalDiscount - totalExpense;
-        
-        const now = new Date();
-        const outputTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-        
-        // ジャーナルテキストを生成
-        const journalText = `
-=====================================
-      期間ジャーナル
-=====================================
-期間: ${startDate} ～ ${endDate}
-出力時刻: ${outputTime}
-客数: ${totalCustomerCount}組
-総売上点数: ${totalItems}点
-平均客単価: ¥${averageSpend.toLocaleString()}
-合計売上: ¥${totalSales.toLocaleString()}
-
--------------------------------------
-売上内訳
--------------------------------------
-現金: ¥${totalCashSales.toLocaleString()}
-電子マネー: ¥${totalEmoneSales.toLocaleString()}
-クレジットカード: ¥${totalCreditSales.toLocaleString()}
-値引き: ¥${totalDiscount.toLocaleString()}
-
--------------------------------------
-税金内訳※赤伝票減算前
--------------------------------------
-【8%軽減税率】
-内税の消費税: ¥${tax8InclusiveTotal.toLocaleString()}
-外税の消費税: ¥${tax8ExclusiveTotal.toLocaleString()}
-8%合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal).toLocaleString()}
-
-【10%標準税率】
-内税の消費税: ¥${tax10InclusiveTotal.toLocaleString()}
-外税の消費税: ¥${tax10ExclusiveTotal.toLocaleString()}
-10%合計: ¥${(tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
-
-消費税の合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal + tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
-税抜合計: ¥${taxExcludedTotal.toLocaleString()}
-税込合計: ¥${taxIncludedTotal.toLocaleString()}
-${totalRedSlipCount > 0 ? `
--------------------------------------
-赤伝票の税金内訳
--------------------------------------
-8%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax8 / 1.08).toLocaleString()}
-8%の赤伝票（税込）: -¥${totalRedSlipTax8.toLocaleString()}
-8%の赤伝票の消費税: -¥${(totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / 1.08)).toLocaleString()}
-  内税: -¥${redSlipTax8Inclusive.toLocaleString()}
-  外税: -¥${redSlipTax8Exclusive.toLocaleString()}
-
-10%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax10 / 1.10).toLocaleString()}
-10%の赤伝票（税込）: -¥${totalRedSlipTax10.toLocaleString()}
-10%の赤伝票の消費税: -¥${(totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / 1.10)).toLocaleString()}
-  内税: -¥${redSlipTax10Inclusive.toLocaleString()}
-  外税: -¥${redSlipTax10Exclusive.toLocaleString()}
-
-赤伝票消費税の合計: -¥${((totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / 1.08)) + (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / 1.10))).toLocaleString()}
-赤伝票税抜合計: -¥${(Math.floor(totalRedSlipTax8 / 1.08) + Math.floor(totalRedSlipTax10 / 1.10)).toLocaleString()}
-赤伝票税込合計: -¥${(totalRedSlipTax8 + totalRedSlipTax10).toLocaleString()}
-
--------------------------------------
-税金内訳 正式計算（赤伝票減算後）
--------------------------------------
-8%の商品合計（税抜）: ¥${Math.floor((totalTax8 - totalRedSlipTax8) / 1.08).toLocaleString()}
-8%の商品合計（税込）: ¥${(totalTax8 - totalRedSlipTax8).toLocaleString()}
-8%の消費税: ¥${((totalTax8 - totalRedSlipTax8) - Math.floor((totalTax8 - totalRedSlipTax8) / 1.08)).toLocaleString()}
-  内税: ¥${(tax8InclusiveTotal - redSlipTax8Inclusive).toLocaleString()}
-  外税: ¥${(tax8ExclusiveTotal - redSlipTax8Exclusive).toLocaleString()}
-
-10%の商品合計（税抜）: ¥${Math.floor((totalTax10 - totalRedSlipTax10) / 1.10).toLocaleString()}
-10%の商品合計（税込）: ¥${(totalTax10 - totalRedSlipTax10).toLocaleString()}
-10%の消費税: ¥${((totalTax10 - totalRedSlipTax10) - Math.floor((totalTax10 - totalRedSlipTax10) / 1.10)).toLocaleString()}
-  内税: ¥${(tax10InclusiveTotal - redSlipTax10Inclusive).toLocaleString()}
-  外税: ¥${(tax10ExclusiveTotal - redSlipTax10Exclusive).toLocaleString()}
-
-消費税の合計: ¥${(((totalTax8 - totalRedSlipTax8) - Math.floor((totalTax8 - totalRedSlipTax8) / 1.08)) + ((totalTax10 - totalRedSlipTax10) - Math.floor((totalTax10 - totalRedSlipTax10) / 1.10))).toLocaleString()}
-税抜合計: ¥${(Math.floor((totalTax8 - totalRedSlipTax8) / 1.08) + Math.floor((totalTax10 - totalRedSlipTax10) / 1.10)).toLocaleString()}
-税込合計: ¥${((totalTax8 - totalRedSlipTax8) + (totalTax10 - totalRedSlipTax10)).toLocaleString()}
-` : ''}
-支出: ¥${totalExpense.toLocaleString()}
-合計売上: ¥${(totalRedSlipCount > 0 ? ((totalTax8 - totalRedSlipTax8) + (totalTax10 - totalRedSlipTax10)) - totalExpense : taxIncludedTotal - totalExpense).toLocaleString()}
-
--------------------------------------
-その他
--------------------------------------
-ドロアオープン数: ${totalDrawerOpen}回
-赤伝票件数: ${totalRedSlipCount}件
-赤伝票金額: ¥${totalRedSlipAmount.toLocaleString()}
-人件費: ¥${Math.round(totalLaborCost).toLocaleString()}
-
-=====================================
-`;
-        
-        // PNG画像として保存
-        const journalDiv = document.createElement('div');
-        journalDiv.style.cssText = `
-          font-family: 'Courier New', monospace;
-          font-size: 14px;
-          line-height: 1.6;
-          padding: 30px;
-          background: white;
-          color: black;
-          white-space: pre-wrap;
-          position: absolute;
-          left: -9999px;
-        `;
-        
-        // HTMLとして生成し、支出と合計売上を赤色にする
-        journalDiv.innerHTML = journalText
-          .replace(/^(支出: .+)$/gm, '<span style="color: #d32f2f; font-weight: bold;">$1</span>')
-          .replace(/^(合計売上: .+)$/gm, '<span style="color: #d32f2f; font-weight: bold;">$1</span>')
-          .replace(/^(税金内訳 正式計算（赤伝票減算後）)$/gm, '<span style="color: #1976d2; font-weight: bold;">$1</span>');
-        
-        document.body.appendChild(journalDiv);
-        
-        const canvas = await html2canvas(journalDiv, {
+        // html2canvasで画像化
+        const canvas = await html2canvas(content, {
+          scale: 2,
           backgroundColor: '#ffffff',
-          scale: 2
+          logging: false,
+          width: content.scrollWidth,
+          height: content.scrollHeight
         });
         
-        document.body.removeChild(journalDiv);
-        
-        const link = document.createElement('a');
-        link.download = `期間ジャーナル_${startDate}_${endDate}.png`;
-        link.href = canvas.toDataURL();
-        link.click();
-        
-        console.log('✅ 期間ジャーナル生成完了');
-        
-        // 商品カウントをソート（販売数が多い順）
-        const sortedItems = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]);
-        console.log('📊 集計された商品データ:', itemCounts);
-        console.log('📊 ソート後の商品データ:', sortedItems);
-        
-        // 商品カウントのHTML生成
-        let itemCountsHtml = '';
-        sortedItems.forEach(([itemName, count]) => {
-          itemCountsHtml += `
-            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
-              <span>${itemName}</span>
-              <strong>${count}個</strong>
-            </div>
-          `;
+        // PNG画像としてダウンロード
+        canvas.toBlob(async (blob) => {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `月次レポート_${startDate}_${endDate}.png`;
+          link.click();
+          URL.revokeObjectURL(url);
+          
+          await showCustomAlert({ icon: '✓', title: '完了', message: '月次レポートをPNG画像として出力しました', btnClass: 'modal-btn-success' });
         });
-        
-        // サマリー表示
-        container.innerHTML = `
-          <div style="padding: 20px;">
-            <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border-radius: 12px; margin-bottom: 20px;">
-              <div style="font-size: 18px; margin-bottom: 10px;">✅ ジャーナルをダウンロードしました</div>
-              <div style="font-size: 14px; opacity: 0.9;">期間: ${startDate} ～ ${endDate}</div>
-            </div>
-            
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
-              <h4 style="margin: 0 0 15px 0; color: #333;">期間サマリー</h4>
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                  <div style="font-size: 12px; color: #666; margin-bottom: 5px;">総売上</div>
-                  <div style="font-size: 24px; font-weight: bold; color: #4CAF50;">¥${(totalCashSales + totalEmoneSales + totalCreditSales).toLocaleString()}</div>
-                </div>
-                <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                  <div style="font-size: 12px; color: #666; margin-bottom: 5px;">客数</div>
-                  <div style="font-size: 24px; font-weight: bold; color: #2196F3;">${totalCustomerCount}組</div>
-                </div>
-                <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                  <div style="font-size: 12px; color: #666; margin-bottom: 5px;">販売点数</div>
-                  <div style="font-size: 24px; font-weight: bold; color: #FF9800;">${totalItems}点</div>
-                </div>
-                <div style="background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                  <div style="font-size: 12px; color: #666; margin-bottom: 5px;">平均客単価</div>
-                  <div style="font-size: 24px; font-weight: bold; color: #9C27B0;">¥${totalCustomerCount > 0 ? Math.round((totalCashSales + totalEmoneSales + totalCreditSales) / totalCustomerCount).toLocaleString() : 0}</div>
-                </div>
-              </div>
-            </div>
-            
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
-              <h4 style="margin: 0 0 15px 0; color: #333;">💳 支払方法別</h4>
-              <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
-                <span>現金</span>
-                <strong>¥${totalCashSales.toLocaleString()}</strong>
-              </div>
-              <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd;">
-                <span>電子マネー</span>
-                <strong>¥${totalEmoneSales.toLocaleString()}</strong>
-              </div>
-              <div style="display: flex; justify-content: space-between; padding: 10px 0;">
-                <span>クレジットカード</span>
-                <strong>¥${totalCreditSales.toLocaleString()}</strong>
-              </div>
-            </div>
-            
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 12px;">
-              <h4 style="margin: 0 0 15px 0; color: #333;">商品別販売数</h4>
-              <div style="max-height: 300px; overflow-y: auto;">
-                ${itemCountsHtml || '<div style="text-align: center; color: #999;">データがありません</div>'}
-              </div>
-            </div>
-          </div>
-        `;
         
       } catch (e) {
-        console.error('❌ 期間ジャーナル生成エラー:', e);
-        alert('期間ジャーナルの生成に失敗しました: ' + e.message);
+        console.error('PNG出力エラー:', e);
+        await showCustomAlert({ icon: '✗', title: 'エラー', message: 'PNG出力に失敗しました: ' + e.message, btnClass: 'modal-btn-danger' });
       }
     };
     
@@ -6372,7 +6116,7 @@ ${totalRedSlipCount > 0 ? `
   <div id="monthlyReportModal" class="modal-overlay" style="display: none;">
     <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
       <div class="modal-header">
-        <h3>期間ジャーナル生成</h3>
+        <h3>月次レポート</h3>
         <button class="modal-close" onclick="closeMonthlyReportModal()">×</button>
       </div>
       <div style="padding: 20px;">
@@ -6385,8 +6129,9 @@ ${totalRedSlipCount > 0 ? `
             <label style="display: block; margin-bottom: 5px; font-weight: bold;">終了日</label>
             <input type="date" id="reportEndDate" style="width: 100%; padding: 8px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px;">
           </div>
-          <button onclick="generatePeriodJournal()" style="padding: 12px 24px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">ジャーナル生成</button>
-          </div>
+          <button onclick="generateMonthlyReport()" style="padding: 12px 24px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">レポート生成</button>
+          <button onclick="exportMonthlyReportAsPNG()" style="padding: 12px 24px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">PNG出力</button>
+        </div>
         <div id="monthlyReportContent"></div>
       </div>
       <div class="modal-footer">
