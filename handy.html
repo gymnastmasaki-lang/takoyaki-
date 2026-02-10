@@ -2965,6 +2965,26 @@
           </div>`;
         });
         
+        // ボタン作成
+        let buttonsHtml = '';
+        if (order.paidAt) {
+          // 会計済み：赤伝票、レシート再印刷、領収書再印刷
+          buttonsHtml = `
+            <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
+              <button onclick="redSlipFromHistory('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">赤伝票</button>
+              <button onclick="reprintReceipt('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">レシート再印刷</button>
+              <button onclick="reprintInvoice('${order.id}')" style="flex: 1; min-width: 100px; padding: 8px 12px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">領収書再印刷</button>
+            </div>
+          `;
+        } else {
+          // 未会計：編集ボタンのみ
+          buttonsHtml = `
+            <div style="display: flex; gap: 8px; margin-top: 12px;">
+              <button onclick="editOrderFromHistory('${order.id}')" style="flex: 1; padding: 8px 12px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px;">編集</button>
+            </div>
+          `;
+        }
+        
         card.innerHTML = `
           <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
             <div>
@@ -2982,6 +3002,7 @@
             <span>支払方法: ${paymentMethodLabel}</span>
             <strong style="font-size: 18px; color: #667eea;">¥${order.totalAmount.toLocaleString()}</strong>
           </div>
+          ${buttonsHtml}
         `;
         
         container.appendChild(card);
@@ -2990,6 +3011,140 @@
     
     window.refreshHistory = async function() {
       await loadHistory();
+    };
+    
+    // ========== 赤伝票機能 ==========
+    window.redSlipFromHistory = async function(orderId) {
+      try {
+        const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
+        if (!orderDoc.exists()) {
+          alert('注文が見つかりません');
+          return;
+        }
+        
+        const orderData = { id: orderDoc.id, ...orderDoc.data() };
+        
+        if (!orderData.paidAt) {
+          alert('会計済みの注文のみ赤伝票できます');
+          return;
+        }
+        
+        const confirmed = confirm(`注文 #${orderData.orderNumber} を赤伝票で完全取消しますか？\n\n金額: ¥${orderData.totalAmount.toLocaleString()}\n\n⚠️ 重要な注意事項:\n• 売上から完全に除外されます\n• 客数も減少します\n• 復元できません\n• この操作は取り消せません`);
+        
+        if (!confirmed) return;
+        
+        // 会計日時から営業日を計算（3時基準）
+        const paidDate = orderData.paidAt.toDate();
+        let businessDate = new Date(paidDate);
+        
+        if (paidDate.getHours() < 3) {
+          businessDate.setDate(businessDate.getDate() - 1);
+        }
+        
+        const dateStr = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
+        
+        // dailySalesを取得
+        const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
+        const dailySalesDoc = await window.getDoc(dailySalesRef);
+        
+        if (!dailySalesDoc.exists()) {
+          alert('この営業日のdailySalesが見つかりません');
+          return;
+        }
+        
+        const dailyData = dailySalesDoc.data();
+        const totalAmount = orderData.totalAmount || 0;
+        
+        // 税率計算
+        let tax8Total = 0;
+        let tax10Total = 0;
+        
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+            let itemTaxRate = item.taxRate || (item.takeout ? 8 : 10);
+            
+            if (itemTaxRate === 8) {
+              tax8Total += itemTotal;
+            } else {
+              tax10Total += itemTotal;
+            }
+          });
+        }
+        
+        // 支払い方法別の金額
+        let cashSales = 0, emoneSales = 0, creditSales = 0;
+        const paymentMethod = orderData.paymentMethod || '';
+        if (paymentMethod === '現金' || paymentMethod === 'cash') cashSales = totalAmount;
+        else if (paymentMethod === '電子マネー' || paymentMethod === 'emoney') emoneSales = totalAmount;
+        else if (paymentMethod === 'クレジットカード' || paymentMethod === 'credit') creditSales = totalAmount;
+        
+        // 商品数を計算
+        let totalItems = 0;
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            totalItems += item.quantity || 0;
+          });
+        }
+        
+        // dailySalesから減算
+        const updateData = {
+          totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
+          customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+          totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
+          cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
+          emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
+          creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
+          tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
+          tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total),
+          redSlipCount: (dailyData.redSlipCount || 0) + 1,
+          redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount,
+          redSlipTax8Total: (dailyData.redSlipTax8Total || 0) + tax8Total,
+          redSlipTax10Total: (dailyData.redSlipTax10Total || 0) + tax10Total
+        };
+        
+        await window.updateDoc(dailySalesRef, updateData);
+        
+        // redSlipsコレクションに保存
+        const redSlipData = {
+          ...orderData,
+          redSlippedAt: window.Timestamp.now(),
+          redSlippedBy: window.currentStoreId,
+          businessDate: dateStr,
+          originalOrderId: orderData.id,
+          calculatedTax8Total: tax8Total,
+          calculatedTax10Total: tax10Total
+        };
+        
+        const redSlipRef = window.doc(window.collection(window.db, 'stores', window.currentStoreId, 'redSlips'));
+        await window.setDoc(redSlipRef, redSlipData);
+        
+        // 注文を削除
+        await window.deleteDoc(window.getStoreDoc('orders', orderData.id));
+        
+        alert(`注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n\n売上・客数から除外されました`);
+        
+        // 履歴を再読み込み
+        await loadHistory();
+        
+      } catch (e) {
+        console.error('赤伝票エラー:', e);
+        alert('赤伝票処理に失敗しました: ' + e.message);
+      }
+    };
+    
+    // ========== レシート・領収書再印刷機能 ==========
+    window.reprintReceipt = async function(orderId) {
+      alert('レシート再印刷機能\n（プリンター連携が必要です）\n\n現在この機能は開発中です。');
+    };
+    
+    window.reprintInvoice = async function(orderId) {
+      alert('領収書再印刷機能\n（プリンター連携が必要です）\n\n現在この機能は開発中です。');
+    };
+    
+    // ========== 履歴から注文編集 ==========
+    window.editOrderFromHistory = async function(orderId) {
+      alert('履歴からの注文編集機能\n\n現在この機能は開発中です。');
     };
     
     // ========== 💸 支出機能 ==========
