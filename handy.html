@@ -857,6 +857,7 @@
         </div>
         <!-- 🆕 機能サブメニュー -->
         <div id="functionsSubMenu" class="functions-submenu" style="display: none;">
+          <button onclick="playTapSound(); openInstantCheckout()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">💳 即会計</button>
           <button onclick="playTapSound(); window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kintai.html', '_blank')" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">勤怠</button>
           <button onclick="playTapSound(); showSalesModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">売上</button>
           <button onclick="playTapSound(); showHistoryModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">履歴</button>
@@ -1077,6 +1078,7 @@
     let ordersListener = null;
     let currentOrders = [];
     let currentTableSettings = null;  // 🆕 現在のテーブル設定
+    let isInstantCheckoutMode = false;  // 💳 即会計モードフラグ
     
     let selectedPaymentMethod = null;
     let totalAmountToPay = 0;
@@ -7637,6 +7639,118 @@ ${totalRedSlipCount > 0 ? `
         resultDiv.innerHTML = 'エラー<br>' + error.message;
       }
     };
+    
+    // ========================================
+    // 💳 即会計機能
+    // ========================================
+    
+    // 即会計モーダルを開く
+    window.openInstantCheckout = async function() {
+      console.log('💳 即会計モードを開始');
+      playTapSound();
+      
+      // 機能メニューを閉じる
+      const functionsMenu = document.getElementById('functionsSubMenu');
+      if (functionsMenu) {
+        functionsMenu.style.display = 'none';
+      }
+      
+      try {
+        // 即会計モードフラグを設定
+        isInstantCheckoutMode = true;
+        
+        // POSモーダルを開いてmenu.htmlを表示（即会計モード）
+        const modal = document.getElementById('posIframeModal');
+        const iframe = document.getElementById('posIframe');
+        const modalTitle = document.getElementById('posModalTitle');
+        
+        if (modal && iframe && modalTitle) {
+          // モーダルタイトルを設定
+          modalTitle.textContent = '💳 即会計';
+          
+          // menu.htmlを即会計モードで開く
+          const menuUrl = `menu.html?table=即会計&store=${currentStoreId}&mode=handy&instant=true`;
+          console.log('📱 menu.htmlを開く:', menuUrl);
+          iframe.src = menuUrl;
+          
+          // モーダルを表示
+          modal.classList.add('active');
+          
+          await showCustomAlert({
+            title: '即会計モード',
+            message: '商品を選択して注文を確定してください。\n会計画面が自動的に表示されます。',
+            type: 'success'
+          });
+        }
+        
+      } catch (error) {
+        console.error('❌ 即会計モード起動エラー:', error);
+        await showCustomAlert({
+          title: 'エラー',
+          message: '即会計モードの起動に失敗しました: ' + error.message,
+          type: 'error'
+        });
+      }
+    };
+    
+    // 即会計処理（POSから移植）- iframe内からの注文完了時に呼ばれる
+    window.processInstantCheckout = async function(orderData) {
+      console.log('💳 即会計処理開始');
+      console.log('注文データ:', orderData);
+      
+      try {
+        // currentOrdersに設定
+        currentOrders = [orderData];
+        
+        // POSモーダルを閉じる
+        const modal = document.getElementById('posIframeModal');
+        if (modal) {
+          modal.classList.remove('active');
+        }
+        
+        // 即会計フラグを設定
+        const orderRef = doc(db, 'stores', currentStoreId, 'orders', orderData.id);
+        await updateDoc(orderRef, {
+          directPayment: true,
+          handyOrder: true
+        });
+        
+        // 会計モーダルを表示
+        setTimeout(() => {
+          document.getElementById('discountAmount').value = '0';
+          updatePaymentTotal();
+          document.getElementById('paymentModal').classList.remove('hidden');
+          selectedPaymentMethod = null;
+          document.querySelectorAll('.payment-method-btn').forEach(btn => {
+            btn.classList.remove('selected');
+          });
+          document.getElementById('cashInputSection').classList.add('hidden');
+          document.getElementById('completePaymentBtn').disabled = true;
+        }, 500);
+        
+        // 即会計モードをリセット
+        isInstantCheckoutMode = false;
+        
+      } catch (error) {
+        console.error('❌ 即会計処理エラー:', error);
+        await showCustomAlert({
+          title: 'エラー',
+          message: '即会計の処理に失敗しました: ' + error.message,
+          type: 'error'
+        });
+      }
+    };
+    
+    // menu.htmlからのメッセージを受信
+    window.addEventListener('message', function(event) {
+      console.log('📨 メッセージ受信:', event.data);
+      
+      if (event.data && event.data.type === 'orderCreated' && isInstantCheckoutMode) {
+        // 即会計モードで注文が作成された場合
+        console.log('💳 即会計モード: 注文作成を検知');
+        processInstantCheckout(event.data.order);
+      }
+    });
   
   </script>
   

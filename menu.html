@@ -68,11 +68,14 @@
       const orderId = urlParams.get('orderId');
       const fromIndex = urlParams.get('fromIndex');
       const mode = urlParams.get('mode'); // POSモード/ハンディモード判定
+      const instant = urlParams.get('instant'); // 即会計モード判定
       
       // POSモードフラグをグローバル変数に設定
       window.isPOSMode = mode === 'pos';
       // ハンディモードフラグをグローバル変数に設定
       window.isHandyMode = mode === 'handy';
+      // 💳 即会計モードフラグをグローバル変数に設定
+      window.isInstantCheckoutMode = instant === 'true';
       
       console.log('=== リダイレクトチェック ===');
       console.log('tableNumber:', tableNumber);
@@ -81,6 +84,7 @@
       console.log('fromIndex:', fromIndex);
       console.log('POSモード:', window.isPOSMode);
       console.log('ハンディモード:', window.isHandyMode);
+      console.log('💳 即会計モード:', window.isInstantCheckoutMode);
       
       if (fromIndex) {
         const newUrl = new URL(window.location);
@@ -3661,6 +3665,29 @@
         showPage('page-complete');
         
         console.log('✅ 注文送信成功');
+        
+        // 💳 即会計モードの場合、親ウィンドウに注文データを送信
+        if (window.isInstantCheckoutMode && window.parent !== window) {
+          console.log('💳 即会計モード: 親ウィンドウに注文完了を通知');
+          
+          // 注文データを親ウィンドウに送信
+          window.parent.postMessage({
+            type: 'orderCreated',
+            order: {
+              id: docRef.id,
+              orderNumber: orderNumber,
+              tableNumber: tableNumber,
+              items: orderData.items,
+              totalAmount: totalAmount,
+              timestamp: orderData.timestamp,
+              status: 'pending',
+              directPayment: true,
+              handyOrder: true
+            }
+          }, window.location.origin);
+          
+          console.log('✅ 親ウィンドウへの通知完了');
+        }
         
       } catch (e) {
         console.error('❌ 注文エラー:', e);
