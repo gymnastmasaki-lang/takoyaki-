@@ -2066,6 +2066,120 @@
                 }
             };
 
+            // 🆕 全商品を一括で品切れにする（フィルター無視）
+            const setAllProductsToZero = async () => {
+                const confirmed = await showCustomConfirmFunc(
+                    '全商品を品切れ（在庫0）に設定しますか？\n\n休業日などに使用してください。\nフィルター条件に関わらず、全ての商品が対象になります。\nこの操作は取り消せません',
+                    '全商品品切',
+                    '設定する',
+                    'キャンセル'
+                );
+                if (!confirmed) return;
+
+                try {
+                    const { getDocs } = window.firebaseModules;
+                    
+                    // 全商品を取得
+                    const menuSnapshot = await getDocs(window.getStoreCollection('menus'));
+                    const itemsToUpdate = [];
+                    
+                    menuSnapshot.forEach(doc => {
+                        const data = doc.data();
+                        const itemId = data.id || doc.id;
+                        itemsToUpdate.push(itemId);
+                    });
+                    
+                    if (itemsToUpdate.length === 0) {
+                        showCustomAlertFunc('商品がありません', '警告', '⚠️');
+                        return;
+                    }
+                    
+                    // 在庫を0に設定
+                    const newSettings = { ...inventorySettings };
+                    itemsToUpdate.forEach(itemId => {
+                        newSettings[itemId] = {
+                            ...newSettings[itemId],
+                            stock: 0
+                        };
+                    });
+                    
+                    setInventorySettings(newSettings);
+                    
+                    const { setDoc } = window.firebaseModules;
+                    const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+                    await setDoc(inventoryRef, {
+                        items: newSettings,
+                        updatedAt: new Date().toISOString()
+                    });
+                    
+                    showCustomAlertFunc(`${itemsToUpdate.length}件の全商品を品切れに設定しました`, '全商品品切完了', '✅');
+                    console.log('✅ 全商品品切完了:', itemsToUpdate.length, '件');
+                } catch (error) {
+                    console.error('❌ 全商品品切エラー:', error);
+                    showCustomAlertFunc('全商品品切に失敗しました: ' + error.message, 'エラー', '❌');
+                }
+            };
+
+            // 🆕 全商品を一括で復活させる（フィルター無視）
+            const clearAllProductsZero = async () => {
+                const confirmed = await showCustomConfirmFunc(
+                    '全商品の品切れを解除しますか？\n\n全ての商品が無限在庫（未設定）に戻ります。\nフィルター条件に関わらず、在庫0の全商品が対象になります。\nこの操作は取り消せません',
+                    '全商品復活',
+                    '復活させる',
+                    'キャンセル'
+                );
+                if (!confirmed) return;
+
+                try {
+                    const { getDocs } = window.firebaseModules;
+                    
+                    // 全商品を取得
+                    const menuSnapshot = await getDocs(window.getStoreCollection('menus'));
+                    const itemsToUpdate = [];
+                    
+                    menuSnapshot.forEach(doc => {
+                        const data = doc.data();
+                        const itemId = data.id || doc.id;
+                        
+                        // 在庫が0の商品のみ対象
+                        const currentInventory = inventorySettings[itemId] || {};
+                        if (currentInventory.stock === 0) {
+                            itemsToUpdate.push(itemId);
+                        }
+                    });
+                    
+                    if (itemsToUpdate.length === 0) {
+                        showCustomAlertFunc('在庫0の商品がありません', '警告', '⚠️');
+                        return;
+                    }
+                    
+                    // 在庫をnullに設定（無限在庫）
+                    const newSettings = { ...inventorySettings };
+                    itemsToUpdate.forEach(itemId => {
+                        newSettings[itemId] = {
+                            ...newSettings[itemId],
+                            stock: null,
+                            alertThreshold: null
+                        };
+                    });
+                    
+                    setInventorySettings(newSettings);
+                    
+                    const { setDoc } = window.firebaseModules;
+                    const inventoryRef = window.getStoreDoc('inventory_settings', 'default');
+                    await setDoc(inventoryRef, {
+                        items: newSettings,
+                        updatedAt: new Date().toISOString()
+                    });
+                    
+                    showCustomAlertFunc(`${itemsToUpdate.length}件の全商品を復活させました`, '全商品復活完了', '✅');
+                    console.log('✅ 全商品復活完了:', itemsToUpdate.length, '件');
+                } catch (error) {
+                    console.error('❌ 全商品復活エラー:', error);
+                    showCustomAlertFunc('全商品復活に失敗しました: ' + error.message, 'エラー', '❌');
+                }
+            };
+
             // 🆕 テーブル設定読み込み
             const loadTableSettings = async () => {
                 try {
@@ -7592,21 +7706,43 @@
 
                                     <div className="flex justify-between gap-2 pt-4 border-t">
                                         {/* 左側: 一括操作ボタン */}
-                                        <div className="flex gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={setAllStockToZero}
-                                                className="px-4 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold text-sm"
-                                            >
-                                                🚫 一括在庫0設定
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={clearAllStockZero}
-                                                className="px-4 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-bold text-sm"
-                                            >
-                                                ♻️ 一括在庫0解除
-                                            </button>
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={setAllStockToZero}
+                                                    className="px-4 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold text-sm"
+                                                >
+                                                    一括在庫0設定
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={clearAllStockZero}
+                                                    className="px-4 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-bold text-sm"
+                                                >
+                                                    一括在庫0解除
+                                                </button>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={setAllProductsToZero}
+                                                    className="px-4 py-3 bg-red-700 text-white rounded-lg hover:bg-red-800 font-bold text-sm"
+                                                >
+                                                    全商品品切
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={clearAllProductsZero}
+                                                    className="px-4 py-3 bg-orange-700 text-white rounded-lg hover:bg-orange-800 font-bold text-sm"
+                                                >
+                                                    全商品復活
+                                                </button>
+                                            </div>
+                                            <div className="text-xs text-gray-600 mt-1">
+                                                <div>上段: 表示中の商品のみ対象</div>
+                                                <div>下段: 全商品対象（休業日用）</div>
+                                            </div>
                                         </div>
                                         
                                         {/* 右側: 保存・リセットボタン */}
