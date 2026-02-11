@@ -1116,6 +1116,16 @@
                                         </div>
                                     )}
 
+                                    {/* 店舗にサポートを開始するボタン */}
+                                    <div className="mb-2">
+                                        <button
+                                            onClick={() => window.initiateSupportToStore(store.id, store.storeName)}
+                                            className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white py-2 rounded-lg font-bold hover:opacity-90 transition-all"
+                                        >
+                                            📞 店舗にサポート
+                                        </button>
+                                    </div>
+
                                     <div className="flex gap-2 mb-2">
                                         <button
                                             onClick={() => openDailyReportModal(store)}
@@ -1773,6 +1783,85 @@
                 alert('カメラ・マイクへのアクセスに失敗しました');
                 closeSupportCall();
             }
+        }
+        
+        // 管理画面から店舗にサポートを開始
+        window.initiateSupportToStore = async function(storeId, storeName) {
+            try {
+                currentStoreInfo = { storeId, storeName };
+                supportCallActive = true;
+                isCaller = true; // 管理画面側が発信者
+                
+                document.getElementById('supportModalTitle').textContent = `${storeName} へのサポート通話`;
+                
+                // ローカルメディアストリーム取得
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
+                });
+                
+                document.getElementById('localVideo').srcObject = localStream;
+                document.getElementById('supportModal').classList.add('active');
+                
+                // Firebaseにサポート要求を作成
+                currentSupportCallId = 'admin_support_' + Date.now();
+                const { doc, setDoc, Timestamp } = window.firebaseModules;
+                
+                await setDoc(doc(window.db, 'support_calls', currentSupportCallId), {
+                    caller: 'admin',
+                    target: 'pos',
+                    storeId: storeId,
+                    storeName: storeName,
+                    status: 'waiting',
+                    createdAt: Timestamp.now()
+                });
+                
+                // シグナリングリスナー設定
+                setupSignalingListenerAsCaller();
+                
+            } catch (error) {
+                console.error('サポート通話開始エラー:', error);
+                alert('カメラ・マイクへのアクセスに失敗しました');
+                closeSupportCall();
+            }
+        };
+        
+        // 発信者側のシグナリング
+        function setupSignalingListenerAsCaller() {
+            const { doc, onSnapshot } = window.firebaseModules;
+            const callRef = doc(window.db, 'support_calls', currentSupportCallId);
+            
+            unsubscribeSignaling = onSnapshot(callRef, async (snapshot) => {
+                const data = snapshot.data();
+                if (!data) return;
+                
+                // 相手が応答したか確認
+                if (data.status === 'accepted' && !peerConnection) {
+                    await createPeerConnection();
+                    
+                    // Offerを作成して送信
+                    const offer = await peerConnection.createOffer();
+                    await peerConnection.setLocalDescription(offer);
+                    
+                    const { updateDoc } = window.firebaseModules;
+                    await updateDoc(callRef, {
+                        offer: {
+                            type: offer.type,
+                            sdp: offer.sdp
+                        }
+                    });
+                }
+                
+                if (data.answer && peerConnection && !peerConnection.currentRemoteDescription) {
+                    const answer = new RTCSessionDescription(data.answer);
+                    await peerConnection.setRemoteDescription(answer);
+                }
+                
+                if (data.receiverIceCandidate && peerConnection) {
+                    const candidate = new RTCIceCandidate(data.receiverIceCandidate);
+                    await peerConnection.addIceCandidate(candidate);
+                }
+            });
         }
         
         // 受信者側のシグナリング

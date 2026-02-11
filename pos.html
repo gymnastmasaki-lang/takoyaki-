@@ -249,10 +249,125 @@
             
             // URLパラメータをチェックしてモーダルを開く
             checkURLParametersForModal();
+            
+            // サポート要請を監視
+            startSupportRequestMonitoring();
           }
         }, 500);
       }, 300);
     };
+    
+    // サポート要請を監視
+    function startSupportRequestMonitoring() {
+      if (!window.currentStoreId) {
+        console.warn('店舗IDが未設定のためサポート監視をスキップ');
+        return;
+      }
+      
+      console.log('📡 サポート要請の監視を開始:', window.currentStoreId);
+      
+      const q = window.query(
+        window.collection(window.db, 'support_calls'),
+        window.where('storeId', '==', window.currentStoreId),
+        window.where('status', '==', 'waiting')
+      );
+      
+      window.onSnapshot(q, (snapshot) => {
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          
+          // 管理画面からのサポート要請を検出
+          if (data.caller === 'admin' && data.target === 'pos') {
+            console.log('📞 管理画面からのサポート要請:', data);
+            showAdminSupportNotification(doc.id, data);
+          }
+        });
+      });
+    }
+    
+    // 管理画面からのサポート通知を表示
+    function showAdminSupportNotification(callId, data) {
+      const storeName = data.storeName || '管理画面';
+      if (confirm(`${storeName}からサポート要請があります。応答しますか?`)) {
+        respondToAdminSupport(callId, data);
+      } else {
+        // 拒否した場合、要請を削除
+        window.deleteDoc(window.doc(window.db, 'support_calls', callId));
+      }
+    }
+    
+    // 管理画面からのサポートに応答
+    async function respondToAdminSupport(callId, data) {
+      try {
+        supportCallId = callId;
+        supportCallActive = true;
+        supportTarget = 'admin';
+        
+        const storeName = data.storeName || '管理画面';
+        document.getElementById('supportModalTitle').textContent = `${storeName} とのサポート通話`;
+        document.getElementById('supportConnecting').style.display = 'flex';
+        
+        // ローカルメディアストリーム取得
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true
+        });
+        
+        document.getElementById('localVideo').srcObject = localStream;
+        document.getElementById('supportModal').classList.add('active');
+        
+        // 応答をFirebaseに記録
+        await window.updateDoc(window.doc(window.db, 'support_calls', supportCallId), {
+          status: 'accepted',
+          acceptedAt: window.Timestamp.now()
+        });
+        
+        // シグナリングリスナー設定（受信者として、Offerを待つ）
+        setupSignalingListenerForReceiver();
+        
+      } catch (error) {
+        console.error('サポート通話応答エラー:', error);
+        alert('カメラ・マイクへのアクセスに失敗しました');
+        if (supportCallId) {
+          await window.deleteDoc(window.doc(window.db, 'support_calls', supportCallId));
+        }
+        closeSupportCall();
+      }
+    }
+    
+    // 受信者用のシグナリングリスナー（Offerを受けてAnswerを返す）
+    function setupSignalingListenerForReceiver() {
+      const callRef = window.doc(window.db, 'support_calls', supportCallId);
+      
+      unsubscribeSignaling = window.onSnapshot(callRef, async (snapshot) => {
+        const data = snapshot.data();
+        if (!data) return;
+        
+        if (data.offer && !peerConnection) {
+          // Offerを受信してAnswerを返す
+          document.getElementById('supportConnecting').style.display = 'none';
+          await createPeerConnection();
+          
+          const offer = new RTCSessionDescription(data.offer);
+          await peerConnection.setRemoteDescription(offer);
+          
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          
+          await window.updateDoc(callRef, {
+            answer: {
+              type: answer.type,
+              sdp: answer.sdp
+            }
+          });
+        }
+        
+        if (data.callerIceCandidate && peerConnection) {
+          const candidate = new RTCIceCandidate(data.callerIceCandidate);
+          await peerConnection.addIceCandidate(candidate);
+        }
+      });
+    }
     
     // 営業日表示を更新
     window.updateBusinessDateDisplay = function() {
@@ -18929,6 +19044,14 @@ ${redSlipCount > 0 ? `
         closeSupportCall();
       }
     }
+    
+    // 関数をグローバルに公開（onclickから呼び出せるようにする）
+    window.openSupportCall = openSupportCall;
+    window.closeSupportCall = closeSupportCall;
+    window.toggleVideo = toggleVideo;
+    window.toggleAudio = toggleAudio;
+    window.toggleSpeaker = toggleSpeaker;
+    window.sendChatMessage = sendChatMessage;
     
     function setupSignalingListener() {
       const callRef = window.doc(window.db, 'support_calls', supportCallId);
