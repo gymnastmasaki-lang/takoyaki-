@@ -7722,10 +7722,29 @@ ${totalRedSlipCount > 0 ? `
     window.processInstantCheckout = async function(orderData) {
       console.log('💳 即会計処理開始');
       console.log('注文データ:', orderData);
+      console.log('🛍 レジ袋情報確認:', {
+        bagNeeded: orderData.bagNeeded,
+        bagQuantity: orderData.bagQuantity,
+        bagPrice: orderData.bagPrice
+      });
       
       try {
+        // レジ袋情報を確実にorderDataに含める
+        const processedOrderData = {
+          ...orderData,
+          bagNeeded: orderData.bagNeeded || false,
+          bagQuantity: orderData.bagQuantity || 0,
+          bagPrice: orderData.bagPrice || 0
+        };
+        
+        console.log('✅ 処理後のレジ袋情報:', {
+          bagNeeded: processedOrderData.bagNeeded,
+          bagQuantity: processedOrderData.bagQuantity,
+          bagPrice: processedOrderData.bagPrice
+        });
+        
         // currentOrdersに設定
-        currentOrders = [orderData];
+        currentOrders = [processedOrderData];
         
         // POSモーダルを閉じる
         const modal = document.getElementById('posIframeModal');
@@ -7733,11 +7752,14 @@ ${totalRedSlipCount > 0 ? `
           modal.classList.remove('active');
         }
         
-        // 即会計フラグを設定
+        // 即会計フラグを設定（レジ袋情報も保存）
         const orderRef = doc(db, 'stores', currentStoreId, 'orders', orderData.id);
         await updateDoc(orderRef, {
           directPayment: true,
-          handyOrder: true
+          handyOrder: true,
+          bagNeeded: processedOrderData.bagNeeded,
+          bagQuantity: processedOrderData.bagQuantity,
+          bagPrice: processedOrderData.bagPrice
         });
         
         // テーブル設定を取得
@@ -7749,8 +7771,9 @@ ${totalRedSlipCount > 0 ? `
           // 注文番号を表示
           document.getElementById('selectedTableLabel2').textContent = `即会計 - 注文 #${orderData.orderNumber || '1'}`;
           
-          // 税率アイテムを生成
-          generateTaxRateItems([orderData], '即会計');
+          // 税率アイテムを生成（レジ袋情報を含む）
+          console.log('📝 generateTaxRateItemsにレジ袋情報を渡します:', processedOrderData);
+          generateTaxRateItems([processedOrderData], '即会計');
           
           document.getElementById('discountAmount').value = '0';
           updatePaymentTotal();
