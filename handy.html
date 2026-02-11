@@ -3513,10 +3513,47 @@
         console.log('📊 settlementData全体:', settlementData);
         
         // ===== 🆕 赤伝票情報を取得 =====
-        const redSlipCount = settlementData.redSlipCount || 0;
-        const redSlipAmount = settlementData.redSlipAmount || 0;
-        const redSlipTax8Total = settlementData.redSlipTax8Total || 0;
-        const redSlipTax10Total = settlementData.redSlipTax10Total || 0;
+        let redSlipCount = settlementData.redSlipCount || 0;
+        let redSlipAmount = settlementData.redSlipAmount || 0;
+        let redSlipTax8Total = settlementData.redSlipTax8Total || 0;
+        let redSlipTax10Total = settlementData.redSlipTax10Total || 0;
+        
+        // 🔥 dailySalesに赤伝票データがない場合、redSlipsコレクションから直接集計
+        if (redSlipCount === 0) {
+          console.log('⚠️ dailySalesに赤伝票データがないため、redSlipsコレクションから直接集計します');
+          try {
+            const redSlipsSnapshot = await window.getDocs(window.getStoreCollection('redSlips'));
+            redSlipsSnapshot.forEach(doc => {
+              const data = doc.data();
+              if (!data.businessDate || data.businessDate !== dateStr) return;
+              
+              redSlipCount++;
+              redSlipAmount += data.totalAmount || 0;
+              
+              if (data.items && Array.isArray(data.items)) {
+                data.items.forEach(item => {
+                  const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+                  const itemTaxRate = item.taxRate || (item.takeout ? 8 : 10);
+                  
+                  if (itemTaxRate === 8) {
+                    redSlipTax8Total += itemTotal;
+                  } else {
+                    redSlipTax10Total += itemTotal;
+                  }
+                });
+              }
+            });
+            console.log('✅ redSlipsから集計完了:', {
+              redSlipCount,
+              redSlipAmount,
+              redSlipTax8Total,
+              redSlipTax10Total
+            });
+          } catch (e) {
+            console.error('redSlips集計エラー:', e);
+          }
+        }
+        
         console.log('🔴 赤伝票件数:', redSlipCount);
         console.log('🔴 赤伝票金額:', redSlipAmount);
         console.log('🔴 赤伝票8%税金:', redSlipTax8Total);
