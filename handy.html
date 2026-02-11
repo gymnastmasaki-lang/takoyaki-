@@ -6971,11 +6971,26 @@ ${totalRedSlipCount > 0 ? `
         const tax8Total = settlementData.tax8Total || 0;
         const tax10Total = settlementData.tax10Total || 0;
         
+        // 🆕 赤伝票情報を取得
+        const redSlipCount = settlementData.redSlipCount || 0;
+        const redSlipAmount = settlementData.redSlipAmount || 0;
+        const redSlipTax8Total = settlementData.redSlipTax8Total || 0;
+        const redSlipTax10Total = settlementData.redSlipTax10Total || 0;
+        console.log('🔴 赤伝票件数:', redSlipCount);
+        console.log('🔴 赤伝票金額:', redSlipAmount);
+        console.log('🔴 赤伝票8%税金:', redSlipTax8Total);
+        console.log('🔴 赤伝票10%税金:', redSlipTax10Total);
+        
         // 内税・外税の内訳を注文データから集計
         let tax8InclusiveTotal = 0;
         let tax10InclusiveTotal = 0;
         let tax8ExclusiveTotal = 0;
         let tax10ExclusiveTotal = 0;
+        // 🆕 赤伝票の内税・外税をdailySalesから取得
+        let redSlipTax8Inclusive = settlementData.redSlipTax8Inclusive || 0;
+        let redSlipTax10Inclusive = settlementData.redSlipTax10Inclusive || 0;
+        let redSlipTax8Exclusive = settlementData.redSlipTax8Exclusive || 0;
+        let redSlipTax10Exclusive = settlementData.redSlipTax10Exclusive || 0;
         
         const ordersQuery = window.query(
           window.getStoreCollection('orders'),
@@ -7016,6 +7031,49 @@ ${totalRedSlipCount > 0 ? `
             });
           }
         });
+        
+        // 🆕 赤伝票の内税・外税をredSlipsコレクションから計算（dailySalesに保存されていない場合）
+        const needCalculateRedSlip = (redSlipTax8Inclusive === 0 && redSlipTax8Exclusive === 0 && 
+                                      redSlipTax10Inclusive === 0 && redSlipTax10Exclusive === 0) &&
+                                     (redSlipCount > 0);
+        
+        if (needCalculateRedSlip) {
+          console.log('⚠️ dailySalesに赤伝票の内税・外税が保存されていないため、redSlipsから計算します');
+          try {
+            const redSlipsSnapshot = await window.getDocs(window.getStoreCollection('redSlips'));
+            redSlipsSnapshot.forEach(doc => {
+              const data = doc.data();
+              if (!data.businessDate || data.businessDate !== dateStr || !data.items) return;
+              
+              data.items.forEach(item => {
+                const taxType = item.taxType || 'inclusive';
+                const taxAmount = getTaxAmount(item, item.quantity || 1);
+                
+                if ((item.taxRate || 10) === 8) {
+                  if (taxType === 'exclusive') {
+                    redSlipTax8Exclusive += taxAmount;
+                  } else {
+                    redSlipTax8Inclusive += taxAmount;
+                  }
+                } else {
+                  if (taxType === 'exclusive') {
+                    redSlipTax10Exclusive += taxAmount;
+                  } else {
+                    redSlipTax10Inclusive += taxAmount;
+                  }
+                }
+              });
+            });
+            console.log('✅ redSlipsから計算完了:', {
+              redSlipTax8Inclusive,
+              redSlipTax8Exclusive,
+              redSlipTax10Inclusive,
+              redSlipTax10Exclusive
+            });
+          } catch (e) {
+            console.error('redSlips取得エラー:', e);
+          }
+        }
         
         // 税金計算
         const tax8Excluded = Math.floor(tax8Total / 1.08);
@@ -7140,6 +7198,84 @@ ${totalRedSlipCount > 0 ? `
               <div style="display: flex; justify-content: space-between; margin: 8px 0; font-size: 18px; font-weight: bold;">
                 <span>税込合計:</span>
                 <strong style="font-size: 24px;">¥${taxIncludedTotal.toLocaleString()}</strong>
+              </div>
+            </div>
+            
+            ${redSlipCount > 0 ? `
+            <div style="margin: 20px 0; border-top: 1px dashed #999; padding-top: 15px;">
+              <div style="font-weight: bold; margin-bottom: 10px; color: #d32f2f;">🔴 赤伝票の税金内訳</div>
+              <div style="margin-left: 10px;">
+                <div style="font-weight: bold; margin: 10px 0;">8%の赤伝票</div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　税抜:</span>
+                  <span>-¥${Math.floor(redSlipTax8Total / 1.08).toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　税込:</span>
+                  <span>-¥${redSlipTax8Total.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　消費税:</span>
+                  <span>-¥${(redSlipTax8Total - Math.floor(redSlipTax8Total / 1.08)).toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0; margin-left: 15px;">
+                  <span>内税:</span>
+                  <span>-¥${redSlipTax8Inclusive.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0; margin-left: 15px;">
+                  <span>外税:</span>
+                  <span>-¥${redSlipTax8Exclusive.toLocaleString()}</span>
+                </div>
+                
+                <div style="font-weight: bold; margin: 10px 0;">10%の赤伝票</div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　税抜:</span>
+                  <span>-¥${Math.floor(redSlipTax10Total / 1.10).toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　税込:</span>
+                  <span>-¥${redSlipTax10Total.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0;">
+                  <span>　消費税:</span>
+                  <span>-¥${(redSlipTax10Total - Math.floor(redSlipTax10Total / 1.10)).toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0; margin-left: 15px;">
+                  <span>内税:</span>
+                  <span>-¥${redSlipTax10Inclusive.toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 3px 0; margin-left: 15px;">
+                  <span>外税:</span>
+                  <span>-¥${redSlipTax10Exclusive.toLocaleString()}</span>
+                </div>
+              </div>
+              
+              <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #ddd;">
+                <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                  <span>赤伝票消費税の合計:</span>
+                  <strong>-¥${((redSlipTax8Total - Math.floor(redSlipTax8Total / 1.08)) + (redSlipTax10Total - Math.floor(redSlipTax10Total / 1.10))).toLocaleString()}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                  <span>赤伝票税抜合計:</span>
+                  <strong>-¥${(Math.floor(redSlipTax8Total / 1.08) + Math.floor(redSlipTax10Total / 1.10)).toLocaleString()}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                  <span>赤伝票税込合計:</span>
+                  <strong>-¥${(redSlipTax8Total + redSlipTax10Total).toLocaleString()}</strong>
+                </div>
+              </div>
+            </div>
+            ` : ''}
+            
+            <div style="margin: 20px 0; border-top: 1px dashed #999; padding-top: 15px;">
+              <div style="font-weight: bold; margin-bottom: 10px;">その他</div>
+              <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                <span>赤伝票件数:</span>
+                <span>${redSlipCount}件</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+                <span>赤伝票金額:</span>
+                <span>¥${redSlipAmount.toLocaleString()}</span>
               </div>
             </div>
           </div>
