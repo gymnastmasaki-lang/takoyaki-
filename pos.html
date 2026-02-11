@@ -249,125 +249,10 @@
             
             // URLパラメータをチェックしてモーダルを開く
             checkURLParametersForModal();
-            
-            // サポート要請を監視
-            startSupportRequestMonitoring();
           }
         }, 500);
       }, 300);
     };
-    
-    // サポート要請を監視
-    function startSupportRequestMonitoring() {
-      if (!window.currentStoreId) {
-        console.warn('店舗IDが未設定のためサポート監視をスキップ');
-        return;
-      }
-      
-      console.log('📡 サポート要請の監視を開始:', window.currentStoreId);
-      
-      const q = window.query(
-        window.collection(window.db, 'support_calls'),
-        window.where('storeId', '==', window.currentStoreId),
-        window.where('status', '==', 'waiting')
-      );
-      
-      window.onSnapshot(q, (snapshot) => {
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          
-          // 管理画面からのサポート要請を検出
-          if (data.caller === 'admin' && data.target === 'pos') {
-            console.log('📞 管理画面からのサポート要請:', data);
-            showAdminSupportNotification(doc.id, data);
-          }
-        });
-      });
-    }
-    
-    // 管理画面からのサポート通知を表示
-    function showAdminSupportNotification(callId, data) {
-      const storeName = data.storeName || '管理画面';
-      if (confirm(`${storeName}からサポート要請があります。応答しますか?`)) {
-        respondToAdminSupport(callId, data);
-      } else {
-        // 拒否した場合、要請を削除
-        window.deleteDoc(window.doc(window.db, 'support_calls', callId));
-      }
-    }
-    
-    // 管理画面からのサポートに応答
-    async function respondToAdminSupport(callId, data) {
-      try {
-        supportCallId = callId;
-        supportCallActive = true;
-        supportTarget = 'admin';
-        
-        const storeName = data.storeName || '管理画面';
-        document.getElementById('supportModalTitle').textContent = `${storeName} とのサポート通話`;
-        document.getElementById('supportConnecting').style.display = 'flex';
-        
-        // ローカルメディアストリーム取得
-        localStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true
-        });
-        
-        document.getElementById('localVideo').srcObject = localStream;
-        document.getElementById('supportModal').classList.add('active');
-        
-        // 応答をFirebaseに記録
-        await window.updateDoc(window.doc(window.db, 'support_calls', supportCallId), {
-          status: 'accepted',
-          acceptedAt: window.Timestamp.now()
-        });
-        
-        // シグナリングリスナー設定（受信者として、Offerを待つ）
-        setupSignalingListenerForReceiver();
-        
-      } catch (error) {
-        console.error('サポート通話応答エラー:', error);
-        alert('カメラ・マイクへのアクセスに失敗しました');
-        if (supportCallId) {
-          await window.deleteDoc(window.doc(window.db, 'support_calls', supportCallId));
-        }
-        closeSupportCall();
-      }
-    }
-    
-    // 受信者用のシグナリングリスナー（Offerを受けてAnswerを返す）
-    function setupSignalingListenerForReceiver() {
-      const callRef = window.doc(window.db, 'support_calls', supportCallId);
-      
-      unsubscribeSignaling = window.onSnapshot(callRef, async (snapshot) => {
-        const data = snapshot.data();
-        if (!data) return;
-        
-        if (data.offer && !peerConnection) {
-          // Offerを受信してAnswerを返す
-          document.getElementById('supportConnecting').style.display = 'none';
-          await createPeerConnection();
-          
-          const offer = new RTCSessionDescription(data.offer);
-          await peerConnection.setRemoteDescription(offer);
-          
-          const answer = await peerConnection.createAnswer();
-          await peerConnection.setLocalDescription(answer);
-          
-          await window.updateDoc(callRef, {
-            answer: {
-              type: answer.type,
-              sdp: answer.sdp
-            }
-          });
-        }
-        
-        if (data.callerIceCandidate && peerConnection) {
-          const candidate = new RTCIceCandidate(data.callerIceCandidate);
-          await peerConnection.addIceCandidate(candidate);
-        }
-      });
-    }
     
     // 営業日表示を更新
     window.updateBusinessDateDisplay = function() {
@@ -2483,10 +2368,10 @@
             <span>設定・管理</span>
           </button>
         </div>
-        <button id="supportHandyBtn" class="sidebar-button" style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);">
+        <button class="sidebar-button" onclick="openSupportCall('handy')" style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);">
           <span>子機にサポート</span>
         </button>
-        <button id="supportAdminBtn" class="sidebar-button" style="background: linear-gradient(135deg, #FF6B6B 0%, #C44569 100%);">
+        <button class="sidebar-button" onclick="openSupportCall('admin')" style="background: linear-gradient(135deg, #FF6B6B 0%, #C44569 100%);">
           <span>カスタマーにサポート</span>
         </button>
         <button class="sidebar-button" onclick="handleLogout()">
@@ -18983,7 +18868,8 @@ ${redSlipCount > 0 ? `
   </div>
   
   <script>
-    // サポート通話機能
+  <script>
+    // サポート通話機能（POS側 - 発信と受信の両方）
     let localStream = null;
     let remoteStream = null;
     let peerConnection = null;
@@ -18992,9 +18878,11 @@ ${redSlipCount > 0 ? `
     let audioEnabled = true;
     let speakerEnabled = true;
     let supportCallActive = false;
-    let supportCallId = null;
+    let currentSupportCallId = null;
     let supportTarget = null; // 'handy' or 'admin'
+    let isCaller = false; // 発信者かどうか
     let unsubscribeSignaling = null;
+    let unsubscribeIncoming = null;
     
     const configuration = {
       iceServers: [
@@ -19003,45 +18891,104 @@ ${redSlipCount > 0 ? `
       ]
     };
     
-    async function openSupportCall(target) {
-      console.log('🎯 openSupportCall が呼ばれました。target:', target);
+    // 着信監視を開始
+    function startIncomingCallListener() {
+      const q = window.query(
+        window.collection(window.db, 'support_calls'),
+        window.where('target', '==', 'pos'),
+        window.where('status', '==', 'waiting')
+      );
+      
+      unsubscribeIncoming = window.onSnapshot(q, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const callData = change.doc.data();
+            const callId = change.doc.id;
+            
+            // 自分の店舗からの着信のみ受け付け
+            if (callData.storeId === window.currentStoreId) {
+              handleIncomingCall(callId, callData);
+            }
+          }
+        });
+      });
+    }
+    
+    // 着信処理
+    async function handleIncomingCall(callId, callData) {
+      if (supportCallActive) return; // 既に通話中の場合は無視
+      
+      const caller = callData.caller === 'handy' ? 'ハンディ' : (callData.caller === 'admin' ? '管理画面' : 'カスタマー');
+      if (confirm(`${caller}からのサポート要請があります。応答しますか？`)) {
+        acceptIncomingCall(callId, callData);
+      } else {
+        // 拒否した場合は削除
+        await window.deleteDoc(window.doc(window.db, 'support_calls', callId));
+      }
+    }
+    
+    // 着信を受け入れ
+    async function acceptIncomingCall(callId, callData) {
+      currentSupportCallId = callId;
+      supportCallActive = true;
+      isCaller = false;
+      
+      const caller = callData.caller === 'handy' ? 'ハンディ' : (callData.caller === 'admin' ? '管理画面' : 'カスタマー');
+      document.getElementById('supportModalTitle').textContent = `${caller}とのサポート通話`;
       
       try {
-        supportTarget = target;
-        supportCallActive = true;
-        
-        // タイトル更新
-        const title = target === 'handy' ? '子機にサポート' : 'カスタマーにサポート';
-        console.log('📝 タイトル:', title);
-        
-        document.getElementById('supportModalTitle').textContent = title;
-        document.getElementById('supportConnectingText').textContent = 
-          target === 'handy' ? '子機からの応答を待っています...' : 'カスタマーからの応答を待っています...';
-        
-        document.getElementById('supportModal').classList.add('active');
-        console.log('✅ サポートモーダルを表示しました');
-        
         // ローカルメディアストリーム取得
-        console.log('🎥 カメラ・マイクへのアクセスを要求中...');
         localStream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true
         });
-        console.log('✅ カメラ・マイク取得成功');
+        
+        document.getElementById('localVideo').srcObject = localStream;
+        document.getElementById('supportModal').classList.add('active');
+        
+        // ステータスを更新
+        const callRef = window.doc(window.db, 'support_calls', callId);
+        await window.updateDoc(callRef, {
+          status: 'accepted',
+          acceptedAt: window.Timestamp.now()
+        });
+        
+        // シグナリングリスナー設定
+        setupSignalingListenerAsReceiver();
+        
+      } catch (error) {
+        console.error('サポート通話受け入れエラー:', error);
+        alert('カメラ・マイクへのアクセスに失敗しました');
+        closeSupportCall();
+      }
+    }
+    
+    // 発信（ハンディまたは管理画面に）
+    async function openSupportCall(target) {
+      try {
+        supportTarget = target;
+        supportCallActive = true;
+        isCaller = true;
+        
+        const title = target === 'handy' ? '子機にサポート' : 'カスタマーにサポート';
+        document.getElementById('supportModalTitle').textContent = title;
+        document.getElementById('supportConnectingText').textContent = 
+          target === 'handy' ? '子機からの応答を待っています...' : 'カスタマーからの応答を待っています...';
+        document.getElementById('supportConnecting').style.display = 'flex';
+        
+        document.getElementById('supportModal').classList.add('active');
+        
+        // ローカルメディアストリーム取得
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true
+        });
         
         document.getElementById('localVideo').srcObject = localStream;
         
         // Firebaseにサポート要求を作成
-        supportCallId = 'support_' + Date.now();
-        console.log('📤 Firebaseにサポート要求を作成中...', {
-          caller: 'pos',
-          target: target,
-          storeId: window.currentStoreId || '',
-          storeName: window.currentStoreName || 'POS',
-          supportCallId: supportCallId
-        });
-        
-        await window.setDoc(window.doc(window.db, 'support_calls', supportCallId), {
+        currentSupportCallId = 'support_' + Date.now();
+        await window.setDoc(window.doc(window.db, 'support_calls', currentSupportCallId), {
           caller: 'pos',
           target: target,
           storeId: window.currentStoreId || '',
@@ -19050,82 +18997,28 @@ ${redSlipCount > 0 ? `
           createdAt: window.Timestamp.now()
         });
         
-        console.log('✅ Firebaseへのサポート要求作成完了');
-        
         // シグナリングリスナー設定
-        setupSignalingListener();
-        console.log('✅ シグナリングリスナー設定完了');
+        setupSignalingListenerAsCaller();
         
       } catch (error) {
-        console.error('❌ サポート通話開始エラー:', error);
-        alert('カメラ・マイクへのアクセスに失敗しました: ' + error.message);
+        console.error('サポート通話開始エラー:', error);
+        alert('カメラ・マイクへのアクセスに失敗しました');
         closeSupportCall();
       }
     }
     
-    // 関数をグローバルに公開（onclickから呼び出せるようにする）
-    window.openSupportCall = openSupportCall;
-    window.closeSupportCall = closeSupportCall;
-    window.toggleVideo = toggleVideo;
-    window.toggleAudio = toggleAudio;
-    window.toggleSpeaker = toggleSpeaker;
-    window.sendChatMessage = sendChatMessage;
-    
-    // サポートボタンにイベントリスナーを設定
-    function setupSupportButtons() {
-      console.log('🔘 サポートボタンのイベントリスナーを設定中...');
-      console.log('📍 document.readyState:', document.readyState);
-      
-      const supportHandyBtn = document.getElementById('supportHandyBtn');
-      const supportAdminBtn = document.getElementById('supportAdminBtn');
-      
-      console.log('🔍 supportHandyBtn:', supportHandyBtn);
-      console.log('🔍 supportAdminBtn:', supportAdminBtn);
-      
-      if (supportHandyBtn) {
-        supportHandyBtn.addEventListener('click', function(e) {
-          console.log('🟢🟢🟢 子機にサポートボタンがクリックされました！', e);
-          console.log('🔧 openSupportCall関数:', typeof openSupportCall);
-          openSupportCall('handy');
-        });
-        console.log('✅ 子機にサポートボタンのリスナー設定完了');
-      } else {
-        console.error('❌❌❌ supportHandyBtn が見つかりません！');
-      }
-      
-      if (supportAdminBtn) {
-        supportAdminBtn.addEventListener('click', function(e) {
-          console.log('🔴🔴🔴 カスタマーにサポートボタンがクリックされました！', e);
-          console.log('🔧 openSupportCall関数:', typeof openSupportCall);
-          openSupportCall('admin');
-        });
-        console.log('✅ カスタマーにサポートボタンのリスナー設定完了');
-      } else {
-        console.error('❌❌❌ supportAdminBtn が見つかりません！');
-      }
-    }
-    
-    // DOMが既に読み込まれているか確認
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', setupSupportButtons);
-    } else {
-      // DOM already loaded
-      setupSupportButtons();
-    }
-    
-    function setupSignalingListener() {
-      const callRef = window.doc(window.db, 'support_calls', supportCallId);
+    // 発信者側のシグナリング
+    function setupSignalingListenerAsCaller() {
+      const callRef = window.doc(window.db, 'support_calls', currentSupportCallId);
       
       unsubscribeSignaling = window.onSnapshot(callRef, async (snapshot) => {
         const data = snapshot.data();
         if (!data) return;
         
         if (data.status === 'accepted' && !peerConnection) {
-          // 応答があった
           document.getElementById('supportConnecting').style.display = 'none';
           await createPeerConnection();
           
-          // Offerを作成して送信
           const offer = await peerConnection.createOffer();
           await peerConnection.setLocalDescription(offer);
           
@@ -19138,14 +19031,44 @@ ${redSlipCount > 0 ? `
         }
         
         if (data.answer && peerConnection && !peerConnection.currentRemoteDescription) {
-          // Answerを受信
           const answer = new RTCSessionDescription(data.answer);
           await peerConnection.setRemoteDescription(answer);
         }
         
         if (data.receiverIceCandidate && peerConnection) {
-          // ICE候補を受信
           const candidate = new RTCIceCandidate(data.receiverIceCandidate);
+          await peerConnection.addIceCandidate(candidate);
+        }
+      });
+    }
+    
+    // 受信者側のシグナリング
+    function setupSignalingListenerAsReceiver() {
+      const callRef = window.doc(window.db, 'support_calls', currentSupportCallId);
+      
+      unsubscribeSignaling = window.onSnapshot(callRef, async (snapshot) => {
+        const data = snapshot.data();
+        if (!data) return;
+        
+        if (data.offer && !peerConnection) {
+          await createPeerConnection();
+          
+          const offer = new RTCSessionDescription(data.offer);
+          await peerConnection.setRemoteDescription(offer);
+          
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          
+          await window.updateDoc(callRef, {
+            answer: {
+              type: answer.type,
+              sdp: answer.sdp
+            }
+          });
+        }
+        
+        if (data.callerIceCandidate && peerConnection) {
+          const candidate = new RTCIceCandidate(data.callerIceCandidate);
           await peerConnection.addIceCandidate(candidate);
         }
       });
@@ -19154,31 +19077,27 @@ ${redSlipCount > 0 ? `
     async function createPeerConnection() {
       peerConnection = new RTCPeerConnection(configuration);
       
-      // ローカルストリームを追加
       localStream.getTracks().forEach(track => {
         peerConnection.addTrack(track, localStream);
       });
       
-      // リモートストリームを受信
       peerConnection.ontrack = (event) => {
         if (!remoteStream) {
           remoteStream = new MediaStream();
           const remoteVideo = document.getElementById('remoteVideo');
           remoteVideo.srcObject = remoteStream;
           remoteVideo.style.display = 'block';
-          
-          // スピーカー設定を適用
           applySpeakerSetting();
         }
         remoteStream.addTrack(event.track);
       };
       
-      // ICE候補を送信
       peerConnection.onicecandidate = async (event) => {
         if (event.candidate) {
-          const callRef = window.doc(window.db, 'support_calls', supportCallId);
+          const callRef = window.doc(window.db, 'support_calls', currentSupportCallId);
+          const fieldName = isCaller ? 'callerIceCandidate' : 'receiverIceCandidate';
           await window.updateDoc(callRef, {
-            callerIceCandidate: {
+            [fieldName]: {
               candidate: event.candidate.candidate,
               sdpMLineIndex: event.candidate.sdpMLineIndex,
               sdpMid: event.candidate.sdpMid
@@ -19187,9 +19106,15 @@ ${redSlipCount > 0 ? `
         }
       };
       
-      // データチャネル作成
-      dataChannel = peerConnection.createDataChannel('chat');
-      setupDataChannel();
+      if (isCaller) {
+        dataChannel = peerConnection.createDataChannel('chat');
+        setupDataChannel();
+      } else {
+        peerConnection.ondatachannel = (event) => {
+          dataChannel = event.channel;
+          setupDataChannel();
+        };
+      }
     }
     
     function setupDataChannel() {
@@ -19293,7 +19218,6 @@ ${redSlipCount > 0 ? `
     async function closeSupportCall() {
       supportCallActive = false;
       
-      // ストリームを停止
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
         localStream = null;
@@ -19304,7 +19228,6 @@ ${redSlipCount > 0 ? `
         remoteStream = null;
       }
       
-      // 接続を閉じる
       if (peerConnection) {
         peerConnection.close();
         peerConnection = null;
@@ -19315,23 +19238,20 @@ ${redSlipCount > 0 ? `
         dataChannel = null;
       }
       
-      // リスナー解除
       if (unsubscribeSignaling) {
         unsubscribeSignaling();
         unsubscribeSignaling = null;
       }
       
-      // Firebaseから削除
-      if (supportCallId) {
+      if (currentSupportCallId) {
         try {
-          await window.deleteDoc(window.doc(window.db, 'support_calls', supportCallId));
+          await window.deleteDoc(window.doc(window.db, 'support_calls', currentSupportCallId));
         } catch (error) {
           console.error('サポート通話削除エラー:', error);
         }
-        supportCallId = null;
+        currentSupportCallId = null;
       }
       
-      // UI リセット
       document.getElementById('supportModal').classList.remove('active');
       document.getElementById('remoteVideo').style.display = 'none';
       document.getElementById('supportConnecting').style.display = 'flex';
@@ -19341,6 +19261,7 @@ ${redSlipCount > 0 ? `
       audioEnabled = true;
       speakerEnabled = true;
       supportTarget = null;
+      isCaller = false;
       document.getElementById('videoToggle').textContent = 'ビデオOFF';
       document.getElementById('audioToggle').textContent = 'ミュートOFF';
       document.getElementById('speakerToggle').textContent = 'スピーカーON';
@@ -19348,30 +19269,18 @@ ${redSlipCount > 0 ? `
       document.getElementById('audioToggle').classList.remove('active');
       document.getElementById('speakerToggle').classList.remove('active');
     }
-  </script>
-  
-  <script>
-    // モジュールスクリプトの読み込みを待ってから関数を確実に公開
-    window.addEventListener('firebaseReady', function() {
-      console.log('✅ Firebase初期化完了 - サポート機能を有効化');
-      
-      // 既にwindowに公開されているか確認
-      if (!window.openSupportCall) {
-        console.warn('⚠️ openSupportCall が見つかりません。再試行します...');
-        
-        // 少し待ってから再確認
-        setTimeout(function() {
-          if (window.openSupportCall) {
-            console.log('✅ openSupportCall が利用可能になりました');
-          } else {
-            console.error('❌ openSupportCall が利用できません');
-          }
-        }, 1000);
-      } else {
-        console.log('✅ openSupportCall は既に利用可能です');
-      }
+    
+    // ページ読み込み時に着信監視を開始
+    window.addEventListener('DOMContentLoaded', () => {
+      // currentStoreIdが設定されるまで待つ
+      const checkStoreId = setInterval(() => {
+        if (window.currentStoreId) {
+          clearInterval(checkStoreId);
+          startIncomingCallListener();
+        }
+      }, 100);
     });
   </script>
-  
+
 </body>
 </html>
