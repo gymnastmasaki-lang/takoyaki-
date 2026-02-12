@@ -2878,34 +2878,10 @@
     // プロキシを使用するかどうか（HTTPSサイトの場合はtrue）
     const USE_PROXY = window.location.protocol === 'https:';
     
-    // 🆕 印刷ヘルパー関数（Bluetooth、USB、プロキシ、Firebaseキュー対応）
+    // 🆕 プロキシ対応の印刷ヘルパー関数
+    // 🆕 プロキシ対応 + Bluetooth対応の印刷ヘルパー関数
     async function sendPrintRequest(builder, onSuccess, onError) {
       try {
-        // USB接続の場合
-        if (PRINTER_CONNECTION_TYPE === 'usb') {
-          console.log('🔌 USB経由で印刷します');
-          
-          if (!USB_DEVICE) {
-            throw new Error('USBプリンタが接続されていません。プリンタ設定から接続してください。');
-          }
-          
-          // StarWebPrintBuilderから生テキストを抽出
-          const xmlString = builder.toString();
-          const textMatch = xmlString.match(/<text[^>]*>([^<]*)<\/text>/g);
-          let text = '';
-          if (textMatch) {
-            textMatch.forEach(match => {
-              const content = match.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-              text += content + '\n';
-            });
-          }
-          
-          await printViaUSB(text);
-          
-          if (onSuccess) onSuccess({ status: 'success', message: 'USB印刷完了' });
-          return;
-        }
-        
         // Bluetooth接続の場合
         if (PRINTER_CONNECTION_TYPE === 'bluetooth') {
           console.log('📱 Bluetooth経由で印刷します');
@@ -2914,13 +2890,14 @@
             throw new Error('Bluetoothプリンタが接続されていません。プリンタ設定から接続してください。');
           }
           
-          // StarWebPrintBuilderから生テキストを抽出
+          // StarWebPrintBuilderから生テキストを抽出（簡易版）
+          // 注意: StarWebPrintBuilderはXMLを生成するので、テキストのみを抽出
           const xmlString = builder.toString();
           const textMatch = xmlString.match(/<text[^>]*>([^<]*)<\/text>/g);
           let text = '';
           if (textMatch) {
             textMatch.forEach(match => {
-              const content = match.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+              const content = match.replace(/<[^>]+>/g, '');
               text += content + '\n';
             });
           }
@@ -2931,109 +2908,46 @@
           return;
         }
         
-        // プロキシ接続の場合
-        if (PRINTER_CONNECTION_TYPE === 'proxy') {
+        // Ethernet/WiFi接続の場合
+        if (USE_PROXY) {
           console.log('🔄 プロキシサーバー経由で印刷します');
           
-          const proxyURL = localStorage.getItem('printerProxyURL') || 'http://192.168.1.100:3000';
-          const xmlString = builder.toString();
-          const textMatch = xmlString.match(/<text[^>]*>([^<]*)<\/text>/g);
-          let text = '';
-          if (textMatch) {
-            textMatch.forEach(match => {
-              const content = match.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-              text += content + '\n';
-            });
-          }
+          // XMLリクエストを取得
+          const request = builder.toString();
           
-          const response = await fetch(`${proxyURL}/print`, {
+          // プロキシサーバーに送信
+          const response = await fetch(PRINTER_PROXY_URL, {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json'
+              'Content-Type': 'text/xml; charset=utf-8'
             },
-            body: JSON.stringify({ text: text })
+            body: request
           });
           
           if (response.ok) {
-            console.log('✅ プロキシ印刷成功');
-            if (onSuccess) onSuccess({ status: 'success', message: 'プロキシ印刷完了' });
+            console.log('✅ 印刷成功');
+            const data = await response.text();
+            if (onSuccess) onSuccess({ status: 'success', data: data });
           } else {
-            throw new Error(`プロキシエラー: ${response.status}`);
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            console.error('❌ 印刷エラー:', errorData);
+            if (onError) onError({ status: response.status, message: errorData.error || response.statusText });
           }
-          return;
-        }
-        
-        // Firebaseキュー印刷の場合（リモート印刷用）
-        if (PRINTER_CONNECTION_TYPE === 'firebase_queue') {
-          console.log('☁️ Firebaseキュー経由で印刷します（リモート印刷）');
+        } else {
+          console.log('🖨️ プリンターに直接印刷します');
           
-          const xmlString = builder.toString();
-          const textMatch = xmlString.match(/<text[^>]*>([^<]*)<\/text>/g);
-          let text = '';
-          if (textMatch) {
-            textMatch.forEach(match => {
-              const content = match.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-              text += content + '\n';
-            });
-          }
+          const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
+          const request = builder.toString();
           
-          // Firestoreに印刷ジョブを追加
-          await window.addDoc(window.getStoreCollection('print_jobs'), {
-            text: text,
-            status: 'pending',
-            createdAt: window.Timestamp.now(),
-            deviceName: window.currentStoreName || 'handy',
-            jobType: 'receipt'
-          });
-          
-          console.log('✅ 印刷ジョブをキューに追加しました');
-          if (onSuccess) onSuccess({ status: 'success', message: '印刷ジョブを送信しました' });
-          return;
-        }
-        
-        // Ethernet/WiFi接続の場合
-        console.log('🖨️ WiFi/LAN経由で印刷します');
-        
-        // StarWebPrintが利用可能かチェック
-        if (typeof StarWebPrintBuilder === 'undefined' || typeof StarWebPrintTrader === 'undefined') {
-          console.warn('⚠️ StarWebPrint未定義 - Firebaseキューにフォールバック');
-          
-          // StarWebPrintが使えない場合はFirebaseキューを使用
-          const xmlString = builder.toString();
-          const textMatch = xmlString.match(/<text[^>]*>([^<]*)<\/text>/g);
-          let text = '';
-          if (textMatch) {
-            textMatch.forEach(match => {
-              const content = match.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-              text += content + '\n';
-            });
-          }
-          
-          await window.addDoc(window.getStoreCollection('print_jobs'), {
-            text: text,
-            status: 'pending',
-            createdAt: window.Timestamp.now(),
-            deviceName: window.currentStoreName || 'device',
-            jobType: 'receipt'
-          });
-          
-          console.log('✅ 印刷ジョブをキューに追加しました（フォールバック）');
-          if (onSuccess) onSuccess({ status: 'success', message: '印刷ジョブを送信しました' });
-          return;
-        }
-        
-        const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
-        const request = builder.toString();
-        
-        const trader = new StarWebPrintTrader({url: url});
-        trader.onReceive = function(response) {
-          console.log('✅ WiFi/LAN印刷成功:', response);
-          if (onSuccess) onSuccess(response);
-        };
-        trader.onError = function(response) {
-          console.error('❌ WiFi/LAN印刷エラー:', response);
-          if (onError) onError(response);
-        };
+          const trader = new StarWebPrintTrader({url: url});
+          trader.onReceive = function(response) {
+            console.log('印刷成功:', response);
+            if (onSuccess) onSuccess(response);
+          };
+          trader.onError = function(response) {
+            console.error('印刷エラー:', response);
+            if (onError) onError(response);
+          };
           
           trader.sendMessage({request: request});
         }
@@ -17352,15 +17266,13 @@ ${redSlipCount > 0 ? `
       const bluetoothBtn = document.getElementById('connectionTypeBluetooth');
       const usbBtn = document.getElementById('connectionTypeUsb');
       const proxyBtn = document.getElementById('connectionTypeProxy');
-      const remoteBtn = document.getElementById('connectionTypeRemote');
       const ethernetSettings = document.getElementById('ethernetSettings');
       const bluetoothSettings = document.getElementById('bluetoothSettings');
       const usbSettings = document.getElementById('usbSettings');
       const proxySettings = document.getElementById('proxySettings');
-      const remoteSettings = document.getElementById('remoteSettings');
       
       // すべてのボタンをリセット
-      [ethernetBtn, bluetoothBtn, usbBtn, proxyBtn, remoteBtn].forEach(btn => {
+      [ethernetBtn, bluetoothBtn, usbBtn, proxyBtn].forEach(btn => {
         if (btn) {
           btn.style.background = 'white';
           btn.style.color = '#666';
@@ -17373,7 +17285,6 @@ ${redSlipCount > 0 ? `
       if (bluetoothSettings) bluetoothSettings.style.display = 'none';
       if (usbSettings) usbSettings.style.display = 'none';
       if (proxySettings) proxySettings.style.display = 'none';
-      if (remoteSettings) remoteSettings.style.display = 'none';
       
       if (type === 'ethernet') {
         if (ethernetBtn) {
@@ -17403,13 +17314,6 @@ ${redSlipCount > 0 ? `
           proxyBtn.style.borderColor = '#667eea';
         }
         if (proxySettings) proxySettings.style.display = 'block';
-      } else if (type === 'firebase_queue') {
-        if (remoteBtn) {
-          remoteBtn.style.background = '#667eea';
-          remoteBtn.style.color = 'white';
-          remoteBtn.style.borderColor = '#667eea';
-        }
-        if (remoteSettings) remoteSettings.style.display = 'block';
       }
     };
     
@@ -17767,11 +17671,7 @@ ${redSlipCount > 0 ? `
         }
         
         localStorage.setItem('printerConnectionType', 'usb');
-        
-        // USB接続の場合、印刷キュー監視を開始
-        startPrintQueueMonitor();
-        
-        alert('プリンタ設定を保存しました\n接続方式: USB\nデバイス: ' + (USB_DEVICE.productName || 'mC-Print3') + '\n\n印刷キュー監視を開始しました。\n他のデバイスからの印刷指示を受け付けます。');
+        alert('プリンタ設定を保存しました\n接続方式: USB\nデバイス: ' + (USB_DEVICE.productName || 'mC-Print3'));
       } else if (PRINTER_CONNECTION_TYPE === 'proxy') {
         const proxyURL = document.getElementById('printerProxyInput').value.trim();
         
@@ -17784,10 +17684,6 @@ ${redSlipCount > 0 ? `
         localStorage.setItem('printerConnectionType', 'proxy');
         
         alert('プリンタ設定を保存しました\n接続方式: プロキシサーバー\nURL: ' + proxyURL);
-      } else if (PRINTER_CONNECTION_TYPE === 'firebase_queue') {
-        localStorage.setItem('printerConnectionType', 'firebase_queue');
-        
-        alert('プリンタ設定を保存しました\n接続方式: リモート印刷\n\n印刷指示は他のデバイス（タブレット）経由で実行されます。\n\nタブレット側でUSB接続設定を確認してください。');
       }
       
       closePrinterSettings();
@@ -17853,12 +17749,6 @@ ${redSlipCount > 0 ? `
           resultDiv.style.background = '#C8E6C9';
           resultDiv.style.color = '#2E7D32';
           resultDiv.innerHTML = `✅ 接続成功！<br>サーバー: ${data.serverIP || 'N/A'}:${data.serverPort || 'N/A'}<br>プリンター数: ${data.printers || 'N/A'}`;
-          
-        } else if (PRINTER_CONNECTION_TYPE === 'firebase_queue') {
-          // リモート印刷テスト（Firebaseキュー）
-          resultDiv.style.background = '#C8E6C9';
-          resultDiv.style.color = '#2E7D32';
-          resultDiv.innerHTML = '✅ リモート印刷モード<br>印刷指示は他のデバイス経由で実行されます<br><small>実際の印刷テストは、レシート発行で確認してください</small>';
           
         } else {
           // Ethernet接続テスト
@@ -17961,112 +17851,7 @@ ${redSlipCount > 0 ? `
       if (PRINTER_CONNECTION_TYPE === 'bluetooth') {
         console.log('ℹ️ Bluetooth接続モードです。プリンタ設定から接続してください。');
       }
-      
-      // USB接続の場合、印刷キューを監視（タブレット用）
-      if (PRINTER_CONNECTION_TYPE === 'usb') {
-        console.log('🔌 USB接続モード - 印刷キュー監視を開始します');
-        startPrintQueueMonitor();
-      }
-      
-      // リモート印刷の場合、情報を表示
-      if (PRINTER_CONNECTION_TYPE === 'firebase_queue') {
-        console.log('🌐 リモート印刷モード - 印刷は他のデバイス経由で実行されます');
-      }
     });
-    
-    // ========================================
-    // 印刷キュー監視機能（タブレット用）
-    // ========================================
-    
-    let printQueueUnsubscribe = null;
-    
-    // 印刷キュー監視を開始
-    function startPrintQueueMonitor() {
-      if (printQueueUnsubscribe) {
-        console.log('⚠️ 印刷キュー監視は既に開始されています');
-        return;
-      }
-      
-      console.log('👀 印刷キュー監視開始');
-      
-      const printJobsRef = window.getStoreCollection('print_jobs');
-      const q = window.query(
-        printJobsRef,
-        window.where('status', '==', 'pending'),
-        window.orderBy('createdAt', 'asc')
-      );
-      
-      printQueueUnsubscribe = window.onSnapshot(q, async (snapshot) => {
-        snapshot.docChanges().forEach(async (change) => {
-          if (change.type === 'added') {
-            const job = { id: change.doc.id, ...change.doc.data() };
-            console.log('🆕 新しい印刷ジョブを検知:', job);
-            
-            // USB印刷を実行
-            try {
-              if (USB_DEVICE) {
-                console.log('🖨️ USB印刷を実行します...');
-                await printViaUSB(job.text);
-                
-                // ジョブを完了としてマーク
-                await window.updateDoc(window.getStoreDoc('print_jobs', job.id), {
-                  status: 'completed',
-                  completedAt: window.Timestamp.now(),
-                  completedBy: window.currentStoreName || 'tablet'
-                });
-                
-                console.log('✅ 印刷ジョブ完了:', job.id);
-                
-                // 5秒後にジョブを削除
-                setTimeout(async () => {
-                  try {
-                    await window.deleteDoc(window.getStoreDoc('print_jobs', job.id));
-                    console.log('🗑️ 印刷ジョブを削除しました:', job.id);
-                  } catch (e) {
-                    console.error('ジョブ削除エラー:', e);
-                  }
-                }, 5000);
-                
-              } else {
-                console.warn('⚠️ USBプリンタが接続されていません');
-                // ジョブをエラーとしてマーク
-                await window.updateDoc(window.getStoreDoc('print_jobs', job.id), {
-                  status: 'error',
-                  error: 'USBプリンタ未接続',
-                  errorAt: window.Timestamp.now()
-                });
-              }
-            } catch (error) {
-              console.error('❌ 印刷ジョブ実行エラー:', error);
-              // ジョブをエラーとしてマーク
-              try {
-                await window.updateDoc(window.getStoreDoc('print_jobs', job.id), {
-                  status: 'error',
-                  error: error.message,
-                  errorAt: window.Timestamp.now()
-                });
-              } catch (e) {
-                console.error('ジョブ更新エラー:', e);
-              }
-            }
-          }
-        });
-      }, (error) => {
-        console.error('❌ 印刷キュー監視エラー:', error);
-      });
-      
-      console.log('✅ 印刷キュー監視を開始しました');
-    }
-    
-    // 印刷キュー監視を停止
-    function stopPrintQueueMonitor() {
-      if (printQueueUnsubscribe) {
-        printQueueUnsubscribe();
-        printQueueUnsubscribe = null;
-        console.log('⏹️ 印刷キュー監視を停止しました');
-      }
-    }
-    
     
     // inventory_settingsの変更をリアルタイム監視
     function watchInventoryChanges() {
@@ -19215,10 +19000,6 @@ ${redSlipCount > 0 ? `
                   style="padding: 15px 10px; border: 2px solid #ddd; background: white; color: #666; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">
             プロキシ
           </button>
-          <button id="connectionTypeRemote" onclick="selectConnectionType('firebase_queue')" 
-                  style="padding: 15px 10px; border: 2px solid #ddd; background: white; color: #666; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; grid-column: 1 / -1;">
-            🌐 リモート印刷（他のデバイス経由）
-          </button>
         </div>
       </div>
       
@@ -19282,38 +19063,6 @@ ${redSlipCount > 0 ? `
           <div style="margin-top: 8px; font-size: 14px; color: #666;">
             PCでNode.jsサーバーを起動してURLを入力<br>
             <small style="color: #999;">※サーバー起動時に表示されます</small>
-          </div>
-        </div>
-      </div>
-      
-      <!-- リモート印刷設定 -->
-      <div id="remoteSettings" style="display: none;">
-        <div style="margin-bottom: 25px;">
-          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 12px; color: white; margin-bottom: 15px;">
-            <div style="font-size: 20px; font-weight: bold; margin-bottom: 10px;">🌐 リモート印刷とは？</div>
-            <div style="font-size: 14px; line-height: 1.6;">
-              このデバイスはプリンターに接続されていませんが、<br>
-              印刷指示を他のデバイス（タブレット等）に送信して<br>
-              そちらのプリンターで印刷できます。
-            </div>
-          </div>
-          
-          <div style="background: #f5f5f5; padding: 15px; border-radius: 8px;">
-            <div style="font-weight: bold; color: #333; margin-bottom: 10px;">📋 使い方</div>
-            <div style="font-size: 14px; color: #666; line-height: 1.8;">
-              <strong>1. タブレット側の設定：</strong><br>
-              　• プリンター設定で「USB接続」を選択<br>
-              　• プリンターをUSBで接続<br>
-              　• 設定を保存<br><br>
-              
-              <strong>2. handy側の設定（このデバイス）：</strong><br>
-              　• プリンター設定で「リモート印刷」を選択<br>
-              　• 設定を保存<br><br>
-              
-              <strong>3. 印刷：</strong><br>
-              　• handyでレシート発行すると<br>
-              　• 自動的にタブレットのプリンターから印刷されます
-            </div>
           </div>
         </div>
       </div>
