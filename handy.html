@@ -831,6 +831,135 @@
       to { opacity: 1; }
     }
   </style>
+  
+  <!-- カスタムアラート/確認ダイアログ -->
+  <script>
+    // カスタムアラート表示関数
+    window.showCustomAlert = function(message, title = 'お知らせ') {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        animation: fadeIn 0.3s ease-out;
+        padding: 20px;
+      `;
+      
+      const alertBox = document.createElement('div');
+      alertBox.style.cssText = `
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 24px;
+        padding: 40px;
+        max-width: 450px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        border: 2px solid rgba(255,255,255,0.2);
+        animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      `;
+      
+      alertBox.innerHTML = `
+        <h3 style="color: white; font-size: 24px; font-weight: bold; margin-bottom: 16px; text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+          ${title}
+        </h3>
+        <p style="color: rgba(255,255,255,0.95); font-size: 16px; margin-bottom: 30px; text-align: center; line-height: 1.7; white-space: pre-line;">
+          ${message}
+        </p>
+        <button style="width: 100%; padding: 14px; background: white; color: #667eea; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s;">
+          OK
+        </button>
+      `;
+      
+      overlay.appendChild(alertBox);
+      document.body.appendChild(overlay);
+      
+      const closeAlert = () => {
+        overlay.style.animation = 'fadeOut 0.2s ease-out';
+        setTimeout(() => overlay.remove(), 200);
+      };
+      
+      alertBox.querySelector('button').onclick = closeAlert;
+      overlay.onclick = (e) => {
+        if (e.target === overlay) closeAlert();
+      };
+    };
+    
+    // カスタム確認ダイアログ表示関数
+    window.showCustomConfirm = function(message, title = '確認') {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0,0,0,0.7);
+          backdrop-filter: blur(8px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10000;
+          animation: fadeIn 0.3s ease-out;
+          padding: 20px;
+        `;
+        
+        const confirmBox = document.createElement('div');
+        confirmBox.style.cssText = `
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 24px;
+          padding: 40px;
+          max-width: 450px;
+          width: 90%;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+          border: 2px solid rgba(255,255,255,0.2);
+          animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        `;
+        
+        confirmBox.innerHTML = `
+          <h3 style="color: white; font-size: 24px; font-weight: bold; margin-bottom: 16px; text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+            ${title}
+          </h3>
+          <p style="color: rgba(255,255,255,0.95); font-size: 16px; margin-bottom: 30px; text-align: center; line-height: 1.7; white-space: pre-line;">
+            ${message}
+          </p>
+          <div style="display: flex; gap: 12px;">
+            <button class="cancel-btn" style="flex: 1; padding: 14px; background: rgba(255,255,255,0.2); color: white; border: 2px solid rgba(255,255,255,0.3); border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s;">
+              キャンセル
+            </button>
+            <button class="ok-btn" style="flex: 1; padding: 14px; background: white; color: #667eea; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s;">
+              OK
+            </button>
+          </div>
+        `;
+        
+        overlay.appendChild(confirmBox);
+        document.body.appendChild(overlay);
+        
+        const closeConfirm = (result) => {
+          overlay.style.animation = 'fadeOut 0.2s ease-out';
+          setTimeout(() => {
+            overlay.remove();
+            resolve(result);
+          }, 200);
+        };
+        
+        confirmBox.querySelector('.ok-btn').onclick = () => closeConfirm(true);
+        confirmBox.querySelector('.cancel-btn').onclick = () => closeConfirm(false);
+        overlay.onclick = (e) => {
+          if (e.target === overlay) closeConfirm(false);
+        };
+      });
+    };
+  </script>
+  
 </head>
 <body>
   <div class="container">
@@ -7704,9 +7833,11 @@ ${totalRedSlipCount > 0 ? `
     
     // 全商品を一括で品切れにする
     window.bulkSetInventoryToZero = async function() {
-      if (!confirm('全商品を品切れ（在庫0）に設定しますか？\n\n休業日などに使用してください。\nこの操作は取り消せません。')) {
-        return;
-      }
+      const confirmed = await showCustomConfirm(
+        '全商品を品切れ（在庫0）に設定しますか？\n\n休業日などに使用してください。\nこの操作は取り消せません。',
+        '全商品品切'
+      );
+      if (!confirmed) return;
       
       try {
         // 全商品を取得
@@ -7739,21 +7870,23 @@ ${totalRedSlipCount > 0 ? `
           updatedAt: new Date().toISOString()
         });
         
-        alert(`✅ ${count}件の商品を品切れに設定しました`);
+        showCustomAlert(`${count}件の商品を品切れに設定しました`, '完了');
         console.log('✅ 全商品品切れ設定完了:', count, '件');
         
         closeBulkInventoryModal();
       } catch (error) {
         console.error('❌ 全商品品切れ設定エラー:', error);
-        alert('エラーが発生しました: ' + error.message);
+        showCustomAlert('エラーが発生しました: ' + error.message, 'エラー');
       }
     };
     
     // 全商品を一括で復活させる（在庫0を解除）
     window.bulkClearInventoryZero = async function() {
-      if (!confirm('全商品の品切れを解除しますか？\n\n全ての商品が無限在庫（未設定）に戻ります。\nこの操作は取り消せません。')) {
-        return;
-      }
+      const confirmed = await showCustomConfirm(
+        '全商品の品切れを解除しますか？\n\n全ての商品が無限在庫（未設定）に戻ります。\nこの操作は取り消せません。',
+        '全商品復活'
+      );
+      if (!confirmed) return;
       
       try {
         // 全商品を取得
@@ -7790,13 +7923,13 @@ ${totalRedSlipCount > 0 ? `
           updatedAt: new Date().toISOString()
         });
         
-        alert(`✅ ${count}件の商品を復活させました`);
+        showCustomAlert(`${count}件の商品を復活させました`, '完了');
         console.log('✅ 全商品復活完了:', count, '件');
         
         closeBulkInventoryModal();
       } catch (error) {
         console.error('❌ 全商品復活エラー:', error);
-        alert('エラーが発生しました: ' + error.message);
+        showCustomAlert('エラーが発生しました: ' + error.message, 'エラー');
       }
     };
     
