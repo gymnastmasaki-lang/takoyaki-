@@ -17,9 +17,96 @@
       to { transform: translateY(0); opacity: 1; }
     }
   </style>
-  <!-- StarWebPrint SDK (CDN経由で読み込み) -->
-  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/StarWebPrintBuilder.js"></script>
-  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/StarWebPrintTrader.js"></script>
+  <!-- プリンター用ライブラリ（ローカル実装） -->
+  <script>
+    // StarWebPrint互換のビルダークラス（簡易版）
+    class StarWebPrintBuilder {
+      constructor() {
+        this.commands = [];
+      }
+      
+      createInitializationElement() {
+        this.commands.push('\x1b\x40'); // 初期化
+        return this;
+      }
+      
+      createAlignmentElement(options) {
+        const alignMap = { left: '\x1b\x61\x00', center: '\x1b\x61\x01', right: '\x1b\x61\x02' };
+        this.commands.push(alignMap[options.position] || alignMap.left);
+        return this;
+      }
+      
+      createTextElement(options) {
+        let cmd = '';
+        if (options.emphasis) cmd += '\x1b\x45\x01'; // 強調ON
+        if (options.width === 2 && options.height === 2) cmd += '\x1d\x21\x11'; // 2倍
+        else if (options.width === 2) cmd += '\x1d\x21\x10'; // 幅2倍
+        else if (options.height === 2) cmd += '\x1d\x21\x01'; // 高さ2倍
+        else cmd += '\x1d\x21\x00'; // 通常
+        
+        if (options.invert) cmd += '\x1d\x42\x01'; // 反転ON
+        if (options.data) cmd += options.data;
+        if (options.invert) cmd += '\x1d\x42\x00'; // 反転OFF
+        if (options.emphasis === false) cmd += '\x1b\x45\x00'; // 強調OFF
+        
+        this.commands.push(cmd);
+        return this;
+      }
+      
+      createRuledLineElement(options) {
+        const lines = { thin: '--------------------------------\n', medium: '================================\n', thick: '################################\n' };
+        this.commands.push(lines[options.thickness] || lines.thin);
+        return this;
+      }
+      
+      createCutPaperElement(options) {
+        if (options.feed) this.commands.push('\n\n\n');
+        this.commands.push('\x1d\x56\x00'); // カット
+        return this;
+      }
+      
+      createPeripheralElement(options) {
+        return this; // ブザー等は省略
+      }
+      
+      toString() {
+        return this.commands.join('');
+      }
+    }
+    
+    // StarWebPrintTrader互換クラス
+    class StarWebPrintTrader {
+      constructor(options) {
+        this.url = options.url;
+        this.onReceive = null;
+        this.onError = null;
+      }
+      
+      async sendMessage(request) {
+        try {
+          const response = await fetch(this.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            body: request
+          });
+          
+          if (response.ok && this.onReceive) {
+            this.onReceive({ status: 'success' });
+          } else if (this.onError) {
+            this.onError({ status: response.status + ' ' + response.statusText });
+          }
+        } catch (error) {
+          if (this.onError) {
+            this.onError({ status: error.message });
+          }
+        }
+      }
+    }
+    
+    // グローバルに公開
+    window.StarWebPrintBuilder = StarWebPrintBuilder;
+    window.StarWebPrintTrader = StarWebPrintTrader;
+  </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -2873,19 +2960,10 @@
             throw new Error('Bluetoothプリンタが接続されていません。プリンタ設定から接続してください。');
           }
           
-          // StarWebPrintBuilderから生テキストを抽出（簡易版）
-          // 注意: StarWebPrintBuilderはXMLを生成するので、テキストのみを抽出
-          const xmlString = builder.toString();
-          const textMatch = xmlString.match(/<text[^>]*>([^<]*)<\/text>/g);
-          let text = '';
-          if (textMatch) {
-            textMatch.forEach(match => {
-              const content = match.replace(/<[^>]+>/g, '');
-              text += content + '\n';
-            });
-          }
+          // builderからESC/POSコマンド文字列を取得
+          const commands = builder.toString();
           
-          await printViaBluetooth(text);
+          await printViaBluetooth(commands);
           
           if (onSuccess) onSuccess({ status: 'success', message: 'Bluetooth印刷完了' });
           return;
@@ -2932,7 +3010,7 @@
             if (onError) onError(response);
           };
           
-          trader.sendMessage({request: request});
+          await trader.sendMessage(request);
         }
       } catch (error) {
         console.error('❌ 印刷処理エラー:', error);
@@ -17783,7 +17861,7 @@ ${redSlipCount > 0 ? `
             resultDiv.innerHTML = `❌ 接続失敗<br>${response.status || 'プリンタに接続できません'}<br><small>IPアドレスとネットワーク接続を確認してください</small>`;
           };
           
-          trader.sendMessage({request: request});
+          await trader.sendMessage(request);
         }
         
       } catch (error) {

@@ -6,9 +6,96 @@
   <title>ハンディシステム</title>
   
   <!-- 外部ライブラリ -->
-  <!-- StarWebPrint SDK (CDN経由で読み込み) -->
-  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/StarWebPrintBuilder.js"></script>
-  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/StarWebPrintTrader.js"></script>
+  <!-- プリンター用ライブラリ（ローカル実装） -->
+  <script>
+    // StarWebPrint互換のビルダークラス（簡易版）
+    class StarWebPrintBuilder {
+      constructor() {
+        this.commands = [];
+      }
+      
+      createInitializationElement() {
+        this.commands.push('\x1b\x40'); // 初期化
+        return this;
+      }
+      
+      createAlignmentElement(options) {
+        const alignMap = { left: '\x1b\x61\x00', center: '\x1b\x61\x01', right: '\x1b\x61\x02' };
+        this.commands.push(alignMap[options.position] || alignMap.left);
+        return this;
+      }
+      
+      createTextElement(options) {
+        let cmd = '';
+        if (options.emphasis) cmd += '\x1b\x45\x01'; // 強調ON
+        if (options.width === 2 && options.height === 2) cmd += '\x1d\x21\x11'; // 2倍
+        else if (options.width === 2) cmd += '\x1d\x21\x10'; // 幅2倍
+        else if (options.height === 2) cmd += '\x1d\x21\x01'; // 高さ2倍
+        else cmd += '\x1d\x21\x00'; // 通常
+        
+        if (options.invert) cmd += '\x1d\x42\x01'; // 反転ON
+        if (options.data) cmd += options.data;
+        if (options.invert) cmd += '\x1d\x42\x00'; // 反転OFF
+        if (options.emphasis === false) cmd += '\x1b\x45\x00'; // 強調OFF
+        
+        this.commands.push(cmd);
+        return this;
+      }
+      
+      createRuledLineElement(options) {
+        const lines = { thin: '--------------------------------\n', medium: '================================\n', thick: '################################\n' };
+        this.commands.push(lines[options.thickness] || lines.thin);
+        return this;
+      }
+      
+      createCutPaperElement(options) {
+        if (options.feed) this.commands.push('\n\n\n');
+        this.commands.push('\x1d\x56\x00'); // カット
+        return this;
+      }
+      
+      createPeripheralElement(options) {
+        return this; // ブザー等は省略
+      }
+      
+      toString() {
+        return this.commands.join('');
+      }
+    }
+    
+    // StarWebPrintTrader互換クラス
+    class StarWebPrintTrader {
+      constructor(options) {
+        this.url = options.url;
+        this.onReceive = null;
+        this.onError = null;
+      }
+      
+      async sendMessage(request) {
+        try {
+          const response = await fetch(this.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            body: request
+          });
+          
+          if (response.ok && this.onReceive) {
+            this.onReceive({ status: 'success' });
+          } else if (this.onError) {
+            this.onError({ status: response.status + ' ' + response.statusText });
+          }
+        } catch (error) {
+          if (this.onError) {
+            this.onError({ status: error.message });
+          }
+        }
+      }
+    }
+    
+    // グローバルに公開
+    window.StarWebPrintBuilder = StarWebPrintBuilder;
+    window.StarWebPrintTrader = StarWebPrintTrader;
+  </script>
   
   <!-- その他のライブラリ -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
@@ -7870,6 +7957,35 @@ ${totalRedSlipCount > 0 ? `
     // 🆕 日計表出力
 
     
+    // 🆕 印刷リクエストを送信する共通関数
+    async function sendPrintRequest(builder, onSuccess, onError) {
+      try {
+        const request = builder.toString();
+        
+        if (PRINTER_CONNECTION_TYPE === 'ethernet' || PRINTER_CONNECTION_TYPE === 'wifi') {
+          // Wi-Fi/LAN印刷
+          const url = `http://${PRINTER_IP}/StarWebPRNT/SendMessage`;
+          const trader = new StarWebPrintTrader({url: url});
+          
+          trader.onReceive = onSuccess;
+          trader.onError = onError;
+          
+          await trader.sendMessage(request);
+        } else if (PRINTER_CONNECTION_TYPE === 'bluetooth' && BLUETOOTH_CHARACTERISTIC) {
+          // Bluetooth印刷
+          const encoder = new TextEncoder();
+          const data = encoder.encode(request);
+          await BLUETOOTH_CHARACTERISTIC.writeValue(data);
+          if (onSuccess) onSuccess({ status: 'success' });
+        } else {
+          throw new Error('プリンターが接続されていません');
+        }
+      } catch (error) {
+        console.error('印刷エラー:', error);
+        if (onError) onError({ status: error.message });
+      }
+    }
+    
     // ========== 🖨 プリンタ設定機能 ==========
     
     // プリンタ設定のグローバル変数
@@ -8432,7 +8548,7 @@ ${totalRedSlipCount > 0 ? `
             resultDiv.innerHTML = `❌ 接続失敗<br>${response.status || 'プリンタに接続できません'}<br><small>IPアドレスとネットワーク接続を確認してください</small>`;
           };
           
-          trader.sendMessage({request: request});
+          await trader.sendMessage(request);
         }
         
       } catch (error) {
