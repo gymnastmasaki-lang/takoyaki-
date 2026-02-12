@@ -7,25 +7,8 @@
   
   <!-- 外部ライブラリ -->
   <!-- StarWebPrint SDK (CDN経由で読み込み) -->
-  <script>
-    // StarWebPrint SDKのフォールバック読み込み
-    (function() {
-      const urls = [
-        'https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/StarWebPrintTrader.js',
-        'https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/StarWebPrintBuilder.js'
-      ];
-      
-      urls.forEach(url => {
-        const script = document.createElement('script');
-        script.src = url;
-        script.async = false; // 順番に読み込む
-        script.onerror = function() {
-          console.warn('StarWebPrint SDK読み込み失敗:', url);
-        };
-        document.head.appendChild(script);
-      });
-    })();
-  </script>
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/StarWebPrintBuilder.js"></script>
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/StarWebPrintTrader.js"></script>
   
   <!-- その他のライブラリ -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
@@ -2299,12 +2282,19 @@
         }
         message += `\n客数: +1\n\n注文は自動的に削除されました。`;
         
-        await showCustomAlert({ 
-          icon: '✅', 
-          title: '会計完了', 
-          message: message, 
-          btnClass: 'modal-btn-success' 
-        });
+        // 🆕 会計完了時にレシート・領収書発行の選択肢を表示
+        const checkoutData = {
+          totalAmount: totalAmountToPay,
+          discountAmount: discountAmount,
+          originalAmount: totalBeforeDiscount,
+          paymentMethod: paymentMethodJP,
+          tax8Total: tax8Total,
+          tax10Total: tax10Total,
+          orders: ordersToProcess,
+          timestamp: now
+        };
+        
+        await showCheckoutCompleteOptions(checkoutData);
         
         // モーダルを閉じる
         closePaymentModal();
@@ -2321,6 +2311,343 @@
         });
       }
     };
+    
+    // 🆕 会計完了後にレシート・領収書発行の選択肢を表示
+    async function showCheckoutCompleteOptions(checkoutData) {
+      return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0,0,0,0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 100000;
+        `;
+        
+        const content = document.createElement('div');
+        content.style.cssText = `
+          background: white;
+          border-radius: 20px;
+          padding: 30px;
+          max-width: 400px;
+          width: 90%;
+          box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        `;
+        
+        let message = `会計が完了しました\n\n売上: ¥${checkoutData.totalAmount.toLocaleString()}`;
+        if (checkoutData.discountAmount > 0) {
+          message += `\n値引き: ¥${checkoutData.discountAmount.toLocaleString()}`;
+        }
+        message += `\n客数: +1`;
+        
+        content.innerHTML = `
+          <div style="text-align: center; margin-bottom: 20px;">
+            <div style="font-size: 50px; margin-bottom: 10px;">✅</div>
+            <div style="font-size: 20px; font-weight: bold; margin-bottom: 10px;">会計完了</div>
+            <div style="white-space: pre-line; color: #666; line-height: 1.6;">${message}</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <button id="printReceiptBtn" style="
+              padding: 15px;
+              background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+              color: white;
+              border: none;
+              border-radius: 10px;
+              font-size: 16px;
+              font-weight: bold;
+              cursor: pointer;
+              box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+            ">📄 レシート発行</button>
+            <button id="printInvoiceBtn" style="
+              padding: 15px;
+              background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+              color: white;
+              border: none;
+              border-radius: 10px;
+              font-size: 16px;
+              font-weight: bold;
+              cursor: pointer;
+              box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3);
+            ">🧾 領収書発行</button>
+            <button id="closeCheckoutBtn" style="
+              padding: 15px;
+              background: linear-gradient(135deg, #9E9E9E 0%, #757575 100%);
+              color: white;
+              border: none;
+              border-radius: 10px;
+              font-size: 16px;
+              font-weight: bold;
+              cursor: pointer;
+              box-shadow: 0 4px 15px rgba(158, 158, 158, 0.3);
+            ">閉じる</button>
+          </div>
+        `;
+        
+        modal.appendChild(content);
+        document.body.appendChild(modal);
+        
+        // レシート発行ボタン
+        document.getElementById('printReceiptBtn').onclick = async () => {
+          playTapSound();
+          await printCheckoutReceipt(checkoutData);
+        };
+        
+        // 領収書発行ボタン
+        document.getElementById('printInvoiceBtn').onclick = async () => {
+          playTapSound();
+          await printCheckoutInvoice(checkoutData);
+        };
+        
+        // 閉じるボタン
+        document.getElementById('closeCheckoutBtn').onclick = () => {
+          playTapSound();
+          document.body.removeChild(modal);
+          resolve();
+        };
+      });
+    }
+    
+    // 🆕 会計後のレシート印刷
+    async function printCheckoutReceipt(checkoutData) {
+      try {
+        console.log('🖨️ レシート印刷開始');
+        
+        if (typeof StarWebPrintBuilder === 'undefined') {
+          await showCustomAlert({
+            icon: '⚠️',
+            title: 'プリンター未接続',
+            message: 'プリンターが接続されていません。\n設定画面でプリンターを設定してください。',
+            btnClass: 'modal-btn-warning'
+          });
+          return;
+        }
+        
+        const builder = new StarWebPrintBuilder();
+        builder.createInitializationElement();
+        
+        // ヘッダー
+        builder.createAlignmentElement({position: 'center'});
+        const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
+        const branchName = window.receiptSettings?.branchName || '下赤塚店';
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: storeName + '\n'});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        builder.createTextElement({data: branchName + '\n'});
+        
+        const address = window.receiptSettings?.address || '東京都板橋区赤塚新町';
+        const phone = window.receiptSettings?.phone || '03-XXXX-XXXX';
+        builder.createTextElement({data: address + '\n'});
+        builder.createTextElement({data: 'TEL: ' + phone + '\n'});
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        // 日時
+        builder.createAlignmentElement({position: 'left'});
+        const now = checkoutData.timestamp || new Date();
+        const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        builder.createTextElement({data: `発行日時: ${dateStr}\n`});
+        
+        builder.createRuledLineElement({thickness: 'thin'});
+        
+        // 商品明細
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true});
+        builder.createTextElement({data: 'ご注文内容\n'});
+        builder.createTextElement({emphasis: false});
+        builder.createAlignmentElement({position: 'left'});
+        
+        checkoutData.orders.forEach(order => {
+          order.items.forEach(item => {
+            const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
+            const subtotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+            const priceInfo = `@${item.price} x${item.quantity}`;
+            const subtotalStr = `${subtotal.toLocaleString()}円`;
+            const spaces = ' '.repeat(Math.max(1, 32 - priceInfo.length - subtotalStr.length));
+            
+            builder.createTextElement({data: `${itemName}\n`});
+            builder.createTextElement({data: `${priceInfo}${spaces}${subtotalStr}\n`});
+            
+            if (item.toppings && item.toppings !== 'なし') {
+              builder.createTextElement({data: ` TP:${item.toppings}\n`});
+            }
+          });
+        });
+        
+        builder.createRuledLineElement({thickness: 'medium'});
+        
+        // 合計金額
+        if (checkoutData.discountAmount > 0) {
+          builder.createAlignmentElement({position: 'right'});
+          builder.createTextElement({data: `小計: ¥${checkoutData.originalAmount.toLocaleString()}\n`});
+          builder.createTextElement({data: `値引き: -¥${checkoutData.discountAmount.toLocaleString()}\n`});
+          builder.createRuledLineElement({thickness: 'thin'});
+        }
+        
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: `合計 ¥${checkoutData.totalAmount.toLocaleString()}\n`});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        
+        // 支払い方法
+        builder.createAlignmentElement({position: 'left'});
+        builder.createTextElement({data: `\nお支払い: ${checkoutData.paymentMethod}\n`});
+        
+        // 税金内訳
+        builder.createRuledLineElement({thickness: 'thin'});
+        builder.createTextElement({data: `8%対象: ¥${checkoutData.tax8Total.toLocaleString()}\n`});
+        builder.createTextElement({data: `10%対象: ¥${checkoutData.tax10Total.toLocaleString()}\n`});
+        
+        // フッター
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({data: '\nありがとうございました\n\n\n'});
+        
+        builder.createCutPaperElement({feed: true});
+        
+        // 印刷実行
+        await sendPrintRequest(
+          builder,
+          (response) => {
+            console.log('✅ レシート印刷成功');
+            showCustomAlert({
+              icon: '✅',
+              title: '印刷完了',
+              message: 'レシートを印刷しました',
+              btnClass: 'modal-btn-success'
+            });
+          },
+          (response) => {
+            console.error('❌ レシート印刷エラー:', response);
+            showCustomAlert({
+              icon: '❌',
+              title: '印刷エラー',
+              message: 'レシートの印刷に失敗しました\n' + (response.status || ''),
+              btnClass: 'modal-btn-danger'
+            });
+          }
+        );
+        
+      } catch (e) {
+        console.error('❌ レシート印刷エラー:', e);
+        showCustomAlert({
+          icon: '❌',
+          title: 'エラー',
+          message: 'レシートの印刷に失敗しました\n' + e.message,
+          btnClass: 'modal-btn-danger'
+        });
+      }
+    }
+    
+    // 🆕 会計後の領収書印刷
+    async function printCheckoutInvoice(checkoutData) {
+      try {
+        console.log('🖨️ 領収書印刷開始');
+        
+        if (typeof StarWebPrintBuilder === 'undefined') {
+          await showCustomAlert({
+            icon: '⚠️',
+            title: 'プリンター未接続',
+            message: 'プリンターが接続されていません。\n設定画面でプリンターを設定してください。',
+            btnClass: 'modal-btn-warning'
+          });
+          return;
+        }
+        
+        const builder = new StarWebPrintBuilder();
+        builder.createInitializationElement();
+        
+        // ヘッダー
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: '領 収 書\n'});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        
+        const storeName = window.receiptSettings?.storeName || '粉もん屋 八';
+        const branchName = window.receiptSettings?.branchName || '下赤塚店';
+        builder.createTextElement({data: '\n'});
+        builder.createTextElement({emphasis: true, width: 1, height: 1});
+        builder.createTextElement({data: storeName + ' ' + branchName + '\n'});
+        builder.createTextElement({emphasis: false});
+        
+        const address = window.receiptSettings?.address || '東京都板橋区赤塚新町';
+        const phone = window.receiptSettings?.phone || '03-XXXX-XXXX';
+        builder.createTextElement({data: address + '\n'});
+        builder.createTextElement({data: 'TEL: ' + phone + '\n'});
+        
+        builder.createRuledLineElement({thickness: 'medium'});
+        
+        // 金額
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({data: '\n'});
+        builder.createTextElement({emphasis: true, width: 2, height: 2});
+        builder.createTextElement({data: `¥${checkoutData.totalAmount.toLocaleString()}\n`});
+        builder.createTextElement({emphasis: false, width: 1, height: 1});
+        builder.createTextElement({data: '\n'});
+        
+        // 但し書き
+        builder.createAlignmentElement({position: 'left'});
+        builder.createTextElement({data: '但し: お食事代として\n'});
+        builder.createTextElement({data: `支払方法: ${checkoutData.paymentMethod}\n`});
+        
+        // 日付
+        const now = checkoutData.timestamp || new Date();
+        const dateStr = `${now.getFullYear()}年${String(now.getMonth()+1).padStart(2,'0')}月${String(now.getDate()).padStart(2,'0')}日`;
+        builder.createTextElement({data: `発行日: ${dateStr}\n`});
+        
+        // 内訳
+        builder.createRuledLineElement({thickness: 'thin'});
+        builder.createTextElement({data: '\n内訳:\n'});
+        if (checkoutData.discountAmount > 0) {
+          builder.createTextElement({data: `小計: ¥${checkoutData.originalAmount.toLocaleString()}\n`});
+          builder.createTextElement({data: `値引き: -¥${checkoutData.discountAmount.toLocaleString()}\n`});
+        }
+        builder.createTextElement({data: `8%対象: ¥${checkoutData.tax8Total.toLocaleString()}\n`});
+        builder.createTextElement({data: `10%対象: ¥${checkoutData.tax10Total.toLocaleString()}\n`});
+        
+        // フッター
+        builder.createTextElement({data: '\n'});
+        builder.createAlignmentElement({position: 'center'});
+        builder.createTextElement({data: '上記の通り領収いたしました\n\n\n'});
+        
+        builder.createCutPaperElement({feed: true});
+        
+        // 印刷実行
+        await sendPrintRequest(
+          builder,
+          (response) => {
+            console.log('✅ 領収書印刷成功');
+            showCustomAlert({
+              icon: '✅',
+              title: '印刷完了',
+              message: '領収書を印刷しました',
+              btnClass: 'modal-btn-success'
+            });
+          },
+          (response) => {
+            console.error('❌ 領収書印刷エラー:', response);
+            showCustomAlert({
+              icon: '❌',
+              title: '印刷エラー',
+              message: '領収書の印刷に失敗しました\n' + (response.status || ''),
+              btnClass: 'modal-btn-danger'
+            });
+          }
+        );
+        
+      } catch (e) {
+        console.error('❌ 領収書印刷エラー:', e);
+        showCustomAlert({
+          icon: '❌',
+          title: 'エラー',
+          message: '領収書の印刷に失敗しました\n' + e.message,
+          btnClass: 'modal-btn-danger'
+        });
+      }
+    }
     
     // 営業日の日付文字列を取得（3時基準）
     function getBusinessDateStr() {
