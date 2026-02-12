@@ -7556,23 +7556,56 @@ ${totalRedSlipCount > 0 ? `
       
       const ethernetBtn = document.getElementById('connectionTypeEthernet');
       const bluetoothBtn = document.getElementById('connectionTypeBluetooth');
+      const usbBtn = document.getElementById('connectionTypeUsb');
+      const proxyBtn = document.getElementById('connectionTypeProxy');
       const ethernetSettings = document.getElementById('ethernetSettings');
       const bluetoothSettings = document.getElementById('bluetoothSettings');
+      const usbSettings = document.getElementById('usbSettings');
+      const proxySettings = document.getElementById('proxySettings');
+      
+      // すべてのボタンをリセット
+      [ethernetBtn, bluetoothBtn, usbBtn, proxyBtn].forEach(btn => {
+        if (btn) {
+          btn.style.background = 'white';
+          btn.style.color = '#666';
+          btn.style.borderColor = '#ddd';
+        }
+      });
+      
+      // すべての設定セクションを非表示
+      if (ethernetSettings) ethernetSettings.style.display = 'none';
+      if (bluetoothSettings) bluetoothSettings.style.display = 'none';
+      if (usbSettings) usbSettings.style.display = 'none';
+      if (proxySettings) proxySettings.style.display = 'none';
       
       if (type === 'ethernet') {
-        ethernetBtn.style.background = '#667eea';
-        ethernetBtn.style.color = 'white';
-        bluetoothBtn.style.background = 'white';
-        bluetoothBtn.style.color = '#666';
-        ethernetSettings.style.display = 'block';
-        bluetoothSettings.style.display = 'none';
-      } else {
-        ethernetBtn.style.background = 'white';
-        ethernetBtn.style.color = '#666';
-        bluetoothBtn.style.background = '#667eea';
-        bluetoothBtn.style.color = 'white';
-        ethernetSettings.style.display = 'none';
-        bluetoothSettings.style.display = 'block';
+        if (ethernetBtn) {
+          ethernetBtn.style.background = '#667eea';
+          ethernetBtn.style.color = 'white';
+          ethernetBtn.style.borderColor = '#667eea';
+        }
+        if (ethernetSettings) ethernetSettings.style.display = 'block';
+      } else if (type === 'bluetooth') {
+        if (bluetoothBtn) {
+          bluetoothBtn.style.background = '#667eea';
+          bluetoothBtn.style.color = 'white';
+          bluetoothBtn.style.borderColor = '#667eea';
+        }
+        if (bluetoothSettings) bluetoothSettings.style.display = 'block';
+      } else if (type === 'usb') {
+        if (usbBtn) {
+          usbBtn.style.background = '#667eea';
+          usbBtn.style.color = 'white';
+          usbBtn.style.borderColor = '#667eea';
+        }
+        if (usbSettings) usbSettings.style.display = 'block';
+      } else if (type === 'proxy') {
+        if (proxyBtn) {
+          proxyBtn.style.background = '#667eea';
+          proxyBtn.style.color = 'white';
+          proxyBtn.style.borderColor = '#667eea';
+        }
+        if (proxySettings) proxySettings.style.display = 'block';
       }
     };
     
@@ -7722,6 +7755,120 @@ ${totalRedSlipCount > 0 ? `
       }
     }
     
+    // ========================================
+    // USB接続機能
+    // ========================================
+    
+    let USB_DEVICE = null;
+    
+    // USB接続のmCprint3プリンターを検索して接続
+    window.connectUSBPrinter = async function() {
+      if (!navigator.usb) {
+        await showCustomAlert({
+          icon: '',
+          title: 'エラー',
+          message: 'このブラウザはWebUSB APIに対応していません。\nChromeまたはEdgeをご使用ください。',
+          btnClass: 'modal-btn-danger'
+        });
+        return;
+      }
+      
+      try {
+        console.log('🔍 USBプリンタを検索中...');
+        
+        // USBデバイスを要求（ユーザーがデバイスを選択）
+        const device = await navigator.usb.requestDevice({
+          filters: [
+            { vendorId: 0x0519 }, // Star Micronics Vendor ID
+            { vendorId: 0x0519, productId: 0x0001 } // mCprint3
+          ]
+        });
+        
+        console.log('✅ USBデバイス検出:', device.productName);
+        
+        // デバイスを開く
+        await device.open();
+        console.log('📂 デバイスをオープンしました');
+        
+        // コンフィグレーションを選択
+        if (device.configuration === null) {
+          await device.selectConfiguration(1);
+          console.log('⚙️ コンフィグレーション選択完了');
+        }
+        
+        // インターフェースをクレーム
+        await device.claimInterface(0);
+        console.log('🔗 インターフェース接続完了');
+        
+        USB_DEVICE = device;
+        
+        // デバイス名を表示
+        document.getElementById('usbDeviceInfo').style.display = 'block';
+        document.getElementById('usbDeviceName').textContent = device.productName || 'mC-Print3';
+        
+        // localStorageに保存
+        localStorage.setItem('usbDeviceName', device.productName || 'mC-Print3');
+        
+        await showCustomAlert({
+          icon: '',
+          title: '接続成功',
+          message: 'USBプリンタに接続しました\n' + (device.productName || 'mC-Print3'),
+          btnClass: 'modal-btn-success'
+        });
+        
+      } catch (error) {
+        console.error('❌ USB接続エラー:', error);
+        
+        if (error.name === 'NotFoundError') {
+          await showCustomAlert({
+            icon: '',
+            title: 'デバイスが見つかりません',
+            message: 'USBプリンタが見つかりませんでした。\n\n確認事項:\n1. USBケーブルが接続されているか\n2. プリンターの電源が入っているか',
+            btnClass: 'modal-btn-danger'
+          });
+        } else if (error.name === 'SecurityError' || error.name === 'NotAllowedError') {
+          console.log('検索がキャンセルされました');
+        } else {
+          await showCustomAlert({
+            icon: '',
+            title: '接続エラー',
+            message: 'USBプリンタの接続に失敗しました。\n\nブラウザがWebUSB対応か確認してください（Chrome、Edge推奨）',
+            btnClass: 'modal-btn-danger'
+          });
+        }
+      }
+    };
+    
+    // USB経由で印刷
+    async function printViaUSB(text) {
+      if (!USB_DEVICE) {
+        throw new Error('USBプリンタが接続されていません');
+      }
+      
+      try {
+        const command = createESCPOSCommand(text);
+        
+        console.log('📤 USB印刷データ送信中... (' + command.length + ' bytes)');
+        await USB_DEVICE.transferOut(1, command);
+        
+        console.log('✅ USB印刷完了');
+      } catch (error) {
+        console.error('❌ USB印刷エラー:', error);
+        
+        // デバイスをクローズして再接続を促す
+        if (USB_DEVICE) {
+          try {
+            await USB_DEVICE.close();
+          } catch (e) {
+            console.error('デバイスクローズエラー:', e);
+          }
+          USB_DEVICE = null;
+        }
+        
+        throw error;
+      }
+    }
+    
     window.showPrinterSettings = function() {
       // 機能メニューを閉じる
       const menu = document.getElementById('functionsSubMenu');
@@ -7730,12 +7877,28 @@ ${totalRedSlipCount > 0 ? `
       }
       
       document.getElementById('printerIPInput').value = PRINTER_IP;
+      
+      // プロキシURLの復元
+      const savedProxyURL = localStorage.getItem('printerProxyURL') || 'http://192.168.1.100:3000';
+      const proxyInput = document.getElementById('printerProxyInput');
+      if (proxyInput) {
+        proxyInput.value = savedProxyURL;
+      }
+      
       selectConnectionType(PRINTER_CONNECTION_TYPE);
       
+      // Bluetoothデバイス情報の復元
       const savedDeviceName = localStorage.getItem('bluetoothDeviceName');
       if (savedDeviceName && PRINTER_CONNECTION_TYPE === 'bluetooth') {
         document.getElementById('bluetoothDeviceInfo').style.display = 'block';
         document.getElementById('bluetoothDeviceName').textContent = savedDeviceName + ' (再接続が必要)';
+      }
+      
+      // USBデバイス情報の復元
+      const savedUsbName = localStorage.getItem('usbDeviceName');
+      if (savedUsbName && PRINTER_CONNECTION_TYPE === 'usb') {
+        document.getElementById('usbDeviceInfo').style.display = 'block';
+        document.getElementById('usbDeviceName').textContent = savedUsbName + ' (再接続が必要)';
       }
       
       document.getElementById('printerSettingsModal').style.display = 'flex';
@@ -7771,7 +7934,7 @@ ${totalRedSlipCount > 0 ? `
           message: 'プリンタ設定を保存しました\n接続方式: WiFi/LAN\nIP: ' + newIP, 
           btnClass: 'modal-btn-success' 
         });
-      } else {
+      } else if (PRINTER_CONNECTION_TYPE === 'bluetooth') {
         if (!BLUETOOTH_DEVICE) {
           await showCustomAlert({ 
             icon: '', 
@@ -7787,6 +7950,46 @@ ${totalRedSlipCount > 0 ? `
           icon: '', 
           title: '保存完了', 
           message: 'プリンタ設定を保存しました\n接続方式: Bluetooth\nデバイス: ' + (BLUETOOTH_DEVICE.name || '不明'), 
+          btnClass: 'modal-btn-success' 
+        });
+      } else if (PRINTER_CONNECTION_TYPE === 'usb') {
+        if (!USB_DEVICE) {
+          await showCustomAlert({ 
+            icon: '', 
+            title: 'エラー', 
+            message: 'USBプリンタを接続してください', 
+            btnClass: 'modal-btn-danger' 
+          });
+          return;
+        }
+        
+        localStorage.setItem('printerConnectionType', 'usb');
+        await showCustomAlert({ 
+          icon: '', 
+          title: '保存完了', 
+          message: 'プリンタ設定を保存しました\n接続方式: USB\nデバイス: ' + (USB_DEVICE.productName || 'mC-Print3'), 
+          btnClass: 'modal-btn-success' 
+        });
+      } else if (PRINTER_CONNECTION_TYPE === 'proxy') {
+        const proxyURL = document.getElementById('printerProxyInput').value.trim();
+        
+        if (!proxyURL.startsWith('http://') && !proxyURL.startsWith('https://')) {
+          await showCustomAlert({ 
+            icon: '', 
+            title: 'エラー', 
+            message: '正しいURLを入力してください\n例: http://192.168.1.100:3000', 
+            btnClass: 'modal-btn-danger' 
+          });
+          return;
+        }
+        
+        localStorage.setItem('printerProxyURL', proxyURL);
+        localStorage.setItem('printerConnectionType', 'proxy');
+        
+        await showCustomAlert({ 
+          icon: '', 
+          title: '保存完了', 
+          message: 'プリンタ設定を保存しました\n接続方式: プロキシサーバー\nURL: ' + proxyURL, 
           btnClass: 'modal-btn-success' 
         });
       }
@@ -7817,6 +8020,41 @@ ${totalRedSlipCount > 0 ? `
           resultDiv.style.color = '#2E7D32';
           resultDiv.innerHTML = '接続成功！<br>Bluetoothプリンタと通信できました';
           
+        } else if (PRINTER_CONNECTION_TYPE === 'usb') {
+          if (!USB_DEVICE) {
+            resultDiv.style.background = '#FFCDD2';
+            resultDiv.style.color = '#C62828';
+            resultDiv.innerHTML = 'USBプリンタが未接続<br>先にプリンタを接続してください';
+            return;
+          }
+          
+          await printViaUSB('=== 接続テスト ===\n印刷成功！\n\n');
+          
+          resultDiv.style.background = '#C8E6C9';
+          resultDiv.style.color = '#2E7D32';
+          resultDiv.innerHTML = '✅ 接続成功！<br>USBプリンタと通信できました';
+          
+        } else if (PRINTER_CONNECTION_TYPE === 'proxy') {
+          // プロキシサーバー接続テスト
+          const proxyURL = document.getElementById('printerProxyInput').value.trim();
+          
+          const response = await fetch(`${proxyURL}/health`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          
+          const data = await response.json();
+          
+          resultDiv.style.background = '#C8E6C9';
+          resultDiv.style.color = '#2E7D32';
+          resultDiv.innerHTML = `✅ 接続成功！<br>サーバー: ${data.serverIP}:${data.serverPort}<br>プリンター数: ${data.printers}`;
+          
         } else {
           // Ethernet接続テスト
           const testIP = document.getElementById('printerIPInput').value.trim();
@@ -7834,7 +8072,7 @@ ${totalRedSlipCount > 0 ? `
           if (typeof StarWebPrintBuilder === 'undefined' || typeof StarWebPrintTrader === 'undefined') {
             resultDiv.style.background = '#FFF9C4';
             resultDiv.style.color = '#F57F17';
-            resultDiv.innerHTML = '⚠️ WiFi/LAN接続テストは現在利用できません<br><small>StarWebPrintライブラリの読み込みに失敗しました。<br>Bluetoothプリンターをご利用ください。</small>';
+            resultDiv.innerHTML = '⚠️ WiFi/LAN接続テストは現在利用できません<br><small>StarWebPrintライブラリの読み込みに失敗しました。<br>プロキシサーバーまたはBluetoothをご利用ください。</small>';
             console.error('StarWebPrint未定義:', {
               Builder: typeof StarWebPrintBuilder,
               Trader: typeof StarWebPrintTrader
@@ -8355,14 +8593,22 @@ ${totalRedSlipCount > 0 ? `
       <!-- 接続方式選択 -->
       <div style="margin-bottom: 25px;">
         <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">接続方式</label>
-        <div style="display: flex; gap: 10px;">
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
           <button id="connectionTypeEthernet" onclick="playTapSound(); selectConnectionType('ethernet')" 
-                  style="flex: 1; padding: 15px; border: 2px solid #667eea; background: #667eea; color: white; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
-            WiFi / LAN
+                  style="padding: 15px 10px; border: 2px solid #ddd; background: white; color: #666; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">
+            WiFi/LAN
           </button>
           <button id="connectionTypeBluetooth" onclick="playTapSound(); selectConnectionType('bluetooth')" 
-                  style="flex: 1; padding: 15px; border: 2px solid #ddd; background: white; color: #666; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                  style="padding: 15px 10px; border: 2px solid #ddd; background: white; color: #666; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">
             Bluetooth
+          </button>
+          <button id="connectionTypeUsb" onclick="playTapSound(); selectConnectionType('usb')" 
+                  style="padding: 15px 10px; border: 2px solid #667eea; background: #667eea; color: white; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">
+            USB接続
+          </button>
+          <button id="connectionTypeProxy" onclick="playTapSound(); selectConnectionType('proxy')" 
+                  style="padding: 15px 10px; border: 2px solid #ddd; background: white; color: #666; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">
+            プロキシ
           </button>
         </div>
       </div>
@@ -8395,6 +8641,38 @@ ${totalRedSlipCount > 0 ? `
           <div style="margin-top: 8px; font-size: 14px; color: #666;">
             ESC/POS対応のBluetoothプリンタを検索します<br>
             <small style="color: #999;">※Chrome、Edgeで利用可能</small>
+          </div>
+        </div>
+      </div>
+      
+      <!-- USB設定 -->
+      <div id="usbSettings" style="display: none;">
+        <div style="margin-bottom: 25px;">
+          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">USBプリンタ</label>
+          <button onclick="playTapSound(); connectUSBPrinter()" 
+                  style="width: 100%; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; box-shadow: 0 4px 15px rgba(255,152,0,0.3);">
+            プリンタを接続
+          </button>
+          <div id="usbDeviceInfo" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 8px; display: none;">
+            <div style="font-weight: bold; color: #333;">接続済みプリンタ:</div>
+            <div id="usbDeviceName" style="color: #666; margin-top: 5px;">なし</div>
+          </div>
+          <div style="margin-top: 8px; font-size: 14px; color: #666;">
+            mC-Print3をUSBケーブルで接続してください<br>
+            <small style="color: #999;">※Chrome、Edgeで利用可能</small>
+          </div>
+        </div>
+      </div>
+      
+      <!-- プロキシサーバー設定 -->
+      <div id="proxySettings" style="display: none;">
+        <div style="margin-bottom: 25px;">
+          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">プロキシサーバーURL</label>
+          <input type="text" id="printerProxyInput" placeholder="例: http://192.168.1.100:3000" 
+                 style="width: 100%; padding: 15px; border: 2px solid #667eea; border-radius: 8px; font-size: 16px; box-sizing: border-box;">
+          <div style="margin-top: 8px; font-size: 14px; color: #666;">
+            PCでNode.jsサーバーを起動してURLを入力<br>
+            <small style="color: #999;">※サーバー起動時に表示されます</small>
           </div>
         </div>
       </div>
