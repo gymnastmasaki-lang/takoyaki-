@@ -1799,9 +1799,60 @@
           updateTopWaitingCount().catch(e => console.error('待ち人数更新エラー:', e));
         });
         
-        // 🆕 定期的に営業時間をチェック（1分ごと）
+        // 🆕 休業日設定の変更をリアルタイムで監視
+        onSnapshot(window.getStoreDoc('closed_days_settings', 'default'), async (doc) => {
+          if (doc.exists()) {
+            const closedDaysSettings = doc.data();
+            const today = new Date();
+            const dayOfWeek = today.getDay();
+            const todayDate = today.toISOString().split('T')[0];
+            
+            const isWeeklyClosedDay = closedDaysSettings.weeklyClosedDays && 
+                                      closedDaysSettings.weeklyClosedDays.includes(dayOfWeek);
+            const isSpecificClosedDate = closedDaysSettings.specificClosedDates && 
+                                          closedDaysSettings.specificClosedDates.includes(todayDate);
+            
+            if (isWeeklyClosedDay || isSpecificClosedDate) {
+              console.log('🚫 休業日設定が変更されました - ページをリロードします');
+              const closedMessage = closedDaysSettings.closedMessage || '本日は休業日です';
+              showCustomAlert(closedMessage, () => {
+                window.location.reload();
+              });
+            }
+          }
+        });
+        
+        // 🆕 定期的に営業時間と休業日をチェック（1分ごと）
         setInterval(async () => {
           try {
+            // 🆕 休業日チェック
+            try {
+              const closedDaysRef = await getDoc(window.getStoreDoc('closed_days_settings', 'default'));
+              if (closedDaysRef.exists()) {
+                const closedDaysSettings = closedDaysRef.data();
+                const today = new Date();
+                const dayOfWeek = today.getDay();
+                const todayDate = today.toISOString().split('T')[0];
+                
+                const isWeeklyClosedDay = closedDaysSettings.weeklyClosedDays && 
+                                          closedDaysSettings.weeklyClosedDays.includes(dayOfWeek);
+                const isSpecificClosedDate = closedDaysSettings.specificClosedDates && 
+                                              closedDaysSettings.specificClosedDates.includes(todayDate);
+                
+                if (isWeeklyClosedDay || isSpecificClosedDate) {
+                  console.log('🚫 休業日になったためページをリロードします');
+                  const closedMessage = closedDaysSettings.closedMessage || '本日は休業日です';
+                  showCustomAlert(closedMessage, () => {
+                    window.location.reload();
+                  });
+                  return;
+                }
+              }
+            } catch (e) {
+              console.error('定期休業日チェックエラー:', e);
+            }
+            
+            // 営業時間チェック
             const now = new Date();
             const hours = now.getHours();
             const minutes = now.getMinutes();
