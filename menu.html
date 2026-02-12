@@ -1069,7 +1069,47 @@
     let lastOrderTimestamp = 0;
     const ORDER_COOLDOWN = 3000; // 3秒間のクールダウン
     
+    // 休業日フラグ
+    let isClosedDay = false;
+    
     const tableNumber = urlParams.get('table') || 'テイクアウト';
+
+    // 休業日チェック関数
+    async function checkClosedDay() {
+      try {
+        const closedDaysRef = await getDoc(window.getStoreDoc('closed_days_settings', 'default'));
+        if (closedDaysRef.exists()) {
+          const closedDaysSettings = closedDaysRef.data();
+          const today = new Date();
+          const dayOfWeek = today.getDay();
+          const todayDate = today.toISOString().split('T')[0];
+          
+          const isWeeklyClosedDay = closedDaysSettings.weeklyClosedDays && closedDaysSettings.weeklyClosedDays.includes(dayOfWeek);
+          const isSpecificClosedDate = closedDaysSettings.specificClosedDates && closedDaysSettings.specificClosedDates.includes(todayDate);
+          
+          isClosedDay = isWeeklyClosedDay || isSpecificClosedDate;
+          
+          if (isClosedDay) {
+            console.log('休業日が検出されました');
+            const closedMessage = closedDaysSettings.closedMessage || '本日は休業日です';
+            
+            document.getElementById('page-menu').style.display = 'none';
+            document.getElementById('page-topping').style.display = 'none';
+            document.getElementById('page-cart').style.display = 'none';
+            document.getElementById('page-complete').style.display = 'none';
+            
+            document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;text-align:center;padding:20px;font-family:sans-serif;"><div style="background:rgba(255,255,255,0.1);padding:40px;border-radius:20px;backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(0,0,0,0.3);max-width:400px;"><p style="font-size:24px;font-weight:bold;margin:10px 0;white-space:pre-line;">' + closedMessage + '</p></div></div>';
+            return true;
+          }
+        }
+        isClosedDay = false;
+        return false;
+      } catch (e) {
+        console.error('休業日チェックエラー:', e);
+        isClosedDay = false;
+        return false;
+      }
+    }
 
     // LocalStorageから注文情報を復元
     function restoreOrderFromStorage() {
@@ -1599,63 +1639,10 @@
         }
       }
       
-      // 🆕 休業日チェック
-      try {
-        const closedDaysRef = await getDoc(window.getStoreDoc('closed_days_settings', 'default'));
-        if (closedDaysRef.exists()) {
-          const closedDaysSettings = closedDaysRef.data();
-          const today = new Date();
-          const dayOfWeek = today.getDay(); // 0=日曜、1=月曜、...、6=土曜
-          const todayDate = today.toISOString().split('T')[0]; // YYYY-MM-DD形式
-          
-          // 定休日チェック
-          const isWeeklyClosedDay = closedDaysSettings.weeklyClosedDays && 
-                                     closedDaysSettings.weeklyClosedDays.includes(dayOfWeek);
-          
-          // 指定休業日チェック
-          const isSpecificClosedDate = closedDaysSettings.specificClosedDates && 
-                                        closedDaysSettings.specificClosedDates.includes(todayDate);
-          
-          if (isWeeklyClosedDay || isSpecificClosedDate) {
-            console.log('🚫 本日は休業日です');
-            
-            // 休業日画面を表示
-            document.getElementById('page-menu').style.display = 'none';
-            document.getElementById('page-topping').style.display = 'none';
-            document.getElementById('page-cart').style.display = 'none';
-            document.getElementById('page-complete').style.display = 'none';
-            
-            const closedMessage = closedDaysSettings.closedMessage || '本日は休業日です';
-            
-            document.body.innerHTML = `
-              <div style="
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 100vh;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                text-align: center;
-                padding: 20px;
-                font-family: sans-serif;
-              ">
-                <div style="
-                  background: rgba(255, 255, 255, 0.1);
-                  padding: 40px;
-                  border-radius: 20px;
-                  backdrop-filter: blur(10px);
-                  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                  max-width: 400px;
-                ">
-                  <p style="font-size: 24px; font-weight: bold; margin: 10px 0; white-space: pre-line;">${closedMessage}</p>
-                </div>
-              </div>
-            `;
-            return;
-          }
-        }
-      } catch (e) {
-        console.error('休業日設定の読み込みエラー:', e);
+      // 休業日チェック
+      const closedCheck = await checkClosedDay();
+      if (closedCheck) {
+        return;
       }
       
       // 営業時間チェック
@@ -1799,9 +1786,18 @@
           updateTopWaitingCount().catch(e => console.error('待ち人数更新エラー:', e));
         });
         
+        // 休業日設定の変更をリアルタイムで監視
+        onSnapshot(window.getStoreDoc('closed_days_settings', 'default'), async () => {
+          console.log('休業日設定が更新されました');
+          await checkClosedDay();
+        });
+        
         // 🆕 定期的に営業時間をチェック（1分ごと）
         setInterval(async () => {
           try {
+            // 休業日チェック
+            await checkClosedDay();
+            
             const now = new Date();
             const hours = now.getHours();
             const minutes = now.getMinutes();
@@ -2873,6 +2869,12 @@
     }
 
     window.addToCart = async function() {
+      // 休業日チェック
+      if (isClosedDay) {
+        await checkClosedDay();
+        return;
+      }
+      
       if (soldOutIds.has(currentItem.id)) {
         showCustomAlert('申し訳ございません。\nこの商品は現在品切れになりました。');
         backToMenu();
@@ -3239,6 +3241,16 @@
     };
 
     window.confirmOrder = async function() {
+      // ========== 休業日チェック ==========
+      if (isClosedDay) {
+        await checkClosedDay();
+        return;
+      }
+      const closedCheck = await checkClosedDay();
+      if (closedCheck) {
+        return;
+      }
+      
       // ========== 営業時間チェック ==========
       // 🆕 注文確定時に再度営業時間をチェック
       try {
