@@ -6,6 +6,8 @@
   <title>ハンディシステム</title>
   
   <!-- 外部ライブラリ -->
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprinttracer/v1.1.0/StarWebPrintTrader.js"></script>
+  <script src="https://www.star-m.jp/products/s_print/sdk/starwebprintbuilder/v1.2.0/StarWebPrintBuilder.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -7796,9 +7798,52 @@ ${totalRedSlipCount > 0 ? `
           resultDiv.innerHTML = '接続成功！<br>Bluetoothプリンタと通信できました';
           
         } else {
-          resultDiv.style.background = '#FFCDD2';
-          resultDiv.style.color = '#C62828';
-          resultDiv.innerHTML = '接続テスト機能は準備中です<br>WiFi/LANプリンタのテストには対応していません';
+          // Ethernet接続テスト
+          const testIP = document.getElementById('printerIPInput').value.trim();
+          
+          // IPアドレスのバリデーション
+          const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+          if (!ipPattern.test(testIP)) {
+            resultDiv.style.background = '#FFCDD2';
+            resultDiv.style.color = '#C62828';
+            resultDiv.innerHTML = '❌ エラー<br>正しいIPアドレスを入力してください';
+            return;
+          }
+          
+          // StarWebPrintBuilderが利用可能かチェック
+          if (typeof StarWebPrintBuilder === 'undefined') {
+            resultDiv.style.background = '#FFCDD2';
+            resultDiv.style.color = '#C62828';
+            resultDiv.innerHTML = '❌ エラー<br>StarWebPrintライブラリが読み込まれていません';
+            return;
+          }
+          
+          const builder = new StarWebPrintBuilder();
+          builder.createInitializationElement();
+          builder.createTextElement({data: '=== 接続テスト ===\n'});
+          builder.createTextElement({data: '印刷成功！\n\n'});
+          builder.createCutPaperElement({feed: true});
+          
+          const url = `http://${testIP}/StarWebPRNT/SendMessage`;
+          const request = builder.toString();
+          
+          const trader = new StarWebPrintTrader({url: url});
+          
+          trader.onReceive = function(response) {
+            console.log('✅ 接続テスト成功:', response);
+            resultDiv.style.background = '#C8E6C9';
+            resultDiv.style.color = '#2E7D32';
+            resultDiv.innerHTML = '✅ 接続成功！<br>プリンタと通信できました';
+          };
+          
+          trader.onError = function(response) {
+            console.error('❌ 接続テスト失敗:', response);
+            resultDiv.style.background = '#FFCDD2';
+            resultDiv.style.color = '#C62828';
+            resultDiv.innerHTML = `❌ 接続失敗<br>${response.status || 'プリンタに接続できません'}<br><small>IPアドレスとネットワーク接続を確認してください</small>`;
+          };
+          
+          trader.sendMessage({request: request});
         }
         
       } catch (error) {
