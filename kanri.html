@@ -293,6 +293,14 @@
             });
             const [showBusinessHoursSettings, setShowBusinessHoursSettings] = useState(false);
             
+            // 🆕 休業日設定用のstate
+            const [closedDaysSettings, setClosedDaysSettings] = useState({
+                weeklyClosedDays: [], // 定休日（0=日曜、1=月曜、...、6=土曜）
+                specificClosedDates: [], // 指定休業日（YYYY-MM-DD形式）
+                closedMessage: '本日は休業日です'
+            });
+            const [showClosedDaysSettings, setShowClosedDaysSettings] = useState(false);
+            
             // メニューカスタマイズ設定用のstate
             const [menuSettings, setMenuSettings] = useState({
                 showMemoField: true, // デフォルトで表示
@@ -696,6 +704,7 @@
                         loadAlertSettings();
                         loadStatusDisplaySettings(); // ステータス表示設定を読み込み
                         loadBusinessHoursSettings(); // 営業時間設定を読み込み
+                        loadClosedDaysSettings(); // 🆕 休業日設定を読み込み
                         loadTableSettings();
                         loadMenuItems();
                         loadGlobalMenuSettings();
@@ -1776,6 +1785,119 @@
                     console.error('❌ 営業時間設定読み込みエラー:', error);
                 }
             };
+
+            // 🆕 休業日設定を保存
+            const saveClosedDaysSettings = async () => {
+                try {
+                    while (!window.FirebaseReady || !window.db) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                    
+                    console.log('💾 休業日設定保存開始');
+                    const { setDoc } = window.firebaseModules;
+                    
+                    const docId = 'default';
+                    const closedDaysRef = window.getStoreDoc('closed_days_settings', docId);
+                    
+                    await setDoc(closedDaysRef, closedDaysSettings);
+                    
+                    console.log('✅ 休業日設定を保存しました');
+                    showCustomAlertFunc('✅ 休業日設定を保存しました', '保存完了', '✅');
+                } catch (error) {
+                    console.error('❌ 休業日設定保存エラー:', error);
+                    showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
+                }
+            };
+
+            // 🆕 休業日設定をデフォルトに戻す
+            const resetClosedDaysSettings = async () => {
+                const confirmed = await showCustomConfirmFunc(
+                    '休業日設定をデフォルトに戻しますか？\n\nこの操作は取り消せません',
+                    '設定リセット',
+                    'リセットする',
+                    'キャンセル'
+                );
+                if (!confirmed) return;
+
+                try {
+                    const defaultSettings = {
+                        weeklyClosedDays: [],
+                        specificClosedDates: [],
+                        closedMessage: '本日は休業日です'
+                    };
+                    setClosedDaysSettings(defaultSettings);
+                    
+                    const { setDoc } = window.firebaseModules;
+                    const docId = 'default';
+                    const closedDaysRef = window.getStoreDoc('closed_days_settings', docId);
+                    await setDoc(closedDaysRef, defaultSettings);
+                    
+                    showCustomAlertFunc('休業日設定をデフォルトに戻しました', 'リセット完了');
+                } catch (error) {
+                    console.error('❌ リセットエラー:', error);
+                    showCustomAlertFunc('リセットに失敗しました: ' + error.message, 'エラー');
+                }
+            };
+
+            // 🆕 休業日設定を読み込み
+            const loadClosedDaysSettings = async () => {
+                try {
+                    const { getDoc } = window.firebaseModules;
+                    
+                    const docId = 'default';
+                    const closedDaysRef = window.getStoreDoc('closed_days_settings', docId);
+                    
+                    console.log('🔍 休業日設定読み込み');
+                    
+                    const closedDaysDoc = await getDoc(closedDaysRef);
+                    
+                    if (closedDaysDoc.exists()) {
+                        setClosedDaysSettings(closedDaysDoc.data());
+                        console.log('✅ 休業日設定を読み込みました');
+                    } else {
+                        console.log('⚠️ 休業日設定が存在しないため、デフォルト設定を使用');
+                        const defaultSettings = {
+                            weeklyClosedDays: [],
+                            specificClosedDates: [],
+                            closedMessage: '本日は休業日です'
+                        };
+                        setClosedDaysSettings(defaultSettings);
+                    }
+                } catch (error) {
+                    console.error('❌ 休業日設定読み込みエラー:', error);
+                }
+            };
+
+            // 🆕 定休日のトグル
+            const toggleWeeklyClosedDay = (dayIndex) => {
+                const newWeeklyClosedDays = [...closedDaysSettings.weeklyClosedDays];
+                const index = newWeeklyClosedDays.indexOf(dayIndex);
+                if (index > -1) {
+                    newWeeklyClosedDays.splice(index, 1);
+                } else {
+                    newWeeklyClosedDays.push(dayIndex);
+                }
+                setClosedDaysSettings({...closedDaysSettings, weeklyClosedDays: newWeeklyClosedDays});
+            };
+
+            // 🆕 指定休業日を追加
+            const addSpecificClosedDate = (date) => {
+                if (date && !closedDaysSettings.specificClosedDates.includes(date)) {
+                    setClosedDaysSettings({
+                        ...closedDaysSettings,
+                        specificClosedDates: [...closedDaysSettings.specificClosedDates, date].sort()
+                    });
+                }
+            };
+
+            // 🆕 指定休業日を削除
+            const removeSpecificClosedDate = (date) => {
+                setClosedDaysSettings({
+                    ...closedDaysSettings,
+                    specificClosedDates: closedDaysSettings.specificClosedDates.filter(d => d !== date)
+                });
+            };
+
 
             // 🆕 テーブル一覧読み込み
             const loadTables = async () => {
@@ -7297,6 +7419,118 @@
                             )}
                         </div>
 
+                        {/* 🆕 休業日設定 */}
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                        休業日設定
+                                    </h2>
+                                    <p className="text-sm text-gray-600 mt-1">定休日や指定日を休業日として設定</p>
+                                </div>
+                                <button
+                                    onClick={() => setShowClosedDaysSettings(!showClosedDaysSettings)}
+                                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                                >
+                                    {showClosedDaysSettings ? '閉じる' : '設定を開く'}
+                                </button>
+                            </div>
+
+                            {showClosedDaysSettings && (
+                                <div className="space-y-6 border-t pt-4">
+                                    {/* 定休日設定 */}
+                                    <div>
+                                        <label className="block text-md font-bold mb-3">定休日</label>
+                                        <div className="flex gap-2 flex-wrap">
+                                            {['日', '月', '火', '水', '木', '金', '土'].map((day, index) => (
+                                                <button
+                                                    key={index}
+                                                    onClick={() => toggleWeeklyClosedDay(index)}
+                                                    className={`px-4 py-2 rounded-lg font-bold transition-all ${
+                                                        closedDaysSettings.weeklyClosedDays.includes(index)
+                                                            ? 'bg-red-500 text-white'
+                                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                    }`}
+                                                >
+                                                    {day}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* 指定休業日 */}
+                                    <div>
+                                        <label className="block text-md font-bold mb-2">指定休業日</label>
+                                        <p className="text-xs text-gray-500 mb-2">カレンダーから休業日にする日を選択してください</p>
+                                        <div className="flex gap-2 mb-3">
+                                            <input
+                                                type="date"
+                                                onChange={(e) => {
+                                                    if (e.target.value) {
+                                                        addSpecificClosedDate(e.target.value);
+                                                        e.target.value = '';
+                                                    }
+                                                }}
+                                                className="flex-1 p-3 border rounded-lg"
+                                            />
+                                        </div>
+                                        {closedDaysSettings.specificClosedDates.length > 0 && (
+                                            <div className="bg-gray-50 p-3 rounded-lg">
+                                                <div className="text-sm font-medium mb-2">設定済みの休業日:</div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {closedDaysSettings.specificClosedDates.map(date => (
+                                                        <div key={date} className="flex items-center gap-2 bg-red-100 text-red-700 px-3 py-1 rounded-full">
+                                                            <span>{date}</span>
+                                                            <button
+                                                                onClick={() => removeSpecificClosedDate(date)}
+                                                                className="text-red-900 hover:text-red-600 font-bold"
+                                                            >
+                                                                ×
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* 休業日メッセージ */}
+                                    <div>
+                                        <label className="block text-md font-bold mb-2">休業日メッセージ</label>
+                                        <p className="text-xs text-gray-500 mb-2">休業日にお客様に表示されるメッセージ</p>
+                                        <textarea
+                                            value={closedDaysSettings.closedMessage}
+                                            onChange={(e) => setClosedDaysSettings({...closedDaysSettings, closedMessage: e.target.value})}
+                                            className="w-full p-3 border rounded-lg font-mono text-sm"
+                                            rows="3"
+                                            placeholder="例: 本日は休業日です"
+                                        />
+                                    </div>
+
+                                    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                        <p className="text-sm text-yellow-800">
+                                            <strong>注意:</strong> 休業日に設定された日は、お客様がメニュー画面にアクセスすると休業日メッセージが表示されます。
+                                        </p>
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={saveClosedDaysSettings}
+                                            className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold"
+                                        >
+                                            保存
+                                        </button>
+                                        <button
+                                            onClick={resetClosedDaysSettings}
+                                            className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold"
+                                        >
+                                            デフォルトに戻す
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                         {/* レシート/領収書設定 */}
                         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
                             <div className="flex justify-between items-center mb-4">
@@ -7706,43 +7940,21 @@
 
                                     <div className="flex justify-between gap-2 pt-4 border-t">
                                         {/* 左側: 一括操作ボタン */}
-                                        <div className="flex flex-col gap-2">
-                                            <div className="flex gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={setAllStockToZero}
-                                                    className="px-4 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold text-sm"
-                                                >
-                                                    一括在庫0設定
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={clearAllStockZero}
-                                                    className="px-4 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-bold text-sm"
-                                                >
-                                                    一括在庫0解除
-                                                </button>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={setAllProductsToZero}
-                                                    className="px-4 py-3 bg-red-700 text-white rounded-lg hover:bg-red-800 font-bold text-sm"
-                                                >
-                                                    全商品品切
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={clearAllProductsZero}
-                                                    className="px-4 py-3 bg-orange-700 text-white rounded-lg hover:bg-orange-800 font-bold text-sm"
-                                                >
-                                                    全商品復活
-                                                </button>
-                                            </div>
-                                            <div className="text-xs text-gray-600 mt-1">
-                                                <div>上段: 表示中の商品のみ対象</div>
-                                                <div>下段: 全商品対象（休業日用）</div>
-                                            </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={setAllProductsToZero}
+                                                className="px-4 py-3 bg-red-700 text-white rounded-lg hover:bg-red-800 font-bold text-sm"
+                                            >
+                                                全商品品切
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={clearAllProductsZero}
+                                                className="px-4 py-3 bg-orange-700 text-white rounded-lg hover:bg-orange-800 font-bold text-sm"
+                                            >
+                                                全商品復活
+                                            </button>
                                         </div>
                                         
                                         {/* 右側: 保存・リセットボタン */}
