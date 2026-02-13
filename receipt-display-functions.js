@@ -1,8 +1,9 @@
-// ========== レシート・領収書表示システム ==========
-// menu.htmlと完全に同じフォーマット
+// ========== レシート・領収書表示システム（修正版）==========
 
 // レシート表示関数
 async function showReceiptDisplay(receiptData) {
+  console.log('showReceiptDisplay called:', receiptData);
+  
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
   let receiptAddress = '東京都板橋区赤塚2-2-4';
@@ -54,7 +55,7 @@ async function showReceiptDisplay(receiptData) {
   }
   
   // 日時フォーマット
-  const now = new Date(receiptData.timestamp);
+  const now = new Date(receiptData.timestamp || Date.now());
   const dateStr = now.getFullYear() + '/' + 
                   String(now.getMonth() + 1).padStart(2, '0') + '/' + 
                   String(now.getDate()).padStart(2, '0') + ' ' +
@@ -88,6 +89,8 @@ async function showReceiptDisplay(receiptData) {
   const tax10Amount = tax10Total - tax10Excluded;
   const totalTax = tax8Amount + tax10Amount;
   
+  console.log('税額計算:', { tax8Total, tax10Total, tax8Amount, tax10Amount, totalTax });
+  
   const receiptHtml = `
     <div style="font-family: 'Courier New', monospace; text-align: center;">
       <div style="border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 15px;">
@@ -103,7 +106,7 @@ async function showReceiptDisplay(receiptData) {
         </div>
         <div style="display: flex; justify-content: space-between; margin: 5px 0;">
           <span>注文番号:</span>
-          <span style="font-weight: bold; font-size: 18px;">#${receiptData.orderNum}</span>
+          <span style="font-weight: bold; font-size: 18px;">#${receiptData.orderNum || ''}</span>
         </div>
       </div>
       
@@ -145,6 +148,8 @@ async function showReceiptDisplay(receiptData) {
 
 // 領収書表示関数
 async function showInvoiceDisplay(invoiceData) {
+  console.log('showInvoiceDisplay called:', invoiceData);
+  
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
   let receiptAddress = '東京都板橋区赤塚2-2-4';
@@ -188,7 +193,7 @@ async function showInvoiceDisplay(invoiceData) {
   }
   
   // 日時フォーマット
-  const now = new Date(invoiceData.timestamp);
+  const now = new Date(invoiceData.timestamp || Date.now());
   const dateStr = now.getFullYear() + '年' + 
                   String(now.getMonth() + 1).padStart(2, '0') + '月' + 
                   String(now.getDate()).padStart(2, '0') + '日';
@@ -201,6 +206,8 @@ async function showInvoiceDisplay(invoiceData) {
   const tax8Amount = tax8Total - tax8Excluded;
   const tax10Amount = tax10Total - tax10Excluded;
   const totalTax = tax8Amount + tax10Amount;
+  
+  console.log('領収書税額計算:', { tax8Total, tax10Total, totalTax });
   
   const invoiceHtml = `
     <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 10px;">
@@ -232,7 +239,7 @@ async function showInvoiceDisplay(invoiceData) {
         </div>
         <div style="margin: 10px 0;">
           <span style="display: inline-block; width: 100px;">注文番号</span>
-          <span>#${invoiceData.orderNum}</span>
+          <span>#${invoiceData.orderNum || ''}</span>
         </div>
       </div>
       
@@ -338,6 +345,7 @@ async function issueReceiptQR() {
     const id = 'receipt_' + Date.now();
     
     // LocalStorageに保存
+    console.log('LocalStorageに保存:', id);
     localStorage.setItem(id, imageData);
     
     // 現在のURLからベースURLを作成
