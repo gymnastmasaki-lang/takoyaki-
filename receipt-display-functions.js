@@ -16,7 +16,7 @@
 })();
 
 // レシート表示関数
-async function showReceiptDisplay(receiptData) {
+window.showReceiptDisplay = async function showReceiptDisplay(receiptData) {
   console.log('📄 ==== レシート表示開始 ====');
   console.log('受信データ:', JSON.stringify(receiptData, null, 2));
   
@@ -187,7 +187,7 @@ async function showReceiptDisplay(receiptData) {
 }
 
 // 領収書表示関数
-async function showInvoiceDisplay(invoiceData) {
+window.showInvoiceDisplay = async function showInvoiceDisplay(invoiceData) {
   console.log('🧾 ==== 領収書表示開始 ====');
   console.log('受信データ:', JSON.stringify(invoiceData, null, 2));
   
@@ -355,11 +355,11 @@ function showReceiptModal(html, data, type) {
     console.log('既存のモーダルを削除しました');
   }
   
-  // モーダルHTML
+  // モーダルHTML - ダイレクト表示対応
   const modalHtml = `
     <div id="receiptDisplayModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; align-items: center; justify-content: center; overflow-y: auto;">
       <div style="background: white; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; position: relative;">
-        <button onclick="closeReceiptDisplay()" style="position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; border: none; background: #f44336; color: white; border-radius: 50%; font-size: 24px; cursor: pointer; line-height: 1;">×</button>
+        <button onclick="closeReceiptDisplay()" style="position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; border: none; background: #f44336; color: white; border-radius: 50%; font-size: 24px; cursor: pointer; line-height: 1; z-index: 1;">×</button>
         
         <div id="receiptContent" style="margin-top: 20px;">
           ${html}
@@ -388,7 +388,7 @@ function showReceiptModal(html, data, type) {
 }
 
 // モーダルを閉じる
-function closeReceiptDisplay() {
+window.closeReceiptDisplay = function closeReceiptDisplay() {
   const modal = document.getElementById('receiptDisplayModal');
   if (modal) {
     modal.remove();
@@ -397,7 +397,7 @@ function closeReceiptDisplay() {
 }
 
 // PNG保存
-async function saveReceiptPNG() {
+window.saveReceiptPNG = async function saveReceiptPNG() {
   console.log('💾 PNG保存開始');
   const element = document.getElementById('receiptContent');
   
@@ -428,7 +428,7 @@ async function saveReceiptPNG() {
 }
 
 // QRコード発行
-async function issueReceiptQR() {
+window.issueReceiptQR = async function issueReceiptQR() {
   console.log('📱 QRコード生成開始');
   const element = document.getElementById('receiptContent');
   
@@ -509,7 +509,7 @@ async function issueReceiptQR() {
 }
 
 // Wi-Fiドロア開放
-async function openCashDrawer() {
+window.openCashDrawer = async function openCashDrawer() {
   const drawerIp = localStorage.getItem('drawerIp') || '192.168.1.100';
   const duration = localStorage.getItem('drawerDuration') || '500';
   
