@@ -1,4 +1,27 @@
-// ========== レシート・領収書表示システム（完全修正版）==========
+// ========== レシート・領収書表示システム（完全修正版 v3.2）==========
+// 🔧 バージョン: 3.2 (2026-02-15)
+// 🔧 修正内容: DOM更新待機、連続発行対応、QR中央配置
+
+console.log('🔄 receipt-display-functions.js 読み込み開始 (v3.2)');
+console.log('📅 ビルド日時: 2026-02-15');
+
+// 🔧 古いバージョンのクリーンアップ
+if (window.currentReceiptData) {
+  console.log('🗑️ 古いレシートデータをクリア');
+  window.currentReceiptData = null;
+  window.currentReceiptType = null;
+}
+
+// 既存のモーダルをすべて削除
+const oldModals = document.querySelectorAll('#receiptDisplayModal, #qrDisplayModal, [data-receipt-modal="true"]');
+if (oldModals.length > 0) {
+  console.log('🗑️ 既存モーダルを削除:', oldModals.length);
+  oldModals.forEach(el => {
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  });
+}
 
 // QRCodeライブラリの読み込み確認と動的ロード
 (function() {
@@ -558,7 +581,7 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     qrModal.innerHTML = `
       <div style="background: white; border-radius: 16px; padding: 30px; text-align: center;">
         <h3 style="margin: 0 0 20px 0;">お客様用QRコード</h3>
-        <div id="qrcode" style="margin: 20px auto;"></div>
+        <div id="qrcode" style="margin: 20px auto; display: flex; justify-content: center; align-items: center;"></div>
         <p style="margin: 20px 0; color: #666;">お客様にスキャンしていただいてください</p>
         <button onclick="closeQRModal()" style="padding: 15px 30px; background: #666; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
           閉じる
@@ -590,6 +613,21 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
           colorLight: '#ffffff',
           correctLevel: QRCode.CorrectLevel.H
         });
+        
+        // 🔧 QRコード要素のスタイルを調整（中央配置）
+        setTimeout(() => {
+          const qrImg = qrcodeElement.querySelector('img');
+          const qrCanvas = qrcodeElement.querySelector('canvas');
+          if (qrImg) {
+            qrImg.style.display = 'block';
+            qrImg.style.margin = '0 auto';
+          }
+          if (qrCanvas) {
+            qrCanvas.style.display = 'block';
+            qrCanvas.style.margin = '0 auto';
+          }
+        }, 50);
+        
         console.log('✅ QRコード生成完了');
       }
     }, 100);
