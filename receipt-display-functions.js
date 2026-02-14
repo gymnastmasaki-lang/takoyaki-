@@ -17,6 +17,17 @@
 
 // レシート表示関数
 async function showReceiptDisplay(receiptData) {
+  // 🚨 デバッグ: 受信データを強制表示
+  const debugInfo = `
+📄 レシート表示開始
+注文番号: ${receiptData.orderNumber || receiptData.orderNum || '不明'}
+テーブル: ${receiptData.tableNumber || '不明'}
+合計: ¥${receiptData.total || 0}
+タイムスタンプ: ${new Date().toLocaleTimeString()}
+  `;
+  console.log(debugInfo);
+  alert(debugInfo);  // 強制的にアラート表示
+  
   console.log('📄 ==== レシート表示開始 ====');
   console.log('🔍 受信データ:', receiptData);
   console.log('🔍 注文番号:', receiptData.orderNumber || receiptData.orderNum);
@@ -227,6 +238,17 @@ async function showReceiptDisplay(receiptData) {
 
 // 領収書表示関数
 async function showInvoiceDisplay(invoiceData) {
+  // 🚨 デバッグ: 受信データを強制表示
+  const debugInfo = `
+🧾 領収書表示開始
+注文番号: ${invoiceData.orderNumber || invoiceData.orderNum || '不明'}
+テーブル: ${invoiceData.tableNumber || '不明'}
+合計: ¥${invoiceData.total || 0}
+タイムスタンプ: ${new Date().toLocaleTimeString()}
+  `;
+  console.log(debugInfo);
+  alert(debugInfo);  // 強制的にアラート表示
+  
   console.log('🧾 ==== 領収書表示開始 ====');
   console.log('🔍 受信データ:', invoiceData);
   console.log('🔍 注文番号:', invoiceData.orderNumber || invoiceData.orderNum);
