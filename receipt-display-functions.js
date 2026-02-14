@@ -232,6 +232,11 @@ async function showInvoiceDisplay(invoiceData) {
       }
       
       // 電子印鑑データを取得
+      console.log('🔍 電子印鑑チェック:');
+      console.log('  - sealImageData存在:', !!settings.sealImageData);
+      console.log('  - sealImage存在:', !!settings.sealImage);
+      console.log('  - 利用可能なフィールド:', Object.keys(settings));
+      
       if (settings.sealImageData) {
         sealImageData = settings.sealImageData;
         console.log('✅ 電子印鑑データを取得しました（sealImageData・長さ:', sealImageData.length, '文字）');
@@ -239,7 +244,9 @@ async function showInvoiceDisplay(invoiceData) {
         sealImageData = settings.sealImage;
         console.log('✅ 電子印鑑データを取得しました（sealImage・長さ:', sealImageData.length, '文字）');
       } else {
-        console.warn('⚠️ 電子印鑑データが設定されていません - kanri.htmlで作成・保存してください');
+        console.warn('⚠️ 電子印鑑データが設定されていません');
+        console.warn('   kanri.htmlで電子印鑑を作成・保存してください');
+        console.warn('   現在の設定:', settings);
       }
     } else {
       console.warn('⚠️ 領収書設定が見つかりません');
@@ -445,7 +452,7 @@ async function saveReceiptPNG() {
 }
 
 // QRコード発行
-async function issueReceiptQR() {
+window.issueReceiptQR = async function issueReceiptQR() {
   console.log('📱 QRコード生成開始');
   const element = document.getElementById('receiptContent');
   
@@ -473,6 +480,14 @@ async function issueReceiptQR() {
     localStorage.setItem(id, imageData);
     console.log('✅ 保存完了（サイズ:', imageData.length, '文字）');
     
+    // レシートモーダルを閉じる
+    console.log('📄 レシートモーダルを閉じます');
+    const receiptModal = document.getElementById('receiptDisplayModal');
+    if (receiptModal) {
+      receiptModal.remove();
+      console.log('✅ レシートモーダルを閉じました');
+    }
+    
     // 現在のURLからベースURLを作成
     const currentUrl = window.location.href;
     const baseUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
@@ -483,7 +498,7 @@ async function issueReceiptQR() {
     // QRコード表示モーダルを作成
     const qrModal = document.createElement('div');
     qrModal.id = 'qrDisplayModal';
-    qrModal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 10001; display: flex; align-items: center; justify-content: center;';
+    qrModal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.9) !important; z-index: 9999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
     
     qrModal.innerHTML = `
       <div style="background: white; border-radius: 16px; padding: 30px; text-align: center;">

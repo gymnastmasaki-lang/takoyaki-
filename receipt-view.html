@@ -132,33 +132,61 @@
       
       console.log('🔍 デバッグ情報:');
       console.log('  - 検索ID:', receiptId);
+      console.log('  - 現在のURL:', window.location.href);
+      console.log('  - オリジン:', window.location.origin);
       console.log('  - LocalStorage利用可能:', typeof(Storage) !== "undefined");
       console.log('  - LocalStorageアイテム数:', localStorage.length);
       
       // LocalStorageの全キーを表示
       console.log('  - 保存されているキー:');
+      const allKeys = [];
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
+        allKeys.push(key);
         console.log('    [' + i + '] ' + key);
       }
       
-      // LocalStorageから画像データを取得
+      // LocalStorageから画像データを取得（大文字小文字を区別しない）
       console.log('💾 LocalStorageから取得を試みます:', receiptId);
       receiptImageData = localStorage.getItem(receiptId);
       
       if (!receiptImageData) {
-        // もう一度、すべてのキーをチェック
+        console.warn('⚠️ 最初の試行で見つかりませんでした。代替検索を試みます...');
+        
+        // すべてのキーをチェック
         let found = false;
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);
-          if (key.includes('receipt_')) {
-            console.log('⚠️ 類似キー発見:', key);
-            if (key === receiptId) {
-              receiptImageData = localStorage.getItem(key);
-              found = true;
-              console.log('✅ 完全一致で取得成功');
-              break;
-            }
+          console.log('  チェック中:', key);
+          
+          // 完全一致
+          if (key === receiptId) {
+            receiptImageData = localStorage.getItem(key);
+            found = true;
+            console.log('✅ 完全一致で取得成功:', key);
+            break;
+          }
+          
+          // 部分一致（receipt_で始まるキー）
+          if (key && key.startsWith('receipt_')) {
+            console.log('  ⚠️ 類似キー発見:', key);
+          }
+        }
+        
+        // それでも見つからない場合、最新のreceipt_キーを使用
+        if (!found && allKeys.length > 0) {
+          const receiptKeys = allKeys.filter(k => k && k.startsWith('receipt_'));
+          if (receiptKeys.length > 0) {
+            // 最新のキー（タイムスタンプが最大のもの）を取得
+            receiptKeys.sort((a, b) => {
+              const timeA = parseInt(a.replace('receipt_', ''));
+              const timeB = parseInt(b.replace('receipt_', ''));
+              return timeB - timeA;
+            });
+            const latestKey = receiptKeys[0];
+            console.log('⚠️ 最新のレシートキーを使用:', latestKey);
+            receiptImageData = localStorage.getItem(latestKey);
+            found = true;
           }
         }
         
@@ -167,17 +195,24 @@
             <div class="error-message">
               ❌ レシート・領収書が見つかりません<br><br>
               <small>QRコードの有効期限が切れているか、データが削除された可能性があります</small><br><br>
-              <div style="font-size: 12px; color: #999; margin-top: 20px;">
-                デバッグ情報:<br>
+              <div style="font-size: 12px; color: #999; margin-top: 20px; text-align: left;">
+                <strong>デバッグ情報:</strong><br>
                 検索ID: ${receiptId}<br>
-                LocalStorageアイテム数: ${localStorage.length}
+                LocalStorageアイテム数: ${localStorage.length}<br>
+                利用可能なキー:<br>
+                ${allKeys.map(k => '- ' + k).join('<br>')}
               </div>
             </div>
           `;
           console.error('❌ LocalStorageにデータがありません:', receiptId);
-          console.log('利用可能なキー:', Object.keys(localStorage));
           return;
         }
+      }
+      
+      if (!receiptImageData) {
+        displayDiv.innerHTML = '<div class="error-message">❌ 画像データが空です</div>';
+        console.error('画像データが空です');
+        return;
       }
       
       console.log('✅ データ取得成功（サイズ:', receiptImageData.length, '文字）');
@@ -187,6 +222,10 @@
       img.src = receiptImageData;
       img.style.width = '100%';
       img.style.borderRadius = '8px';
+      img.onerror = function() {
+        console.error('❌ 画像の読み込みに失敗しました');
+        displayDiv.innerHTML = '<div class="error-message">❌ 画像の読み込みに失敗しました</div>';
+      };
       
       displayDiv.innerHTML = '';
       displayDiv.appendChild(img);
