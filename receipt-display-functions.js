@@ -368,15 +368,15 @@ async function showInvoiceDisplay(invoiceData) {
   const tax10Amount = tax10Total - tax10Excluded;
   const totalTax = tax8Amount + tax10Amount;
   
-  // 🔧 修正: 電子印鑑の位置を「日付の左、線の上」に配置
+  // 電子印鑑の位置を「線の下端と揃える」ように配置
   const sealHtml = sealImageData ? `
-    <div style="position: absolute; left: 20px; bottom: 80px;">
+    <div style="position: absolute; left: 20px; bottom: 0;">
       <img src="${sealImageData}" style="width: 80px; height: 80px; opacity: 0.8;" alt="印" />
     </div>
   ` : '';
   
   if (sealImageData) {
-    console.log('✅ 電子印鑑を表示します（日付の左、線の上）');
+    console.log('✅ 電子印鑑を表示します（線の下端と揃える）');
   } else {
     console.error('❌ 電子印鑑が表示されません');
   }
@@ -648,4 +648,4 @@ async function openCashDrawer() {
   }
 }
 
-console.log('✅ receipt-display-functions.js loaded (最終完全版 - orders配列対応・電子印鑑位置修正)');
+console.log('✅ receipt-display-functions.js loaded (最終版 - orders配列対応・電子印鑑位置修正・絵文字削除)');
