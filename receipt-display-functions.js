@@ -333,8 +333,15 @@ async function showInvoiceDisplay(invoiceData) {
 function showReceiptModal(html, data, type) {
   console.log('🖼️ モーダル表示:', type);
   
-  // 既存のモーダルを完全削除
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
+  // 🔧 修正: 既存のモーダルを完全削除（すべてのタイプ）
+  document.querySelectorAll('#receiptDisplayModal').forEach(el => {
+    console.log('🗑️ 既存のレシートモーダルを削除');
+    el.remove();
+  });
+  document.querySelectorAll('#qrDisplayModal').forEach(el => {
+    console.log('🗑️ 既存のQRモーダルを削除');
+    el.remove();
+  });
   
   // ユニークなタイムスタンプとIDを生成
   const timestamp = Date.now();
@@ -373,9 +380,24 @@ function showReceiptModal(html, data, type) {
 
 // モーダルを閉じる
 function closeReceiptDisplay() {
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
+  console.log('🚪 モーダルを閉じる処理開始');
+  
+  // レシートモーダルを閉じる
+  document.querySelectorAll('#receiptDisplayModal').forEach(el => {
+    console.log('🗑️ レシートモーダル削除');
+    el.remove();
+  });
+  
+  // QRモーダルも閉じる
+  document.querySelectorAll('#qrDisplayModal').forEach(el => {
+    console.log('🗑️ QRモーダル削除');
+    el.remove();
+  });
+  
   window.currentReceiptData = null;
   window.currentReceiptType = null;
+  
+  console.log('✅ モーダル閉じる処理完了');
 }
 
 // PNG保存
@@ -457,11 +479,31 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     });
     
     const imageData = canvas.toDataURL();
-    const id = 'receipt_' + Date.now();
+    const timestamp = Date.now();
+    const id = 'receipt_' + timestamp;
+    
+    console.log('💾 LocalStorageに保存:', id);
+    
+    // 🔧 修正: 古いレシートデータをクリーンアップ（最新5件のみ保持）
+    const allKeys = Object.keys(localStorage);
+    const receiptKeys = allKeys.filter(k => k.startsWith('receipt_')).sort((a, b) => {
+      const timeA = parseInt(a.replace('receipt_', '')) || 0;
+      const timeB = parseInt(b.replace('receipt_', '')) || 0;
+      return timeB - timeA;
+    });
+    
+    // 古いレシートを削除（最新5件以外）
+    if (receiptKeys.length > 5) {
+      for (let i = 5; i < receiptKeys.length; i++) {
+        console.log('🗑️ 古いレシート削除:', receiptKeys[i]);
+        localStorage.removeItem(receiptKeys[i]);
+      }
+    }
     
     // LocalStorageに保存
     localStorage.setItem(id, imageData);
     localStorage.setItem('latest_receipt_id', id);
+    console.log('✅ LocalStorage保存完了');
     
     // レシートモーダルを閉じる
     document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
@@ -469,7 +511,8 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     // 現在のURLからベースURLを作成
     const currentUrl = window.location.href;
     const baseUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
-    const qrUrl = baseUrl + 'receipt-view.html?id=' + id;
+    // 🔧 重要修正: キャッシュバスターとしてタイムスタンプをURLに追加
+    const qrUrl = baseUrl + 'receipt-view.html?id=' + id + '&t=' + timestamp;
     
     // QRコード表示モーダルを作成
     const qrModal = document.createElement('div');
@@ -481,11 +524,20 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
         <h3 style="margin: 0 0 20px 0;">お客様用QRコード</h3>
         <div id="qrcode" style="margin: 20px auto;"></div>
         <p style="margin: 20px 0; color: #666;">お客様にスキャンしていただいてください</p>
-        <button onclick="document.getElementById('qrDisplayModal').remove();" style="padding: 15px 30px; background: #666; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
+        <button onclick="closeQRModal()" style="padding: 15px 30px; background: #666; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
           閉じる
         </button>
       </div>
     `;
+    
+    // QRモーダルを閉じる関数をグローバルに定義
+    window.closeQRModal = function() {
+      const qrModal = document.getElementById('qrDisplayModal');
+      if (qrModal) {
+        qrModal.remove();
+      }
+      console.log('🚪 QRモーダルを閉じました');
+    };
     
     document.body.appendChild(qrModal);
     
@@ -542,4 +594,4 @@ async function openCashDrawer() {
   }
 }
 
-console.log('✅ receipt-display-functions.js loaded (v3.0 - アラート削除・完全修正版)');
+console.log('✅ receipt-display-functions.js loaded (v3.1 - 連続発行対応・キャッシュ修正版)');

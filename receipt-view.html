@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- 🔧 キャッシュ防止 -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>レシート・領収書表示</title>
   <style>
     * {
@@ -105,30 +109,39 @@
   </div>
 
   <script>
+    // 🔧 修正: ページロード時に即座にコンテンツをクリア
+    const displayDiv = document.getElementById('receiptDisplay');
+    displayDiv.innerHTML = '<div class="loading-message">読み込み中...</div>';
+    
     // URLパラメータからIDを取得
     const urlParams = new URLSearchParams(window.location.search);
     const receiptId = urlParams.get('id');
     
-    console.log('レシート表示ページ読み込み');
-    console.log('レシートID:', receiptId);
+    console.log('📱 レシート表示ページ読み込み');
+    console.log('🆔 レシートID:', receiptId);
+    console.log('🌐 現在のURL:', window.location.href);
+    console.log('⏰ 読み込み時刻:', new Date().toISOString());
     
     let receiptImageData = null;
     
-    // レシート画像を読み込み
+    // 🔧 修正: レシート画像を読み込み（完全再構築版）
     function loadReceipt() {
-      const displayDiv = document.getElementById('receiptDisplay');
+      console.log('🔄 レシート読み込み開始');
+      
       const downloadBtn = document.getElementById('downloadBtn');
+      
+      // 🔧 重要: 表示エリアを完全にクリア
+      displayDiv.innerHTML = '<div class="loading-message">データ取得中...</div>';
+      receiptImageData = null;
       
       if (!receiptId) {
         displayDiv.innerHTML = '<div class="error-message">レシートIDが指定されていません</div>';
-        console.error('レシートIDがありません');
+        console.error('❌ レシートIDがありません');
         return;
       }
       
       console.log('🔍 デバッグ情報:');
       console.log('  - 検索ID:', receiptId);
-      console.log('  - 現在のURL:', window.location.href);
-      console.log('  - オリジン:', window.location.origin);
       console.log('  - LocalStorage利用可能:', typeof(Storage) !== "undefined");
       console.log('  - LocalStorageアイテム数:', localStorage.length);
       
@@ -201,25 +214,34 @@
         }
       }
       
-      if (!receiptImageData) {
+      if (!receiptImageData || receiptImageData.trim() === '') {
         displayDiv.innerHTML = '<div class="error-message">画像データが空です</div>';
-        console.error('画像データが空です');
+        console.error('❌ 画像データが空です');
         return;
       }
       
       console.log('✅ データ取得成功（サイズ:', receiptImageData.length, '文字）');
+      
+      // 🔧 重要: 古い画像を完全に削除してから新しい画像を作成
+      displayDiv.innerHTML = '';
       
       // 画像を表示
       const img = document.createElement('img');
       img.src = receiptImageData;
       img.style.width = '100%';
       img.style.borderRadius = '8px';
+      
+      // 🔧 画像読み込みエラーハンドリング
       img.onerror = function() {
         console.error('❌ 画像の読み込みに失敗しました');
         displayDiv.innerHTML = '<div class="error-message">画像の読み込みに失敗しました</div>';
       };
       
-      displayDiv.innerHTML = '';
+      // 🔧 画像読み込み成功時のログ
+      img.onload = function() {
+        console.log('✅ 画像の読み込み成功');
+      };
+      
       displayDiv.appendChild(img);
       
       // ダウンロードボタンを表示
@@ -240,11 +262,38 @@
       link.href = receiptImageData;
       link.click();
       
-      console.log('画像ダウンロード実行');
+      console.log('📥 画像ダウンロード実行');
     }
     
-    // ページ読み込み時に実行
-    window.addEventListener('DOMContentLoaded', loadReceipt);
+    // 🔧 修正: ページロード時に確実に実行
+    // DOMContentLoadedとloadの両方で実行して確実性を高める
+    let loaded = false;
+    
+    function tryLoadReceipt() {
+      if (!loaded) {
+        loaded = true;
+        console.log('🚀 レシート読み込み実行');
+        loadReceipt();
+      }
+    }
+    
+    // 複数のタイミングで読み込みを試みる
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', tryLoadReceipt);
+    } else {
+      // すでに読み込み済みの場合は即座に実行
+      tryLoadReceipt();
+    }
+    
+    window.addEventListener('load', tryLoadReceipt);
+    
+    // 🔧 フォールバック: 少し待ってから強制実行
+    setTimeout(() => {
+      if (!loaded) {
+        console.warn('⚠️ 通常の読み込みが完了しなかったため、フォールバック実行');
+        tryLoadReceipt();
+      }
+    }, 100);
   </script>
 </body>
 </html>
