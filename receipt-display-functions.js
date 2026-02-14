@@ -19,9 +19,17 @@
 async function showReceiptDisplay(receiptData) {
   console.log('📄 ==== レシート表示開始 ====');
   console.log('🔍 受信データ:', receiptData);
+  console.log('🔢 注文番号:', receiptData.orderNumber || receiptData.orderNum);
+  console.log('⏰ タイムスタンプ:', receiptData.timestamp);
   
   // 🔧 修正: 既存のモーダルを完全削除
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
+  const existingModals = document.querySelectorAll('#receiptDisplayModal, #qrDisplayModal, [data-receipt-modal="true"]');
+  console.log('🗑️ 既存モーダル削除（showReceiptDisplay開始時）:', existingModals.length);
+  existingModals.forEach(el => {
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  });
   
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
@@ -168,7 +176,7 @@ async function showReceiptDisplay(receiptData) {
   `;
   
   // モーダルを作成して表示
-  showReceiptModal(receiptHtml, receiptData, 'receipt');
+  await showReceiptModal(receiptHtml, receiptData, 'receipt');
   console.log('✅ レシート表示完了');
 }
 
@@ -176,9 +184,17 @@ async function showReceiptDisplay(receiptData) {
 async function showInvoiceDisplay(invoiceData) {
   console.log('🧾 ==== 領収書表示開始 ====');
   console.log('🔍 受信データ:', invoiceData);
+  console.log('🔢 注文番号:', invoiceData.orderNumber || invoiceData.orderNum);
+  console.log('⏰ タイムスタンプ:', invoiceData.timestamp);
   
   // 🔧 修正: 既存のモーダルを完全削除
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
+  const existingModals = document.querySelectorAll('#receiptDisplayModal, #qrDisplayModal, [data-receipt-modal="true"]');
+  console.log('🗑️ 既存モーダル削除（showInvoiceDisplay開始時）:', existingModals.length);
+  existingModals.forEach(el => {
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  });
   
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
@@ -325,73 +341,91 @@ async function showInvoiceDisplay(invoiceData) {
   `;
   
   // モーダルを作成して表示
-  showReceiptModal(invoiceHtml, invoiceData, 'invoice');
+  await showReceiptModal(invoiceHtml, invoiceData, 'invoice');
   console.log('✅ 領収書表示完了');
 }
 
 // モーダル表示共通関数
-function showReceiptModal(html, data, type) {
-  console.log('🖼️ モーダル表示:', type);
+async function showReceiptModal(html, data, type) {
+  console.log('🖼️ モーダル表示開始:', type);
+  console.log('📊 受信データorderNumber:', data.orderNumber || data.orderNum);
+  console.log('📊 データタイムスタンプ:', data.timestamp);
   
-  // 🔧 修正: 既存のモーダルを完全削除（すべてのタイプ）
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => {
-    console.log('🗑️ 既存のレシートモーダルを削除');
-    el.remove();
+  // 🔧 CRITICAL FIX: 既存のモーダルを完全削除して、DOMの更新を待つ
+  const existingModals = document.querySelectorAll('#receiptDisplayModal, #qrDisplayModal, [data-receipt-modal="true"]');
+  console.log('🗑️ 削除対象モーダル数:', existingModals.length);
+  existingModals.forEach(el => {
+    console.log('  - 削除:', el.id, 'timestamp:', el.getAttribute('data-timestamp'));
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
   });
-  document.querySelectorAll('#qrDisplayModal').forEach(el => {
-    console.log('🗑️ 既存のQRモーダルを削除');
-    el.remove();
+  
+  // 🔧 CRITICAL FIX: DOM更新を確実に待つ（ダブルrequestAnimationFrame）
+  await new Promise(resolve => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(resolve);
+    });
   });
+  
+  console.log('✅ 古いモーダル削除完了、新しいモーダル作成開始');
   
   // ユニークなタイムスタンプとIDを生成
   const timestamp = Date.now();
   const uniqueContentId = `receiptContent_${timestamp}`;
   
-  // モーダルHTML（ユニークなIDを使用）
-  const modalHtml = `
-    <div id="receiptDisplayModal" data-timestamp="${timestamp}" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 999999 !important; display: flex !important; align-items: center !important; justify-content: center !important; overflow-y: auto !important;">
-      <div style="background: white !important; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.5) !important;">
-        <button onclick="closeReceiptDisplay()" style="position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; border: none; background: #f44336; color: white; border-radius: 50%; font-size: 24px; cursor: pointer; line-height: 1; z-index: 1000000;">×</button>
-        
-        <div id="${uniqueContentId}" class="receiptContent" style="margin-top: 20px;">
-          ${html}
-        </div>
-        
-        <div style="display: flex; gap: 10px; margin-top: 30px;">
-          <button onclick="saveReceiptPNG('${uniqueContentId}')" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
-            店側保存 (PNG)
-          </button>
-          <button onclick="issueReceiptQR('${uniqueContentId}')" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
-            発行 (QR)
-          </button>
-        </div>
+  console.log('🆕 新規モーダルタイムスタンプ:', timestamp);
+  console.log('🆕 新規コンテンツID:', uniqueContentId);
+  
+  // 🔧 モーダル要素を動的に作成（insertAdjacentHTMLではなくcreateElement使用）
+  const modalDiv = document.createElement('div');
+  modalDiv.id = 'receiptDisplayModal';
+  modalDiv.setAttribute('data-receipt-modal', 'true');
+  modalDiv.setAttribute('data-timestamp', timestamp);
+  modalDiv.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 999999 !important; display: flex !important; align-items: center !important; justify-content: center !important; overflow-y: auto !important;';
+  
+  modalDiv.innerHTML = `
+    <div style="background: white !important; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.5) !important;">
+      <button onclick="closeReceiptDisplay()" style="position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; border: none; background: #f44336; color: white; border-radius: 50%; font-size: 24px; cursor: pointer; line-height: 1; z-index: 1000000;">×</button>
+      
+      <div id="${uniqueContentId}" class="receiptContent" style="margin-top: 20px;">
+        ${html}
+      </div>
+      
+      <div style="display: flex; gap: 10px; margin-top: 30px;">
+        <button onclick="saveReceiptPNG('${uniqueContentId}')" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
+          店側保存 (PNG)
+        </button>
+        <button onclick="issueReceiptQR('${uniqueContentId}')" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
+          発行 (QR)
+        </button>
       </div>
     </div>
   `;
   
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  // モーダルを追加
+  document.body.appendChild(modalDiv);
   
   // データを一時保存（タイムスタンプとコンテンツID付き）
   window.currentReceiptData = { ...data, _timestamp: timestamp, _contentId: uniqueContentId };
   window.currentReceiptType = type;
   
   console.log('✅ モーダル表示完了');
+  console.log('💾 window.currentReceiptData更新:', window.currentReceiptData.orderNumber || window.currentReceiptData.orderNum);
 }
 
 // モーダルを閉じる
 function closeReceiptDisplay() {
   console.log('🚪 モーダルを閉じる処理開始');
   
-  // レシートモーダルを閉じる
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => {
-    console.log('🗑️ レシートモーダル削除');
-    el.remove();
-  });
+  // すべてのモーダルを削除
+  const allModals = document.querySelectorAll('#receiptDisplayModal, #qrDisplayModal, [data-receipt-modal="true"]');
+  console.log('🗑️ 削除対象モーダル数:', allModals.length);
   
-  // QRモーダルも閉じる
-  document.querySelectorAll('#qrDisplayModal').forEach(el => {
-    console.log('🗑️ QRモーダル削除');
-    el.remove();
+  allModals.forEach(el => {
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
   });
   
   window.currentReceiptData = null;
@@ -514,6 +548,8 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     // 🔧 重要修正: キャッシュバスターとしてタイムスタンプをURLに追加
     const qrUrl = baseUrl + 'receipt-view.html?id=' + id + '&t=' + timestamp;
     
+    console.log('🔗 QR URL:', qrUrl);
+    
     // QRコード表示モーダルを作成
     const qrModal = document.createElement('div');
     qrModal.id = 'qrDisplayModal';
@@ -530,16 +566,16 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
       </div>
     `;
     
-    // QRモーダルを閉じる関数をグローバルに定義
+    document.body.appendChild(qrModal);
+    
+    // QRモーダルを閉じる関数
     window.closeQRModal = function() {
       const qrModal = document.getElementById('qrDisplayModal');
-      if (qrModal) {
-        qrModal.remove();
+      if (qrModal && qrModal.parentNode) {
+        qrModal.parentNode.removeChild(qrModal);
       }
       console.log('🚪 QRモーダルを閉じました');
     };
-    
-    document.body.appendChild(qrModal);
     
     // QRコード生成
     setTimeout(() => {
@@ -594,4 +630,4 @@ async function openCashDrawer() {
   }
 }
 
-console.log('✅ receipt-display-functions.js loaded (v3.1 - 連続発行対応・キャッシュ修正版)');
+console.log('✅ receipt-display-functions.js loaded (v3.2 - DOM更新待機・連続発行完全修正版)');
