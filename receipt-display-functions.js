@@ -1,4 +1,4 @@
-// ========== レシート・領収書表示システム（デバッグ版）==========
+// ========== レシート・領収書表示システム（修正版）==========
 
 // QRCodeライブラリの読み込み確認と動的ロード
 (function() {
@@ -81,14 +81,14 @@ async function showReceiptDisplay(receiptData) {
                   String(now.getHours()).padStart(2, '0') + ':' + 
                   String(now.getMinutes()).padStart(2, '0');
   
-  // 注文番号を確実に取得
-  const orderNum = receiptData.orderNum || receiptData.orderNumber || receiptData.orderNo || 
-                   (receiptData.checkoutData && (receiptData.checkoutData.orderNum || receiptData.checkoutData.orderNumber)) ||
+  // 🔧 修正: 注文番号を確実に取得（orderNumberを優先）
+  const orderNum = receiptData.orderNumber || receiptData.orderNum || receiptData.orderNo || 
+                   (receiptData.checkoutData && (receiptData.checkoutData.orderNumber || receiptData.checkoutData.orderNum)) ||
                    '未設定';
   
   console.log('🔢 注文番号チェック:', {
-    'receiptData.orderNum': receiptData.orderNum,
     'receiptData.orderNumber': receiptData.orderNumber,
+    'receiptData.orderNum': receiptData.orderNum,
     'receiptData.orderNo': receiptData.orderNo,
     '最終値': orderNum
   });
@@ -231,10 +231,8 @@ async function showInvoiceDisplay(invoiceData) {
         receiptPhone = 'TEL: ' + settings.phone;
       }
       
-      // 電子印鑑データを取得
+      // 🔧 修正: 電子印鑑データを複数のフィールド名で取得
       console.log('🔍 電子印鑑チェック:');
-      console.log('  - sealImageData存在:', !!settings.sealImageData);
-      console.log('  - sealImage存在:', !!settings.sealImage);
       console.log('  - 利用可能なフィールド:', Object.keys(settings));
       
       if (settings.sealImageData) {
@@ -243,16 +241,40 @@ async function showInvoiceDisplay(invoiceData) {
       } else if (settings.sealImage) {
         sealImageData = settings.sealImage;
         console.log('✅ 電子印鑑データを取得しました（sealImage・長さ:', sealImageData.length, '文字）');
+      } else if (settings.seal) {
+        sealImageData = settings.seal;
+        console.log('✅ 電子印鑑データを取得しました（seal・長さ:', sealImageData.length, '文字）');
       } else {
         console.warn('⚠️ 電子印鑑データが設定されていません');
         console.warn('   kanri.htmlで電子印鑑を作成・保存してください');
         console.warn('   現在の設定:', settings);
+        
+        // LocalStorageからも試す
+        const localSeal = localStorage.getItem('companySealData');
+        if (localSeal) {
+          sealImageData = localSeal;
+          console.log('✅ LocalStorageから電子印鑑を取得しました（長さ:', sealImageData.length, '文字）');
+        }
       }
     } else {
       console.warn('⚠️ 領収書設定が見つかりません');
+      
+      // LocalStorageからも試す
+      const localSeal = localStorage.getItem('companySealData');
+      if (localSeal) {
+        sealImageData = localSeal;
+        console.log('✅ LocalStorageから電子印鑑を取得しました（長さ:', sealImageData.length, '文字）');
+      }
     }
   } catch (error) {
     console.error('❌ 領収書設定読み込みエラー:', error);
+    
+    // エラー時もLocalStorageから試す
+    const localSeal = localStorage.getItem('companySealData');
+    if (localSeal) {
+      sealImageData = localSeal;
+      console.log('✅ LocalStorageから電子印鑑を取得しました（長さ:', sealImageData.length, '文字）');
+    }
   }
   
   // 日時フォーマット
@@ -261,14 +283,14 @@ async function showInvoiceDisplay(invoiceData) {
                   String(now.getMonth() + 1).padStart(2, '0') + '月' + 
                   String(now.getDate()).padStart(2, '0') + '日';
   
-  // 注文番号を確実に取得
-  const orderNum = invoiceData.orderNum || invoiceData.orderNumber || invoiceData.orderNo ||
-                   (invoiceData.checkoutData && (invoiceData.checkoutData.orderNum || invoiceData.checkoutData.orderNumber)) ||
+  // 🔧 修正: 注文番号を確実に取得（orderNumberを優先）
+  const orderNum = invoiceData.orderNumber || invoiceData.orderNum || invoiceData.orderNo ||
+                   (invoiceData.checkoutData && (invoiceData.checkoutData.orderNumber || invoiceData.checkoutData.orderNum)) ||
                    '未設定';
   
   console.log('🔢 注文番号チェック:', {
-    'invoiceData.orderNum': invoiceData.orderNum,
     'invoiceData.orderNumber': invoiceData.orderNumber,
+    'invoiceData.orderNum': invoiceData.orderNum,
     'invoiceData.orderNo': invoiceData.orderNo,
     '最終値': orderNum
   });
@@ -295,7 +317,9 @@ async function showInvoiceDisplay(invoiceData) {
     </div>
   ` : '';
   
-  if (!sealImageData) {
+  if (sealImageData) {
+    console.log('✅ 電子印鑑を表示します');
+  } else {
     console.warn('⚠️ 電子印鑑が表示されません - kanri.htmlで設定してください');
   }
   
@@ -398,15 +422,18 @@ function showReceiptModal(html, data, type) {
     }
   }, 10);
   
-  // データを一時保存
-  window.currentReceiptData = data;
+  // 🔧 修正: orderNumberを優先して保存
+  window.currentReceiptData = {
+    ...data,
+    orderNum: data.orderNumber || data.orderNum || data.orderNo || '未設定'
+  };
   window.currentReceiptType = type;
   
   console.log('✅ モーダルを表示しました');
   console.log('📊 データを保存:', { 
     type, 
-    orderNum: data.orderNum, 
-    orderNumber: data.orderNumber,
+    orderNumber: window.currentReceiptData.orderNumber,
+    orderNum: window.currentReceiptData.orderNum,
     dataKeys: Object.keys(data)
   });
 }
@@ -438,7 +465,7 @@ async function saveReceiptPNG() {
     
     const link = document.createElement('a');
     const type = window.currentReceiptType === 'invoice' ? '領収書' : 'レシート';
-    const orderNum = window.currentReceiptData.orderNum || window.currentReceiptData.orderNumber || 'nonum';
+    const orderNum = window.currentReceiptData.orderNumber || window.currentReceiptData.orderNum || 'nonum';
     link.download = `${type}_${orderNum}.png`;
     link.href = canvas.toDataURL();
     link.click();
@@ -479,6 +506,10 @@ window.issueReceiptQR = async function issueReceiptQR() {
     console.log('💾 LocalStorageに保存:', id);
     localStorage.setItem(id, imageData);
     console.log('✅ 保存完了（サイズ:', imageData.length, '文字）');
+    
+    // 🔧 追加: 最新レシートIDも保存
+    localStorage.setItem('latest_receipt_id', id);
+    console.log('✅ 最新レシートIDを保存:', id);
     
     // レシートモーダルを閉じる
     console.log('📄 レシートモーダルを閉じます');
@@ -570,4 +601,4 @@ async function openCashDrawer() {
   }
 }
 
-console.log('✅ receipt-display-functions.js loaded (デバッグ版)');
+console.log('✅ receipt-display-functions.js loaded (修正版・注文番号orderNumber対応・電子印鑑複数フィールド対応)');

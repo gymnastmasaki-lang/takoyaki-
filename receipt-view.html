@@ -146,51 +146,48 @@
         console.log('    [' + i + '] ' + key);
       }
       
-      // LocalStorageから画像データを取得（大文字小文字を区別しない）
+      // 🔧 修正: より柔軟な検索ロジック
       console.log('💾 LocalStorageから取得を試みます:', receiptId);
+      
+      // 方法1: 完全一致で検索
       receiptImageData = localStorage.getItem(receiptId);
       
-      if (!receiptImageData) {
-        console.warn('⚠️ 最初の試行で見つかりませんでした。代替検索を試みます...');
+      if (receiptImageData) {
+        console.log('✅ 完全一致で取得成功:', receiptId);
+      } else {
+        console.warn('⚠️ 完全一致で見つかりませんでした。代替検索を試みます...');
         
-        // すべてのキーをチェック
-        let found = false;
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          console.log('  チェック中:', key);
-          
-          // 完全一致
-          if (key === receiptId) {
-            receiptImageData = localStorage.getItem(key);
-            found = true;
-            console.log('✅ 完全一致で取得成功:', key);
-            break;
-          }
-          
-          // 部分一致（receipt_で始まるキー）
-          if (key && key.startsWith('receipt_')) {
-            console.log('  ⚠️ 類似キー発見:', key);
+        // 方法2: 最新のレシートIDから取得
+        const latestId = localStorage.getItem('latest_receipt_id');
+        if (latestId) {
+          console.log('🔍 最新レシートID:', latestId);
+          receiptImageData = localStorage.getItem(latestId);
+          if (receiptImageData) {
+            console.log('✅ 最新レシートIDから取得成功:', latestId);
           }
         }
         
-        // それでも見つからない場合、最新のreceipt_キーを使用
-        if (!found && allKeys.length > 0) {
+        // 方法3: receipt_で始まる最新のキーを使用
+        if (!receiptImageData) {
           const receiptKeys = allKeys.filter(k => k && k.startsWith('receipt_'));
           if (receiptKeys.length > 0) {
-            // 最新のキー（タイムスタンプが最大のもの）を取得
+            // タイムスタンプでソート（降順）
             receiptKeys.sort((a, b) => {
-              const timeA = parseInt(a.replace('receipt_', ''));
-              const timeB = parseInt(b.replace('receipt_', ''));
+              const timeA = parseInt(a.replace('receipt_', '')) || 0;
+              const timeB = parseInt(b.replace('receipt_', '')) || 0;
               return timeB - timeA;
             });
             const latestKey = receiptKeys[0];
-            console.log('⚠️ 最新のレシートキーを使用:', latestKey);
+            console.log('🔍 receipt_キーの中で最新:', latestKey);
             receiptImageData = localStorage.getItem(latestKey);
-            found = true;
+            if (receiptImageData) {
+              console.log('✅ 最新のreceipt_キーから取得成功:', latestKey);
+            }
           }
         }
         
-        if (!found) {
+        // それでも見つからない場合
+        if (!receiptImageData) {
           displayDiv.innerHTML = `
             <div class="error-message">
               ❌ レシート・領収書が見つかりません<br><br>
@@ -200,11 +197,11 @@
                 検索ID: ${receiptId}<br>
                 LocalStorageアイテム数: ${localStorage.length}<br>
                 利用可能なキー:<br>
-                ${allKeys.map(k => '- ' + k).join('<br>')}
+                ${allKeys.length > 0 ? allKeys.map(k => '- ' + k).join('<br>') : '（なし）'}
               </div>
             </div>
           `;
-          console.error('❌ LocalStorageにデータがありません:', receiptId);
+          console.error('❌ LocalStorageにデータがありません');
           return;
         }
       }
