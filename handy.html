@@ -5794,7 +5794,9 @@ ${fileName}`,
             totalAmount: data.totalAmount || 0,
             paymentMethod: data.paymentMethod || 'cash',
             paidAt: data.paidAt || null,
-            completedAt: data.completedAt || null
+            completedAt: data.completedAt || null,
+            tax8Total: data.tax8Total || 0,
+            tax10Total: data.tax10Total || 0
           });
         });
         
@@ -6114,11 +6116,87 @@ ${fileName}`,
     
     // ========== レシート・領収書表示機能 ==========
     window.reprintReceipt = async function(orderId) {
-      await showCustomAlert({ icon: '', title: 'お知らせ', message: 'レシート表示機能\n（プリンター連携が必要です）\n\n現在この機能は開発中です。', btnClass: 'modal-btn-primary' });
+      try {
+        const order = historyOrders.find(o => o.id === orderId);
+        if (!order) {
+          await showCustomAlert({
+            icon: '⚠️',
+            title: 'エラー',
+            message: '注文データが見つかりません',
+            btnClass: 'modal-btn-danger'
+          });
+          return;
+        }
+        
+        // Firestoreから最新データも取得（tax情報のため）
+        const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
+        const orderData = orderDoc.exists() ? orderDoc.data() : {};
+        
+        // レシートデータを構築
+        const receiptData = {
+          orderNum: order.orderNumber,
+          orderNumber: order.orderNumber,
+          timestamp: order.timestamp?.toDate?.() || new Date(),
+          items: order.items || [],
+          total: order.totalAmount || 0,
+          tax8Total: orderData.tax8Total || order.tax8Total || 0,
+          tax10Total: orderData.tax10Total || order.tax10Total || 0
+        };
+        
+        // レシート表示関数を呼び出し
+        await showReceiptDisplay(receiptData);
+        
+      } catch (error) {
+        console.error('レシート表示エラー:', error);
+        await showCustomAlert({
+          icon: '❌',
+          title: 'エラー',
+          message: 'レシートの表示に失敗しました: ' + error.message,
+          btnClass: 'modal-btn-danger'
+        });
+      }
     };
     
     window.reprintInvoice = async function(orderId) {
-      await showCustomAlert({ icon: '', title: 'お知らせ', message: '領収書表示機能\n（プリンター連携が必要です）\n\n現在この機能は開発中です。', btnClass: 'modal-btn-primary' });
+      try {
+        const order = historyOrders.find(o => o.id === orderId);
+        if (!order) {
+          await showCustomAlert({
+            icon: '⚠️',
+            title: 'エラー',
+            message: '注文データが見つかりません',
+            btnClass: 'modal-btn-danger'
+          });
+          return;
+        }
+        
+        // Firestoreから最新データも取得（tax情報のため）
+        const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
+        const orderData = orderDoc.exists() ? orderDoc.data() : {};
+        
+        // 領収書データを構築
+        const invoiceData = {
+          orderNum: order.orderNumber,
+          orderNumber: order.orderNumber,
+          timestamp: order.timestamp?.toDate?.() || new Date(),
+          items: order.items || [],
+          total: order.totalAmount || 0,
+          tax8Total: orderData.tax8Total || order.tax8Total || 0,
+          tax10Total: orderData.tax10Total || order.tax10Total || 0
+        };
+        
+        // 領収書表示関数を呼び出し
+        await showInvoiceDisplay(invoiceData);
+        
+      } catch (error) {
+        console.error('領収書表示エラー:', error);
+        await showCustomAlert({
+          icon: '❌',
+          title: 'エラー',
+          message: '領収書の表示に失敗しました: ' + error.message,
+          btnClass: 'modal-btn-danger'
+        });
+      }
     };
     
     // ========== 履歴から注文編集 ==========
@@ -8411,6 +8489,117 @@ ${totalRedSlipCount > 0 ? `
     };
     
     // ========================================
+    // 🗄️ ドロア設定機能
+    // ========================================
+    
+    // ドロア設定モーダルを開く
+    window.showDrawerSettings = function() {
+      // 機能メニューを閉じる
+      const menu = document.getElementById('functionsSubMenu');
+      if (menu) {
+        menu.style.display = 'none';
+      }
+      
+      // 保存済みの値を復元
+      const savedIp = localStorage.getItem('drawerIp') || '192.168.1.100';
+      const savedDuration = localStorage.getItem('drawerDuration') || '500';
+      
+      document.getElementById('drawerIpInput').value = savedIp;
+      document.getElementById('drawerDurationInput').value = savedDuration;
+      
+      document.getElementById('drawerSettingsModal').style.display = 'flex';
+      document.getElementById('drawerTestResult').style.display = 'none';
+    };
+    
+    // ドロア設定モーダルを閉じる
+    window.closeDrawerSettingsModal = function() {
+      document.getElementById('drawerSettingsModal').style.display = 'none';
+    };
+    
+    // ドロア設定を保存
+    window.saveDrawerSettings = async function() {
+      const ip = document.getElementById('drawerIpInput').value.trim();
+      const duration = document.getElementById('drawerDurationInput').value.trim();
+      
+      if (!ip) {
+        await showCustomAlert({
+          icon: '⚠️',
+          title: '入力エラー',
+          message: 'ドロアのIPアドレスを入力してください',
+          btnClass: 'modal-btn-danger'
+        });
+        return;
+      }
+      
+      localStorage.setItem('drawerIp', ip);
+      localStorage.setItem('drawerDuration', duration);
+      
+      await showCustomAlert({
+        icon: '✅',
+        title: '保存完了',
+        message: 'ドロア設定を保存しました',
+        btnClass: 'modal-btn-success'
+      });
+      
+      closeDrawerSettingsModal();
+    };
+    
+    // ドロア接続テスト
+    window.testDrawerConnection = async function() {
+      const ip = document.getElementById('drawerIpInput').value.trim();
+      const duration = document.getElementById('drawerDurationInput').value.trim();
+      
+      if (!ip) {
+        await showCustomAlert({
+          icon: '⚠️',
+          title: '入力エラー',
+          message: 'IPアドレスを入力してください',
+          btnClass: 'modal-btn-danger'
+        });
+        return;
+      }
+      
+      const resultDiv = document.getElementById('drawerTestResult');
+      resultDiv.style.display = 'block';
+      resultDiv.style.background = '#fff3cd';
+      resultDiv.style.color = '#856404';
+      resultDiv.innerHTML = '接続テスト中...';
+      
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        const response = await fetch(`http://${ip}/open`, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ duration: parseInt(duration) || 500 })
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          resultDiv.style.background = '#d4edda';
+          resultDiv.style.color = '#155724';
+          resultDiv.innerHTML = '✅ 接続成功！ドロアが開きます';
+        } else {
+          throw new Error(`HTTP ${response.status}`);
+        }
+      } catch (error) {
+        resultDiv.style.background = '#f8d7da';
+        resultDiv.style.color = '#721c24';
+        
+        if (error.name === 'AbortError') {
+          resultDiv.innerHTML = '❌ タイムアウト: ドロアに接続できませんでした';
+        } else {
+          resultDiv.innerHTML = '❌ 接続失敗: ' + error.message;
+        }
+      }
+    };
+    
+    // ========================================
     // 📦 在庫一括設定機能
     // ========================================
     
@@ -8879,119 +9068,55 @@ ${totalRedSlipCount > 0 ? `
   </div>
   
   <!-- プリンタ設定モーダル -->
-  <div id="printerSettingsModal" class="modal-overlay" style="display: none;">
-    <div class="modal-content" style="background: white; border-radius: 20px; padding: 40px; max-width: 600px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
-      <h3 style="font-size: 24px; font-weight: bold; text-align: center; margin-bottom: 15px; color: #333;">プリンタ設定</h3>
-      <p style="text-align: center; font-size: 16px; color: #666; margin-bottom: 30px;">TSP650II / mC-Print3 / Bluetooth対応</p>
-      
-      <!-- 接続方式選択 -->
-      <div style="margin-bottom: 25px;">
-        <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">接続方式</label>
-        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-          <button id="connectionTypeEthernet" onclick="playTapSound(); selectConnectionType('ethernet')" 
-                  style="padding: 15px 10px; border: 2px solid #ddd; background: white; color: #666; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">
-            WiFi/LAN
-          </button>
-          <button id="connectionTypeBluetooth" onclick="playTapSound(); selectConnectionType('bluetooth')" 
-                  style="padding: 15px 10px; border: 2px solid #ddd; background: white; color: #666; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">
-            Bluetooth
-          </button>
-          <button id="connectionTypeUsb" onclick="playTapSound(); selectConnectionType('usb')" 
-                  style="padding: 15px 10px; border: 2px solid #667eea; background: #667eea; color: white; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">
-            USB接続
-          </button>
-          <button id="connectionTypeProxy" onclick="playTapSound(); selectConnectionType('proxy')" 
-                  style="padding: 15px 10px; border: 2px solid #ddd; background: white; color: #666; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer;">
-            プロキシ
-          </button>
-        </div>
-      </div>
-      
-      <!-- Ethernet設定 -->
-      <div id="ethernetSettings" style="display: block;">
-        <div style="margin-bottom: 25px;">
-          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">プリンタIPアドレス</label>
-          <input type="text" id="printerIPInput" placeholder="例: 192.168.1.100" 
-                 style="width: 100%; padding: 15px; border: 2px solid #667eea; border-radius: 8px; font-size: 16px; box-sizing: border-box;">
-          <div style="margin-top: 8px; font-size: 14px; color: #666;">
-            プリンタのIPアドレスを入力してください<br>
-            <small style="color: #999;">※プリンタの設定印刷で確認できます</small>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Bluetooth設定 -->
-      <div id="bluetoothSettings" style="display: none;">
-        <div style="margin-bottom: 25px;">
-          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">Bluetoothプリンタ</label>
-          <button onclick="playTapSound(); searchBluetoothPrinter()" 
-                  style="width: 100%; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; box-shadow: 0 4px 15px rgba(33,150,243,0.3);">
-            プリンタを検索
-          </button>
-          <div id="bluetoothDeviceInfo" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 8px; display: none;">
-            <div style="font-weight: bold; color: #333;">接続済みプリンタ:</div>
-            <div id="bluetoothDeviceName" style="color: #666; margin-top: 5px;">なし</div>
-          </div>
-          <div style="margin-top: 8px; font-size: 14px; color: #666;">
-            ESC/POS対応のBluetoothプリンタを検索します<br>
-            <small style="color: #999;">※Chrome、Edgeで利用可能</small>
-          </div>
-        </div>
-      </div>
-      
-      <!-- USB設定 -->
-      <div id="usbSettings" style="display: none;">
-        <div style="margin-bottom: 25px;">
-          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">USBプリンタ</label>
-          <button onclick="playTapSound(); connectUSBPrinter()" 
-                  style="width: 100%; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; box-shadow: 0 4px 15px rgba(255,152,0,0.3);">
-            プリンタを接続
-          </button>
-          <div id="usbDeviceInfo" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 8px; display: none;">
-            <div style="font-weight: bold; color: #333;">接続済みプリンタ:</div>
-            <div id="usbDeviceName" style="color: #666; margin-top: 5px;">なし</div>
-          </div>
-          <div style="margin-top: 8px; font-size: 14px; color: #666;">
-            mC-Print3をUSBケーブルで接続してください<br>
-            <small style="color: #999;">※Chrome、Edgeで利用可能</small>
-          </div>
-        </div>
-      </div>
-      
-      <!-- プロキシサーバー設定 -->
-      <div id="proxySettings" style="display: none;">
-        <div style="margin-bottom: 25px;">
-          <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">プロキシサーバーURL</label>
-          <input type="text" id="printerProxyInput" placeholder="例: http://192.168.1.100:3000" 
-                 style="width: 100%; padding: 15px; border: 2px solid #667eea; border-radius: 8px; font-size: 16px; box-sizing: border-box;">
-          <div style="margin-top: 8px; font-size: 14px; color: #666;">
-            PCでNode.jsサーバーを起動してURLを入力<br>
-            <small style="color: #999;">※サーバー起動時に表示されます</small>
-          </div>
-        </div>
-      </div>
-      
-      <div style="margin-bottom: 25px;">
-        <button onclick="playTapSound(); testPrinterConnection()" id="testConnectionBtn"
-                style="width: 100%; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; box-shadow: 0 4px 15px rgba(76,175,80,0.3);">
-          接続テスト
-        </button>
-        <div id="printerTestResult" style="margin-top: 10px; padding: 10px; border-radius: 8px; display: none;"></div>
-      </div>
-      
-      <div style="display: flex; gap: 15px; margin-top: 30px;">
-        <button onclick="playTapSound(); closePrinterSettingsModal()" 
-                style="flex: 1; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: #e0e0e0; color: #666;">
-          キャンセル
-        </button>
-        <button onclick="playTapSound(); savePrinterSettings()" 
-                style="flex: 1; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-          保存
-        </button>
+<!-- ========================================
+     ドロア設定モーダルHTML
+     (handy.htmlの8882-8993行目のprinterSettingsModalを
+      このコードに置き換える)
+     ======================================== -->
+
+<div id="drawerSettingsModal" class="modal-overlay" style="display: none;">
+  <div class="modal-content" style="background: white; border-radius: 20px; padding: 40px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+    <h3 style="font-size: 24px; font-weight: bold; text-align: center; margin-bottom: 15px; color: #333;">キャッシュドロア設定</h3>
+    <p style="text-align: center; font-size: 16px; color: #666; margin-bottom: 30px;">WiFi接続ドロアの設定</p>
+    
+    <div style="margin-bottom: 25px;">
+      <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">ドロアIPアドレス</label>
+      <input type="text" id="drawerIpInput" placeholder="例: 192.168.1.100" 
+             style="width: 100%; padding: 15px; border: 2px solid #667eea; border-radius: 8px; font-size: 16px; box-sizing: border-box;">
+      <div style="margin-top: 8px; font-size: 14px; color: #666;">
+        WiFi接続ドロアのIPアドレスを入力してください
       </div>
     </div>
+    
+    <div style="margin-bottom: 25px;">
+      <label style="display: block; font-weight: bold; margin-bottom: 10px; color: #333;">開放時間 (ミリ秒)</label>
+      <input type="number" id="drawerDurationInput" placeholder="500" value="500"
+             style="width: 100%; padding: 15px; border: 2px solid #667eea; border-radius: 8px; font-size: 16px; box-sizing: border-box;">
+      <div style="margin-top: 8px; font-size: 14px; color: #666;">
+        ドロアを開ける時間（推奨: 500ms）
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 25px;">
+      <button onclick="playTapSound(); testDrawerConnection()" id="testDrawerBtn"
+              style="width: 100%; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; box-shadow: 0 4px 15px rgba(76,175,80,0.3);">
+        接続テスト
+      </button>
+      <div id="drawerTestResult" style="margin-top: 10px; padding: 10px; border-radius: 8px; display: none;"></div>
+    </div>
+    
+    <div style="display: flex; gap: 15px; margin-top: 30px;">
+      <button onclick="playTapSound(); closeDrawerSettingsModal()" 
+              style="flex: 1; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: #e0e0e0; color: #666;">
+        キャンセル
+      </button>
+      <button onclick="playTapSound(); saveDrawerSettings()" 
+              style="flex: 1; padding: 18px; font-size: 18px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+        保存
+      </button>
+    </div>
   </div>
-  
+</div>
   <!-- 🆕 在庫一括設定モーダル -->
   <div id="bulkInventoryModal" class="modal-overlay" style="display: none;">
     <div class="modal-content" style="max-width: 500px;">

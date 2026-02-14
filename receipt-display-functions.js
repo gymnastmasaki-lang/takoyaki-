@@ -1,4 +1,38 @@
-// ========== レシート・領収書表示システム（修正版）==========
+// ========== レシート・領収書表示システム（完全修正版）==========
+
+// QRCodeライブラリの読み込み確認と動的ロード
+(function() {
+  // QRCodeライブラリが読み込まれているか確認
+  if (typeof QRCode === 'undefined') {
+    console.warn('QRCodeライブラリが見つかりません。動的に読み込みます...');
+    
+    // スクリプトを動的に読み込む
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    script.onload = function() {
+      console.log('✅ QRCodeライブラリを読み込みました');
+    };
+    script.onerror = function() {
+      console.error('❌ QRCodeライブラリの読み込みに失敗しました');
+    };
+    document.head.appendChild(script);
+  }
+  
+  // html2canvasライブラリの読み込み確認と動的ロード
+  if (typeof html2canvas === 'undefined') {
+    console.warn('html2canvasライブラリが見つかりません。動的に読み込みます...');
+    
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.onload = function() {
+      console.log('✅ html2canvasライブラリを読み込みました');
+    };
+    script.onerror = function() {
+      console.error('❌ html2canvasライブラリの読み込みに失敗しました');
+    };
+    document.head.appendChild(script);
+  }
+})();
 
 // レシート表示関数
 async function showReceiptDisplay(receiptData) {
@@ -62,6 +96,9 @@ async function showReceiptDisplay(receiptData) {
                   String(now.getHours()).padStart(2, '0') + ':' + 
                   String(now.getMinutes()).padStart(2, '0');
   
+  // 注文番号を確実に取得
+  const orderNum = receiptData.orderNum || receiptData.orderNumber || '';
+  
   // 商品リストHTML生成
   let itemsHtml = '';
   if (receiptData.items && Array.isArray(receiptData.items)) {
@@ -106,7 +143,7 @@ async function showReceiptDisplay(receiptData) {
         </div>
         <div style="display: flex; justify-content: space-between; margin: 5px 0;">
           <span>注文番号:</span>
-          <span style="font-weight: bold; font-size: 18px;">#${receiptData.orderNum || ''}</span>
+          <span style="font-weight: bold; font-size: 18px;">#${orderNum}</span>
         </div>
       </div>
       
@@ -154,6 +191,7 @@ async function showInvoiceDisplay(invoiceData) {
   let receiptStoreName = '粉もん屋 八 下赤塚店';
   let receiptAddress = '東京都板橋区赤塚2-2-4';
   let receiptPhone = 'TEL: 03-6904-2888';
+  let sealImageData = ''; // 電子印鑑データ
   
   try {
     const storeId = window.currentStoreId;
@@ -187,6 +225,11 @@ async function showInvoiceDisplay(invoiceData) {
       if (settings.phone) {
         receiptPhone = 'TEL: ' + settings.phone;
       }
+      
+      // 電子印鑑データを取得
+      if (settings.sealImageData) {
+        sealImageData = settings.sealImageData;
+      }
     }
   } catch (error) {
     console.error('領収書設定読み込みエラー:', error);
@@ -198,6 +241,9 @@ async function showInvoiceDisplay(invoiceData) {
                   String(now.getMonth() + 1).padStart(2, '0') + '月' + 
                   String(now.getDate()).padStart(2, '0') + '日';
   
+  // 注文番号を確実に取得
+  const orderNum = invoiceData.orderNum || invoiceData.orderNumber || '';
+  
   // 消費税計算（内税）
   const tax8Total = invoiceData.tax8Total || 0;
   const tax10Total = invoiceData.tax10Total || 0;
@@ -208,6 +254,13 @@ async function showInvoiceDisplay(invoiceData) {
   const totalTax = tax8Amount + tax10Amount;
   
   console.log('領収書税額計算:', { tax8Total, tax10Total, totalTax });
+  
+  // 電子印鑑の表示HTML
+  const sealHtml = sealImageData ? `
+    <div style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%);">
+      <img src="${sealImageData}" style="width: 80px; height: 80px; opacity: 0.8;" />
+    </div>
+  ` : '';
   
   const invoiceHtml = `
     <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 10px;">
@@ -239,7 +292,7 @@ async function showInvoiceDisplay(invoiceData) {
         </div>
         <div style="margin: 10px 0;">
           <span style="display: inline-block; width: 100px;">注文番号</span>
-          <span>#${invoiceData.orderNum || ''}</span>
+          <span>#${orderNum}</span>
         </div>
       </div>
       
@@ -248,6 +301,7 @@ async function showInvoiceDisplay(invoiceData) {
       </div>
       
       <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 40px; position: relative;">
+        ${sealHtml}
         <div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>
         <div style="text-align: center; font-size: 12px; color: #666;">
           <div>${receiptAddress}</div>
@@ -311,6 +365,12 @@ function closeReceiptDisplay() {
 async function saveReceiptPNG() {
   const element = document.getElementById('receiptContent');
   
+  // html2canvasが読み込まれているか確認
+  if (typeof html2canvas === 'undefined') {
+    alert('画像変換ライブラリが読み込まれていません。ページを再読み込みしてください。');
+    return;
+  }
+  
   try {
     const canvas = await html2canvas(element, {
       backgroundColor: '#ffffff',
@@ -319,7 +379,7 @@ async function saveReceiptPNG() {
     
     const link = document.createElement('a');
     const type = window.currentReceiptType === 'invoice' ? '領収書' : 'レシート';
-    const orderNum = window.currentReceiptData.orderNum || 'nonum';
+    const orderNum = window.currentReceiptData.orderNum || window.currentReceiptData.orderNumber || 'nonum';
     link.download = `${type}_${orderNum}.png`;
     link.href = canvas.toDataURL();
     link.click();
@@ -327,13 +387,25 @@ async function saveReceiptPNG() {
     alert(`${type}を保存しました！`);
   } catch (error) {
     console.error('保存エラー:', error);
-    alert('保存に失敗しました');
+    alert('保存に失敗しました: ' + error.message);
   }
 }
 
 // QRコード発行
 async function issueReceiptQR() {
   const element = document.getElementById('receiptContent');
+  
+  // QRCodeライブラリが読み込まれているか確認
+  if (typeof QRCode === 'undefined') {
+    alert('QRコードライブラリが読み込まれていません。ページを再読み込みしてください。');
+    return;
+  }
+  
+  // html2canvasが読み込まれているか確認
+  if (typeof html2canvas === 'undefined') {
+    alert('画像変換ライブラリが読み込まれていません。ページを再読み込みしてください。');
+    return;
+  }
   
   try {
     const canvas = await html2canvas(element, {
@@ -373,16 +445,31 @@ async function issueReceiptQR() {
     
     document.body.appendChild(qrModal);
     
-    // QRコード生成
-    new QRCode(document.getElementById('qrcode'), {
-      text: qrUrl,
-      width: 256,
-      height: 256
-    });
+    // QRコード生成（少し遅延させて確実にDOMに追加されるのを待つ）
+    setTimeout(() => {
+      const qrcodeElement = document.getElementById('qrcode');
+      if (qrcodeElement) {
+        // 既存のQRコードをクリア
+        qrcodeElement.innerHTML = '';
+        
+        // QRコード生成
+        new QRCode(qrcodeElement, {
+          text: qrUrl,
+          width: 256,
+          height: 256,
+          colorDark: '#000000',
+          colorLight: '#ffffff',
+          correctLevel: QRCode.CorrectLevel.H
+        });
+      } else {
+        console.error('QRコード表示要素が見つかりません');
+        alert('QRコードの表示に失敗しました');
+      }
+    }, 100);
     
   } catch (error) {
     console.error('QRコード生成エラー:', error);
-    alert('QRコード生成に失敗しました');
+    alert('QRコード生成に失敗しました: ' + error.message);
   }
 }
 
