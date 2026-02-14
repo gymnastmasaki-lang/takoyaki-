@@ -1,4 +1,4 @@
-// ========== レシート・領収書表示システム（最終完全版）==========
+// ========== レシート・領収書表示システム（完全修正版）==========
 
 // QRCodeライブラリの読み込み確認と動的ロード
 (function() {
@@ -17,29 +17,11 @@
 
 // レシート表示関数
 async function showReceiptDisplay(receiptData) {
-  // 🔧 修正: 既存のモーダルを削除してから新しいレシートを表示
-  const existingModal = document.getElementById('receiptDisplayModal');
-  if (existingModal) {
-    console.log('🗑️ 既存のモーダルを削除');
-    existingModal.remove();
-  }
-  
-  // 🚨 デバッグ: 受信データを強制表示
-  const debugInfo = `
-📄 レシート表示開始
-注文番号: ${receiptData.orderNumber || receiptData.orderNum || '不明'}
-テーブル: ${receiptData.tableNumber || '不明'}
-合計: ¥${receiptData.total || 0}
-タイムスタンプ: ${new Date().toLocaleTimeString()}
-  `;
-  console.log(debugInfo);
-  alert(debugInfo);  // 強制的にアラート表示
-  
   console.log('📄 ==== レシート表示開始 ====');
   console.log('🔍 受信データ:', receiptData);
-  console.log('🔍 注文番号:', receiptData.orderNumber || receiptData.orderNum);
-  console.log('🔍 合計金額:', receiptData.total);
-  console.log('🔍 タイムスタンプ:', new Date().toISOString());
+  
+  // 🔧 修正: 既存のモーダルを完全削除
+  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
   
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
@@ -99,57 +81,9 @@ async function showReceiptDisplay(receiptData) {
                   String(now.getHours()).padStart(2, '0') + ':' + 
                   String(now.getMinutes()).padStart(2, '0');
   
-  // 🔧 完全修正: ordersから注文番号を取得
-  let orderNum = null;
-  
-  console.log('🔢 注文番号探索開始...');
-  
-  // CRITICAL: ordersの中から注文番号を取得（handy対応）
-  if (receiptData.orders && Array.isArray(receiptData.orders) && receiptData.orders.length > 0) {
-    console.log('🔍 orders配列を確認:', receiptData.orders.length, '件');
-    for (const order of receiptData.orders) {
-      console.log('  - order:', order);
-      if (order.orderNumber) {
-        orderNum = order.orderNumber;
-        console.log('✅ orders[].orderNumberから取得:', orderNum);
-        break;
-      }
-    }
-  }
-  
-  // フォールバック1: 直接のフィールド
-  if (!orderNum) {
-    if (receiptData.orderNumber) {
-      orderNum = receiptData.orderNumber;
-      console.log('✅ orderNumberから取得:', orderNum);
-    } else if (receiptData.orderNum) {
-      orderNum = receiptData.orderNum;
-      console.log('✅ orderNumから取得:', orderNum);
-    }
-  }
-  
-  // フォールバック2: checkoutData
-  if (!orderNum && receiptData.checkoutData) {
-    if (receiptData.checkoutData.orderNumber) {
-      orderNum = receiptData.checkoutData.orderNumber;
-      console.log('✅ checkoutData.orderNumberから取得:', orderNum);
-    }
-  }
-  
-  // フォールバック3: グローバル変数
-  if (!orderNum && window.currentOrderNumber) {
-    orderNum = window.currentOrderNumber;
-    console.log('✅ window.currentOrderNumberから取得:', orderNum);
-  }
-  
-  // エラー表示
-  if (!orderNum) {
-    console.error('❌ 注文番号が見つかりません！');
-    console.error('   受信データ:', receiptData);
-    orderNum = '番号不明';
-  }
-  
-  console.log('🔢 最終的な注文番号:', orderNum);
+  // 🔧 重要修正: 注文番号を確実に取得
+  let orderNum = receiptData.orderNumber || receiptData.orderNum || 'なし';
+  console.log('🔢 注文番号:', orderNum);
   
   // 商品リストHTML生成
   let itemsHtml = '';
@@ -234,40 +168,17 @@ async function showReceiptDisplay(receiptData) {
   `;
   
   // モーダルを作成して表示
-  const finalData = {
-    ...receiptData,
-    orderNumber: orderNum,
-    orderNum: orderNum
-  };
-  showReceiptModal(receiptHtml, finalData, 'receipt');
-  console.log('✅ レシート表示完了 - 注文番号:', orderNum);
+  showReceiptModal(receiptHtml, receiptData, 'receipt');
+  console.log('✅ レシート表示完了');
 }
 
 // 領収書表示関数
 async function showInvoiceDisplay(invoiceData) {
-  // 🔧 修正: 既存のモーダルを削除してから新しい領収書を表示
-  const existingModal = document.getElementById('receiptDisplayModal');
-  if (existingModal) {
-    console.log('🗑️ 既存のモーダルを削除');
-    existingModal.remove();
-  }
-  
-  // 🚨 デバッグ: 受信データを強制表示
-  const debugInfo = `
-🧾 領収書表示開始
-注文番号: ${invoiceData.orderNumber || invoiceData.orderNum || '不明'}
-テーブル: ${invoiceData.tableNumber || '不明'}
-合計: ¥${invoiceData.total || 0}
-タイムスタンプ: ${new Date().toLocaleTimeString()}
-  `;
-  console.log(debugInfo);
-  alert(debugInfo);  // 強制的にアラート表示
-  
   console.log('🧾 ==== 領収書表示開始 ====');
   console.log('🔍 受信データ:', invoiceData);
-  console.log('🔍 注文番号:', invoiceData.orderNumber || invoiceData.orderNum);
-  console.log('🔍 合計金額:', invoiceData.total);
-  console.log('🔍 タイムスタンプ:', new Date().toISOString());
+  
+  // 🔧 修正: 既存のモーダルを完全削除
+  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
   
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
@@ -309,39 +220,27 @@ async function showInvoiceDisplay(invoiceData) {
       }
       
       // 電子印鑑データを取得
-      console.log('🔍 電子印鑑探索開始...');
-      
       if (settings.sealImageData) {
         sealImageData = settings.sealImageData;
-        console.log('✅ sealImageDataから取得');
       } else if (settings.sealImage) {
         sealImageData = settings.sealImage;
-        console.log('✅ sealImageから取得');
       } else if (settings.seal) {
         sealImageData = settings.seal;
-        console.log('✅ sealから取得');
       } else if (settings.stampImage) {
         sealImageData = settings.stampImage;
-        console.log('✅ stampImageから取得');
       }
     }
     
     // LocalStorageからも試す
     if (!sealImageData) {
-      console.log('🔍 LocalStorageから電子印鑑を探索...');
       const localSealKeys = ['companySealData', 'sealImageData', 'sealImage', 'stampData'];
       for (const key of localSealKeys) {
         const localSeal = localStorage.getItem(key);
         if (localSeal) {
           sealImageData = localSeal;
-          console.log('✅ LocalStorage[' + key + ']から取得');
           break;
         }
       }
-    }
-    
-    if (!sealImageData) {
-      console.error('❌ 電子印鑑が見つかりません - kanri.htmlで設定してください');
     }
   } catch (error) {
     console.error('❌ 領収書設定読み込みエラー:', error);
@@ -353,57 +252,9 @@ async function showInvoiceDisplay(invoiceData) {
                   String(now.getMonth() + 1).padStart(2, '0') + '月' + 
                   String(now.getDate()).padStart(2, '0') + '日';
   
-  // 🔧 完全修正: ordersから注文番号を取得
-  let orderNum = null;
-  
-  console.log('🔢 注文番号探索開始...');
-  
-  // CRITICAL: ordersの中から注文番号を取得（handy対応）
-  if (invoiceData.orders && Array.isArray(invoiceData.orders) && invoiceData.orders.length > 0) {
-    console.log('🔍 orders配列を確認:', invoiceData.orders.length, '件');
-    for (const order of invoiceData.orders) {
-      console.log('  - order:', order);
-      if (order.orderNumber) {
-        orderNum = order.orderNumber;
-        console.log('✅ orders[].orderNumberから取得:', orderNum);
-        break;
-      }
-    }
-  }
-  
-  // フォールバック1: 直接のフィールド
-  if (!orderNum) {
-    if (invoiceData.orderNumber) {
-      orderNum = invoiceData.orderNumber;
-      console.log('✅ orderNumberから取得:', orderNum);
-    } else if (invoiceData.orderNum) {
-      orderNum = invoiceData.orderNum;
-      console.log('✅ orderNumから取得:', orderNum);
-    }
-  }
-  
-  // フォールバック2: checkoutData
-  if (!orderNum && invoiceData.checkoutData) {
-    if (invoiceData.checkoutData.orderNumber) {
-      orderNum = invoiceData.checkoutData.orderNumber;
-      console.log('✅ checkoutData.orderNumberから取得:', orderNum);
-    }
-  }
-  
-  // フォールバック3: グローバル変数
-  if (!orderNum && window.currentOrderNumber) {
-    orderNum = window.currentOrderNumber;
-    console.log('✅ window.currentOrderNumberから取得:', orderNum);
-  }
-  
-  // エラー表示
-  if (!orderNum) {
-    console.error('❌ 注文番号が見つかりません！');
-    console.error('   受信データ:', invoiceData);
-    orderNum = '番号不明';
-  }
-  
-  console.log('🔢 最終的な注文番号:', orderNum);
+  // 🔧 重要修正: 注文番号を確実に取得
+  let orderNum = invoiceData.orderNumber || invoiceData.orderNum || 'なし';
+  console.log('🔢 注文番号:', orderNum);
   
   // 消費税計算（内税）
   const tax8Total = invoiceData.tax8Total || 0;
@@ -413,12 +264,6 @@ async function showInvoiceDisplay(invoiceData) {
   const tax8Amount = tax8Total - tax8Excluded;
   const tax10Amount = tax10Total - tax10Excluded;
   const totalTax = tax8Amount + tax10Amount;
-  
-  if (sealImageData) {
-    console.log('✅ 電子印鑑を表示します（線の上に下端を配置）');
-  } else {
-    console.error('❌ 電子印鑑が表示されません');
-  }
   
   // 電子印鑑のHTML（線の上に下端を配置）
   const sealHtml = sealImageData ? `
@@ -480,38 +325,20 @@ async function showInvoiceDisplay(invoiceData) {
   `;
   
   // モーダルを作成して表示
-  const finalData = {
-    ...invoiceData,
-    orderNumber: orderNum,
-    orderNum: orderNum
-  };
-  showReceiptModal(invoiceHtml, finalData, 'invoice');
-  console.log('✅ 領収書表示完了 - 注文番号:', orderNum);
+  showReceiptModal(invoiceHtml, invoiceData, 'invoice');
+  console.log('✅ 領収書表示完了');
 }
 
 // モーダル表示共通関数
 function showReceiptModal(html, data, type) {
-  console.log('🖼️ モーダル表示開始:', type);
-  console.log('📋 表示データ:', data);
+  console.log('🖼️ モーダル表示:', type);
   
-  // 既存のモーダルを確実に削除
-  const existingModal = document.getElementById('receiptDisplayModal');
-  if (existingModal) {
-    console.log('🗑️ 既存のモーダルを削除');
-    existingModal.remove();
-  }
-  
-  // 念のため、すべての同じIDのモーダルを削除
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => {
-    console.log('🗑️ モーダル削除:', el);
-    el.remove();
-  });
+  // 既存のモーダルを完全削除
+  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
   
   // ユニークなタイムスタンプとIDを生成
   const timestamp = Date.now();
   const uniqueContentId = `receiptContent_${timestamp}`;
-  console.log('⏰ 新しいモーダルのタイムスタンプ:', timestamp);
-  console.log('🆔 新しいコンテンツID:', uniqueContentId);
   
   // モーダルHTML（ユニークなIDを使用）
   const modalHtml = `
@@ -541,20 +368,12 @@ function showReceiptModal(html, data, type) {
   window.currentReceiptData = { ...data, _timestamp: timestamp, _contentId: uniqueContentId };
   window.currentReceiptType = type;
   
-  console.log('✅ モーダルを表示しました - 注文番号:', data.orderNumber, 'タイムスタンプ:', timestamp);
+  console.log('✅ モーダル表示完了');
 }
 
 // モーダルを閉じる
 function closeReceiptDisplay() {
-  console.log('🗑️ モーダルを閉じます');
-  const modal = document.getElementById('receiptDisplayModal');
-  if (modal) {
-    modal.remove();
-  }
-  // 念のため、すべての同じIDのモーダルを削除
   document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
-  
-  // データをクリア
   window.currentReceiptData = null;
   window.currentReceiptType = null;
 }
@@ -563,21 +382,15 @@ function closeReceiptDisplay() {
 async function saveReceiptPNG(contentId) {
   console.log('💾 PNG保存開始');
   
-  // コンテンツIDを取得（引数または currentReceiptData から）
   const elementId = contentId || (window.currentReceiptData && window.currentReceiptData._contentId) || 'receiptContent';
-  console.log('🆔 使用するコンテンツID:', elementId);
-  
   const element = document.getElementById(elementId);
   
   if (!element) {
-    console.error('❌ 要素が見つかりません:', elementId);
-    // フォールバック: classで検索
     const fallbackElement = document.querySelector('.receiptContent');
     if (!fallbackElement) {
       alert('レシート要素が見つかりません');
       return;
     }
-    console.log('✅ フォールバック要素を使用');
   }
   
   if (typeof html2canvas === 'undefined') {
@@ -610,29 +423,19 @@ async function saveReceiptPNG(contentId) {
 // QRコード発行
 window.issueReceiptQR = async function issueReceiptQR(contentId) {
   console.log('📱 QRコード生成開始');
-  console.log('📋 現在のレシートデータ:', window.currentReceiptData);
   
-  // コンテンツIDを取得（引数または currentReceiptData から）
   const elementId = contentId || (window.currentReceiptData && window.currentReceiptData._contentId) || 'receiptContent';
-  console.log('🆔 使用するコンテンツID:', elementId);
-  
   const element = document.getElementById(elementId);
   
   if (!element) {
-    console.error('❌ receiptContent要素が見つかりません, ID:', elementId);
-    // フォールバック: classで検索
     const fallbackElement = document.querySelector('.receiptContent');
     if (!fallbackElement) {
       alert('レシート要素が見つかりません。モーダルを開き直してください。');
       return;
     }
-    console.log('✅ フォールバック要素を使用');
   }
   
   const targetElement = element || document.querySelector('.receiptContent');
-  
-  console.log('📄 receiptContent要素:', targetElement);
-  console.log('📝 HTML内容（最初の200文字）:', targetElement.innerHTML.substring(0, 200));
   
   if (typeof QRCode === 'undefined') {
     alert('QRコードライブラリが読み込まれていません。ページを再読み込みしてください。');
@@ -645,8 +448,6 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
   }
   
   try {
-    // html2canvasのキャッシュをクリア
-    console.log('🔄 キャンバス生成開始...');
     const canvas = await html2canvas(targetElement, {
       backgroundColor: '#ffffff',
       scale: 2,
@@ -658,34 +459,17 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     const imageData = canvas.toDataURL();
     const id = 'receipt_' + Date.now();
     
-    console.log('🖼️ 生成された画像データ（最初の100文字）:', imageData.substring(0, 100));
-    
     // LocalStorageに保存
-    console.log('💾 LocalStorageに保存:', id);
     localStorage.setItem(id, imageData);
-    console.log('✅ 保存完了（サイズ:', imageData.length, '文字）');
-    
-    // 保存されたデータを確認
-    const savedData = localStorage.getItem(id);
-    console.log('🔍 保存確認:', savedData ? '保存成功' : '保存失敗');
-    console.log('🔍 保存データ（最初の100文字）:', savedData ? savedData.substring(0, 100) : 'なし');
-    
-    // 最新レシートIDも保存
     localStorage.setItem('latest_receipt_id', id);
-    console.log('✅ 最新レシートIDを保存:', id);
     
     // レシートモーダルを閉じる
-    const receiptModal = document.getElementById('receiptDisplayModal');
-    if (receiptModal) {
-      receiptModal.remove();
-    }
+    document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
     
     // 現在のURLからベースURLを作成
     const currentUrl = window.location.href;
     const baseUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
     const qrUrl = baseUrl + 'receipt-view.html?id=' + id;
-    
-    console.log('🔗 QR URL:', qrUrl);
     
     // QRコード表示モーダルを作成
     const qrModal = document.createElement('div');
@@ -704,7 +488,6 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     `;
     
     document.body.appendChild(qrModal);
-    console.log('✅ QRモーダルを表示');
     
     // QRコード生成
     setTimeout(() => {
@@ -759,4 +542,4 @@ async function openCashDrawer() {
   }
 }
 
-console.log('✅ receipt-display-functions.js loaded (v2.0 - 印鑑位置修正・リアルタイム更新対応)');
+console.log('✅ receipt-display-functions.js loaded (v3.0 - アラート削除・完全修正版)');
