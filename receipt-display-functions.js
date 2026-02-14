@@ -1,4 +1,4 @@
-// ========== レシート・領収書表示システム（完全修正版）==========
+// ========== レシート・領収書表示システム（最終修正版）==========
 
 // QRCodeライブラリの読み込み確認と動的ロード
 (function() {
@@ -96,8 +96,14 @@ async function showReceiptDisplay(receiptData) {
                   String(now.getHours()).padStart(2, '0') + ':' + 
                   String(now.getMinutes()).padStart(2, '0');
   
-  // 注文番号を確実に取得
-  const orderNum = receiptData.orderNum || receiptData.orderNumber || '';
+  // 注文番号を確実に取得（複数のプロパティをチェック）
+  const orderNum = receiptData.orderNum || receiptData.orderNumber || receiptData.orderNo || '';
+  console.log('注文番号チェック:', {
+    orderNum: receiptData.orderNum,
+    orderNumber: receiptData.orderNumber,
+    orderNo: receiptData.orderNo,
+    final: orderNum
+  });
   
   // 商品リストHTML生成
   let itemsHtml = '';
@@ -143,7 +149,7 @@ async function showReceiptDisplay(receiptData) {
         </div>
         <div style="display: flex; justify-content: space-between; margin: 5px 0;">
           <span>注文番号:</span>
-          <span style="font-weight: bold; font-size: 18px;">#${orderNum}</span>
+          <span style="font-weight: bold; font-size: 18px;">${orderNum ? '#' + orderNum : '#'}</span>
         </div>
       </div>
       
@@ -229,6 +235,9 @@ async function showInvoiceDisplay(invoiceData) {
       // 電子印鑑データを取得
       if (settings.sealImageData) {
         sealImageData = settings.sealImageData;
+        console.log('✅ 電子印鑑データを取得しました');
+      } else {
+        console.warn('⚠️ 電子印鑑データが設定されていません');
       }
     }
   } catch (error) {
@@ -241,8 +250,14 @@ async function showInvoiceDisplay(invoiceData) {
                   String(now.getMonth() + 1).padStart(2, '0') + '月' + 
                   String(now.getDate()).padStart(2, '0') + '日';
   
-  // 注文番号を確実に取得
-  const orderNum = invoiceData.orderNum || invoiceData.orderNumber || '';
+  // 注文番号を確実に取得（複数のプロパティをチェック）
+  const orderNum = invoiceData.orderNum || invoiceData.orderNumber || invoiceData.orderNo || '';
+  console.log('領収書注文番号チェック:', {
+    orderNum: invoiceData.orderNum,
+    orderNumber: invoiceData.orderNumber,
+    orderNo: invoiceData.orderNo,
+    final: orderNum
+  });
   
   // 消費税計算（内税）
   const tax8Total = invoiceData.tax8Total || 0;
@@ -258,7 +273,7 @@ async function showInvoiceDisplay(invoiceData) {
   // 電子印鑑の表示HTML
   const sealHtml = sealImageData ? `
     <div style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%);">
-      <img src="${sealImageData}" style="width: 80px; height: 80px; opacity: 0.8;" />
+      <img src="${sealImageData}" style="width: 80px; height: 80px; opacity: 0.8;" alt="印" />
     </div>
   ` : '';
   
@@ -292,7 +307,7 @@ async function showInvoiceDisplay(invoiceData) {
         </div>
         <div style="margin: 10px 0;">
           <span style="display: inline-block; width: 100px;">注文番号</span>
-          <span>#${orderNum}</span>
+          <span>${orderNum ? '#' + orderNum : '#'}</span>
         </div>
       </div>
       
@@ -316,7 +331,7 @@ async function showInvoiceDisplay(invoiceData) {
   showReceiptModal(invoiceHtml, invoiceData, 'invoice');
 }
 
-// モーダル表示共通関数
+// モーダル表示共通関数（自動表示に修正）
 function showReceiptModal(html, data, type) {
   // 既存のモーダルを削除
   const existingModal = document.getElementById('receiptDisplayModal');
@@ -324,7 +339,7 @@ function showReceiptModal(html, data, type) {
     existingModal.remove();
   }
   
-  // モーダルHTML
+  // モーダルHTML - 最初から表示状態
   const modalHtml = `
     <div id="receiptDisplayModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; align-items: center; justify-content: center; overflow-y: auto;">
       <div style="background: white; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; position: relative;">
@@ -351,6 +366,8 @@ function showReceiptModal(html, data, type) {
   // データを一時保存
   window.currentReceiptData = data;
   window.currentReceiptType = type;
+  
+  console.log('✅ レシート/領収書モーダルを表示しました');
 }
 
 // モーダルを閉じる
@@ -379,7 +396,7 @@ async function saveReceiptPNG() {
     
     const link = document.createElement('a');
     const type = window.currentReceiptType === 'invoice' ? '領収書' : 'レシート';
-    const orderNum = window.currentReceiptData.orderNum || window.currentReceiptData.orderNumber || 'nonum';
+    const orderNum = window.currentReceiptData.orderNum || window.currentReceiptData.orderNumber || window.currentReceiptData.orderNo || 'nonum';
     link.download = `${type}_${orderNum}.png`;
     link.href = canvas.toDataURL();
     link.click();
