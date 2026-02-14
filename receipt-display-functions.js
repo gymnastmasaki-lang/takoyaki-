@@ -177,7 +177,7 @@ async function showReceiptDisplay(receiptData) {
           <span>注文番号:</span>
           <span style="font-weight: bold; font-size: 18px;">#${orderNum}</span>
         </div>
-        ${receiptData.tableNumber ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
+        ${receiptData.tableNumber && receiptData.tableNumber !== '即会計' ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
           <span>テーブル:</span>
           <span style="font-weight: bold;">${receiptData.tableNumber}</span>
         </div>` : ''}
@@ -379,14 +379,14 @@ async function showInvoiceDisplay(invoiceData) {
   const totalTax = tax8Amount + tax10Amount;
   
   if (sealImageData) {
-    console.log('✅ 電子印鑑を表示します（日付の左、下の線に合わせる）');
+    console.log('✅ 電子印鑑を表示します（線の上に下端を配置）');
   } else {
     console.error('❌ 電子印鑑が表示されません');
   }
   
-  // 電子印鑑のHTML（日付の下の線に配置）
+  // 電子印鑑のHTML（線の上に下端を配置）
   const sealHtml = sealImageData ? `
-    <img src="${sealImageData}" style="width: 80px; height: 80px; opacity: 0.8; position: absolute; left: 0; top: -40px;" alt="印" />
+    <img src="${sealImageData}" style="width: 80px; height: 80px; opacity: 0.8; position: absolute; left: 0; top: -80px;" alt="印" />
   ` : '';
   
   const invoiceHtml = `
@@ -421,7 +421,7 @@ async function showInvoiceDisplay(invoiceData) {
           <span style="display: inline-block; width: 100px;">注文番号</span>
           <span>#${orderNum}</span>
         </div>
-        ${invoiceData.tableNumber ? `<div style="margin: 10px 0;">
+        ${invoiceData.tableNumber && invoiceData.tableNumber !== '即会計' ? `<div style="margin: 10px 0;">
           <span style="display: inline-block; width: 100px;">テーブル</span>
           <span>${invoiceData.tableNumber}</span>
         </div>` : ''}
@@ -466,40 +466,47 @@ function showReceiptModal(html, data, type) {
   }
   
   // 念のため、すべての同じIDのモーダルを削除
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
+  document.querySelectorAll('#receiptDisplayModal').forEach(el => {
+    console.log('🗑️ モーダル削除:', el);
+    el.remove();
+  });
   
-  // ユニークなタイムスタンプを生成してキャッシュを防ぐ
-  const timestamp = Date.now();
-  
-  // モーダルHTML
-  const modalHtml = `
-    <div id="receiptDisplayModal" data-timestamp="${timestamp}" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 999999 !important; display: flex !important; align-items: center !important; justify-content: center !important; overflow-y: auto !important;">
-      <div style="background: white !important; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.5) !important;">
-        <button onclick="closeReceiptDisplay()" style="position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; border: none; background: #f44336; color: white; border-radius: 50%; font-size: 24px; cursor: pointer; line-height: 1; z-index: 1000000;">×</button>
-        
-        <div id="receiptContent" style="margin-top: 20px;">
-          ${html}
-        </div>
-        
-        <div style="display: flex; gap: 10px; margin-top: 30px;">
-          <button onclick="saveReceiptPNG()" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
-            店側保存 (PNG)
-          </button>
-          <button onclick="issueReceiptQR()" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
-            発行 (QR)
-          </button>
+  // DOMの更新を待つ
+  setTimeout(() => {
+    // ユニークなタイムスタンプを生成してキャッシュを防ぐ
+    const timestamp = Date.now();
+    console.log('⏰ 新しいモーダルのタイムスタンプ:', timestamp);
+    
+    // モーダルHTML
+    const modalHtml = `
+      <div id="receiptDisplayModal" data-timestamp="${timestamp}" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 999999 !important; display: flex !important; align-items: center !important; justify-content: center !important; overflow-y: auto !important;">
+        <div style="background: white !important; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.5) !important;">
+          <button onclick="closeReceiptDisplay()" style="position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; border: none; background: #f44336; color: white; border-radius: 50%; font-size: 24px; cursor: pointer; line-height: 1; z-index: 1000000;">×</button>
+          
+          <div id="receiptContent" style="margin-top: 20px;">
+            ${html}
+          </div>
+          
+          <div style="display: flex; gap: 10px; margin-top: 30px;">
+            <button onclick="saveReceiptPNG()" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
+              店側保存 (PNG)
+            </button>
+            <button onclick="issueReceiptQR()" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
+              発行 (QR)
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  `;
-  
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
-  
-  // データを一時保存（タイムスタンプ付き）
-  window.currentReceiptData = { ...data, _timestamp: timestamp };
-  window.currentReceiptType = type;
-  
-  console.log('✅ モーダルを表示しました - 注文番号:', data.orderNumber, 'タイムスタンプ:', timestamp);
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // データを一時保存（タイムスタンプ付き）
+    window.currentReceiptData = { ...data, _timestamp: timestamp };
+    window.currentReceiptType = type;
+    
+    console.log('✅ モーダルを表示しました - 注文番号:', data.orderNumber, 'タイムスタンプ:', timestamp);
+  }, 50); // 50ms待つ
 }
 
 // モーダルを閉じる
@@ -551,7 +558,18 @@ async function saveReceiptPNG() {
 // QRコード発行
 window.issueReceiptQR = async function issueReceiptQR() {
   console.log('📱 QRコード生成開始');
+  console.log('📋 現在のレシートデータ:', window.currentReceiptData);
+  
   const element = document.getElementById('receiptContent');
+  
+  if (!element) {
+    console.error('❌ receiptContent要素が見つかりません');
+    alert('レシート要素が見つかりません。モーダルを開き直してください。');
+    return;
+  }
+  
+  console.log('📄 receiptContent要素:', element);
+  console.log('📝 HTML内容（最初の200文字）:', element.innerHTML.substring(0, 200));
   
   if (typeof QRCode === 'undefined') {
     alert('QRコードライブラリが読み込まれていません。ページを再読み込みしてください。');
@@ -564,18 +582,30 @@ window.issueReceiptQR = async function issueReceiptQR() {
   }
   
   try {
+    // html2canvasのキャッシュをクリア
+    console.log('🔄 キャンバス生成開始...');
     const canvas = await html2canvas(element, {
       backgroundColor: '#ffffff',
-      scale: 2
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      logging: false
     });
     
     const imageData = canvas.toDataURL();
     const id = 'receipt_' + Date.now();
     
+    console.log('🖼️ 生成された画像データ（最初の100文字）:', imageData.substring(0, 100));
+    
     // LocalStorageに保存
     console.log('💾 LocalStorageに保存:', id);
     localStorage.setItem(id, imageData);
     console.log('✅ 保存完了（サイズ:', imageData.length, '文字）');
+    
+    // 保存されたデータを確認
+    const savedData = localStorage.getItem(id);
+    console.log('🔍 保存確認:', savedData ? '保存成功' : '保存失敗');
+    console.log('🔍 保存データ（最初の100文字）:', savedData ? savedData.substring(0, 100) : 'なし');
     
     // 最新レシートIDも保存
     localStorage.setItem('latest_receipt_id', id);
