@@ -12291,35 +12291,11 @@ ${redSlipCount > 0 ? `
         
         // 自動印刷が有効なら印刷
         if (autoPrintEnabled) {
-          console.log('🖨️ 自動印刷実行 - データを直接渡します');
-          console.log('  - 注文番号:', lastPaymentData.orderNumber);
-          console.log('  - テーブル:', lastPaymentData.tableNumber);
-          await printReceipt(lastPaymentData);
+          console.log('🖨️ 自動印刷実行');
+          await printReceiptWithData(lastPaymentData);
         } else {
-          // レシート完了画面を表示
-          console.log('📋 レシート完了モーダルを表示 - ボタンイベントを更新');
-          
-          // ボタンのイベントハンドラを更新して、現在のlastPaymentDataを確実に使う
-          const receiptBtn = document.querySelector('#receiptCompleteModal .receipt-btn.print');
-          const invoiceBtn = document.querySelector('#receiptCompleteModal .receipt-btn.invoice');
-          
-          if (receiptBtn) {
-            const currentData = {...lastPaymentData}; // データをコピー
-            receiptBtn.onclick = () => {
-              console.log('🔘 レシートボタンクリック - データ:', currentData);
-              printReceipt(currentData);
-            };
-          }
-          
-          if (invoiceBtn) {
-            const currentData = {...lastPaymentData}; // データをコピー
-            invoiceBtn.onclick = () => {
-              console.log('🔘 領収書ボタンクリック - データ:', currentData);
-              printInvoice(currentData);
-            };
-          }
-          
-          document.getElementById('receiptCompleteModal').classList.remove('hidden');
+          // 🆕 Handyと同じ方式: 動的にモーダルを作成してデータを直接渡す
+          await showPOSCheckoutComplete(lastPaymentData);
         }
         
         // 表示をクリア（即会計の場合は何もしない）
@@ -12582,6 +12558,165 @@ ${redSlipCount > 0 ? `
         alert('領収書表示でエラーが発生しました: ' + e.message);
       }
     };
+    
+    // 🆕 Handy方式: 会計完了モーダルを動的に作成（データを直接渡す）
+    async function showPOSCheckoutComplete(paymentData) {
+      return new Promise((resolve) => {
+        console.log('📋 会計完了モーダル作成 - データ:', paymentData);
+        
+        // 既存のモーダルを削除
+        const existing = document.getElementById('dynamicCheckoutModal');
+        if (existing) existing.remove();
+        
+        const modal = document.createElement('div');
+        modal.id = 'dynamicCheckoutModal';
+        modal.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0,0,0,0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 100000;
+        `;
+        
+        const content = document.createElement('div');
+        content.style.cssText = `
+          background: white;
+          border-radius: 20px;
+          padding: 30px;
+          max-width: 400px;
+          width: 90%;
+          box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        `;
+        
+        content.innerHTML = `
+          <div style="text-align: center; margin-bottom: 20px;">
+            <div style="font-size: 50px; margin-bottom: 10px;">✅</div>
+            <div style="font-size: 20px; font-weight: bold; margin-bottom: 10px;">会計完了</div>
+            <div style="color: #666; line-height: 1.6;">
+              合計: ¥${paymentData.totalAmount.toLocaleString()}<br>
+              注文番号: #${paymentData.orderNumber}
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <button id="dynPrintReceiptBtn" style="
+              padding: 15px;
+              background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+              color: white;
+              border: none;
+              border-radius: 10px;
+              font-size: 16px;
+              font-weight: bold;
+              cursor: pointer;
+              box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+            ">📄 レシート表示</button>
+            <button id="dynPrintInvoiceBtn" style="
+              padding: 15px;
+              background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+              color: white;
+              border: none;
+              border-radius: 10px;
+              font-size: 16px;
+              font-weight: bold;
+              cursor: pointer;
+              box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3);
+            ">🧾 領収書表示</button>
+            <button id="dynCloseBtn" style="
+              padding: 15px;
+              background: linear-gradient(135deg, #9E9E9E 0%, #757575 100%);
+              color: white;
+              border: none;
+              border-radius: 10px;
+              font-size: 16px;
+              font-weight: bold;
+              cursor: pointer;
+              box-shadow: 0 4px 15px rgba(158, 158, 158, 0.3);
+            ">閉じる</button>
+          </div>
+        `;
+        
+        modal.appendChild(content);
+        document.body.appendChild(modal);
+        
+        // レシートボタン
+        document.getElementById('dynPrintReceiptBtn').onclick = async () => {
+          console.log('🔘 レシートボタンクリック - データ:', paymentData);
+          await printReceiptWithData(paymentData);
+        };
+        
+        // 領収書ボタン
+        document.getElementById('dynPrintInvoiceBtn').onclick = async () => {
+          console.log('🔘 領収書ボタンクリック - データ:', paymentData);
+          await printInvoiceWithData(paymentData);
+        };
+        
+        // 閉じるボタン
+        document.getElementById('dynCloseBtn').onclick = () => {
+          document.body.removeChild(modal);
+          resolve();
+        };
+      });
+    }
+    
+    // 🆕 データを直接受け取ってレシートを表示
+    async function printReceiptWithData(paymentData) {
+      console.log('📄 レシート表示（データ直接） - 注文番号:', paymentData.orderNumber);
+      
+      try {
+        const receiptSettings = window.receiptSettings || {};
+        const receiptData = {
+          storeName: (receiptSettings.storeName || '粉もん屋 八') + ' ' + (receiptSettings.branchName || '下赤塚店'),
+          address: receiptSettings.address || '東京都板橋区赤塚新町',
+          phone: receiptSettings.phone || '03-XXXX-XXXX',
+          orderNum: paymentData.orderNumber || '',
+          orderNumber: paymentData.orderNumber || '',
+          tableNumber: paymentData.tableNumber || '',
+          items: paymentData.items || [],
+          tax8Total: paymentData.tax8Total || 0,
+          tax10Total: paymentData.tax10Total || 0,
+          total: paymentData.totalAmount,
+          timestamp: Date.now()
+        };
+        console.log('📄 レシートデータ:', receiptData);
+        showReceiptDisplay(receiptData);
+        await openCashDrawer();
+      } catch (e) {
+        console.error('レシート表示エラー:', e);
+        alert('レシート表示でエラーが発生しました: ' + e.message);
+      }
+    }
+    
+    // 🆕 データを直接受け取って領収書を表示
+    async function printInvoiceWithData(paymentData) {
+      console.log('🧾 領収書表示（データ直接） - 注文番号:', paymentData.orderNumber);
+      
+      try {
+        const receiptSettings = window.receiptSettings || {};
+        const invoiceData = {
+          storeName: (receiptSettings.storeName || '粉もん屋 八') + ' ' + (receiptSettings.branchName || '下赤塚店'),
+          address: receiptSettings.address || '東京都板橋区赤塚新町',
+          phone: receiptSettings.phone || '03-XXXX-XXXX',
+          orderNum: paymentData.orderNumber || '',
+          orderNumber: paymentData.orderNumber || '',
+          tableNumber: paymentData.tableNumber || '',
+          items: paymentData.items || [],
+          tax8Total: paymentData.tax8Total || 0,
+          tax10Total: paymentData.tax10Total || 0,
+          total: paymentData.totalAmount,
+          timestamp: Date.now()
+        };
+        console.log('🧾 領収書データ:', invoiceData);
+        showInvoiceDisplay(invoiceData);
+        await openCashDrawer();
+      } catch (e) {
+        console.error('領収書表示エラー:', e);
+        alert('領収書表示でエラーが発生しました: ' + e.message);
+      }
+    }
     
     // レシート完了モーダルを閉じる
     window.closeReceiptModal = function() {
