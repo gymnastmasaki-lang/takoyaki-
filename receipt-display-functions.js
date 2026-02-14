@@ -471,42 +471,41 @@ function showReceiptModal(html, data, type) {
     el.remove();
   });
   
-  // DOMの更新を待つ
-  setTimeout(() => {
-    // ユニークなタイムスタンプを生成してキャッシュを防ぐ
-    const timestamp = Date.now();
-    console.log('⏰ 新しいモーダルのタイムスタンプ:', timestamp);
-    
-    // モーダルHTML
-    const modalHtml = `
-      <div id="receiptDisplayModal" data-timestamp="${timestamp}" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 999999 !important; display: flex !important; align-items: center !important; justify-content: center !important; overflow-y: auto !important;">
-        <div style="background: white !important; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.5) !important;">
-          <button onclick="closeReceiptDisplay()" style="position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; border: none; background: #f44336; color: white; border-radius: 50%; font-size: 24px; cursor: pointer; line-height: 1; z-index: 1000000;">×</button>
-          
-          <div id="receiptContent" style="margin-top: 20px;">
-            ${html}
-          </div>
-          
-          <div style="display: flex; gap: 10px; margin-top: 30px;">
-            <button onclick="saveReceiptPNG()" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
-              店側保存 (PNG)
-            </button>
-            <button onclick="issueReceiptQR()" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
-              発行 (QR)
-            </button>
-          </div>
+  // ユニークなタイムスタンプとIDを生成
+  const timestamp = Date.now();
+  const uniqueContentId = `receiptContent_${timestamp}`;
+  console.log('⏰ 新しいモーダルのタイムスタンプ:', timestamp);
+  console.log('🆔 新しいコンテンツID:', uniqueContentId);
+  
+  // モーダルHTML（ユニークなIDを使用）
+  const modalHtml = `
+    <div id="receiptDisplayModal" data-timestamp="${timestamp}" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 999999 !important; display: flex !important; align-items: center !important; justify-content: center !important; overflow-y: auto !important;">
+      <div style="background: white !important; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.5) !important;">
+        <button onclick="closeReceiptDisplay()" style="position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; border: none; background: #f44336; color: white; border-radius: 50%; font-size: 24px; cursor: pointer; line-height: 1; z-index: 1000000;">×</button>
+        
+        <div id="${uniqueContentId}" class="receiptContent" style="margin-top: 20px;">
+          ${html}
+        </div>
+        
+        <div style="display: flex; gap: 10px; margin-top: 30px;">
+          <button onclick="saveReceiptPNG('${uniqueContentId}')" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
+            店側保存 (PNG)
+          </button>
+          <button onclick="issueReceiptQR('${uniqueContentId}')" style="flex: 1; padding: 15px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
+            発行 (QR)
+          </button>
         </div>
       </div>
-    `;
-    
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    // データを一時保存（タイムスタンプ付き）
-    window.currentReceiptData = { ...data, _timestamp: timestamp };
-    window.currentReceiptType = type;
-    
-    console.log('✅ モーダルを表示しました - 注文番号:', data.orderNumber, 'タイムスタンプ:', timestamp);
-  }, 50); // 50ms待つ
+    </div>
+  `;
+  
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  
+  // データを一時保存（タイムスタンプとコンテンツID付き）
+  window.currentReceiptData = { ...data, _timestamp: timestamp, _contentId: uniqueContentId };
+  window.currentReceiptType = type;
+  
+  console.log('✅ モーダルを表示しました - 注文番号:', data.orderNumber, 'タイムスタンプ:', timestamp);
 }
 
 // モーダルを閉じる
@@ -525,9 +524,25 @@ function closeReceiptDisplay() {
 }
 
 // PNG保存
-async function saveReceiptPNG() {
+async function saveReceiptPNG(contentId) {
   console.log('💾 PNG保存開始');
-  const element = document.getElementById('receiptContent');
+  
+  // コンテンツIDを取得（引数または currentReceiptData から）
+  const elementId = contentId || (window.currentReceiptData && window.currentReceiptData._contentId) || 'receiptContent';
+  console.log('🆔 使用するコンテンツID:', elementId);
+  
+  const element = document.getElementById(elementId);
+  
+  if (!element) {
+    console.error('❌ 要素が見つかりません:', elementId);
+    // フォールバック: classで検索
+    const fallbackElement = document.querySelector('.receiptContent');
+    if (!fallbackElement) {
+      alert('レシート要素が見つかりません');
+      return;
+    }
+    console.log('✅ フォールバック要素を使用');
+  }
   
   if (typeof html2canvas === 'undefined') {
     alert('画像変換ライブラリが読み込まれていません。ページを再読み込みしてください。');
@@ -535,7 +550,8 @@ async function saveReceiptPNG() {
   }
   
   try {
-    const canvas = await html2canvas(element, {
+    const targetElement = element || document.querySelector('.receiptContent');
+    const canvas = await html2canvas(targetElement, {
       backgroundColor: '#ffffff',
       scale: 2
     });
@@ -556,20 +572,31 @@ async function saveReceiptPNG() {
 }
 
 // QRコード発行
-window.issueReceiptQR = async function issueReceiptQR() {
+window.issueReceiptQR = async function issueReceiptQR(contentId) {
   console.log('📱 QRコード生成開始');
   console.log('📋 現在のレシートデータ:', window.currentReceiptData);
   
-  const element = document.getElementById('receiptContent');
+  // コンテンツIDを取得（引数または currentReceiptData から）
+  const elementId = contentId || (window.currentReceiptData && window.currentReceiptData._contentId) || 'receiptContent';
+  console.log('🆔 使用するコンテンツID:', elementId);
+  
+  const element = document.getElementById(elementId);
   
   if (!element) {
-    console.error('❌ receiptContent要素が見つかりません');
-    alert('レシート要素が見つかりません。モーダルを開き直してください。');
-    return;
+    console.error('❌ receiptContent要素が見つかりません, ID:', elementId);
+    // フォールバック: classで検索
+    const fallbackElement = document.querySelector('.receiptContent');
+    if (!fallbackElement) {
+      alert('レシート要素が見つかりません。モーダルを開き直してください。');
+      return;
+    }
+    console.log('✅ フォールバック要素を使用');
   }
   
-  console.log('📄 receiptContent要素:', element);
-  console.log('📝 HTML内容（最初の200文字）:', element.innerHTML.substring(0, 200));
+  const targetElement = element || document.querySelector('.receiptContent');
+  
+  console.log('📄 receiptContent要素:', targetElement);
+  console.log('📝 HTML内容（最初の200文字）:', targetElement.innerHTML.substring(0, 200));
   
   if (typeof QRCode === 'undefined') {
     alert('QRコードライブラリが読み込まれていません。ページを再読み込みしてください。');
@@ -584,7 +611,7 @@ window.issueReceiptQR = async function issueReceiptQR() {
   try {
     // html2canvasのキャッシュをクリア
     console.log('🔄 キャンバス生成開始...');
-    const canvas = await html2canvas(element, {
+    const canvas = await html2canvas(targetElement, {
       backgroundColor: '#ffffff',
       scale: 2,
       useCORS: true,
