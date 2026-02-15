@@ -5,13 +5,17 @@
   if (typeof QRCode === 'undefined') {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    script.async = false; // 同期的に読み込む
     document.head.appendChild(script);
+    console.log('📚 QRCodeライブラリを読み込み中...');
   }
   
   if (typeof html2canvas === 'undefined') {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.async = false; // 同期的に読み込む
     document.head.appendChild(script);
+    console.log('📚 html2canvasライブラリを読み込み中...');
   }
 })();
 
@@ -93,13 +97,6 @@ async function showReceiptDisplay(receiptData) {
   let itemsHtml = '';
   if (receiptData.items && Array.isArray(receiptData.items) && receiptData.items.length > 0) {
     receiptData.items.forEach(item => {
-      const itemTotal = item.price * item.quantity;
-      
-      itemsHtml += `
-        <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
-          <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">${item.name}</div>
-      `;
-      
       // 基本価格を計算
       let basePricePerUnit = item.basePrice || item.price;
       
@@ -125,6 +122,13 @@ async function showReceiptDisplay(receiptData) {
       if (!item.basePrice && toppingTotalPrice > 0 && item.price > toppingTotalPrice) {
         basePricePerUnit = item.price - toppingTotalPrice;
       }
+      
+      // 合計金額を計算（基本価格 + トッピング価格）× 数量
+      const itemTotal = (basePricePerUnit + toppingTotalPrice) * item.quantity;
+      
+      itemsHtml += `
+        <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
+      `;
       
       // 基本価格を表示
       itemsHtml += `
@@ -501,6 +505,12 @@ async function issueReceiptQR(contentId) {
   
   try {
     console.log('📸 Canvas生成中...');
+    
+    // html2canvasの確認
+    if (typeof html2canvas === 'undefined') {
+      throw new Error('html2canvas ライブラリが読み込まれていません');
+    }
+    
     const canvas = await html2canvas(receiptContent, {
       scale: 2,
       backgroundColor: '#ffffff',
@@ -513,8 +523,15 @@ async function issueReceiptQR(contentId) {
     console.log('✅ Canvas生成完了');
     console.log('📏 画像サイズ:', canvas.width, 'x', canvas.height);
     
+    // Firestore関数の確認
+    if (!window.db || !window.doc || !window.setDoc || !window.Timestamp) {
+      throw new Error('Firestore が初期化されていません');
+    }
+    
     // Firestoreに保存
     const receiptId = 'receipt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    console.log('💾 Firestoreに保存中...', receiptId);
     
     const receiptRef = window.doc(window.db, 'receipt_images', receiptId);
     
@@ -538,7 +555,12 @@ async function issueReceiptQR(contentId) {
     
   } catch (error) {
     console.error('❌ QRコード発行エラー:', error);
-    alert('QRコード発行に失敗しました: ' + error.message);
+    console.error('エラー詳細:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    alert('QRコード発行に失敗しました:\n' + error.message + '\n\nコンソールを確認してください。');
   }
 }
 
@@ -561,7 +583,7 @@ async function showQRCodeModal(qrUrl, imageData) {
   qrModal.innerHTML = `
     <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
-      <div id="qrCodeContainer" style="display: flex; justify-content: center; margin: 20px 0; min-height: 256px;"></div>
+      <div id="qrCodeContainer" style="display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
@@ -577,17 +599,37 @@ async function showQRCodeModal(qrUrl, imageData) {
   
   document.body.appendChild(qrModal);
   
-  // QRCodeライブラリの読み込みを待つ
+  console.log('🎨 QRコードモーダルをDOMに追加しました');
+  
+  // QRCodeライブラリの読み込みを待つ（最大5秒）
   let attempts = 0;
-  while (typeof QRCode === 'undefined' && attempts < 20) {
+  const maxAttempts = 50; // 5秒
+  console.log('⏳ QRCodeライブラリの読み込みを待機中...');
+  while (typeof QRCode === 'undefined' && attempts < maxAttempts) {
     await new Promise(resolve => setTimeout(resolve, 100));
     attempts++;
+    if (attempts % 10 === 0) {
+      console.log(`⏳ 待機中... (${attempts * 100}ms / ${maxAttempts * 100}ms)`);
+    }
   }
   
   const qrContainer = document.getElementById('qrCodeContainer');
+  console.log('📦 QRコンテナ:', qrContainer ? '見つかりました' : '見つかりません');
+  console.log('📚 QRCodeライブラリ:', typeof QRCode !== 'undefined' ? '読み込み済み' : '未読み込み');
+  
   if (qrContainer && typeof QRCode !== 'undefined') {
     try {
-      new QRCode(qrContainer, {
+      console.log('🔨 QRコード生成開始:', qrUrl);
+      // コンテナをクリア
+      qrContainer.innerHTML = '';
+      
+      // 一時的なコンテナを作成
+      const tempContainer = document.createElement('div');
+      tempContainer.style.cssText = 'position: absolute; left: -9999px;';
+      document.body.appendChild(tempContainer);
+      
+      // QRコード生成
+      const qrcode = new QRCode(tempContainer, {
         text: qrUrl,
         width: 256,
         height: 256,
@@ -595,15 +637,60 @@ async function showQRCodeModal(qrUrl, imageData) {
         colorLight: '#ffffff',
         correctLevel: QRCode.CorrectLevel.H
       });
+      
       console.log('✅ QRコード生成完了');
+      
+      // 少し待ってからcanvasを取得
+      setTimeout(() => {
+        const canvas = tempContainer.querySelector('canvas');
+        const img = tempContainer.querySelector('img');
+        
+        // コンテナのスタイルを強制設定
+        qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;';
+        
+        if (canvas) {
+          // canvasをクローンして表示コンテナに追加
+          const clonedCanvas = canvas.cloneNode(true);
+          clonedCanvas.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+          qrContainer.appendChild(clonedCanvas);
+          console.log('✅ Canvas要素をクローンして追加しました');
+        } else if (img) {
+          // imgをクローンして表示コンテナに追加
+          const clonedImg = img.cloneNode(true);
+          clonedImg.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+          qrContainer.appendChild(clonedImg);
+          console.log('✅ Img要素をクローンして追加しました');
+        }
+        
+        // 一時コンテナを削除
+        document.body.removeChild(tempContainer);
+        
+        console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
+        
+        // 追加後にもう一度要素のスタイルを確認・設定
+        setTimeout(() => {
+          const displayedCanvas = qrContainer.querySelector('canvas');
+          const displayedImg = qrContainer.querySelector('img');
+          if (displayedCanvas) {
+            displayedCanvas.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+            console.log('🔄 Canvas要素のスタイルを再設定しました');
+          }
+          if (displayedImg) {
+            displayedImg.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+            console.log('🔄 Img要素のスタイルを再設定しました');
+          }
+        }, 50);
+      }, 100);
+      
     } catch (error) {
       console.error('❌ QRコード生成エラー:', error);
-      qrContainer.innerHTML = '<div style="color: red;">QRコード生成に失敗しました</div>';
+      qrContainer.innerHTML = '<div style="color: red; padding: 20px;">QRコード生成に失敗しました:<br>' + error.message + '</div>';
     }
   } else {
-    console.error('❌ QRCodeライブラリが読み込まれていません');
+    const errorMsg = !qrContainer ? 'QRコンテナが見つかりません' : 'QRCodeライブラリが読み込まれていません';
+    console.error('❌', errorMsg);
     if (qrContainer) {
-      qrContainer.innerHTML = '<div style="color: red;">QRCodeライブラリが読み込まれていません</div>';
+      qrContainer.innerHTML = '<div style="color: red; padding: 20px;">' + errorMsg + '</div>';
     }
   }
   
