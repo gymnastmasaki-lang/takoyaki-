@@ -113,13 +113,35 @@ async function showReceiptDisplay(receiptData) {
   }
   
   // 消費税計算（内税）
-  const tax8Total = receiptData.tax8Total || 0;
-  const tax10Total = receiptData.tax10Total || 0;
-  const tax8Excluded = Math.floor(tax8Total / 1.08);
-  const tax10Excluded = Math.floor(tax10Total / 1.10);
-  const tax8Amount = tax8Total - tax8Excluded;
-  const tax10Amount = tax10Total - tax10Excluded;
-  const totalTax = tax8Amount + tax10Amount;
+  let tax8Total = receiptData.tax8Total || 0;
+  let tax10Total = receiptData.tax10Total || 0;
+  let totalTax = 0;
+  
+  // tax8Totalとtax10Totalが両方0の場合、合計金額から10%として計算
+  if (tax8Total === 0 && tax10Total === 0 && receiptData.total > 0) {
+    // 全て10%対象として計算（内税）
+    const totalExcludingTax = Math.floor(receiptData.total / 1.10);
+    totalTax = receiptData.total - totalExcludingTax;
+    tax10Total = receiptData.total; // 表示用
+    
+    console.log('⚠️ 税額情報がないため、全額10%内税として計算');
+    console.log('  合計:', receiptData.total);
+    console.log('  本体:', totalExcludingTax);
+    console.log('  消費税:', totalTax);
+  } else {
+    // 通常の計算（税額情報がある場合）
+    const tax8Excluded = Math.floor(tax8Total / 1.08);
+    const tax10Excluded = Math.floor(tax10Total / 1.10);
+    const tax8Amount = tax8Total - tax8Excluded;
+    const tax10Amount = tax10Total - tax10Excluded;
+    totalTax = tax8Amount + tax10Amount;
+  }
+  
+  // 表示用の税額計算
+  const tax8Excluded = tax8Total > 0 ? Math.floor(tax8Total / 1.08) : 0;
+  const tax10Excluded = tax10Total > 0 ? Math.floor(tax10Total / 1.10) : 0;
+  const tax8Amount = tax8Total > 0 ? tax8Total - tax8Excluded : 0;
+  const tax10Amount = tax10Total > 0 ? tax10Total - tax10Excluded : 0;
   
   const receiptHtml = `
     <div style="font-family: 'Courier New', monospace; text-align: center;">
@@ -275,13 +297,29 @@ async function showInvoiceDisplay(invoiceData) {
   console.log('🔢 注文番号:', orderNum);
   
   // 消費税計算（内税）
-  const tax8Total = invoiceData.tax8Total || 0;
-  const tax10Total = invoiceData.tax10Total || 0;
-  const tax8Excluded = Math.floor(tax8Total / 1.08);
-  const tax10Excluded = Math.floor(tax10Total / 1.10);
-  const tax8Amount = tax8Total - tax8Excluded;
-  const tax10Amount = tax10Total - tax10Excluded;
-  const totalTax = tax8Amount + tax10Amount;
+  let tax8Total = invoiceData.tax8Total || 0;
+  let tax10Total = invoiceData.tax10Total || 0;
+  let totalTax = 0;
+  
+  // tax8Totalとtax10Totalが両方0の場合、合計金額から10%として計算
+  if (tax8Total === 0 && tax10Total === 0 && invoiceData.total > 0) {
+    // 全て10%対象として計算（内税）
+    const totalExcludingTax = Math.floor(invoiceData.total / 1.10);
+    totalTax = invoiceData.total - totalExcludingTax;
+    tax10Total = invoiceData.total; // 表示用
+    
+    console.log('⚠️ 領収書: 税額情報がないため、全額10%内税として計算');
+    console.log('  合計:', invoiceData.total);
+    console.log('  本体:', totalExcludingTax);
+    console.log('  消費税:', totalTax);
+  } else {
+    // 通常の計算（税額情報がある場合）
+    const tax8Excluded = Math.floor(tax8Total / 1.08);
+    const tax10Excluded = Math.floor(tax10Total / 1.10);
+    const tax8Amount = tax8Total - tax8Excluded;
+    const tax10Amount = tax10Total - tax10Excluded;
+    totalTax = tax8Amount + tax10Amount;
+  }
   
   // 電子印鑑のHTML（線の上に下端を配置）
   const sealHtml = sealImageData ? `
