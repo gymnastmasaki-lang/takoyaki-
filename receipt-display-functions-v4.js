@@ -227,7 +227,7 @@ async function showReceiptDisplay(receiptData) {
   const tax10Amount = tax10Total - tax10Excluded;
   
   const receiptHtml = `
-    <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 15px; max-width: 400px; margin: 0 auto;">
+    <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 15px 5px; max-width: 600px; margin: 0 auto; width: 100%;">
       <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px;">
         <div style="font-size: 20px; font-weight: bold; margin-bottom: 5px;">${receiptStoreName}</div>
         <div style="font-size: 11px; color: #666;">${receiptAddress}</div>
@@ -395,7 +395,7 @@ async function showInvoiceDisplay(invoiceData) {
   }
   
   const invoiceHtml = `
-    <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 20px 30px; margin: 0 auto;">
+    <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 20px 10px; margin: 0 auto; max-width: 600px; width: 100%;">
       <div style="text-align: center; border-bottom: 3px double #000; padding-bottom: 20px; margin-bottom: 20px;">
         <h2 style="margin: 0; font-size: 28px; letter-spacing: 8px;">領収書</h2>
       </div>
@@ -466,8 +466,8 @@ async function showReceiptModal(contentHtml, data, type) {
   modal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 9999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
   
   modal.innerHTML = `
-    <div style="background: white; border-radius: 20px; padding: 20px; max-width: 700px; width: 95%; max-height: 90vh; overflow-y: auto;">
-      <div id="${contentId}" class="receiptContent" style="padding: 0 10px; display: flex; justify-content: center;">
+    <div style="background: white; border-radius: 20px; padding: 20px 10px; max-width: 800px; width: 95%; max-height: 90vh; overflow-y: auto;">
+      <div id="${contentId}" class="receiptContent" style="display: flex; justify-content: center;">
         ${contentHtml}
       </div>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
