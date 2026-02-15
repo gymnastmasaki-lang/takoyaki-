@@ -136,10 +136,11 @@ async function showReceiptDisplay(receiptData) {
       // toppingDetails配列がある場合（新POS形式）
       if (item.toppingDetails && Array.isArray(item.toppingDetails) && item.toppingDetails.length > 0) {
         item.toppingDetails.forEach(topping => {
+          const price = topping.price || 0;
           itemsHtml += `
             <div style="font-size: 13px; color: #333; margin-top: 2px; display: flex; justify-content: space-between;">
               <span>${topping.optionName}</span>
-              <span>¥${topping.price.toLocaleString()}</span>
+              <span>¥${price.toLocaleString()}</span>
             </div>
           `;
         });
@@ -147,10 +148,11 @@ async function showReceiptDisplay(receiptData) {
       // toppingsData配列がある場合（menu.htmlから）
       else if (item.toppingsData && Array.isArray(item.toppingsData) && item.toppingsData.length > 0) {
         item.toppingsData.forEach(topping => {
+          const price = topping.price || 0;
           itemsHtml += `
             <div style="font-size: 13px; color: #333; margin-top: 2px; display: flex; justify-content: space-between;">
               <span>${topping.name}</span>
-              <span>¥${(topping.price || 0).toLocaleString()}</span>
+              <span>¥${price.toLocaleString()}</span>
             </div>
           `;
         });
@@ -158,10 +160,11 @@ async function showReceiptDisplay(receiptData) {
       // toppingsList配列がある場合（別のPOS形式）
       else if (item.toppingsList && Array.isArray(item.toppingsList) && item.toppingsList.length > 0) {
         item.toppingsList.forEach(topping => {
+          const price = topping.price || 0;
           itemsHtml += `
             <div style="font-size: 13px; color: #333; margin-top: 2px; display: flex; justify-content: space-between;">
               <span>${topping.name}</span>
-              <span>¥${topping.price.toLocaleString()}</span>
+              <span>¥${price.toLocaleString()}</span>
             </div>
           `;
         });
@@ -621,5 +624,40 @@ function closeQRModal() {
     console.log('🗑️ QRモーダル削除');
   }
 }
+
+// キャッシュドロア開放関数
+async function openCashDrawer() {
+  const drawerIp = localStorage.getItem('drawerIp') || '192.168.1.100';
+  const duration = localStorage.getItem('drawerDuration') || '500';
+  
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    
+    const response = await fetch(`http://${drawerIp}/open`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ duration: parseInt(duration) })
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    console.log('ドロアを開きました');
+  } catch (error) {
+    console.error('ドロア開放エラー:', error);
+  }
+}
+
+// グローバル関数として登録
+window.showReceiptDisplay = showReceiptDisplay;
+window.showInvoiceDisplay = showInvoiceDisplay;
+window.openCashDrawer = openCashDrawer;
 
 console.log('✅ receipt-display-functions-v5.js 読み込み完了');
