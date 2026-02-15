@@ -168,7 +168,7 @@ async function showReceiptDisplay(receiptData) {
   `;
   
   // モーダルを作成して表示
-  showReceiptModal(receiptHtml, receiptData, 'receipt');
+  await showReceiptModal(receiptHtml, receiptData, 'receipt');
   console.log('✅ レシート表示完了');
 }
 
@@ -325,20 +325,38 @@ async function showInvoiceDisplay(invoiceData) {
   `;
   
   // モーダルを作成して表示
-  showReceiptModal(invoiceHtml, invoiceData, 'invoice');
+  await showReceiptModal(invoiceHtml, invoiceData, 'invoice');
   console.log('✅ 領収書表示完了');
 }
 
 // モーダル表示共通関数
-function showReceiptModal(html, data, type) {
+async function showReceiptModal(html, data, type) {
   console.log('🖼️ モーダル表示:', type);
+  console.log('🔍 データ:', data);
   
   // 既存のモーダルを完全削除
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
+  const existingModals = document.querySelectorAll('#receiptDisplayModal, #qrDisplayModal');
+  console.log('🗑️ 削除対象モーダル:', existingModals.length);
+  existingModals.forEach(el => {
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  });
+  
+  // DOM更新を待つ
+  await new Promise(resolve => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(resolve);
+    });
+  });
+  
+  console.log('✅ 古いモーダル削除完了');
   
   // ユニークなタイムスタンプとIDを生成
   const timestamp = Date.now();
   const uniqueContentId = `receiptContent_${timestamp}`;
+  
+  console.log('🆕 新しいモーダル作成: タイムスタンプ=', timestamp);
   
   // モーダルHTML（ユニークなIDを使用）
   const modalHtml = `
@@ -479,7 +497,7 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     qrModal.innerHTML = `
       <div style="background: white; border-radius: 16px; padding: 30px; text-align: center;">
         <h3 style="margin: 0 0 20px 0;">お客様用QRコード</h3>
-        <div id="qrcode" style="margin: 20px auto;"></div>
+        <div id="qrcode" style="margin: 20px auto; display: flex; justify-content: center; align-items: center;"></div>
         <p style="margin: 20px 0; color: #666;">お客様にスキャンしていただいてください</p>
         <button onclick="document.getElementById('qrDisplayModal').remove();" style="padding: 15px 30px; background: #666; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
           閉じる
@@ -502,6 +520,21 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
           colorLight: '#ffffff',
           correctLevel: QRCode.CorrectLevel.H
         });
+        
+        // QRコード生成後、生成された要素を中央配置
+        setTimeout(() => {
+          const qrImg = qrcodeElement.querySelector('img');
+          const qrCanvas = qrcodeElement.querySelector('canvas');
+          if (qrImg) {
+            qrImg.style.display = 'block';
+            qrImg.style.margin = '0 auto';
+          }
+          if (qrCanvas) {
+            qrCanvas.style.display = 'block';
+            qrCanvas.style.margin = '0 auto';
+          }
+        }, 50);
+        
         console.log('✅ QRコード生成完了');
       }
     }, 100);
