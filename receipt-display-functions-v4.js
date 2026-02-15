@@ -5,13 +5,17 @@
   if (typeof QRCode === 'undefined') {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    script.async = false; // 同期的に読み込む
     document.head.appendChild(script);
+    console.log('📚 QRCodeライブラリを読み込み中...');
   }
   
   if (typeof html2canvas === 'undefined') {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.async = false; // 同期的に読み込む
     document.head.appendChild(script);
+    console.log('📚 html2canvasライブラリを読み込み中...');
   }
 })();
 
@@ -93,16 +97,8 @@ async function showReceiptDisplay(receiptData) {
   let itemsHtml = '';
   if (receiptData.items && Array.isArray(receiptData.items) && receiptData.items.length > 0) {
     receiptData.items.forEach(item => {
-      const itemTotal = item.price * item.quantity;
-      
-      itemsHtml += `
-        <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
-          <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">${item.name}</div>
-      `;
-      
       // 基本価格を計算
-      const basePrice = item.basePrice || item.price;
-      let basePricePerUnit = basePrice;
+      let basePricePerUnit = item.basePrice || item.price;
       
       // トッピング詳細がある場合、トッピング価格の合計を計算
       let toppingTotalPrice = 0;
@@ -122,13 +118,22 @@ async function showReceiptDisplay(receiptData) {
         toppingTotalPrice = item.toppingPrice;
       }
       
-      // 基本価格からトッピング価格を引く
-      basePricePerUnit = basePrice - toppingTotalPrice;
+      // basePriceがない場合、item.priceからトッピング価格を引く
+      if (!item.basePrice && toppingTotalPrice > 0 && item.price > toppingTotalPrice) {
+        basePricePerUnit = item.price - toppingTotalPrice;
+      }
+      
+      // 合計金額を計算（基本価格 + トッピング価格）× 数量
+      const itemTotal = (basePricePerUnit + toppingTotalPrice) * item.quantity;
+      
+      itemsHtml += `
+        <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
+      `;
       
       // 基本価格を表示
       itemsHtml += `
         <div style="font-size: 13px; color: #333; margin-bottom: 2px; display: flex; justify-content: space-between;">
-          <span>${item.name}</span>
+          <span>${item.name} × ${item.quantity}</span>
           <span>¥${basePricePerUnit.toLocaleString()}</span>
         </div>
       `;
@@ -397,9 +402,9 @@ async function showInvoiceDisplay(invoiceData) {
       
       <div style="margin: 30px 0;">
         <div style="font-size: 14px; margin-bottom: 10px;">お客様</div>
-        <div style="border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 30px;">
-          <span style="font-size: 18px;">　　　　　　　　　　　</span>
-          <span style="font-size: 14px;">様</span>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 30px;">
+          <span style="font-size: 18px; flex: 1; border-bottom: 1px solid transparent;"></span>
+          <span style="font-size: 14px; white-space: nowrap;">様</span>
         </div>
       </div>
       
@@ -427,21 +432,21 @@ async function showInvoiceDisplay(invoiceData) {
         </div>` : ''}
       </div>
       
-      <div style="text-align: right; font-size: 14px; margin: 40px 0 20px 0;">
+      <div style="position: relative; text-align: right; font-size: 14px; margin: 40px 0 20px 0;">
+        ${sealImageData ? `<div style="position: absolute; left: 20px; bottom: -20px; width: 80px; height: 80px;">
+          <img src="${sealImageData}" style="width: 100%; height: 100%; object-fit: contain;" alt="電子印鑑">
+        </div>` : ''}
         <div style="margin: 5px 0;">${dateStr}</div>
       </div>
       
       <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 0;">
-        <div style="display: flex; align-items: flex-start; justify-content: center; gap: 20px;">
-          <div style="flex: 1; text-align: center;">
-            <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px; white-space: nowrap;">${receiptStoreName}</div>
-            <div style="font-size: 12px; color: #666;">
-              <div>${(receiptAddress || '').replace(/ /g, '<br>')}</div>
-              <div style="margin-top: 5px;">${receiptPhone}</div>
-              <div style="margin-top: 10px;">※この領収書は<br>再発行できません</div>
-            </div>
+        <div style="text-align: center;">
+          <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>
+          <div style="font-size: 12px; color: #666;">
+            <div>${(receiptAddress || '').replace(/ /g, '<br>')}</div>
+            <div style="margin-top: 5px;">${receiptPhone}</div>
+            <div style="margin-top: 10px;">※この領収書は再発行できません</div>
           </div>
-          ${sealHtml}
         </div>
       </div>
     </div>
@@ -461,8 +466,8 @@ async function showReceiptModal(contentHtml, data, type) {
   modal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 9999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
   
   modal.innerHTML = `
-    <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
-      <div id="${contentId}" class="receiptContent" style="padding: 0 20px;">
+    <div style="background: white; border-radius: 20px; padding: 20px; max-width: 700px; width: 95%; max-height: 90vh; overflow-y: auto;">
+      <div id="${contentId}" class="receiptContent" style="padding: 0 10px;">
         ${contentHtml}
       </div>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
@@ -500,6 +505,12 @@ async function issueReceiptQR(contentId) {
   
   try {
     console.log('📸 Canvas生成中...');
+    
+    // html2canvasの確認
+    if (typeof html2canvas === 'undefined') {
+      throw new Error('html2canvas ライブラリが読み込まれていません');
+    }
+    
     const canvas = await html2canvas(receiptContent, {
       scale: 2,
       backgroundColor: '#ffffff',
@@ -512,8 +523,15 @@ async function issueReceiptQR(contentId) {
     console.log('✅ Canvas生成完了');
     console.log('📏 画像サイズ:', canvas.width, 'x', canvas.height);
     
+    // Firestore関数の確認
+    if (!window.db || !window.doc || !window.setDoc || !window.Timestamp) {
+      throw new Error('Firestore が初期化されていません');
+    }
+    
     // Firestoreに保存
     const receiptId = 'receipt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    console.log('💾 Firestoreに保存中...', receiptId);
     
     const receiptRef = window.doc(window.db, 'receipt_images', receiptId);
     
@@ -537,7 +555,12 @@ async function issueReceiptQR(contentId) {
     
   } catch (error) {
     console.error('❌ QRコード発行エラー:', error);
-    alert('QRコード発行に失敗しました: ' + error.message);
+    console.error('エラー詳細:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    alert('QRコード発行に失敗しました:\n' + error.message + '\n\nコンソールを確認してください。');
   }
 }
 
@@ -550,18 +573,21 @@ async function showQRCodeModal(qrUrl, imageData) {
     existingQRModal.remove();
   }
   
+  // グローバル変数に保存
+  window.currentReceiptImageData = imageData;
+  
   const qrModal = document.createElement('div');
   qrModal.id = 'qrDisplayModal';
   qrModal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.9) !important; z-index: 99999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
   
   qrModal.innerHTML = `
-    <div style="background: white; border-radius: 20px; padding: 40px; max-width: 500px; width: 90%; text-align: center;">
+    <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
-      <div id="qrCodeContainer" style="display: flex; justify-content: center; margin: 20px 0;"></div>
+      <div id="qrCodeContainer" style="display: flex; justify-content: center; align-items: center; margin: 20px 0; min-height: 256px; background: #f0f0f0; border: 2px solid #ccc;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
-        <button onclick="downloadReceiptImage('${imageData}')" style="flex: 1; padding: 18px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
+        <button onclick="downloadReceiptImage()" style="flex: 1; padding: 18px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
           画像をダウンロード
         </button>
         <button onclick="closeQRModal()" style="flex: 1; padding: 18px; background: #666; color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
@@ -573,22 +599,70 @@ async function showQRCodeModal(qrUrl, imageData) {
   
   document.body.appendChild(qrModal);
   
-  // QRコードを生成
-  await new Promise(resolve => setTimeout(resolve, 100));
+  console.log('🎨 QRコードモーダルをDOMに追加しました');
+  
+  // QRCodeライブラリの読み込みを待つ（最大5秒）
+  let attempts = 0;
+  const maxAttempts = 50; // 5秒
+  console.log('⏳ QRCodeライブラリの読み込みを待機中...');
+  while (typeof QRCode === 'undefined' && attempts < maxAttempts) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    attempts++;
+    if (attempts % 10 === 0) {
+      console.log(`⏳ 待機中... (${attempts * 100}ms / ${maxAttempts * 100}ms)`);
+    }
+  }
   
   const qrContainer = document.getElementById('qrCodeContainer');
+  console.log('📦 QRコンテナ:', qrContainer ? '見つかりました' : '見つかりません');
+  console.log('📚 QRCodeライブラリ:', typeof QRCode !== 'undefined' ? '読み込み済み' : '未読み込み');
+  
   if (qrContainer && typeof QRCode !== 'undefined') {
-    new QRCode(qrContainer, {
-      text: qrUrl,
-      width: 256,
-      height: 256,
-      colorDark: '#000000',
-      colorLight: '#ffffff',
-      correctLevel: QRCode.CorrectLevel.H
-    });
-    console.log('✅ QRコード生成完了');
+    try {
+      console.log('🔨 QRコード生成開始:', qrUrl);
+      // コンテナをクリア
+      qrContainer.innerHTML = '';
+      // QRコード生成
+      const qrcode = new QRCode(qrContainer, {
+        text: qrUrl,
+        width: 256,
+        height: 256,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+      console.log('✅ QRコード生成完了');
+      console.log('📦 QRコンテナの内容:', qrContainer.innerHTML.substring(0, 200));
+      console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
+      
+      // canvasとimg要素を強制的に表示
+      const forceDisplayQRElements = () => {
+        const canvas = qrContainer.querySelector('canvas');
+        const img = qrContainer.querySelector('img');
+        if (canvas) {
+          canvas.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important;';
+          console.log('✅ Canvas要素を表示しました');
+        }
+        if (img) {
+          img.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important;';
+          console.log('✅ Img要素を表示しました');
+        }
+      };
+      // 即座に実行 + 複数回リトライ
+      forceDisplayQRElements();
+      setTimeout(forceDisplayQRElements, 50);
+      setTimeout(forceDisplayQRElements, 150);
+      setTimeout(forceDisplayQRElements, 300);
+    } catch (error) {
+      console.error('❌ QRコード生成エラー:', error);
+      qrContainer.innerHTML = '<div style="color: red; padding: 20px;">QRコード生成に失敗しました:<br>' + error.message + '</div>';
+    }
   } else {
-    console.error('❌ QRCodeライブラリが読み込まれていません');
+    const errorMsg = !qrContainer ? 'QRコンテナが見つかりません' : 'QRCodeライブラリが読み込まれていません';
+    console.error('❌', errorMsg);
+    if (qrContainer) {
+      qrContainer.innerHTML = '<div style="color: red; padding: 20px;">' + errorMsg + '</div>';
+    }
   }
   
   // モーダルの外側クリックで閉じる
@@ -601,9 +675,17 @@ async function showQRCodeModal(qrUrl, imageData) {
 
 // 画像ダウンロード関数
 function downloadReceiptImage(imageData) {
+  // 引数がない場合はグローバル変数から取得
+  const dataToUse = imageData || window.currentReceiptImageData;
+  
+  if (!dataToUse) {
+    alert('画像データがありません');
+    return;
+  }
+  
   const link = document.createElement('a');
   link.download = 'receipt_' + Date.now() + '.png';
-  link.href = imageData;
+  link.href = dataToUse;
   link.click();
   console.log('📥 画像ダウンロード実行');
 }
