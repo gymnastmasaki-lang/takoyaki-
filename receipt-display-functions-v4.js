@@ -101,8 +101,7 @@ async function showReceiptDisplay(receiptData) {
       `;
       
       // 基本価格を計算
-      const basePrice = item.basePrice || item.price;
-      let basePricePerUnit = basePrice;
+      let basePricePerUnit = item.basePrice || item.price;
       
       // トッピング詳細がある場合、トッピング価格の合計を計算
       let toppingTotalPrice = 0;
@@ -122,9 +121,8 @@ async function showReceiptDisplay(receiptData) {
         toppingTotalPrice = item.toppingPrice;
       }
       
-      // 基本価格はそのまま（トッピング価格を引かない）
-      // basePricePerUnitはitem.priceからtoppingPriceを引いた値
-      if (toppingTotalPrice > 0 && item.price > toppingTotalPrice) {
+      // basePriceがない場合、item.priceからトッピング価格を引く
+      if (!item.basePrice && toppingTotalPrice > 0 && item.price > toppingTotalPrice) {
         basePricePerUnit = item.price - toppingTotalPrice;
       }
       
@@ -400,9 +398,9 @@ async function showInvoiceDisplay(invoiceData) {
       
       <div style="margin: 30px 0;">
         <div style="font-size: 14px; margin-bottom: 10px;">お客様</div>
-        <div style="border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 30px; text-align: right;">
-          <span style="font-size: 18px; margin-right: 10px;">　　　　　　　　　　　</span>
-          <span style="font-size: 14px;">様</span>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 30px;">
+          <span style="font-size: 18px; flex: 1; border-bottom: 1px solid transparent;"></span>
+          <span style="font-size: 14px; white-space: nowrap;">様</span>
         </div>
       </div>
       
@@ -464,8 +462,8 @@ async function showReceiptModal(contentHtml, data, type) {
   modal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 9999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
   
   modal.innerHTML = `
-    <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
-      <div id="${contentId}" class="receiptContent" style="padding: 0 20px;">
+    <div style="background: white; border-radius: 20px; padding: 20px; max-width: 700px; width: 95%; max-height: 90vh; overflow-y: auto;">
+      <div id="${contentId}" class="receiptContent" style="padding: 0 10px;">
         ${contentHtml}
       </div>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
@@ -561,9 +559,9 @@ async function showQRCodeModal(qrUrl, imageData) {
   qrModal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.9) !important; z-index: 99999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
   
   qrModal.innerHTML = `
-    <div style="background: white; border-radius: 20px; padding: 40px; max-width: 500px; width: 90%; text-align: center;">
+    <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
-      <div id="qrCodeContainer" style="display: flex; justify-content: center; margin: 20px 0;"></div>
+      <div id="qrCodeContainer" style="display: flex; justify-content: center; margin: 20px 0; min-height: 256px;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
