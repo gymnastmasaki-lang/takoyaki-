@@ -151,9 +151,22 @@ async function showReceiptDisplay(receiptData) {
           `;
         });
       }
-      // トッピング文字列のみの場合
+      // トッピング文字列のみの場合（カンマ区切りを縦に並べる）
       else if (item.toppings && item.toppings !== 'なし' && item.toppings !== '') {
-        itemsHtml += `<div style="font-size: 12px; color: #666; margin-top: 4px; font-style: italic;">トッピング: ${item.toppings}</div>`;
+        // カンマ区切りの文字列を配列に分割
+        const toppingArray = item.toppings.split(',').map(t => t.trim()).filter(t => t);
+        if (toppingArray.length > 0) {
+          toppingArray.forEach(toppingName => {
+            itemsHtml += `
+              <div style="font-size: 13px; color: #333; margin-top: 2px; display: flex; justify-content: space-between;">
+                <span>${toppingName}</span>
+                <span></span>
+              </div>
+            `;
+          });
+        } else {
+          itemsHtml += `<div style="font-size: 12px; color: #666; margin-top: 4px; font-style: italic;">トッピング: ${item.toppings}</div>`;
+        }
       }
       
       // 合計金額を表示
@@ -373,7 +386,7 @@ async function showInvoiceDisplay(invoiceData) {
       </div>
       
       <div style="text-align: center; margin: 30px 0;">
-        <div style="font-size: 16px; margin-bottom: 10px;">下記の通り領収いたしました</div>
+        <div style="font-size: 16px; margin-bottom: 10px;">下記の通り<br>領収いたしました</div>
         <div style="border: 2px solid #000; padding: 20px; margin: 20px 0;">
           <div style="font-size: 14px; margin-bottom: 5px;">金額</div>
           <div style="font-size: 36px; font-weight: bold;">¥${invoiceData.total.toLocaleString()}</div>
@@ -382,9 +395,9 @@ async function showInvoiceDisplay(invoiceData) {
       </div>
       
       <div style="margin: 30px 0; font-size: 14px;">
-        <div style="margin: 10px 0;">
-          <span style="display: inline-block; width: 100px;">但し</span>
-          <span>飲食代として</span>
+        <div style="margin: 10px 0; line-height: 1.8;">
+          <span style="display: inline-block; width: 100px; vertical-align: top;">但し</span>
+          <span style="display: inline-block; max-width: 200px;">飲食代として</span>
         </div>
         <div style="margin: 10px 0;">
           <span style="display: inline-block; width: 100px;">注文番号</span>
@@ -405,9 +418,9 @@ async function showInvoiceDisplay(invoiceData) {
           <div style="flex: 1; text-align: center;">
             <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px; white-space: nowrap;">${receiptStoreName}</div>
             <div style="font-size: 12px; color: #666;">
-              <div>${receiptAddress}</div>
+              <div>${receiptAddress.replace(' ', '<br>')}</div>
               <div style="margin-top: 5px;">${receiptPhone}</div>
-              <div style="margin-top: 10px;">※この領収書は再発行できません</div>
+              <div style="margin-top: 10px;">※この領収書は<br>再発行できません</div>
             </div>
           </div>
           ${sealHtml}
