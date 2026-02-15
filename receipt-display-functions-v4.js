@@ -122,8 +122,11 @@ async function showReceiptDisplay(receiptData) {
         toppingTotalPrice = item.toppingPrice;
       }
       
-      // 基本価格からトッピング価格を引く
-      basePricePerUnit = basePrice - toppingTotalPrice;
+      // 基本価格はそのまま（トッピング価格を引かない）
+      // basePricePerUnitはitem.priceからtoppingPriceを引いた値
+      if (toppingTotalPrice > 0 && item.price > toppingTotalPrice) {
+        basePricePerUnit = item.price - toppingTotalPrice;
+      }
       
       // 基本価格を表示
       itemsHtml += `
@@ -427,21 +430,21 @@ async function showInvoiceDisplay(invoiceData) {
         </div>` : ''}
       </div>
       
-      <div style="text-align: right; font-size: 14px; margin: 40px 0 20px 0;">
+      <div style="position: relative; text-align: right; font-size: 14px; margin: 40px 0 20px 0;">
+        ${sealImageData ? `<div style="position: absolute; left: 20px; bottom: -20px; width: 80px; height: 80px;">
+          <img src="${sealImageData}" style="width: 100%; height: 100%; object-fit: contain;" alt="電子印鑑">
+        </div>` : ''}
         <div style="margin: 5px 0;">${dateStr}</div>
       </div>
       
       <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 0;">
-        <div style="display: flex; align-items: flex-start; justify-content: center; gap: 20px;">
-          <div style="flex: 1; text-align: center;">
-            <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px; white-space: nowrap;">${receiptStoreName}</div>
-            <div style="font-size: 12px; color: #666;">
-              <div>${(receiptAddress || '').replace(/ /g, '<br>')}</div>
-              <div style="margin-top: 5px;">${receiptPhone}</div>
-              <div style="margin-top: 10px;">※この領収書は<br>再発行できません</div>
-            </div>
+        <div style="text-align: center;">
+          <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>
+          <div style="font-size: 12px; color: #666;">
+            <div>${(receiptAddress || '').replace(/ /g, '<br>')}</div>
+            <div style="margin-top: 5px;">${receiptPhone}</div>
+            <div style="margin-top: 10px;">※この領収書は<br>再発行できません</div>
           </div>
-          ${sealHtml}
         </div>
       </div>
     </div>
@@ -550,6 +553,9 @@ async function showQRCodeModal(qrUrl, imageData) {
     existingQRModal.remove();
   }
   
+  // グローバル変数に保存
+  window.currentReceiptImageData = imageData;
+  
   const qrModal = document.createElement('div');
   qrModal.id = 'qrDisplayModal';
   qrModal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.9) !important; z-index: 99999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
@@ -561,7 +567,7 @@ async function showQRCodeModal(qrUrl, imageData) {
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
-        <button onclick="downloadReceiptImage('${imageData}')" style="flex: 1; padding: 18px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
+        <button onclick="downloadReceiptImage()" style="flex: 1; padding: 18px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
           画像をダウンロード
         </button>
         <button onclick="closeQRModal()" style="flex: 1; padding: 18px; background: #666; color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
@@ -601,9 +607,17 @@ async function showQRCodeModal(qrUrl, imageData) {
 
 // 画像ダウンロード関数
 function downloadReceiptImage(imageData) {
+  // 引数がない場合はグローバル変数から取得
+  const dataToUse = imageData || window.currentReceiptImageData;
+  
+  if (!dataToUse) {
+    alert('画像データがありません');
+    return;
+  }
+  
   const link = document.createElement('a');
   link.download = 'receipt_' + Date.now() + '.png';
-  link.href = imageData;
+  link.href = dataToUse;
   link.click();
   console.log('📥 画像ダウンロード実行');
 }
