@@ -110,6 +110,10 @@ async function showReceiptDisplay(receiptData) {
         item.toppingDetails.forEach(topping => {
           toppingTotalPrice += topping.price || 0;
         });
+      } else if (item.toppingsData && Array.isArray(item.toppingsData) && item.toppingsData.length > 0) {
+        item.toppingsData.forEach(topping => {
+          toppingTotalPrice += topping.price || 0;
+        });
       } else if (item.toppingsList && Array.isArray(item.toppingsList) && item.toppingsList.length > 0) {
         item.toppingsList.forEach(topping => {
           toppingTotalPrice += topping.price || 0;
@@ -136,6 +140,17 @@ async function showReceiptDisplay(receiptData) {
             <div style="font-size: 13px; color: #333; margin-top: 2px; display: flex; justify-content: space-between;">
               <span>${topping.optionName}</span>
               <span>¥${topping.price.toLocaleString()}</span>
+            </div>
+          `;
+        });
+      }
+      // toppingsData配列がある場合（menu.htmlから）
+      else if (item.toppingsData && Array.isArray(item.toppingsData) && item.toppingsData.length > 0) {
+        item.toppingsData.forEach(topping => {
+          itemsHtml += `
+            <div style="font-size: 13px; color: #333; margin-top: 2px; display: flex; justify-content: space-between;">
+              <span>${topping.name}</span>
+              <span>¥${(topping.price || 0).toLocaleString()}</span>
             </div>
           `;
         });
@@ -418,7 +433,7 @@ async function showInvoiceDisplay(invoiceData) {
           <div style="flex: 1; text-align: center;">
             <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px; white-space: nowrap;">${receiptStoreName}</div>
             <div style="font-size: 12px; color: #666;">
-              <div>${receiptAddress.replace(' ', '<br>')}</div>
+              <div>${(receiptAddress || '').replace(/ /g, '<br>')}</div>
               <div style="margin-top: 5px;">${receiptPhone}</div>
               <div style="margin-top: 10px;">※この領収書は<br>再発行できません</div>
             </div>
