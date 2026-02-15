@@ -5,13 +5,17 @@
   if (typeof QRCode === 'undefined') {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    script.async = false; // 同期的に読み込む
     document.head.appendChild(script);
+    console.log('📚 QRCodeライブラリを読み込み中...');
   }
   
   if (typeof html2canvas === 'undefined') {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.async = false; // 同期的に読み込む
     document.head.appendChild(script);
+    console.log('📚 html2canvasライブラリを読み込み中...');
   }
 })();
 
@@ -93,12 +97,6 @@ async function showReceiptDisplay(receiptData) {
   let itemsHtml = '';
   if (receiptData.items && Array.isArray(receiptData.items) && receiptData.items.length > 0) {
     receiptData.items.forEach(item => {
-      const itemTotal = item.price * item.quantity;
-      
-      itemsHtml += `
-        <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
-      `;
-      
       // 基本価格を計算
       let basePricePerUnit = item.basePrice || item.price;
       
@@ -124,6 +122,13 @@ async function showReceiptDisplay(receiptData) {
       if (!item.basePrice && toppingTotalPrice > 0 && item.price > toppingTotalPrice) {
         basePricePerUnit = item.price - toppingTotalPrice;
       }
+      
+      // 合計金額を計算（基本価格 + トッピング価格）× 数量
+      const itemTotal = (basePricePerUnit + toppingTotalPrice) * item.quantity;
+      
+      itemsHtml += `
+        <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
+      `;
       
       // 基本価格を表示
       itemsHtml += `
@@ -596,13 +601,16 @@ async function showQRCodeModal(qrUrl, imageData) {
   
   console.log('🎨 QRコードモーダルをDOMに追加しました');
   
-  // QRCodeライブラリの読み込みを待つ
+  // QRCodeライブラリの読み込みを待つ（最大5秒）
   let attempts = 0;
+  const maxAttempts = 50; // 5秒
   console.log('⏳ QRCodeライブラリの読み込みを待機中...');
-  while (typeof QRCode === 'undefined' && attempts < 20) {
+  while (typeof QRCode === 'undefined' && attempts < maxAttempts) {
     await new Promise(resolve => setTimeout(resolve, 100));
     attempts++;
-    console.log(`⏳ 待機中... (${attempts}/20)`);
+    if (attempts % 10 === 0) {
+      console.log(`⏳ 待機中... (${attempts * 100}ms / ${maxAttempts * 100}ms)`);
+    }
   }
   
   const qrContainer = document.getElementById('qrCodeContainer');
