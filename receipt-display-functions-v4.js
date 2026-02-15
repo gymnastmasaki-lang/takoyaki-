@@ -74,9 +74,9 @@ async function showReceiptDisplay(receiptData) {
       }
       
       if (settings.message) {
-        const messages = settings.message.split('\n');
-        receiptMessage1 = messages[0] || receiptMessage1;
-        receiptMessage2 = messages[1] || receiptMessage2;
+        // 全行を取得（無制限）
+        receiptMessage1 = settings.message;
+        receiptMessage2 = ''; // 使用しない
       }
     }
   } catch (error) {
@@ -293,8 +293,7 @@ async function showReceiptDisplay(receiptData) {
       </div>
       
       <div style="border-top: 2px solid #000; padding-top: 15px; margin-top: 20px; font-size: 12px;">
-        <div style="margin-top: 10px;">${receiptMessage1}</div>
-        <div style="margin-top: 5px;">${receiptMessage2}</div>
+        <div style="margin-top: 10px; white-space: pre-wrap;">${receiptMessage1}</div>
       </div>
     </div>
   `;
