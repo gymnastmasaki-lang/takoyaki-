@@ -3,11 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- 🔧 キャッシュ防止 -->
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <!-- 🔧 最強キャッシュ防止 -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
   <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
+  <meta http-equiv="Expires" content="-1">
   <title>レシート・領収書表示</title>
+  <!-- 最優先: キャッシュ完全無効化スクリプト -->
+  <script>
+    // ページが完全に新しく読み込まれるよう強制
+    if (window.performance && window.performance.navigation.type === 2) {
+      // ブラウザバックで戻った場合は強制リロード
+      window.location.reload(true);
+    }
+  </script>
   <style>
     * {
       margin: 0;
@@ -109,20 +117,31 @@
   </div>
 
   <script>
-    // 🔧 キャッシュ完全防止: ページを強制的にリロード（初回のみ）
+    // 🔧 超強力キャッシュバスター: ページロード直後に実行
     (function() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const hasReloaded = sessionStorage.getItem('receipt_reloaded');
+      console.log('🚀 キャッシュバスター起動');
       
-      // タイムスタンプパラメータがない、またはリロード済みでない場合
-      if (!urlParams.has('t') && !hasReloaded) {
-        sessionStorage.setItem('receipt_reloaded', 'true');
-        const receiptId = urlParams.get('id');
-        if (receiptId) {
-          // タイムスタンプを付けてリロード
-          window.location.href = window.location.pathname + '?id=' + receiptId + '&t=' + Date.now();
-        }
+      const urlParams = new URLSearchParams(window.location.search);
+      const receiptId = urlParams.get('id');
+      const timestamp = urlParams.get('t');
+      const currentTime = Date.now();
+      
+      console.log('📋 URL情報:');
+      console.log('  - receiptId:', receiptId);
+      console.log('  - timestamp:', timestamp);
+      console.log('  - 現在時刻:', currentTime);
+      
+      // タイムスタンプがない、または5秒以上古い場合はリロード
+      if (receiptId && (!timestamp || (currentTime - parseInt(timestamp)) > 5000)) {
+        const newUrl = window.location.pathname + '?id=' + receiptId + '&t=' + currentTime + '&reload=1';
+        console.log('🔄 強制リロード:', newUrl);
+        window.location.replace(newUrl);
+        return;
       }
+      
+      // sessionStorageをクリア（古いキャッシュを削除）
+      sessionStorage.clear();
+      console.log('✅ キャッシュバスター完了');
     })();
   </script>
   <script>
@@ -132,6 +151,21 @@
     // 完全にクリア
     displayDiv.innerHTML = '';
     displayDiv.textContent = '';
+    
+    // URLパラメータを取得してデバッグ表示
+    const urlParams = new URLSearchParams(window.location.search);
+    const debugReceiptId = urlParams.get('id');
+    
+    // デバッグ情報を表示
+    const debugDiv = document.createElement('div');
+    debugDiv.style.cssText = 'background: #fff3cd; border: 2px solid #856404; padding: 12px; margin-bottom: 15px; border-radius: 8px; font-size: 12px; text-align: left;';
+    debugDiv.innerHTML = `
+      <strong>🔍 読み込み情報</strong><br>
+      ID: <code style="background:#fff;padding:2px 5px;border-radius:3px;">${debugReceiptId || 'なし'}</code><br>
+      時刻: ${new Date().toLocaleTimeString('ja-JP')}<br>
+      <small>URL: ${window.location.href.substring(0, 80)}...</small>
+    `;
+    displayDiv.appendChild(debugDiv);
     
     // ローディング表示
     const loadingDiv = document.createElement('div');
@@ -180,6 +214,7 @@
       console.log('  - 検索ID:', receiptId);
       console.log('  - LocalStorage利用可能:', typeof(Storage) !== "undefined");
       console.log('  - LocalStorageアイテム数:', localStorage.length);
+      console.log('  - 現在時刻:', new Date().toISOString());
       
       // LocalStorageの全キーを表示
       console.log('  - 保存されているキー:');
@@ -187,7 +222,9 @@
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         allKeys.push(key);
-        console.log('    [' + i + '] ' + key);
+        const dataPreview = localStorage.getItem(key);
+        const preview = dataPreview ? dataPreview.substring(0, 50) + '...' : 'なし';
+        console.log('    [' + i + '] ' + key + ' => ' + preview);
       }
       
       // 🔧 修正: より柔軟な検索ロジック
@@ -198,6 +235,8 @@
       
       if (receiptImageData) {
         console.log('✅ 完全一致で取得成功:', receiptId);
+        console.log('📊 データサイズ:', receiptImageData.length, '文字');
+        console.log('📄 データ先頭:', receiptImageData.substring(0, 100));
       } else {
         console.warn('⚠️ 完全一致で見つかりませんでした。代替検索を試みます...');
         
