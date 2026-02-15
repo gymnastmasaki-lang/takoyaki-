@@ -20,17 +20,19 @@ async function showReceiptDisplay(receiptData) {
   console.log('📄 ==== レシート表示開始 ====');
   console.log('🔍 受信データ:', receiptData);
   console.log('🔢 注文番号:', receiptData.orderNumber || receiptData.orderNum);
+  console.log('⏰ タイムスタンプ:', Date.now());
   
-  // 🔧 修正: 既存のすべてのモーダルを完全削除（ユニークIDに対応）
-  // 全てのモーダルを確実に削除
+  // 🔧 強化: 既存のすべてのモーダルを完全削除
   const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
   console.log('🗑️ 既存モーダル削除（showReceiptDisplay）:', existingModals.length);
   existingModals.forEach(el => {
-    el.remove();
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
   });
   
-  // DOMから確実に削除されるまで少し待機
-  await new Promise(resolve => setTimeout(resolve, 50));
+  // DOMから確実に削除されるまで待機（時間を延長）
+  await new Promise(resolve => setTimeout(resolve, 100));
   
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
@@ -208,17 +210,19 @@ async function showInvoiceDisplay(invoiceData) {
   console.log('🧾 ==== 領収書表示開始 ====');
   console.log('🔍 受信データ:', invoiceData);
   console.log('🔢 注文番号:', invoiceData.orderNumber || invoiceData.orderNum);
+  console.log('⏰ タイムスタンプ:', Date.now());
   
-  // 🔧 修正: 既存のすべてのモーダルを完全削除（ユニークIDに対応）
-  // 全てのモーダルを確実に削除
+  // 🔧 強化: 既存のすべてのモーダルを完全削除
   const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
   console.log('🗑️ 既存モーダル削除（showInvoiceDisplay）:', existingModals.length);
   existingModals.forEach(el => {
-    el.remove();
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
   });
   
-  // DOMから確実に削除されるまで少し待機
-  await new Promise(resolve => setTimeout(resolve, 50));
+  // DOMから確実に削除されるまで待機（時間を延長）
+  await new Promise(resolve => setTimeout(resolve, 100));
   
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
@@ -736,4 +740,4 @@ async function openCashDrawer() {
   }
 }
 
-console.log('✅ receipt-display-functions.js loaded (v3.2 - LocalStorageクリーンアップ・完全デバッグ版)');
+console.log('✅ receipt-display-functions.js loaded (v3.3 - 連続発行対応・キャッシュ対策強化版)');
