@@ -348,11 +348,11 @@ async function showInvoiceDisplay(invoiceData) {
     totalTax = tax8Amount + tax10Amount;
   }
   
-  // 電子印鑑HTML（修正版：店舗名の右に配置）
+  // 電子印鑑HTML（修正版：店舗名の横に配置、flexboxで確実に並べる）
   let sealHtml = '';
   if (sealImageData) {
     sealHtml = `
-      <div style="position: absolute; top: 0; right: 20px; width: 80px; height: 80px;">
+      <div style="width: 100px; height: 100px; flex-shrink: 0;">
         <img src="${sealImageData}" style="width: 100%; height: 100%; object-fit: contain;" alt="電子印鑑">
       </div>
     `;
@@ -401,16 +401,16 @@ async function showInvoiceDisplay(invoiceData) {
       </div>
       
       <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 0;">
-        <div style="position: relative; min-height: 100px;">
-          ${sealHtml}
-          <div style="padding-right: ${sealImageData ? '100px' : '0'};">
-            <div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>
-            <div style="text-align: center; font-size: 12px; color: #666;">
+        <div style="display: flex; align-items: flex-start; justify-content: center; gap: 20px;">
+          <div style="flex: 1; text-align: center;">
+            <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px; white-space: nowrap;">${receiptStoreName}</div>
+            <div style="font-size: 12px; color: #666;">
               <div>${receiptAddress}</div>
               <div style="margin-top: 5px;">${receiptPhone}</div>
               <div style="margin-top: 10px;">※この領収書は再発行できません</div>
             </div>
           </div>
+          ${sealHtml}
         </div>
       </div>
     </div>
