@@ -620,6 +620,9 @@ async function showQRCodeModal(qrUrl, imageData) {
   if (qrContainer && typeof QRCode !== 'undefined') {
     try {
       console.log('🔨 QRコード生成開始:', qrUrl);
+      // コンテナをクリア
+      qrContainer.innerHTML = '';
+      // QRコード生成
       new QRCode(qrContainer, {
         text: qrUrl,
         width: 256,
