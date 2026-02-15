@@ -634,6 +634,22 @@ async function showQRCodeModal(qrUrl, imageData) {
       console.log('✅ QRコード生成完了');
       console.log('📦 QRコンテナの内容:', qrContainer.innerHTML.substring(0, 200));
       console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
+      
+      // canvasとimg要素を強制的に表示
+      setTimeout(() => {
+        const canvas = qrContainer.querySelector('canvas');
+        const img = qrContainer.querySelector('img');
+        if (canvas) {
+          canvas.style.display = 'block';
+          canvas.style.margin = '0 auto';
+          console.log('✅ Canvas要素を表示しました');
+        }
+        if (img) {
+          img.style.display = 'block';
+          img.style.margin = '0 auto';
+          console.log('✅ Img要素を表示しました');
+        }
+      }, 100);
     } catch (error) {
       console.error('❌ QRコード生成エラー:', error);
       qrContainer.innerHTML = '<div style="color: red; padding: 20px;">QRコード生成に失敗しました:<br>' + error.message + '</div>';
