@@ -89,50 +89,46 @@ async function showReceiptDisplay(receiptData) {
   let orderNum = receiptData.orderNumber || receiptData.orderNum || 'なし';
   console.log('🔢 注文番号:', orderNum);
   
-  // 商品リストHTML生成（トッピング価格を縦表示）
+  // 商品リストHTML生成（縦並びで各価格表示）
   let itemsHtml = '';
   if (receiptData.items && Array.isArray(receiptData.items) && receiptData.items.length > 0) {
     receiptData.items.forEach(item => {
-      //基本商品価格を計算
-      const basePrice = item.basePrice || (item.toppingPrice ? item.price - item.toppingPrice : item.price);
-      const basePriceTotal = basePrice * item.quantity;
+      const itemTotal = item.price * item.quantity;
       
       itemsHtml += `
         <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
             <div style="font-weight: bold; font-size: 14px;">${item.name}</div>
-            <div style="font-weight: bold;">¥${(item.price * item.quantity).toLocaleString()}</div>
+            <div style="font-weight: bold;">¥${itemTotal.toLocaleString()}</div>
           </div>
-          <div style="font-size: 12px; color: #666;">単価 ¥${basePrice.toLocaleString()} × ${item.quantity} = ¥${basePriceTotal.toLocaleString()}</div>
       `;
       
-      // トッピング表示（POS形式: toppingsList配列）
+      // toppingsList配列がある場合（正しいPOS形式）
       if (item.toppingsList && Array.isArray(item.toppingsList) && item.toppingsList.length > 0) {
+        // 基本価格を表示
+        const basePrice = item.basePrice || 880; // デフォルト値
+        itemsHtml += `<div style="font-size: 13px; color: #333; margin-bottom: 4px;">¥${basePrice.toLocaleString()}</div>`;
+        
+        // 各トッピングを縦に表示
         item.toppingsList.forEach(topping => {
-          const toppingTotal = topping.price * item.quantity;
           itemsHtml += `
-            <div style="font-size: 12px; color: #666; margin-top: 3px; padding-left: 10px;">
-              └ ${topping.name} ¥${topping.price.toLocaleString()} × ${item.quantity} = ¥${toppingTotal.toLocaleString()}
+            <div style="font-size: 13px; color: #333; margin-top: 2px;">
+              ${topping.name} ¥${topping.price.toLocaleString()}
             </div>
           `;
         });
       }
-      // トッピング表示（Handy形式: toppings文字列 + toppingPrice合計）
-      else if (item.toppings && item.toppings !== 'なし' && item.toppings !== '' && item.toppingPrice && item.toppingPrice > 0) {
-        itemsHtml += `
-          <div style="font-size: 12px; color: #666; margin-top: 3px; padding-left: 10px;">
-            └ トッピング: ${item.toppings} ¥${item.toppingPrice.toLocaleString()}
-          </div>
-        `;
+      // Handy形式の場合
+      else {
+        itemsHtml += `<div style="font-size: 13px; color: #333;">¥${item.price.toLocaleString()} × ${item.quantity}</div>`;
+        if (item.toppings && item.toppings !== 'なし' && item.toppings !== '') {
+          itemsHtml += `<div style="font-size: 12px; color: #666; margin-top: 4px; font-style: italic;">トッピング: ${item.toppings}</div>`;
+        }
       }
-      // トッピング名のみ（価格なし）
-      else if (item.toppings && item.toppings !== 'なし' && item.toppings !== '') {
-        itemsHtml += `
-          <div style="font-size: 12px; color: #666; margin-top: 3px; padding-left: 10px;">
-            └ ${item.toppings}
-          </div>
-        `;
-      }
+      
+      itemsHtml += `</div>`;
+    });
+  }
       
       itemsHtml += `</div>`;
     });
