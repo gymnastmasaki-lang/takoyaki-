@@ -22,13 +22,15 @@ async function showReceiptDisplay(receiptData) {
   console.log('🔢 注文番号:', receiptData.orderNumber || receiptData.orderNum);
   
   // 🔧 修正: 既存のすべてのモーダルを完全削除（ユニークIDに対応）
+  // 全てのモーダルを確実に削除
   const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
   console.log('🗑️ 既存モーダル削除（showReceiptDisplay）:', existingModals.length);
   existingModals.forEach(el => {
-    if (el.parentNode) {
-      el.parentNode.removeChild(el);
-    }
+    el.remove();
   });
+  
+  // DOMから確実に削除されるまで少し待機
+  await new Promise(resolve => setTimeout(resolve, 50));
   
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
@@ -186,13 +188,15 @@ async function showInvoiceDisplay(invoiceData) {
   console.log('🔢 注文番号:', invoiceData.orderNumber || invoiceData.orderNum);
   
   // 🔧 修正: 既存のすべてのモーダルを完全削除（ユニークIDに対応）
+  // 全てのモーダルを確実に削除
   const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
   console.log('🗑️ 既存モーダル削除（showInvoiceDisplay）:', existingModals.length);
   existingModals.forEach(el => {
-    if (el.parentNode) {
-      el.parentNode.removeChild(el);
-    }
+    el.remove();
   });
+  
+  // DOMから確実に削除されるまで少し待機
+  await new Promise(resolve => setTimeout(resolve, 50));
   
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
@@ -415,8 +419,8 @@ function closeReceiptDisplay(modalId) {
   if (modalId) {
     // 特定のモーダルを閉じる
     const modal = document.getElementById(modalId);
-    if (modal && modal.parentNode) {
-      modal.parentNode.removeChild(modal);
+    if (modal) {
+      modal.remove();
       console.log('✅ モーダル削除:', modalId);
     }
   } else {
@@ -424,9 +428,7 @@ function closeReceiptDisplay(modalId) {
     const allModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
     console.log('🗑️ 全モーダル削除:', allModals.length);
     allModals.forEach(el => {
-      if (el.parentNode) {
-        el.parentNode.removeChild(el);
-      }
+      el.remove();
     });
   }
   
@@ -572,8 +574,8 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     window.closeQRModal = function() {
       console.log('🚪 QRモーダルを閉じます');
       const qrModal = document.getElementById('qrDisplayModal');
-      if (qrModal && qrModal.parentNode) {
-        qrModal.parentNode.removeChild(qrModal);
+      if (qrModal) {
+        qrModal.remove();
         console.log('✅ QRモーダル削除完了');
       }
     };
@@ -592,19 +594,23 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
           correctLevel: QRCode.CorrectLevel.H
         });
         
-        // QRコード生成後、生成された要素を中央配置
+        // QRコード生成後、canvasを非表示にしてimgのみ表示
         setTimeout(() => {
           const qrImg = qrcodeElement.querySelector('img');
           const qrCanvas = qrcodeElement.querySelector('canvas');
+          
+          // canvasを非表示
+          if (qrCanvas) {
+            qrCanvas.style.display = 'none';
+          }
+          
+          // imgのみを中央配置で表示
           if (qrImg) {
             qrImg.style.display = 'block';
             qrImg.style.margin = '0 auto';
           }
-          if (qrCanvas) {
-            qrCanvas.style.display = 'block';
-            qrCanvas.style.margin = '0 auto';
-          }
-          console.log('✅ QRコード中央配置完了');
+          
+          console.log('✅ QRコード中央配置完了（imgのみ表示）');
         }, 50);
         
         console.log('✅ QRコード生成完了');
@@ -647,4 +653,4 @@ async function openCashDrawer() {
   }
 }
 
-console.log('✅ receipt-display-functions.js loaded (v3.0 - アラート削除・完全修正版)');
+console.log('✅ receipt-display-functions.js loaded (v3.1 - 連続発行修正・QRコード単一表示版)');
