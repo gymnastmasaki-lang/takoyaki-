@@ -583,7 +583,7 @@ async function showQRCodeModal(qrUrl, imageData) {
   qrModal.innerHTML = `
     <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
-      <div id="qrCodeContainer" style="display: flex; justify-content: center; margin: 20px 0; min-height: 256px;"></div>
+      <div id="qrCodeContainer" style="display: flex; justify-content: center; align-items: center; margin: 20px 0; min-height: 256px; background: #f0f0f0; border: 2px solid #ccc;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
@@ -623,7 +623,7 @@ async function showQRCodeModal(qrUrl, imageData) {
       // コンテナをクリア
       qrContainer.innerHTML = '';
       // QRコード生成
-      new QRCode(qrContainer, {
+      const qrcode = new QRCode(qrContainer, {
         text: qrUrl,
         width: 256,
         height: 256,
@@ -632,6 +632,8 @@ async function showQRCodeModal(qrUrl, imageData) {
         correctLevel: QRCode.CorrectLevel.H
       });
       console.log('✅ QRコード生成完了');
+      console.log('📦 QRコンテナの内容:', qrContainer.innerHTML.substring(0, 200));
+      console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
     } catch (error) {
       console.error('❌ QRコード生成エラー:', error);
       qrContainer.innerHTML = '<div style="color: red; padding: 20px;">QRコード生成に失敗しました:<br>' + error.message + '</div>';
