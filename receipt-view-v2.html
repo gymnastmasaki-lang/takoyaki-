@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- 🔧 最強キャッシュ防止 -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="-1">
+  <title>レシート・領収書表示</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .container {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      max-width: 600px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    
+    .header h1 {
+      font-size: 28px;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    
+    .header p {
+      font-size: 14px;
+      color: #666;
+    }
+    
+    .receipt-content {
+      margin: 30px 0;
+      border: 2px solid #eee;
+      border-radius: 12px;
+      padding: 20px;
+      background: #fafafa;
+    }
+    
+    .error-message {
+      text-align: center;
+      padding: 40px;
+      color: #f44336;
+      font-size: 18px;
+      font-weight: bold;
+    }
+    
+    .loading-message {
+      text-align: center;
+      padding: 40px;
+      color: #667eea;
+      font-size: 18px;
+      font-weight: bold;
+    }
+    
+    .debug-info {
+      background: #fff3cd;
+      border: 2px solid #856404;
+      padding: 12px;
+      margin-bottom: 15px;
+      border-radius: 8px;
+      font-size: 12px;
+      text-align: left;
+    }
+    
+    .download-btn {
+      width: 100%;
+      padding: 18px;
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 20px;
+      transition: transform 0.2s;
+    }
+    
+    .download-btn:hover {
+      transform: translateY(-2px);
+    }
+    
+    .download-btn:active {
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="receiptDisplay" class="receipt-content">
+      <div class="loading-message">読み込み中...</div>
+    </div>
+    
+    <button id="downloadBtn" class="download-btn" style="display: none;" onclick="downloadImage()">
+      画像をダウンロード
+    </button>
+  </div>
+
+  <script>
+    // 🔧 強制リロード機能 - 常に最新データを表示
+    (function() {
+      console.log('🚀 === ページ読み込み開始 ===');
+      console.log('⏰ 時刻:', new Date().toISOString());
+      
+      const urlParams = new URLSearchParams(window.location.search);
+      const receiptId = urlParams.get('id');
+      const timestamp = urlParams.get('t');
+      const forceParam = urlParams.get('_force');
+      const currentTime = Date.now();
+      
+      console.log('📋 URL情報:');
+      console.log('  - receiptId:', receiptId);
+      console.log('  - timestamp:', timestamp);
+      console.log('  - forceParam:', forceParam);
+      console.log('  - URL:', window.location.href);
+      
+      // タイムスタンプが1秒以上古い、または存在しない場合は強制リロード
+      if (receiptId && (!timestamp || (currentTime - parseInt(timestamp)) > 1000)) {
+        const newUrl = window.location.pathname + '?id=' + receiptId + '&t=' + currentTime + '&_force=' + Math.random();
+        console.log('🔄 強制リロード実行:', newUrl);
+        // location.replaceではなくlocation.hrefを使用して完全リロード
+        window.location.href = newUrl;
+        return;
+      }
+      
+      // ページの再訪問を検出してリロード
+      const lastReceiptId = sessionStorage.getItem('lastReceiptId');
+      const lastTimestamp = sessionStorage.getItem('lastTimestamp');
+      
+      if (receiptId) {
+        // 同じIDで2秒以内の再訪問の場合は強制リフレッシュ
+        if (lastReceiptId === receiptId && lastTimestamp) {
+          const timeSinceLastVisit = currentTime - parseInt(lastTimestamp);
+          if (timeSinceLastVisit < 2000 && !forceParam) {
+            console.log('⚡ 連続アクセス検出 - 強制リフレッシュ');
+            const refreshUrl = window.location.pathname + '?id=' + receiptId + '&t=' + currentTime + '&_force=' + Math.random();
+            window.location.href = refreshUrl;
+            return;
+          }
+        }
+        
+        // 訪問情報を記録
+        sessionStorage.setItem('lastReceiptId', receiptId);
+        sessionStorage.setItem('lastTimestamp', currentTime.toString());
+      }
+    })();
+    
+    // ページ初期化
+    const displayDiv = document.getElementById('receiptDisplay');
+    const downloadBtn = document.getElementById('downloadBtn');
+    let receiptImageData = null;
+    
+    // URLパラメータ取得
+    const urlParams = new URLSearchParams(window.location.search);
+    const receiptId = urlParams.get('id');
+    
+    console.log('🆔 取得するレシートID:', receiptId);
+    
+    // レシート読み込み関数
+    function loadReceipt() {
+      console.log('📄 === レシート読み込み開始 ===');
+      
+      // 表示エリアをクリア
+      displayDiv.innerHTML = '';
+      
+      // デバッグ情報表示
+      const debugDiv = document.createElement('div');
+      debugDiv.className = 'debug-info';
+      debugDiv.innerHTML = `
+        <strong>🔍 読み込み情報</strong><br>
+        ID: <code style="background:#fff;padding:2px 5px;">${receiptId || 'なし'}</code><br>
+        時刻: ${new Date().toLocaleTimeString('ja-JP')}<br>
+      `;
+      displayDiv.appendChild(debugDiv);
+      
+      // ローディング表示
+      const loadingDiv = document.createElement('div');
+      loadingDiv.className = 'loading-message';
+      loadingDiv.textContent = 'データ取得中...';
+      displayDiv.appendChild(loadingDiv);
+      
+      if (!receiptId) {
+        displayDiv.innerHTML = '<div class="error-message">レシートIDが指定されていません</div>';
+        console.error('❌ レシートIDがありません');
+        return;
+      }
+      
+      // LocalStorage確認
+      console.log('💾 LocalStorage状態:');
+      console.log('  - アイテム数:', localStorage.length);
+      
+      const allKeys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        allKeys.push(key);
+        console.log('  [' + i + '] ' + key);
+      }
+      
+      // 🔧 重要: 指定されたIDのデータを取得（完全一致）
+      console.log('🔍 検索ID:', receiptId);
+      receiptImageData = localStorage.getItem(receiptId);
+      
+      if (receiptImageData) {
+        console.log('✅ 完全一致で取得成功');
+        console.log('📊 データサイズ:', receiptImageData.length, '文字');
+      } else {
+        console.warn('⚠️ 完全一致で見つかりません。代替検索...');
+        
+        // 最新のレシートIDから取得
+        const latestId = localStorage.getItem('latest_receipt_id');
+        if (latestId) {
+          console.log('🔍 最新レシートID:', latestId);
+          receiptImageData = localStorage.getItem(latestId);
+          if (receiptImageData) {
+            console.log('✅ 最新レシートIDから取得成功');
+          }
+        }
+        
+        // それでも見つからない場合、receipt_で始まる最新のキーを使用
+        if (!receiptImageData) {
+          const receiptKeys = allKeys.filter(k => k && k.startsWith('receipt_'));
+          if (receiptKeys.length > 0) {
+            receiptKeys.sort((a, b) => {
+              const timeA = parseInt(a.replace('receipt_', '')) || 0;
+              const timeB = parseInt(b.replace('receipt_', '')) || 0;
+              return timeB - timeA;
+            });
+            const latestKey = receiptKeys[0];
+            console.log('🔍 最新のreceipt_キー:', latestKey);
+            receiptImageData = localStorage.getItem(latestKey);
+            if (receiptImageData) {
+              console.log('✅ 最新キーから取得成功');
+            }
+          }
+        }
+      }
+      
+      // データが見つからない場合
+      if (!receiptImageData) {
+        displayDiv.innerHTML = `
+          <div class="error-message">
+            レシート・領収書が見つかりません<br><br>
+            <small>QRコードの有効期限が切れているか、データが削除された可能性があります</small><br><br>
+            <div style="font-size: 12px; color: #999; margin-top: 20px; text-align: left;">
+              <strong>デバッグ情報:</strong><br>
+              検索ID: ${receiptId}<br>
+              LocalStorageアイテム数: ${localStorage.length}<br>
+              利用可能なキー:<br>
+              ${allKeys.length > 0 ? allKeys.map(k => '- ' + k).join('<br>') : '（なし）'}
+            </div>
+          </div>
+        `;
+        console.error('❌ データが見つかりません');
+        return;
+      }
+      
+      // 画像を表示
+      console.log('🖼️ 画像表示開始');
+      displayDiv.innerHTML = '';
+      
+      const img = document.createElement('img');
+      img.src = receiptImageData;
+      img.style.width = '100%';
+      img.style.borderRadius = '8px';
+      
+      img.onload = function() {
+        console.log('✅ 画像読み込み成功');
+        console.log('📐 画像サイズ:', img.naturalWidth, 'x', img.naturalHeight);
+      };
+      
+      img.onerror = function() {
+        console.error('❌ 画像読み込みエラー');
+        displayDiv.innerHTML = '<div class="error-message">画像の読み込みに失敗しました</div>';
+      };
+      
+      displayDiv.appendChild(img);
+      downloadBtn.style.display = 'block';
+      
+      console.log('✅ レシート表示完了');
+    }
+    
+    // ダウンロード関数
+    function downloadImage() {
+      if (!receiptImageData) {
+        alert('画像データがありません');
+        return;
+      }
+      
+      const link = document.createElement('a');
+      link.download = `receipt_${receiptId}.png`;
+      link.href = receiptImageData;
+      link.click();
+      
+      console.log('📥 画像ダウンロード実行');
+    }
+    
+    // ページ読み込み時に実行
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', loadReceipt);
+    } else {
+      loadReceipt();
+    }
+  </script>
+</body>
+</html>
