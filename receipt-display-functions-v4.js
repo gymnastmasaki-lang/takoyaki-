@@ -131,7 +131,7 @@ async function showReceiptDisplay(receiptData) {
       // 基本価格を表示
       itemsHtml += `
         <div style="font-size: 13px; color: #333; margin-bottom: 2px; display: flex; justify-content: space-between;">
-          <span>${item.name}</span>
+          <span>${item.name} × ${item.quantity}</span>
           <span>¥${basePricePerUnit.toLocaleString()}</span>
         </div>
       `;
@@ -400,8 +400,8 @@ async function showInvoiceDisplay(invoiceData) {
       
       <div style="margin: 30px 0;">
         <div style="font-size: 14px; margin-bottom: 10px;">お客様</div>
-        <div style="border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 30px;">
-          <span style="font-size: 18px;">　　　　　　　　　　　</span>
+        <div style="border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 30px; text-align: right;">
+          <span style="font-size: 18px; margin-right: 10px;">　　　　　　　　　　　</span>
           <span style="font-size: 14px;">様</span>
         </div>
       </div>
@@ -443,7 +443,7 @@ async function showInvoiceDisplay(invoiceData) {
           <div style="font-size: 12px; color: #666;">
             <div>${(receiptAddress || '').replace(/ /g, '<br>')}</div>
             <div style="margin-top: 5px;">${receiptPhone}</div>
-            <div style="margin-top: 10px;">※この領収書は<br>再発行できません</div>
+            <div style="margin-top: 10px;">※この領収書は再発行できません</div>
           </div>
         </div>
       </div>
@@ -579,22 +579,34 @@ async function showQRCodeModal(qrUrl, imageData) {
   
   document.body.appendChild(qrModal);
   
-  // QRコードを生成
-  await new Promise(resolve => setTimeout(resolve, 100));
+  // QRCodeライブラリの読み込みを待つ
+  let attempts = 0;
+  while (typeof QRCode === 'undefined' && attempts < 20) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    attempts++;
+  }
   
   const qrContainer = document.getElementById('qrCodeContainer');
   if (qrContainer && typeof QRCode !== 'undefined') {
-    new QRCode(qrContainer, {
-      text: qrUrl,
-      width: 256,
-      height: 256,
-      colorDark: '#000000',
-      colorLight: '#ffffff',
-      correctLevel: QRCode.CorrectLevel.H
-    });
-    console.log('✅ QRコード生成完了');
+    try {
+      new QRCode(qrContainer, {
+        text: qrUrl,
+        width: 256,
+        height: 256,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+      console.log('✅ QRコード生成完了');
+    } catch (error) {
+      console.error('❌ QRコード生成エラー:', error);
+      qrContainer.innerHTML = '<div style="color: red;">QRコード生成に失敗しました</div>';
+    }
   } else {
     console.error('❌ QRCodeライブラリが読み込まれていません');
+    if (qrContainer) {
+      qrContainer.innerHTML = '<div style="color: red;">QRCodeライブラリが読み込まれていません</div>';
+    }
   }
   
   // モーダルの外側クリックで閉じる
