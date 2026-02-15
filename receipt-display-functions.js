@@ -482,7 +482,14 @@ async function saveReceiptPNG(contentId) {
 
 // QRコード発行
 window.issueReceiptQR = async function issueReceiptQR(contentId) {
-  console.log('📱 QRコード生成開始');
+  console.log('📱 ==== QRコード生成開始 ====');
+  console.log('🆔 コンテンツID:', contentId);
+  console.log('⏰ 時刻:', new Date().toISOString());
+  
+  // 🔧 重要: まず、古いQRモーダルを全て削除
+  const oldQRModals = document.querySelectorAll('#qrDisplayModal');
+  console.log('🗑️ 古いQRモーダル削除:', oldQRModals.length);
+  oldQRModals.forEach(el => el.remove());
   
   const elementId = contentId || (window.currentReceiptData && window.currentReceiptData._contentId) || 'receiptContent';
   const element = document.getElementById(elementId);
@@ -491,11 +498,15 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     const fallbackElement = document.querySelector('.receiptContent');
     if (!fallbackElement) {
       alert('レシート要素が見つかりません。モーダルを開き直してください。');
+      console.error('❌ レシート要素が見つかりません');
       return;
     }
   }
   
   const targetElement = element || document.querySelector('.receiptContent');
+  
+  console.log('📸 キャプチャ対象:', targetElement.id || targetElement.className);
+  console.log('📏 要素サイズ:', targetElement.offsetWidth, 'x', targetElement.offsetHeight);
   
   if (typeof QRCode === 'undefined') {
     alert('QRコードライブラリが読み込まれていません。ページを再読み込みしてください。');
@@ -508,6 +519,10 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
   }
   
   try {
+    // 🔧 重要: html2canvasでキャプチャする前に、確実に単一のコンテンツのみが表示されているか確認
+    console.log('📸 キャプチャ対象要素:', targetElement.id);
+    console.log('📏 要素のサイズ:', targetElement.offsetWidth, 'x', targetElement.offsetHeight);
+    
     const canvas = await html2canvas(targetElement, {
       backgroundColor: '#ffffff',
       scale: 2,
@@ -520,12 +535,40 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     const id = 'receipt_' + Date.now();
     
     console.log('💾 LocalStorageに保存:', id);
+    console.log('📊 画像データサイズ:', imageData.length, '文字');
+    
+    // 🔧 重要: 古いレシートデータを削除（最新5件のみ保持）
+    const oldKeys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('receipt_') && key !== 'receipt_settings') {
+        oldKeys.push(key);
+      }
+    }
+    
+    // タイムスタンプでソート（古い順）
+    oldKeys.sort((a, b) => {
+      const timeA = parseInt(a.replace('receipt_', '')) || 0;
+      const timeB = parseInt(b.replace('receipt_', '')) || 0;
+      return timeA - timeB;
+    });
+    
+    // 古いデータを削除（最新5件を残す）
+    if (oldKeys.length >= 5) {
+      const toDelete = oldKeys.slice(0, oldKeys.length - 4);
+      console.log('🗑️ 古いレシートを削除:', toDelete.length, '件');
+      toDelete.forEach(key => {
+        localStorage.removeItem(key);
+        console.log('  - 削除:', key);
+      });
+    }
     
     // LocalStorageに保存
     localStorage.setItem(id, imageData);
     localStorage.setItem('latest_receipt_id', id);
     
     console.log('✅ LocalStorage保存完了');
+    console.log('📦 現在の保存件数:', localStorage.length);
     
     // 🔧 重要: すべてのレシートモーダルを閉じる（ユニークIDに対応）
     const receiptModals = document.querySelectorAll('[id^="receiptDisplayModal"]');
@@ -655,4 +698,4 @@ async function openCashDrawer() {
   }
 }
 
-console.log('✅ receipt-display-functions.js loaded (v3.1 - 連続発行修正・QRコード単一表示版)');
+console.log('✅ receipt-display-functions.js loaded (v3.2 - LocalStorageクリーンアップ・完全デバッグ版)');
