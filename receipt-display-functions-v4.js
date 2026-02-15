@@ -635,24 +635,46 @@ async function showQRCodeModal(qrUrl, imageData) {
       console.log('📦 QRコンテナの内容:', qrContainer.innerHTML.substring(0, 200));
       console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
       
-      // canvasとimg要素を強制的に表示
+      // canvasとimg要素を強制的に表示（より強力な方法）
       const forceDisplayQRElements = () => {
         const canvas = qrContainer.querySelector('canvas');
         const img = qrContainer.querySelector('img');
+        
         if (canvas) {
-          canvas.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important;';
-          console.log('✅ Canvas要素を表示しました');
+          // すべての可能性のあるスタイルをリセット
+          canvas.removeAttribute('style');
+          canvas.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+          console.log('✅ Canvas要素を表示しました', canvas.style.cssText);
         }
         if (img) {
-          img.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important;';
-          console.log('✅ Img要素を表示しました');
+          // すべての可能性のあるスタイルをリセット
+          img.removeAttribute('style');
+          img.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+          console.log('✅ Img要素を表示しました', img.style.cssText);
+        }
+        
+        // 親要素のスタイルも確認
+        if (qrContainer) {
+          qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 256px !important; background: #f0f0f0; border: 2px solid #ccc;';
         }
       };
+      
+      // MutationObserverで要素の追加を監視
+      const observer = new MutationObserver(() => {
+        forceDisplayQRElements();
+      });
+      observer.observe(qrContainer, { childList: true, subtree: true });
+      
       // 即座に実行 + 複数回リトライ
       forceDisplayQRElements();
+      setTimeout(forceDisplayQRElements, 10);
       setTimeout(forceDisplayQRElements, 50);
-      setTimeout(forceDisplayQRElements, 150);
-      setTimeout(forceDisplayQRElements, 300);
+      setTimeout(forceDisplayQRElements, 100);
+      setTimeout(forceDisplayQRElements, 200);
+      setTimeout(forceDisplayQRElements, 500);
+      
+      // 5秒後にobserverを停止
+      setTimeout(() => observer.disconnect(), 5000);
     } catch (error) {
       console.error('❌ QRコード生成エラー:', error);
       qrContainer.innerHTML = '<div style="color: red; padding: 20px;">QRコード生成に失敗しました:<br>' + error.message + '</div>';
