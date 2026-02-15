@@ -583,7 +583,7 @@ async function showQRCodeModal(qrUrl, imageData) {
   qrModal.innerHTML = `
     <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
-      <div id="qrCodeContainer" style="display: flex; justify-content: center; align-items: center; margin: 20px 0; min-height: 256px; background: #f0f0f0; border: 2px solid #ccc;"></div>
+      <div id="qrCodeContainer" style="display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
@@ -645,6 +645,9 @@ async function showQRCodeModal(qrUrl, imageData) {
         const canvas = tempContainer.querySelector('canvas');
         const img = tempContainer.querySelector('img');
         
+        // コンテナのスタイルを強制設定
+        qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;';
+        
         if (canvas) {
           // canvasをクローンして表示コンテナに追加
           const clonedCanvas = canvas.cloneNode(true);
@@ -663,6 +666,20 @@ async function showQRCodeModal(qrUrl, imageData) {
         document.body.removeChild(tempContainer);
         
         console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
+        
+        // 追加後にもう一度要素のスタイルを確認・設定
+        setTimeout(() => {
+          const displayedCanvas = qrContainer.querySelector('canvas');
+          const displayedImg = qrContainer.querySelector('img');
+          if (displayedCanvas) {
+            displayedCanvas.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+            console.log('🔄 Canvas要素のスタイルを再設定しました');
+          }
+          if (displayedImg) {
+            displayedImg.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+            console.log('🔄 Img要素のスタイルを再設定しました');
+          }
+        }, 50);
       }, 100);
       
     } catch (error) {
