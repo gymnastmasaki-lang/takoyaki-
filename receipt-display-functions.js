@@ -331,38 +331,41 @@ async function showInvoiceDisplay(invoiceData) {
 
 // モーダル表示共通関数
 async function showReceiptModal(html, data, type) {
-  console.log('🖼️ モーダル表示:', type);
-  console.log('🔍 データ:', data);
+  console.log('==========================================');
+  console.log('🖼️ モーダル表示開始:', type);
+  console.log('📊 データ:', data);
+  console.log('📋 注文番号:', data.orderNumber || data.orderNum);
+  console.log('==========================================');
   
-  // 既存のモーダルを完全削除
-  const existingModals = document.querySelectorAll('#receiptDisplayModal, #qrDisplayModal');
-  console.log('🗑️ 削除対象モーダル:', existingModals.length);
-  existingModals.forEach(el => {
+  // ユニークなタイムスタンプとIDを生成
+  const timestamp = Date.now();
+  const uniqueModalId = `receiptDisplayModal_${timestamp}`;
+  const uniqueContentId = `receiptContent_${timestamp}`;
+  
+  console.log('🆔 モーダルID:', uniqueModalId);
+  console.log('🆔 コンテンツID:', uniqueContentId);
+  
+  // 既存のすべてのレシートモーダルを削除
+  const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
+  console.log('🗑️ 削除対象モーダル数:', existingModals.length);
+  
+  existingModals.forEach((el, index) => {
+    console.log(`  削除 ${index + 1}:`, el.id);
     if (el.parentNode) {
       el.parentNode.removeChild(el);
     }
   });
   
-  // DOM更新を待つ
-  await new Promise(resolve => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(resolve);
-    });
-  });
+  // DOM更新を待つ（より確実に）
+  await new Promise(resolve => setTimeout(resolve, 100));
   
-  console.log('✅ 古いモーダル削除完了');
+  console.log('✅ 古いモーダル削除完了、新しいモーダル作成開始');
   
-  // ユニークなタイムスタンプとIDを生成
-  const timestamp = Date.now();
-  const uniqueContentId = `receiptContent_${timestamp}`;
-  
-  console.log('🆕 新しいモーダル作成: タイムスタンプ=', timestamp);
-  
-  // モーダルHTML（ユニークなIDを使用）
+  // モーダルHTML（完全にユニークなID）
   const modalHtml = `
-    <div id="receiptDisplayModal" data-timestamp="${timestamp}" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 999999 !important; display: flex !important; align-items: center !important; justify-content: center !important; overflow-y: auto !important;">
+    <div id="${uniqueModalId}" data-timestamp="${timestamp}" style="position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 999999 !important; display: flex !important; align-items: center !important; justify-content: center !important; overflow-y: auto !important;">
       <div style="background: white !important; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.5) !important;">
-        <button onclick="closeReceiptDisplay()" style="position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; border: none; background: #f44336; color: white; border-radius: 50%; font-size: 24px; cursor: pointer; line-height: 1; z-index: 1000000;">×</button>
+        <button onclick="closeReceiptDisplay('${uniqueModalId}')" style="position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; border: none; background: #f44336; color: white; border-radius: 50%; font-size: 24px; cursor: pointer; line-height: 1; z-index: 1000000;">×</button>
         
         <div id="${uniqueContentId}" class="receiptContent" style="margin-top: 20px;">
           ${html}
@@ -383,17 +386,40 @@ async function showReceiptModal(html, data, type) {
   document.body.insertAdjacentHTML('beforeend', modalHtml);
   
   // データを一時保存（タイムスタンプとコンテンツID付き）
-  window.currentReceiptData = { ...data, _timestamp: timestamp, _contentId: uniqueContentId };
+  window.currentReceiptData = { ...data, _timestamp: timestamp, _contentId: uniqueContentId, _modalId: uniqueModalId };
   window.currentReceiptType = type;
   
   console.log('✅ モーダル表示完了');
+  console.log('💾 currentReceiptData更新:', window.currentReceiptData.orderNumber || window.currentReceiptData.orderNum);
+  console.log('==========================================');
 }
 
 // モーダルを閉じる
-function closeReceiptDisplay() {
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
+function closeReceiptDisplay(modalId) {
+  console.log('🚪 モーダルを閉じる:', modalId || '全て');
+  
+  if (modalId) {
+    // 特定のモーダルを閉じる
+    const modal = document.getElementById(modalId);
+    if (modal && modal.parentNode) {
+      modal.parentNode.removeChild(modal);
+      console.log('✅ モーダル削除:', modalId);
+    }
+  } else {
+    // すべてのモーダルを閉じる
+    const allModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
+    console.log('🗑️ 全モーダル削除:', allModals.length);
+    allModals.forEach(el => {
+      if (el.parentNode) {
+        el.parentNode.removeChild(el);
+      }
+    });
+  }
+  
   window.currentReceiptData = null;
   window.currentReceiptType = null;
+  
+  console.log('✅ モーダル閉じる処理完了');
 }
 
 // PNG保存
@@ -533,6 +559,7 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
             qrCanvas.style.display = 'block';
             qrCanvas.style.margin = '0 auto';
           }
+          console.log('✅ QRコード中央配置完了');
         }, 50);
         
         console.log('✅ QRコード生成完了');
