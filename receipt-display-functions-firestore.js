@@ -130,7 +130,7 @@ async function showReceiptDisplay(receiptData) {
   const tax10Amount = tax10Total > 0 ? tax10Total - tax10Excluded : 0;
   
   const receiptHtml = `
-    <div style="font-family: 'Courier New', monospace; text-align: center;">
+    <div style="font-family: 'Courier New', monospace; text-align: center; padding: 0 15px;">
       <div style="border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 15px;">
         <div style="font-weight: bold; font-size: 20px; margin-bottom: 5px;">${receiptStoreName}</div>
         <div style="font-size: 12px;">${receiptAddress}</div>
@@ -188,11 +188,97 @@ async function showReceiptDisplay(receiptData) {
   console.log('✅ レシート表示完了');
 }
 
-// 領収書表示関数（同様の実装）
+// 領収書表示関数
 async function showInvoiceDisplay(invoiceData) {
-  // ... 領収書の実装（レシートと同様）
-  console.log('🧾 領収書表示:', invoiceData);
-  // 実装は省略（レシートと同じパターン）
+  console.log('🧾 ==== 領収書表示開始 ====');
+  console.log('🔍 受信データ:', invoiceData);
+  
+  const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
+  console.log('🗑️ 既存モーダル削除:', existingModals.length);
+  existingModals.forEach(el => el.remove());
+  
+  await new Promise(resolve => setTimeout(resolve, 50));
+  
+  // レシート設定をFirestoreから読み込み
+  let receiptStoreName = '粉もん屋 八 下赤塚店';
+  let receiptAddress = '東京都板橋区赤塚2-2-4';
+  let receiptPhone = 'TEL: 03-6904-2888';
+  
+  try {
+    const storeId = window.currentStoreId;
+    let receiptSettingsRef;
+    
+    if (!storeId || storeId === '') {
+      receiptSettingsRef = window.doc(window.db, 'receipt_settings', 'shimoakatsuka');
+    } else {
+      receiptSettingsRef = window.doc(window.db, 'stores', storeId, 'receipt_settings', 'default');
+    }
+    
+    const receiptSettingsDoc = await window.getDoc(receiptSettingsRef);
+    
+    if (receiptSettingsDoc.exists()) {
+      const settings = receiptSettingsDoc.data();
+      
+      if (settings.storeName && settings.branchName) {
+        receiptStoreName = settings.storeName + ' ' + settings.branchName;
+      } else if (settings.branchName) {
+        receiptStoreName = settings.branchName;
+      } else if (settings.storeName) {
+        receiptStoreName = settings.storeName;
+      }
+      
+      if (settings.postalCode && settings.address) {
+        receiptAddress = settings.postalCode + ' ' + settings.address;
+      } else if (settings.address) {
+        receiptAddress = settings.address;
+      }
+      
+      if (settings.phone) {
+        receiptPhone = 'TEL: ' + settings.phone;
+      }
+    }
+  } catch (error) {
+    console.error('❌ レシート設定読み込みエラー:', error);
+  }
+  
+  const now = new Date(invoiceData.timestamp || Date.now());
+  const dateStr = now.getFullYear() + '年' + 
+                  String(now.getMonth() + 1).padStart(2, '0') + '月' + 
+                  String(now.getDate()).padStart(2, '0') + '日';
+  
+  const invoiceHtml = `
+    <div style="font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', sans-serif; padding: 20px 30px;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <div style="font-size: 28px; font-weight: bold; margin-bottom: 20px;">領収書</div>
+      </div>
+      
+      <div style="margin: 30px 0; padding: 20px; border: 2px solid #000;">
+        <div style="font-size: 24px; font-weight: bold; margin-bottom: 10px;">
+          金額：¥${invoiceData.total.toLocaleString()}-
+        </div>
+        <div style="font-size: 14px; color: #666; margin-top: 10px;">
+          （内消費税：¥${Math.floor(invoiceData.total - (invoiceData.total / 1.10)).toLocaleString()}）
+        </div>
+      </div>
+      
+      <div style="margin: 20px 0;">
+        <div style="margin: 10px 0;">上記正に領収いたしました</div>
+      </div>
+      
+      <div style="margin: 30px 0; text-align: right;">
+        <div style="margin: 5px 0;">発行日：${dateStr}</div>
+      </div>
+      
+      <div style="margin: 30px 0; padding-top: 20px; border-top: 2px solid #000;">
+        <div style="font-weight: bold; font-size: 18px; margin-bottom: 10px;">${receiptStoreName}</div>
+        <div style="font-size: 14px; margin: 5px 0;">${receiptAddress}</div>
+        <div style="font-size: 14px; margin: 5px 0;">${receiptPhone}</div>
+      </div>
+    </div>
+  `;
+  
+  await showReceiptModal(invoiceHtml, invoiceData, 'invoice');
+  console.log('✅ 領収書表示完了');
 }
 
 // モーダル表示関数
@@ -206,12 +292,12 @@ async function showReceiptModal(contentHtml, data, type) {
   
   modal.innerHTML = `
     <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
-      <div id="${contentId}" class="receiptContent">
+      <div id="${contentId}" class="receiptContent" style="padding: 0 20px;">
         ${contentHtml}
       </div>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
         <button onclick="issueReceiptQR('${contentId}')" style="flex: 1; padding: 18px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer;">
-          📱 QRコード発行
+          QRコード発行
         </button>
         <button onclick="closeReceiptModal('${modalId}')" style="flex: 1; padding: 18px; background: #666; color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer;">
           閉じる
@@ -384,5 +470,10 @@ async function openCashDrawer() {
     console.error('ドロア開放エラー:', error);
   }
 }
+
+// グローバル関数として登録
+window.showReceiptDisplay = showReceiptDisplay;
+window.showInvoiceDisplay = showInvoiceDisplay;
+window.openCashDrawer = openCashDrawer;
 
 console.log('✅ receipt-display-functions-firestore.js loaded');
