@@ -19,9 +19,16 @@
 async function showReceiptDisplay(receiptData) {
   console.log('📄 ==== レシート表示開始 ====');
   console.log('🔍 受信データ:', receiptData);
+  console.log('🔢 注文番号:', receiptData.orderNumber || receiptData.orderNum);
   
-  // 🔧 修正: 既存のモーダルを完全削除
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
+  // 🔧 修正: 既存のすべてのモーダルを完全削除（ユニークIDに対応）
+  const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
+  console.log('🗑️ 既存モーダル削除（showReceiptDisplay）:', existingModals.length);
+  existingModals.forEach(el => {
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  });
   
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
@@ -176,9 +183,16 @@ async function showReceiptDisplay(receiptData) {
 async function showInvoiceDisplay(invoiceData) {
   console.log('🧾 ==== 領収書表示開始 ====');
   console.log('🔍 受信データ:', invoiceData);
+  console.log('🔢 注文番号:', invoiceData.orderNumber || invoiceData.orderNum);
   
-  // 🔧 修正: 既存のモーダルを完全削除
-  document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
+  // 🔧 修正: 既存のすべてのモーダルを完全削除（ユニークIDに対応）
+  const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
+  console.log('🗑️ 既存モーダル削除（showInvoiceDisplay）:', existingModals.length);
+  existingModals.forEach(el => {
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  });
   
   // レシート設定をFirestoreから読み込み
   let receiptStoreName = '粉もん屋 八 下赤塚店';
@@ -503,17 +517,38 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     const imageData = canvas.toDataURL();
     const id = 'receipt_' + Date.now();
     
+    console.log('💾 LocalStorageに保存:', id);
+    
     // LocalStorageに保存
     localStorage.setItem(id, imageData);
     localStorage.setItem('latest_receipt_id', id);
     
-    // レシートモーダルを閉じる
-    document.querySelectorAll('#receiptDisplayModal').forEach(el => el.remove());
+    console.log('✅ LocalStorage保存完了');
+    
+    // 🔧 重要: すべてのレシートモーダルを閉じる（ユニークIDに対応）
+    const receiptModals = document.querySelectorAll('[id^="receiptDisplayModal"]');
+    console.log('🗑️ レシートモーダル削除:', receiptModals.length);
+    receiptModals.forEach(el => {
+      if (el.parentNode) {
+        el.parentNode.removeChild(el);
+      }
+    });
     
     // 現在のURLからベースURLを作成
     const currentUrl = window.location.href;
     const baseUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
     const qrUrl = baseUrl + 'receipt-view.html?id=' + id;
+    
+    console.log('🔗 QR URL:', qrUrl);
+    
+    // 🔧 既存のQRモーダルを削除
+    const existingQRModals = document.querySelectorAll('#qrDisplayModal');
+    console.log('🗑️ 既存QRモーダル削除:', existingQRModals.length);
+    existingQRModals.forEach(el => {
+      if (el.parentNode) {
+        el.parentNode.removeChild(el);
+      }
+    });
     
     // QRコード表示モーダルを作成
     const qrModal = document.createElement('div');
@@ -525,13 +560,23 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
         <h3 style="margin: 0 0 20px 0;">お客様用QRコード</h3>
         <div id="qrcode" style="margin: 20px auto; display: flex; justify-content: center; align-items: center;"></div>
         <p style="margin: 20px 0; color: #666;">お客様にスキャンしていただいてください</p>
-        <button onclick="document.getElementById('qrDisplayModal').remove();" style="padding: 15px 30px; background: #666; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
+        <button onclick="closeQRModal()" style="padding: 15px 30px; background: #666; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
           閉じる
         </button>
       </div>
     `;
     
     document.body.appendChild(qrModal);
+    
+    // QRモーダルを閉じる関数をグローバルに定義
+    window.closeQRModal = function() {
+      console.log('🚪 QRモーダルを閉じます');
+      const qrModal = document.getElementById('qrDisplayModal');
+      if (qrModal && qrModal.parentNode) {
+        qrModal.parentNode.removeChild(qrModal);
+        console.log('✅ QRモーダル削除完了');
+      }
+    };
     
     // QRコード生成
     setTimeout(() => {
