@@ -192,6 +192,7 @@ async function showReceiptDisplay(receiptData) {
 async function showInvoiceDisplay(invoiceData) {
   console.log('🧾 ==== 領収書表示開始 ====');
   console.log('🔍 受信データ:', invoiceData);
+  console.log('🔢 注文番号:', invoiceData.orderNumber || invoiceData.orderNum);
   
   const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
   console.log('🗑️ 既存モーダル削除:', existingModals.length);
@@ -203,6 +204,7 @@ async function showInvoiceDisplay(invoiceData) {
   let receiptStoreName = '粉もん屋 八 下赤塚店';
   let receiptAddress = '東京都板橋区赤塚2-2-4';
   let receiptPhone = 'TEL: 03-6904-2888';
+  let sealImageData = '';
   
   try {
     const storeId = window.currentStoreId;
@@ -236,43 +238,119 @@ async function showInvoiceDisplay(invoiceData) {
       if (settings.phone) {
         receiptPhone = 'TEL: ' + settings.phone;
       }
+      
+      // 電子印鑑データを取得
+      if (settings.sealImageData) {
+        sealImageData = settings.sealImageData;
+      } else if (settings.sealImage) {
+        sealImageData = settings.sealImage;
+      } else if (settings.seal) {
+        sealImageData = settings.seal;
+      } else if (settings.stampImage) {
+        sealImageData = settings.stampImage;
+      }
+    }
+    
+    // LocalStorageからも試す
+    if (!sealImageData) {
+      const localSealKeys = ['companySealData', 'sealImageData', 'sealImage', 'stampData'];
+      for (const key of localSealKeys) {
+        const localSeal = localStorage.getItem(key);
+        if (localSeal) {
+          sealImageData = localSeal;
+          break;
+        }
+      }
     }
   } catch (error) {
-    console.error('❌ レシート設定読み込みエラー:', error);
+    console.error('❌ 領収書設定読み込みエラー:', error);
   }
+  
+  console.log('📋 電子印鑑データ:', sealImageData ? '取得済み' : 'なし');
   
   const now = new Date(invoiceData.timestamp || Date.now());
   const dateStr = now.getFullYear() + '年' + 
                   String(now.getMonth() + 1).padStart(2, '0') + '月' + 
                   String(now.getDate()).padStart(2, '0') + '日';
   
+  let orderNum = invoiceData.orderNumber || invoiceData.orderNum || 'なし';
+  
+  // 消費税計算（内税）
+  let tax8Total = invoiceData.tax8Total || 0;
+  let tax10Total = invoiceData.tax10Total || 0;
+  let totalTax = 0;
+  
+  if (tax8Total === 0 && tax10Total === 0 && invoiceData.total > 0) {
+    const totalExcludingTax = Math.floor(invoiceData.total / 1.10);
+    totalTax = invoiceData.total - totalExcludingTax;
+  } else {
+    const tax8Excluded = Math.floor(tax8Total / 1.08);
+    const tax10Excluded = Math.floor(tax10Total / 1.10);
+    const tax8Amount = tax8Total - tax8Excluded;
+    const tax10Amount = tax10Total - tax10Excluded;
+    totalTax = tax8Amount + tax10Amount;
+  }
+  
+  // 電子印鑑HTML
+  let sealHtml = '';
+  if (sealImageData) {
+    sealHtml = `
+      <div style="position: absolute; top: 20px; right: 20px; width: 80px; height: 80px;">
+        <img src="${sealImageData}" style="width: 100%; height: 100%; object-fit: contain;" alt="電子印鑑">
+      </div>
+    `;
+  }
+  
   const invoiceHtml = `
-    <div style="font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', sans-serif; padding: 20px 30px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <div style="font-size: 28px; font-weight: bold; margin-bottom: 20px;">領収書</div>
+    <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 20px 30px;">
+      <div style="text-align: center; border-bottom: 3px double #000; padding-bottom: 20px; margin-bottom: 20px;">
+        <h2 style="margin: 0; font-size: 28px; letter-spacing: 8px;">領収書</h2>
       </div>
       
-      <div style="margin: 30px 0; padding: 20px; border: 2px solid #000;">
-        <div style="font-size: 24px; font-weight: bold; margin-bottom: 10px;">
-          金額：¥${invoiceData.total.toLocaleString()}-
+      <div style="margin: 30px 0;">
+        <div style="font-size: 14px; margin-bottom: 10px;">お客様</div>
+        <div style="border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 30px;">
+          <span style="font-size: 18px;">　　　　　　　　　　　</span>
+          <span style="font-size: 14px;">様</span>
         </div>
-        <div style="font-size: 14px; color: #666; margin-top: 10px;">
-          （内消費税：¥${Math.floor(invoiceData.total - (invoiceData.total / 1.10)).toLocaleString()}）
+      </div>
+      
+      <div style="text-align: center; margin: 30px 0;">
+        <div style="font-size: 16px; margin-bottom: 10px;">下記の通り領収いたしました</div>
+        <div style="border: 2px solid #000; padding: 20px; margin: 20px 0;">
+          <div style="font-size: 14px; margin-bottom: 5px;">金額</div>
+          <div style="font-size: 36px; font-weight: bold;">¥${invoiceData.total.toLocaleString()}</div>
+          <div style="font-size: 14px; margin-top: 10px; color: #666;">（内消費税 ¥${totalTax.toLocaleString()}）</div>
         </div>
       </div>
       
-      <div style="margin: 20px 0;">
-        <div style="margin: 10px 0;">上記正に領収いたしました</div>
+      <div style="margin: 30px 0; font-size: 14px;">
+        <div style="margin: 10px 0;">
+          <span style="display: inline-block; width: 100px;">但し</span>
+          <span>飲食代として</span>
+        </div>
+        <div style="margin: 10px 0;">
+          <span style="display: inline-block; width: 100px;">注文番号</span>
+          <span>#${orderNum}</span>
+        </div>
+        ${invoiceData.tableNumber && invoiceData.tableNumber !== '即会計' ? `<div style="margin: 10px 0;">
+          <span style="display: inline-block; width: 100px;">テーブル</span>
+          <span>${invoiceData.tableNumber}</span>
+        </div>` : ''}
       </div>
       
-      <div style="margin: 30px 0; text-align: right;">
-        <div style="margin: 5px 0;">発行日：${dateStr}</div>
+      <div style="text-align: right; font-size: 14px; margin: 40px 0 20px 0;">
+        <div style="margin: 5px 0;">${dateStr}</div>
       </div>
       
-      <div style="margin: 30px 0; padding-top: 20px; border-top: 2px solid #000;">
-        <div style="font-weight: bold; font-size: 18px; margin-bottom: 10px;">${receiptStoreName}</div>
-        <div style="font-size: 14px; margin: 5px 0;">${receiptAddress}</div>
-        <div style="font-size: 14px; margin: 5px 0;">${receiptPhone}</div>
+      <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 0; position: relative;">
+        ${sealHtml}
+        <div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>
+        <div style="text-align: center; font-size: 12px; color: #666;">
+          <div>${receiptAddress}</div>
+          <div style="margin-top: 5px;">${receiptPhone}</div>
+          <div style="margin-top: 10px;">※この領収書は再発行できません</div>
+        </div>
       </div>
     </div>
   `;
