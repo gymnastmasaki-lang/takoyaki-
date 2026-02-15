@@ -24,6 +24,7 @@ async function showReceiptDisplay(receiptData) {
   console.log('📄 ==== レシート表示開始 ====');
   console.log('🔍 受信データ:', receiptData);
   console.log('🔢 注文番号:', receiptData.orderNumber || receiptData.orderNum);
+  console.log('🛍️ レジ袋情報チェック - bagNeeded:', receiptData.bagNeeded, 'bagQuantity:', receiptData.bagQuantity, 'bagPrice:', receiptData.bagPrice);
   
   // 既存のモーダルを削除
   const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
@@ -205,8 +206,14 @@ async function showReceiptDisplay(receiptData) {
   }
   
   // 🛍️ レジ袋情報を追加
+  console.log('🛍️ レジ袋情報チェック開始');
+  console.log('  - receiptData.bagNeeded:', receiptData.bagNeeded);
+  console.log('  - receiptData.bagQuantity:', receiptData.bagQuantity);
+  console.log('  - receiptData.bagPrice:', receiptData.bagPrice);
+  
   if (receiptData.bagNeeded && receiptData.bagQuantity > 0) {
     const bagPrice = receiptData.bagPrice || 0;
+    console.log('✅ レジ袋を表示します - 枚数:', receiptData.bagQuantity, '価格:', bagPrice);
     itemsHtml += `
       <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
         <div style="font-size: 13px; color: #333; margin-bottom: 2px; display: flex; justify-content: space-between;">
@@ -215,7 +222,8 @@ async function showReceiptDisplay(receiptData) {
         </div>
       </div>
     `;
-    console.log('🛍️ レジ袋情報を追加:', receiptData.bagQuantity + '枚, ¥' + bagPrice);
+  } else {
+    console.log('⚠️ レジ袋は表示されません - 条件を満たしていません');
   }
   
   // 消費税計算
