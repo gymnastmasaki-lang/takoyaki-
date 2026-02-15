@@ -109,9 +109,37 @@
   </div>
 
   <script>
+    // 🔧 キャッシュ完全防止: ページを強制的にリロード（初回のみ）
+    (function() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const hasReloaded = sessionStorage.getItem('receipt_reloaded');
+      
+      // タイムスタンプパラメータがない、またはリロード済みでない場合
+      if (!urlParams.has('t') && !hasReloaded) {
+        sessionStorage.setItem('receipt_reloaded', 'true');
+        const receiptId = urlParams.get('id');
+        if (receiptId) {
+          // タイムスタンプを付けてリロード
+          window.location.href = window.location.pathname + '?id=' + receiptId + '&t=' + Date.now();
+        }
+      }
+    })();
+  </script>
+  <script>
     // 🔧 修正: ページロード時に即座にコンテンツをクリア
     const displayDiv = document.getElementById('receiptDisplay');
-    displayDiv.innerHTML = '<div class="loading-message">読み込み中...</div>';
+    
+    // 完全にクリア
+    displayDiv.innerHTML = '';
+    displayDiv.textContent = '';
+    
+    // ローディング表示
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'loading-message';
+    loadingDiv.textContent = '読み込み中...';
+    displayDiv.appendChild(loadingDiv);
+    
+    console.log('🧹 表示エリアをクリアしました');
     
     // URLパラメータからIDを取得
     const urlParams = new URLSearchParams(window.location.search);
@@ -127,11 +155,19 @@
     // 🔧 修正: レシート画像を読み込み（完全再構築版）
     function loadReceipt() {
       console.log('🔄 レシート読み込み開始');
+      console.log('⏰ 現在時刻:', new Date().toISOString());
       
       const downloadBtn = document.getElementById('downloadBtn');
       
-      // 🔧 重要: 表示エリアを完全にクリア
-      displayDiv.innerHTML = '<div class="loading-message">データ取得中...</div>';
+      // 🔧 重要: 表示エリアを完全にクリア（古い画像を完全削除）
+      displayDiv.innerHTML = '';
+      displayDiv.textContent = '';
+      
+      const loadingMsg = document.createElement('div');
+      loadingMsg.className = 'loading-message';
+      loadingMsg.textContent = 'データ取得中...';
+      displayDiv.appendChild(loadingMsg);
+      
       receiptImageData = null;
       
       if (!receiptId) {
@@ -221,15 +257,22 @@
       }
       
       console.log('✅ データ取得成功（サイズ:', receiptImageData.length, '文字）');
+      console.log('🎯 受信したID:', receiptId);
+      console.log('📊 データプレフィックス:', receiptImageData.substring(0, 50));
       
       // 🔧 重要: 古い画像を完全に削除してから新しい画像を作成
       displayDiv.innerHTML = '';
+      displayDiv.textContent = '';
       
       // 画像を表示
       const img = document.createElement('img');
-      img.src = receiptImageData;
+      // キャッシュバスター: タイムスタンプを追加
+      const timestamp = Date.now();
+      img.src = receiptImageData + '#' + timestamp;
       img.style.width = '100%';
       img.style.borderRadius = '8px';
+      img.setAttribute('data-receipt-id', receiptId);
+      img.setAttribute('data-loaded-at', timestamp);
       
       // 🔧 画像読み込みエラーハンドリング
       img.onerror = function() {
@@ -240,6 +283,9 @@
       // 🔧 画像読み込み成功時のログ
       img.onload = function() {
         console.log('✅ 画像の読み込み成功');
+        console.log('📏 画像サイズ:', img.naturalWidth, 'x', img.naturalHeight);
+        console.log('🆔 表示中のレシートID:', img.getAttribute('data-receipt-id'));
+        console.log('⏰ 読み込み時刻:', new Date(parseInt(img.getAttribute('data-loaded-at'))).toISOString());
       };
       
       displayDiv.appendChild(img);

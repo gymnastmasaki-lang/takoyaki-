@@ -539,7 +539,9 @@ window.issueReceiptQR = async function issueReceiptQR(contentId) {
     // 現在のURLからベースURLを作成
     const currentUrl = window.location.href;
     const baseUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
-    const qrUrl = baseUrl + 'receipt-view.html?id=' + id;
+    // タイムスタンプを追加してキャッシュを防止
+    const timestamp = Date.now();
+    const qrUrl = baseUrl + 'receipt-view.html?id=' + id + '&t=' + timestamp;
     
     console.log('🔗 QR URL:', qrUrl);
     
