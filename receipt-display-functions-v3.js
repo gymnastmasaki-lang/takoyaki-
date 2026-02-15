@@ -89,21 +89,42 @@ async function showReceiptDisplay(receiptData) {
   let orderNum = receiptData.orderNumber || receiptData.orderNum || 'なし';
   console.log('🔢 注文番号:', orderNum);
   
-  // 商品リストHTML生成
+  // 商品リストHTML生成（トッピング価格を明示）
   let itemsHtml = '';
   if (receiptData.items && Array.isArray(receiptData.items) && receiptData.items.length > 0) {
     receiptData.items.forEach(item => {
-      const subtotal = item.price * item.quantity;
+      // 基本商品の表示
+      const basePrice = item.basePrice || item.price;
       itemsHtml += `
         <div style="display: flex; justify-content: space-between; margin: 8px 0; padding: 8px 0; border-bottom: 1px dashed #ddd;">
           <div style="flex: 1;">
             <div style="font-weight: bold;">${item.name}</div>
-            <div style="font-size: 12px; color: #666;">トッピング: ${item.toppings || 'なし'}</div>
-            <div style="font-size: 12px; color: #666;">単価: ¥${item.price.toLocaleString()} × ${item.quantity}</div>
+            <div style="font-size: 12px; color: #666;">単価: ¥${basePrice.toLocaleString()} × ${item.quantity}</div>
           </div>
-          <div style="font-weight: bold; white-space: nowrap;">¥${subtotal.toLocaleString()}</div>
+          <div style="font-weight: bold; white-space: nowrap;">¥${(basePrice * item.quantity).toLocaleString()}</div>
         </div>
       `;
+      
+      // トッピングがある場合は個別に表示
+      if (item.toppingsList && Array.isArray(item.toppingsList) && item.toppingsList.length > 0) {
+        item.toppingsList.forEach(topping => {
+          const toppingTotal = topping.price * item.quantity;
+          itemsHtml += `
+            <div style="display: flex; justify-content: space-between; margin: 4px 0 4px 20px; padding: 4px 0;">
+              <div style="flex: 1;">
+                <div style="font-size: 12px; color: #666;">└ ${topping.name}</div>
+                <div style="font-size: 11px; color: #999;">¥${topping.price.toLocaleString()} × ${item.quantity}</div>
+              </div>
+              <div style="font-size: 12px; color: #666; white-space: nowrap;">¥${toppingTotal.toLocaleString()}</div>
+            </div>
+          `;
+        });
+      } else if (item.toppings && item.toppings !== 'なし' && item.toppings !== '') {
+        // 古い形式のトッピング表示（価格情報がない場合）
+        itemsHtml += `
+          <div style="font-size: 12px; color: #666; margin-left: 20px;">└ トッピング: ${item.toppings}</div>
+        `;
+      }
     });
   }
   
