@@ -1,4 +1,4 @@
-// ========== レシート・領収書表示システム（Firestore版）==========
+// ========== レシート・領収書表示システム（Firestore版）v5 ==========
 
 // QRCodeライブラリの読み込み確認と動的ロード
 (function() {
@@ -89,7 +89,7 @@ async function showReceiptDisplay(receiptData) {
   let orderNum = receiptData.orderNumber || receiptData.orderNum || 'なし';
   console.log('🔢 注文番号:', orderNum);
   
-  // 商品リストHTML生成（トッピングを縦に個別表示）
+  // 商品リストHTML生成（基本価格とトッピングを縦に個別表示し、最後に合計を表示）
   let itemsHtml = '';
   if (receiptData.items && Array.isArray(receiptData.items) && receiptData.items.length > 0) {
     receiptData.items.forEach(item => {
@@ -97,25 +97,45 @@ async function showReceiptDisplay(receiptData) {
       
       itemsHtml += `
         <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-            <div style="font-weight: bold; font-size: 14px;">${item.name}</div>
-            <div style="font-weight: bold;">¥${itemTotal.toLocaleString()}</div>
-          </div>
+          <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">${item.name}</div>
       `;
       
       // 基本価格を計算
       const basePrice = item.basePrice || item.price;
-      const basePricePerUnit = item.toppingPrice ? (basePrice - item.toppingPrice) : basePrice;
+      let basePricePerUnit = basePrice;
+      
+      // トッピング詳細がある場合、トッピング価格の合計を計算
+      let toppingTotalPrice = 0;
+      if (item.toppingDetails && Array.isArray(item.toppingDetails) && item.toppingDetails.length > 0) {
+        item.toppingDetails.forEach(topping => {
+          toppingTotalPrice += topping.price || 0;
+        });
+      } else if (item.toppingsList && Array.isArray(item.toppingsList) && item.toppingsList.length > 0) {
+        item.toppingsList.forEach(topping => {
+          toppingTotalPrice += topping.price || 0;
+        });
+      } else if (item.toppingPrice) {
+        toppingTotalPrice = item.toppingPrice;
+      }
+      
+      // 基本価格からトッピング価格を引く
+      basePricePerUnit = basePrice - toppingTotalPrice;
       
       // 基本価格を表示
-      itemsHtml += `<div style="font-size: 13px; color: #333; margin-bottom: 2px;">¥${basePricePerUnit.toLocaleString()}</div>`;
+      itemsHtml += `
+        <div style="font-size: 13px; color: #333; margin-bottom: 2px; display: flex; justify-content: space-between;">
+          <span>${item.name}</span>
+          <span>¥${basePricePerUnit.toLocaleString()}</span>
+        </div>
+      `;
       
       // toppingDetails配列がある場合（新POS形式）
       if (item.toppingDetails && Array.isArray(item.toppingDetails) && item.toppingDetails.length > 0) {
         item.toppingDetails.forEach(topping => {
           itemsHtml += `
-            <div style="font-size: 13px; color: #333; margin-top: 2px;">
-              ${topping.optionName} ¥${topping.price.toLocaleString()}
+            <div style="font-size: 13px; color: #333; margin-top: 2px; display: flex; justify-content: space-between;">
+              <span>${topping.optionName}</span>
+              <span>¥${topping.price.toLocaleString()}</span>
             </div>
           `;
         });
@@ -124,8 +144,9 @@ async function showReceiptDisplay(receiptData) {
       else if (item.toppingsList && Array.isArray(item.toppingsList) && item.toppingsList.length > 0) {
         item.toppingsList.forEach(topping => {
           itemsHtml += `
-            <div style="font-size: 13px; color: #333; margin-top: 2px;">
-              ${topping.name} ¥${topping.price.toLocaleString()}
+            <div style="font-size: 13px; color: #333; margin-top: 2px; display: flex; justify-content: space-between;">
+              <span>${topping.name}</span>
+              <span>¥${topping.price.toLocaleString()}</span>
             </div>
           `;
         });
@@ -134,6 +155,14 @@ async function showReceiptDisplay(receiptData) {
       else if (item.toppings && item.toppings !== 'なし' && item.toppings !== '') {
         itemsHtml += `<div style="font-size: 12px; color: #666; margin-top: 4px; font-style: italic;">トッピング: ${item.toppings}</div>`;
       }
+      
+      // 合計金額を表示
+      itemsHtml += `
+        <div style="font-size: 14px; font-weight: bold; margin-top: 8px; padding-top: 6px; border-top: 1px solid #eee; display: flex; justify-content: space-between;">
+          <span>合計</span>
+          <span>¥${itemTotal.toLocaleString()}</span>
+        </div>
+      `;
       
       itemsHtml += `</div>`;
     });
@@ -156,47 +185,43 @@ async function showReceiptDisplay(receiptData) {
     totalTax = tax8Amount + tax10Amount;
   }
   
-  const tax8Excluded = tax8Total > 0 ? Math.floor(tax8Total / 1.08) : 0;
-  const tax10Excluded = tax10Total > 0 ? Math.floor(tax10Total / 1.10) : 0;
-  const tax8Amount = tax8Total > 0 ? tax8Total - tax8Excluded : 0;
-  const tax10Amount = tax10Total > 0 ? tax10Total - tax10Excluded : 0;
+  const tax8Excluded = Math.floor(tax8Total / 1.08);
+  const tax10Excluded = Math.floor(tax10Total / 1.10);
+  const tax8Amount = tax8Total - tax8Excluded;
+  const tax10Amount = tax10Total - tax10Excluded;
   
   const receiptHtml = `
-    <div style="font-family: 'Courier New', monospace; text-align: center; padding: 0 15px;">
-      <div style="border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 15px;">
-        <div style="font-weight: bold; font-size: 20px; margin-bottom: 5px;">${receiptStoreName}</div>
-        <div style="font-size: 12px;">${receiptAddress}</div>
-        <div style="font-size: 12px;">${receiptPhone}</div>
+    <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 15px; max-width: 400px;">
+      <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px;">
+        <div style="font-size: 20px; font-weight: bold; margin-bottom: 5px;">${receiptStoreName}</div>
+        <div style="font-size: 11px; color: #666;">${receiptAddress}</div>
+        <div style="font-size: 11px; color: #666;">${receiptPhone}</div>
       </div>
       
-      <div style="text-align: left; margin: 20px 0;">
-        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>日時:</span>
-          <span>${dateStr}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>注文番号:</span>
-          <span style="font-weight: bold; font-size: 18px;">#${orderNum}</span>
-        </div>
-        ${receiptData.tableNumber && receiptData.tableNumber !== '即会計' ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>テーブル:</span>
-          <span style="font-weight: bold;">${receiptData.tableNumber}</span>
-        </div>` : ''}
+      <div style="text-align: center; margin: 15px 0;">
+        <div style="font-size: 12px; color: #666;">日時: ${dateStr}</div>
+        <div style="font-size: 12px; color: #666; margin-top: 3px;">注文番号: #${orderNum}</div>
+        ${receiptData.tableNumber && receiptData.tableNumber !== '即会計' ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">テーブル: ${receiptData.tableNumber}</div>` : ''}
+        ${receiptData.paymentMethod ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">支払方法: ${receiptData.paymentMethod}</div>` : ''}
       </div>
       
-      <div style="border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 15px 0; margin: 15px 0;">
-        <div style="text-align: left;">
-          ${itemsHtml}
-        </div>
+      <div style="border-top: 1px solid #ddd; padding-top: 15px; margin-bottom: 15px;">
+        ${itemsHtml}
       </div>
       
-      <div style="text-align: left; font-size: 14px; margin: 15px 0; padding: 10px 0; border-bottom: 1px solid #ddd;">
+      <div style="border-top: 2px solid #000; padding-top: 15px; margin-top: 20px; font-size: 13px;">
         ${tax8Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>8%対象: ¥${tax8Excluded.toLocaleString()}</span>
+          <span>8%対象額:</span>
+          <span>¥${tax8Excluded.toLocaleString()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
           <span>内税: ¥${tax8Amount.toLocaleString()}</span>
         </div>` : ''}
         ${tax10Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>10%対象: ¥${tax10Excluded.toLocaleString()}</span>
+          <span>10%対象額:</span>
+          <span>¥${tax10Excluded.toLocaleString()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
           <span>内税: ¥${tax10Amount.toLocaleString()}</span>
         </div>` : ''}
         <div style="display: flex; justify-content: space-between; margin: 5px 0; font-weight: bold;">
@@ -323,11 +348,11 @@ async function showInvoiceDisplay(invoiceData) {
     totalTax = tax8Amount + tax10Amount;
   }
   
-  // 電子印鑑HTML
+  // 電子印鑑HTML（修正版：店舗名の右に配置）
   let sealHtml = '';
   if (sealImageData) {
     sealHtml = `
-      <div style="position: absolute; top: 20px; right: 20px; width: 80px; height: 80px;">
+      <div style="position: absolute; top: 0; right: 20px; width: 80px; height: 80px;">
         <img src="${sealImageData}" style="width: 100%; height: 100%; object-fit: contain;" alt="電子印鑑">
       </div>
     `;
@@ -375,13 +400,17 @@ async function showInvoiceDisplay(invoiceData) {
         <div style="margin: 5px 0;">${dateStr}</div>
       </div>
       
-      <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 0; position: relative;">
-        ${sealHtml}
-        <div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>
-        <div style="text-align: center; font-size: 12px; color: #666;">
-          <div>${receiptAddress}</div>
-          <div style="margin-top: 5px;">${receiptPhone}</div>
-          <div style="margin-top: 10px;">※この領収書は再発行できません</div>
+      <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 0;">
+        <div style="position: relative; min-height: 100px;">
+          ${sealHtml}
+          <div style="padding-right: ${sealImageData ? '100px' : '0'};">
+            <div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>
+            <div style="text-align: center; font-size: 12px; color: #666;">
+              <div>${receiptAddress}</div>
+              <div style="margin-top: 5px;">${receiptPhone}</div>
+              <div style="margin-top: 10px;">※この領収書は再発行できません</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -418,172 +447,151 @@ async function showReceiptModal(contentHtml, data, type) {
   
   document.body.appendChild(modal);
   
-  window.currentReceiptData = data;
-  window.currentReceiptData._contentId = contentId;
+  // モーダルの外側クリックで閉じる
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeReceiptModal(modalId);
+    }
+  });
   
-  window.closeReceiptModal = function(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) modal.remove();
-  };
+  console.log('✅ モーダル表示完了');
 }
 
-// 🎯 完全に修正されたQRコード発行関数（Firestore版）
-window.issueReceiptQR = async function issueReceiptQR(contentId) {
-  console.log('📱 ==== QRコード生成開始（Firestore版） ====');
-  console.log('⏰ 時刻:', new Date().toISOString());
+// QRコード発行関数
+async function issueReceiptQR(contentId) {
+  console.log('🔄 QRコード発行開始');
   
-  const elementId = contentId || (window.currentReceiptData && window.currentReceiptData._contentId) || 'receiptContent';
-  const element = document.getElementById(elementId);
-  
-  if (!element) {
-    alert('レシート要素が見つかりません');
-    console.error('❌ レシート要素が見つかりません');
-    return;
-  }
-  
-  if (typeof QRCode === 'undefined' || typeof html2canvas === 'undefined') {
-    alert('ライブラリが読み込まれていません。ページを再読み込みしてください。');
+  const receiptContent = document.getElementById(contentId);
+  if (!receiptContent) {
+    alert('レシート内容が見つかりません');
     return;
   }
   
   try {
-    // 🎯 レシート画像をキャプチャ
-    console.log('📸 キャプチャ開始');
-    const canvas = await html2canvas(element, {
-      backgroundColor: '#ffffff',
+    console.log('📸 Canvas生成中...');
+    const canvas = await html2canvas(receiptContent, {
       scale: 2,
+      backgroundColor: '#ffffff',
+      logging: false,
       useCORS: true,
-      allowTaint: true,
-      logging: false
+      allowTaint: true
     });
     
-    const imageData = canvas.toDataURL();
-    
-    // 🔥 重要: Firestoreに保存（各レシートが独立したドキュメント）
-    const receiptId = 'receipt_' + Date.now() + '_' + Math.random().toString(36).substring(7);
-    
-    console.log('💾 Firestoreに保存開始:', receiptId);
+    const imageData = canvas.toDataURL('image/png');
+    console.log('✅ Canvas生成完了');
+    console.log('📏 画像サイズ:', canvas.width, 'x', canvas.height);
     
     // Firestoreに保存
-    await window.setDoc(window.doc(window.db, 'receipt_images', receiptId), {
+    const receiptId = 'receipt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    const receiptRef = window.doc(window.db, 'receipt_images', receiptId);
+    
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+    
+    await window.setDoc(receiptRef, {
       imageData: imageData,
-      createdAt: new Date(),
-      orderNumber: window.currentReceiptData?.orderNumber || window.currentReceiptData?.orderNum || 'unknown',
-      total: window.currentReceiptData?.total || 0,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7日後に期限切れ
+      createdAt: window.Timestamp.now(),
+      expiresAt: window.Timestamp.fromDate(expiresAt)
     });
     
-    console.log('✅ Firestore保存完了:', receiptId);
+    console.log('✅ Firestoreに保存完了:', receiptId);
     
-    // 全てのレシートモーダルを閉じる
-    const receiptModals = document.querySelectorAll('[id^="receiptDisplayModal"]');
-    console.log('🗑️ レシートモーダル削除:', receiptModals.length);
-    receiptModals.forEach(el => el.remove());
-    
-    // QRコードURL生成
-    const currentUrl = window.location.href;
-    const baseUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
-    const qrUrl = baseUrl + 'receipt-view-firestore.html?id=' + receiptId;
-    
+    // QRコード表示用のURLを生成
+    const qrUrl = `https://gymnastmasaki-lang.github.io/takoyaki-/receipt-view-firestore.html?id=${receiptId}`;
     console.log('🔗 QR URL:', qrUrl);
     
-    // 既存のQRモーダルを削除
-    const existingQRModals = document.querySelectorAll('#qrDisplayModal');
-    existingQRModals.forEach(el => el.remove());
+    // QRコード表示
+    await showQRCodeModal(qrUrl, imageData);
     
-    // QRコード表示モーダルを作成
-    const qrModal = document.createElement('div');
-    qrModal.id = 'qrDisplayModal';
-    qrModal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.9) !important; z-index: 9999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
-    
-    qrModal.innerHTML = `
-      <div style="background: white; border-radius: 16px; padding: 30px; text-align: center;">
-        <h3 style="margin: 0 0 20px 0;">お客様用QRコード</h3>
-        <div id="qrcode" style="margin: 20px auto; display: flex; justify-content: center; align-items: center;"></div>
-        <p style="margin: 20px 0; color: #666; font-size: 14px;">
-          レシートID: ${receiptId}<br>
-          注文番号: #${window.currentReceiptData?.orderNumber || window.currentReceiptData?.orderNum || '---'}
-        </p>
-        <button onclick="closeQRModal()" style="padding: 15px 30px; background: #666; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
+  } catch (error) {
+    console.error('❌ QRコード発行エラー:', error);
+    alert('QRコード発行に失敗しました: ' + error.message);
+  }
+}
+
+// QRコード表示モーダル
+async function showQRCodeModal(qrUrl, imageData) {
+  console.log('🎨 QRコードモーダル表示');
+  
+  const existingQRModal = document.getElementById('qrDisplayModal');
+  if (existingQRModal) {
+    existingQRModal.remove();
+  }
+  
+  const qrModal = document.createElement('div');
+  qrModal.id = 'qrDisplayModal';
+  qrModal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.9) !important; z-index: 99999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
+  
+  qrModal.innerHTML = `
+    <div style="background: white; border-radius: 20px; padding: 40px; max-width: 500px; width: 90%; text-align: center;">
+      <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
+      <div id="qrCodeContainer" style="display: flex; justify-content: center; margin: 20px 0;"></div>
+      <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
+      <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
+      <div style="margin-top: 30px; display: flex; gap: 15px;">
+        <button onclick="downloadReceiptImage('${imageData}')" style="flex: 1; padding: 18px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
+          画像をダウンロード
+        </button>
+        <button onclick="closeQRModal()" style="flex: 1; padding: 18px; background: #666; color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
           閉じる
         </button>
       </div>
-    `;
-    
-    document.body.appendChild(qrModal);
-    
-    window.closeQRModal = function() {
-      const qrModal = document.getElementById('qrDisplayModal');
-      if (qrModal) qrModal.remove();
-    };
-    
-    // QRコード生成
-    setTimeout(() => {
-      const qrcodeElement = document.getElementById('qrcode');
-      if (qrcodeElement) {
-        qrcodeElement.innerHTML = '';
-        new QRCode(qrcodeElement, {
-          text: qrUrl,
-          width: 256,
-          height: 256,
-          colorDark: '#000000',
-          colorLight: '#ffffff',
-          correctLevel: QRCode.CorrectLevel.H
-        });
-        
-        setTimeout(() => {
-          const qrCanvas = qrcodeElement.querySelector('canvas');
-          if (qrCanvas) qrCanvas.style.display = 'none';
-          const qrImg = qrcodeElement.querySelector('img');
-          if (qrImg) {
-            qrImg.style.display = 'block';
-            qrImg.style.margin = '0 auto';
-          }
-        }, 50);
-        
-        console.log('✅ QRコード生成完了');
-      }
-    }, 100);
-    
-  } catch (error) {
-    console.error('❌ QRコード生成エラー:', error);
-    alert('QRコード生成に失敗しました: ' + error.message);
-  }
-};
-
-// Wi-Fiドロア開放
-async function openCashDrawer() {
-  const drawerIp = localStorage.getItem('drawerIp') || '192.168.1.100';
-  const duration = localStorage.getItem('drawerDuration') || '500';
+    </div>
+  `;
   
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    
-    const response = await fetch(`http://${drawerIp}/open`, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ duration: parseInt(duration) })
+  document.body.appendChild(qrModal);
+  
+  // QRコードを生成
+  await new Promise(resolve => setTimeout(resolve, 100));
+  
+  const qrContainer = document.getElementById('qrCodeContainer');
+  if (qrContainer && typeof QRCode !== 'undefined') {
+    new QRCode(qrContainer, {
+      text: qrUrl,
+      width: 256,
+      height: 256,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.H
     });
-    
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    console.log('✅ QRコード生成完了');
+  } else {
+    console.error('❌ QRCodeライブラリが読み込まれていません');
+  }
+  
+  // モーダルの外側クリックで閉じる
+  qrModal.addEventListener('click', function(e) {
+    if (e.target === qrModal) {
+      closeQRModal();
     }
-    
-    console.log('ドロアを開きました');
-  } catch (error) {
-    console.error('ドロア開放エラー:', error);
+  });
+}
+
+// 画像ダウンロード関数
+function downloadReceiptImage(imageData) {
+  const link = document.createElement('a');
+  link.download = 'receipt_' + Date.now() + '.png';
+  link.href = imageData;
+  link.click();
+  console.log('📥 画像ダウンロード実行');
+}
+
+// モーダルを閉じる
+function closeReceiptModal(modalId) {
+  const modal = document.getElementById(modalId);
+  if (modal) {
+    modal.remove();
+    console.log('🗑️ モーダル削除:', modalId);
   }
 }
 
-// グローバル関数として登録
-window.showReceiptDisplay = showReceiptDisplay;
-window.showInvoiceDisplay = showInvoiceDisplay;
-window.openCashDrawer = openCashDrawer;
+function closeQRModal() {
+  const qrModal = document.getElementById('qrDisplayModal');
+  if (qrModal) {
+    qrModal.remove();
+    console.log('🗑️ QRモーダル削除');
+  }
+}
 
-console.log('✅ receipt-display-functions-firestore.js loaded');
+console.log('✅ receipt-display-functions-v5.js 読み込み完了');
