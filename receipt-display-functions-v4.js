@@ -652,12 +652,21 @@ async function showQRCodeModal(qrUrl, imageData) {
         if (canvas || img) {
           console.log('🎨 QR要素を発見:', canvas ? 'canvas' : 'img');
           
-          // 全ての子要素のスタイルをリセット
-          Array.from(qrContainer.children).forEach(child => {
-            child.removeAttribute('style');
-            child.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: relative !important; z-index: 1 !important;';
-            console.log('✅ 子要素のスタイル設定:', child.tagName);
-          });
+          // imgがある場合はimgのみ表示、canvasは非表示
+          // imgがない場合のみcanvasを表示
+          if (img) {
+            // canvasを非表示
+            if (canvas) {
+              canvas.style.display = 'none';
+            }
+            // imgのみ表示
+            img.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: relative !important; z-index: 1 !important;';
+            console.log('✅ Img要素のみを表示しました');
+          } else if (canvas) {
+            // imgがない場合はcanvasを表示
+            canvas.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: relative !important; z-index: 1 !important;';
+            console.log('✅ Canvas要素を表示しました');
+          }
           
           // 親要素のスタイルも再設定
           qrContainer.style.cssText = 'display: block !important; text-align: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important; padding: 10px !important;';
