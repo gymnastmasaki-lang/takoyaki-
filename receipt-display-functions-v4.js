@@ -129,10 +129,6 @@ async function showReceiptDisplay(receiptData) {
       itemsHtml += `</div>`;
     });
   }
-      
-      itemsHtml += `</div>`;
-    });
-  }
   
   // 消費税計算
   let tax8Total = receiptData.tax8Total || 0;
