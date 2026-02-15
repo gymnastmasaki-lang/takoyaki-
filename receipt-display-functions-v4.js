@@ -89,7 +89,7 @@ async function showReceiptDisplay(receiptData) {
   let orderNum = receiptData.orderNumber || receiptData.orderNum || 'なし';
   console.log('🔢 注文番号:', orderNum);
   
-  // 商品リストHTML生成（縦並びで各価格表示）
+  // 商品リストHTML生成（トッピングを縦に個別表示）
   let itemsHtml = '';
   if (receiptData.items && Array.isArray(receiptData.items) && receiptData.items.length > 0) {
     receiptData.items.forEach(item => {
@@ -103,13 +103,25 @@ async function showReceiptDisplay(receiptData) {
           </div>
       `;
       
-      // toppingsList配列がある場合（正しいPOS形式）
-      if (item.toppingsList && Array.isArray(item.toppingsList) && item.toppingsList.length > 0) {
-        // 基本価格を表示
-        const basePrice = item.basePrice || 880; // デフォルト値
-        itemsHtml += `<div style="font-size: 13px; color: #333; margin-bottom: 4px;">¥${basePrice.toLocaleString()}</div>`;
-        
-        // 各トッピングを縦に表示
+      // 基本価格を計算
+      const basePrice = item.basePrice || item.price;
+      const basePricePerUnit = item.toppingPrice ? (basePrice - item.toppingPrice) : basePrice;
+      
+      // 基本価格を表示
+      itemsHtml += `<div style="font-size: 13px; color: #333; margin-bottom: 2px;">¥${basePricePerUnit.toLocaleString()}</div>`;
+      
+      // toppingDetails配列がある場合（新POS形式）
+      if (item.toppingDetails && Array.isArray(item.toppingDetails) && item.toppingDetails.length > 0) {
+        item.toppingDetails.forEach(topping => {
+          itemsHtml += `
+            <div style="font-size: 13px; color: #333; margin-top: 2px;">
+              ${topping.optionName} ¥${topping.price.toLocaleString()}
+            </div>
+          `;
+        });
+      }
+      // toppingsList配列がある場合（別のPOS形式）
+      else if (item.toppingsList && Array.isArray(item.toppingsList) && item.toppingsList.length > 0) {
         item.toppingsList.forEach(topping => {
           itemsHtml += `
             <div style="font-size: 13px; color: #333; margin-top: 2px;">
@@ -118,12 +130,9 @@ async function showReceiptDisplay(receiptData) {
           `;
         });
       }
-      // Handy形式の場合
-      else {
-        itemsHtml += `<div style="font-size: 13px; color: #333;">¥${item.price.toLocaleString()} × ${item.quantity}</div>`;
-        if (item.toppings && item.toppings !== 'なし' && item.toppings !== '') {
-          itemsHtml += `<div style="font-size: 12px; color: #666; margin-top: 4px; font-style: italic;">トッピング: ${item.toppings}</div>`;
-        }
+      // トッピング文字列のみの場合
+      else if (item.toppings && item.toppings !== 'なし' && item.toppings !== '') {
+        itemsHtml += `<div style="font-size: 12px; color: #666; margin-top: 4px; font-style: italic;">トッピング: ${item.toppings}</div>`;
       }
       
       itemsHtml += `</div>`;
