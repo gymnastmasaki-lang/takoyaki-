@@ -599,19 +599,34 @@ async function showQRCodeModal(qrUrl, imageData) {
   
   const qrModal = document.createElement('div');
   qrModal.id = 'qrDisplayModal';
-  qrModal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.9) !important; z-index: 99999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
+  qrModal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100dvh !important; background: rgba(0,0,0,0.9) !important; z-index: 99999999 !important; display: flex !important; align-items: center !important; justify-content: center !important; overflow: hidden !important;';
+  
+  // スマホでの背景タップによる誤閉じを完全防止
+  qrModal.addEventListener('touchstart', (e) => {
+    if (e.target === qrModal) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, { passive: false });
+  
+  qrModal.addEventListener('click', (e) => {
+    if (e.target === qrModal) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
   
   qrModal.innerHTML = `
-    <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
+    <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center; max-height: 90dvh; overflow-y: auto;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
-      <div id="qrCodeContainerModal" style="display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;"></div>
+      <div id="qrCodeContainerModal" style="display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 280px !important; width: 280px !important; background: #f0f0f0 !important; border: 2px solid #ccc !important; overflow: visible !important; padding: 10px !important; position: relative !important;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
-      <div style="margin-top: 30px; display: flex; gap: 15px;">
-        <button onclick="downloadReceiptImage()" style="flex: 1; padding: 18px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
+      <div style="margin-top: 30px; display: flex; gap: 15px; flex-wrap: wrap;">
+        <button onclick="downloadReceiptImage()" style="flex: 1; min-width: 150px; padding: 18px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; touch-action: manipulation;">
           画像をダウンロード
         </button>
-        <button onclick="closeQRModal()" style="flex: 1; padding: 18px; background: #666; color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
+        <button onclick="closeQRModal()" style="flex: 1; min-width: 150px; padding: 18px; background: #666; color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; touch-action: manipulation;">
           閉じる
         </button>
       </div>
@@ -646,8 +661,8 @@ async function showQRCodeModal(qrUrl, imageData) {
       // コンテナをクリア
       qrContainer.innerHTML = '';
       
-      // コンテナのスタイルを事前に設定
-      qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;';
+      // コンテナのスタイルを事前に設定（min-height を 280px に変更）
+      qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 280px !important; width: 280px !important; background: #f0f0f0 !important; border: 2px solid #ccc !important; overflow: visible !important; padding: 10px !important; position: relative !important;';
       
       // 少し待ってからQRコードを生成（DOMの安定化を待つ）
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -708,7 +723,7 @@ async function showQRCodeModal(qrUrl, imageData) {
           }
           
           // 親要素のスタイルも再設定 - 重要: すべてのスタイルをimportantで強制
-          qrContainer.style.cssText = 'display: block !important; text-align: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0 !important; border: 2px solid #ccc !important; overflow: visible !important; padding: 10px !important;';
+          qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 280px !important; width: 280px !important; background: #f0f0f0 !important; border: 2px solid #ccc !important; overflow: visible !important; padding: 10px !important; position: relative !important;';
           
           // QRコンテナを保護（innerHTML変更を監視）
           qrContainer.dataset.qrGenerated = 'true';
@@ -716,18 +731,43 @@ async function showQRCodeModal(qrUrl, imageData) {
           
           console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
           
-          // さらに0.5秒後にもう一度スタイルを強制適用（スマホでのスタイル消失対策）
-          setTimeout(() => {
+          // さらに0.5秒後、1秒後、2秒後にもスタイルを強制適用（スマホでのスタイル消失対策を強化）
+          const reapplyStyles = () => {
             const checkCanvas = qrContainer.querySelector('canvas');
             const checkImg = qrContainer.querySelector('img');
             if (checkImg) {
               checkImg.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: relative !important; z-index: 10 !important;';
-              console.log('🔄 Imgスタイルを再適用しました');
+              console.log('🔄 Imgスタイルを再適用');
             } else if (checkCanvas) {
               checkCanvas.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: relative !important; z-index: 10 !important;';
-              console.log('🔄 Canvasスタイルを再適用しました');
+              console.log('🔄 Canvasスタイルを再適用');
             }
-          }, 500);
+            // コンテナのスタイルも再適用
+            qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 280px !important; width: 280px !important; background: #f0f0f0 !important; border: 2px solid #ccc !important; overflow: visible !important; padding: 10px !important; position: relative !important;';
+          };
+          
+          setTimeout(reapplyStyles, 500);
+          setTimeout(reapplyStyles, 1000);
+          setTimeout(reapplyStyles, 2000);
+          
+          // MutationObserverでDOM変更を監視し、QR要素が削除されないよう保護
+          const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+              if (mutation.type === 'childList' && mutation.removedNodes.length > 0) {
+                // QR要素が削除されそうになったら警告
+                mutation.removedNodes.forEach((node) => {
+                  if (node.tagName === 'CANVAS' || node.tagName === 'IMG') {
+                    console.warn('⚠️ QR要素が削除されました:', node.tagName);
+                  }
+                });
+              }
+            });
+          });
+          
+          observer.observe(qrContainer, {
+            childList: true,
+            subtree: true
+          });
           
         } else {
           // まだ描画されていない場合は再試行
