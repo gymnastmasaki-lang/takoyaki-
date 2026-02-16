@@ -604,7 +604,7 @@ async function showQRCodeModal(qrUrl, imageData) {
   qrModal.innerHTML = `
     <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
-      <div id="qrCodeContainerModal" style="display: block !important; text-align: center !important; margin: 20px auto !important; width: 280px !important;"></div>
+      <div id="qrCodeContainerModal" style="display: inline-block !important; text-align: center !important; margin: 20px auto !important;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
@@ -668,25 +668,33 @@ async function showQRCodeModal(qrUrl, imageData) {
           if (canvas || img) {
             console.log('🎨 QR要素を発見:', canvas ? 'canvas' : 'img', 'attempt:', renderAttempts);
             
-            // すべての子要素にスタイルを適用して確実に表示
-            const allChildren = qrContainer.querySelectorAll('*');
-            allChildren.forEach(child => {
-              child.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
-            });
+            // すべての直接の子要素を取得
+            const directChildren = Array.from(qrContainer.children);
+            console.log('📦 直接の子要素数:', directChildren.length);
+            
+            // 2つ以上の子要素がある場合、最初の1つだけを表示
+            if (directChildren.length > 1) {
+              directChildren.forEach((child, index) => {
+                if (index > 0) {
+                  child.style.display = 'none !important';
+                  console.log('🚫 子要素を非表示:', index);
+                }
+              });
+            }
+            
+            // QRコード要素にスタイルを適用
+            const qrElement = canvas || img;
+            if (qrElement) {
+              qrElement.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important;';
+            }
             
             // コンテナのスタイルを確実に設定
-            qrContainer.style.cssText = 'display: block !important; text-align: center !important; margin: 20px auto !important; width: 280px !important;';
+            qrContainer.style.cssText = 'display: inline-block !important; text-align: center !important; margin: 20px auto !important;';
             
             console.log('✅ QR要素を表示設定しました');
-            console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
             
             // 要素が実際に描画されるまでさらに待つ
             await new Promise(resolve => setTimeout(resolve, 200));
-            
-            // 再度スタイルを確認して設定（モバイルブラウザ対策）
-            allChildren.forEach(child => {
-              child.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
-            });
             
             return;
           }
