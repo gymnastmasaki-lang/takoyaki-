@@ -207,126 +207,107 @@ async function showReceiptDisplay(receiptData) {
   
   // 🛍️ レジ袋情報を追加
   console.log('🛍️ レジ袋情報チェック開始');
-  if (receiptData.bagNeeded === true || receiptData.bagNeeded === 'true') {
-    const bagQty = receiptData.bagQuantity || 1;
+  console.log('  - receiptData.bagNeeded:', receiptData.bagNeeded);
+  console.log('  - receiptData.bagQuantity:', receiptData.bagQuantity);
+  console.log('  - receiptData.bagPrice:', receiptData.bagPrice);
+  
+  if (receiptData.bagNeeded && receiptData.bagQuantity > 0) {
     const bagPrice = receiptData.bagPrice || 0;
-    const bagTotal = bagQty * bagPrice;
-    
-    console.log('🛍️ レジ袋を追加 - 数量:', bagQty, '単価:', bagPrice, '合計:', bagTotal);
-    
+    console.log('✅ レジ袋を表示します - 枚数:', receiptData.bagQuantity, '価格:', bagPrice);
     itemsHtml += `
       <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
         <div style="font-size: 13px; color: #333; margin-bottom: 2px; display: flex; justify-content: space-between;">
-          <span>レジ袋 × ${bagQty}</span>
+          <span>🛍️ レジ袋 × ${receiptData.bagQuantity}</span>
           <span>¥${bagPrice.toLocaleString()}</span>
-        </div>
-        <div style="font-size: 14px; font-weight: bold; margin-top: 8px; padding-top: 6px; border-top: 1px solid #eee; display: flex; justify-content: space-between;">
-          <span>合計</span>
-          <span>¥${bagTotal.toLocaleString()}</span>
         </div>
       </div>
     `;
   } else {
-    console.log('🛍️ レジ袋は不要');
+    console.log('⚠️ レジ袋は表示されません - 条件を満たしていません');
   }
   
-  // 小計と合計
-  const subtotal = receiptData.subtotal || receiptData.total || 0;
-  const tax = receiptData.tax || 0;
-  const total = receiptData.total || subtotal;
+  // 消費税計算
+  let tax8Total = receiptData.tax8Total || 0;
+  let tax10Total = receiptData.tax10Total || 0;
+  let totalTax = 0;
   
-  const paymentMethod = receiptData.paymentMethod || '現金';
-  const receivedAmount = receiptData.receivedAmount || receiptData.total || 0;
-  const changeAmount = receiptData.changeAmount || 0;
+  if (tax8Total === 0 && tax10Total === 0 && receiptData.total > 0) {
+    const totalExcludingTax = Math.floor(receiptData.total / 1.10);
+    totalTax = receiptData.total - totalExcludingTax;
+    tax10Total = receiptData.total;
+  } else {
+    const tax8Excluded = Math.floor(tax8Total / 1.08);
+    const tax10Excluded = Math.floor(tax10Total / 1.10);
+    const tax8Amount = tax8Total - tax8Excluded;
+    const tax10Amount = tax10Total - tax10Excluded;
+    totalTax = tax8Amount + tax10Amount;
+  }
   
-  console.log('💰 支払い情報 - 受け取り:', receivedAmount, '釣り:', changeAmount);
+  const tax8Excluded = Math.floor(tax8Total / 1.08);
+  const tax10Excluded = Math.floor(tax10Total / 1.10);
+  const tax8Amount = tax8Total - tax8Excluded;
+  const tax10Amount = tax10Total - tax10Excluded;
   
-  // モーダルHTML生成
-  const modalHtml = `
-    <div id="receiptDisplayModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 999999; display: flex; align-items: center; justify-content: center;">
-      <div style="background: white; border-radius: 20px; padding: 30px; max-width: 400px; width: 95%; max-height: 90vh; overflow-y: auto;">
-        <h2 style="text-align: center; margin: 0 0 20px 0; font-size: 22px; color: #333;">レシート</h2>
-        
-        <div id="receiptContent" style="font-family: 'Courier New', monospace; background: white; padding: 20px; border: 2px solid #ddd; border-radius: 8px;">
-          <div style="text-align: center; border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 15px;">
-            <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">${receiptStoreName}</div>
-            <div style="font-size: 12px; color: #666; margin-bottom: 3px;">${receiptAddress}</div>
-            <div style="font-size: 12px; color: #666;">${receiptPhone}</div>
-          </div>
-          
-          <div style="font-size: 12px; color: #666; margin-bottom: 20px;">
-            <div>日時: ${dateStr}</div>
-            <div>注文番号: ${orderNum}</div>
-          </div>
-          
-          <div style="border-top: 1px solid #ddd; padding-top: 15px;">
-            ${itemsHtml}
-          </div>
-          
-          <div style="border-top: 2px solid #333; padding-top: 15px; margin-top: 20px;">
-            <div style="font-size: 14px; margin: 8px 0; display: flex; justify-content: space-between;">
-              <span>小計</span>
-              <span>¥${subtotal.toLocaleString()}</span>
-            </div>
-            <div style="font-size: 14px; margin: 8px 0; display: flex; justify-content: space-between;">
-              <span>消費税 (10%)</span>
-              <span>¥${tax.toLocaleString()}</span>
-            </div>
-            <div style="font-size: 18px; font-weight: bold; margin: 15px 0; display: flex; justify-content: space-between; border-top: 2px solid #333; padding-top: 10px;">
-              <span>合計</span>
-              <span>¥${total.toLocaleString()}</span>
-            </div>
-          </div>
-          
-          <div style="border-top: 1px dashed #999; padding-top: 15px; margin-top: 15px; font-size: 13px;">
-            <div style="margin: 5px 0; display: flex; justify-content: space-between;">
-              <span>支払方法</span>
-              <span>${paymentMethod}</span>
-            </div>
-            ${receivedAmount > 0 ? `
-              <div style="margin: 5px 0; display: flex; justify-content: space-between;">
-                <span>お預かり</span>
-                <span>¥${receivedAmount.toLocaleString()}</span>
-              </div>
-            ` : ''}
-            ${changeAmount > 0 ? `
-              <div style="margin: 5px 0; display: flex; justify-content: space-between; font-weight: bold;">
-                <span>おつり</span>
-                <span>¥${changeAmount.toLocaleString()}</span>
-              </div>
-            ` : ''}
-          </div>
-          
-          <div style="text-align: center; margin-top: 20px; padding-top: 15px; border-top: 1px dashed #999;">
-            <div style="font-size: 13px; color: #666; line-height: 1.6; white-space: pre-wrap;">${receiptMessage1}</div>
-            ${receiptMessage2 ? `<div style="font-size: 13px; color: #666; margin-top: 8px; white-space: pre-wrap;">${receiptMessage2}</div>` : ''}
-          </div>
+  const receiptHtml = `
+    <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 15px; max-width: 400px; margin: 0 auto; border: 2px solid #333; background: white;">
+      <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px;">
+        <div style="font-size: 20px; font-weight: bold; margin-bottom: 5px;">${receiptStoreName}</div>
+        <div style="font-size: 11px; color: #666;">${receiptAddress}</div>
+        <div style="font-size: 11px; color: #666;">${receiptPhone}</div>
+      </div>
+      
+      <div style="text-align: center; margin: 15px 0;">
+        <div style="font-size: 12px; color: #666;">日時: ${dateStr}</div>
+        <div style="font-size: 12px; color: #666; margin-top: 3px;">注文番号: #${orderNum}</div>
+        ${receiptData.tableNumber && receiptData.tableNumber !== '即会計' ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">テーブル: ${receiptData.tableNumber}</div>` : ''}
+        ${receiptData.paymentMethod ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">支払方法: ${receiptData.paymentMethod}</div>` : ''}
+      </div>
+      
+      <div style="border-top: 1px solid #ddd; padding-top: 15px; margin-bottom: 15px;">
+        ${itemsHtml}
+      </div>
+      
+      <div style="border-top: 2px solid #000; padding-top: 15px; margin-top: 20px; font-size: 13px;">
+        ${tax8Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
+          <span>8%対象額:</span>
+          <span>¥${tax8Excluded.toLocaleString()}</span>
         </div>
-        
-        <div style="margin-top: 25px; display: flex; flex-direction: column; gap: 12px;">
-          <button id="generateQRBtn" onclick="generateQRCode()" 
-                  style="width: 100%; padding: 18px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
-            QRコードを生成
-          </button>
-          <button onclick="closeReceiptModal('receiptDisplayModal')" 
-                  style="width: 100%; padding: 18px; background: #666; color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
-            閉じる
-          </button>
+        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+          <span>内税: ¥${tax8Amount.toLocaleString()}</span>
+        </div>` : ''}
+        ${tax10Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
+          <span>10%対象額:</span>
+          <span>¥${tax10Excluded.toLocaleString()}</span>
         </div>
+        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+          <span>内税: ¥${tax10Amount.toLocaleString()}</span>
+        </div>` : ''}
+        <div style="display: flex; justify-content: space-between; margin: 5px 0; font-weight: bold;">
+          <span>消費税合計:</span>
+          <span>¥${totalTax.toLocaleString()}</span>
+        </div>
+      </div>
+      
+      <div style="text-align: right; font-size: 24px; font-weight: bold; margin: 20px 0;">
+        合計: ¥${receiptData.total.toLocaleString()}
+      </div>
+      
+      <div style="border-top: 2px solid #000; padding-top: 15px; margin-top: 20px; font-size: 12px;">
+        <div style="margin-top: 10px; white-space: pre-wrap;">${receiptMessage1}</div>
       </div>
     </div>
   `;
   
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
-  console.log('✅ レシートモーダル表示完了');
+  await showReceiptModal(receiptHtml, receiptData, 'receipt');
+  console.log('✅ レシート表示完了');
 }
 
 // 領収書表示関数
-async function showInvoiceDisplay(receiptData) {
-  console.log('📄 ==== 領収書表示開始 ====');
-  console.log('🔍 受信データ:', receiptData);
+async function showInvoiceDisplay(invoiceData) {
+  console.log('🧾 ==== 領収書表示開始 ====');
+  console.log('🔍 受信データ:', invoiceData);
+  console.log('🔢 注文番号:', invoiceData.orderNumber || invoiceData.orderNum);
   
-  // 既存のモーダルを削除
   const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
   console.log('🗑️ 既存モーダル削除:', existingModals.length);
   existingModals.forEach(el => el.remove());
@@ -337,6 +318,7 @@ async function showInvoiceDisplay(receiptData) {
   let receiptStoreName = '粉もん屋 八 下赤塚店';
   let receiptAddress = '東京都板橋区赤塚2-2-4';
   let receiptPhone = 'TEL: 03-6904-2888';
+  let sealImageData = '';
   
   try {
     const storeId = window.currentStoreId;
@@ -370,144 +352,236 @@ async function showInvoiceDisplay(receiptData) {
       if (settings.phone) {
         receiptPhone = 'TEL: ' + settings.phone;
       }
+      
+      // 電子印鑑データを取得
+      if (settings.sealImageData) {
+        sealImageData = settings.sealImageData;
+      } else if (settings.sealImage) {
+        sealImageData = settings.sealImage;
+      } else if (settings.seal) {
+        sealImageData = settings.seal;
+      } else if (settings.stampImage) {
+        sealImageData = settings.stampImage;
+      }
+    }
+    
+    // LocalStorageからも試す
+    if (!sealImageData) {
+      const localSealKeys = ['companySealData', 'sealImageData', 'sealImage', 'stampData'];
+      for (const key of localSealKeys) {
+        const localSeal = localStorage.getItem(key);
+        if (localSeal) {
+          sealImageData = localSeal;
+          break;
+        }
+      }
     }
   } catch (error) {
-    console.error('❌ レシート設定読み込みエラー:', error);
+    console.error('❌ 領収書設定読み込みエラー:', error);
   }
   
-  // 日時フォーマット
-  const now = new Date(receiptData.timestamp || Date.now());
+  console.log('📋 電子印鑑データ:', sealImageData ? '取得済み' : 'なし');
+  
+  const now = new Date(invoiceData.timestamp || Date.now());
   const dateStr = now.getFullYear() + '年' + 
                   String(now.getMonth() + 1).padStart(2, '0') + '月' + 
                   String(now.getDate()).padStart(2, '0') + '日';
   
-  const total = receiptData.total || 0;
-  const customerName = receiptData.customerName || '　　　　　　　　様';
+  let orderNum = invoiceData.orderNumber || invoiceData.orderNum || 'なし';
   
-  // モーダルHTML生成
-  const modalHtml = `
-    <div id="receiptDisplayModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 999999; display: flex; align-items: center; justify-content: center;">
-      <div style="background: white; border-radius: 20px; padding: 30px; max-width: 500px; width: 95%; max-height: 90vh; overflow-y: auto;">
-        <h2 style="text-align: center; margin: 0 0 20px 0; font-size: 22px; color: #333;">領収書</h2>
-        
-        <div id="receiptContent" style="font-family: 'Courier New', monospace; background: white; padding: 30px; border: 3px double #333; border-radius: 8px;">
-          <h1 style="text-align: center; font-size: 28px; margin: 0 0 30px 0; border-bottom: 2px solid #333; padding-bottom: 15px;">領収書</h1>
-          
-          <div style="margin-bottom: 30px;">
-            <div style="font-size: 16px; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
-              ${customerName}
-            </div>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <div style="font-size: 14px; color: #666; margin-bottom: 10px;">金額</div>
-            <div style="font-size: 32px; font-weight: bold; border: 2px solid #333; padding: 15px; display: inline-block;">
-              ¥ ${total.toLocaleString()}
-            </div>
-          </div>
-          
-          <div style="margin: 30px 0;">
-            <div style="font-size: 14px; margin-bottom: 10px;">但し、飲食代として</div>
-            <div style="font-size: 14px; margin-top: 10px;">上記の通り領収いたしました</div>
-          </div>
-          
-          <div style="text-align: right; margin-top: 40px;">
-            <div style="font-size: 14px; margin-bottom: 5px;">${dateStr}</div>
-          </div>
-          
-          <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd;">
-            <div style="font-size: 16px; font-weight: bold; margin-bottom: 8px;">${receiptStoreName}</div>
-            <div style="font-size: 12px; color: #666; margin-bottom: 3px;">${receiptAddress}</div>
-            <div style="font-size: 12px; color: #666;">${receiptPhone}</div>
-          </div>
+  // 消費税計算（内税）
+  let tax8Total = invoiceData.tax8Total || 0;
+  let tax10Total = invoiceData.tax10Total || 0;
+  let totalTax = 0;
+  
+  if (tax8Total === 0 && tax10Total === 0 && invoiceData.total > 0) {
+    const totalExcludingTax = Math.floor(invoiceData.total / 1.10);
+    totalTax = invoiceData.total - totalExcludingTax;
+  } else {
+    const tax8Excluded = Math.floor(tax8Total / 1.08);
+    const tax10Excluded = Math.floor(tax10Total / 1.10);
+    const tax8Amount = tax8Total - tax8Excluded;
+    const tax10Amount = tax10Total - tax10Excluded;
+    totalTax = tax8Amount + tax10Amount;
+  }
+  
+  // 電子印鑑HTML（修正版：店舗名の横に配置、flexboxで確実に並べる）
+  let sealHtml = '';
+  if (sealImageData) {
+    sealHtml = `
+      <div style="width: 100px; height: 100px; flex-shrink: 0;">
+        <img src="${sealImageData}" style="width: 100%; height: 100%; object-fit: contain;" alt="電子印鑑">
+      </div>
+    `;
+  }
+  
+  const invoiceHtml = `
+    <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 20px 30px; margin: 0 auto; border: 2px solid #333; background: white;">
+      <div style="text-align: center; border-bottom: 3px double #000; padding-bottom: 20px; margin-bottom: 20px;">
+        <h2 style="margin: 0; font-size: 28px; letter-spacing: 8px;">領収書</h2>
+      </div>
+      
+      <div style="margin: 30px 0;">
+        <div style="font-size: 14px; margin-bottom: 10px;">お客様</div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 30px;">
+          <span style="font-size: 18px; flex: 1; border-bottom: 1px solid transparent;"></span>
+          <span style="font-size: 14px; white-space: nowrap;">様</span>
         </div>
-        
-        <div style="margin-top: 25px; display: flex; flex-direction: column; gap: 12px;">
-          <button id="generateQRBtn" onclick="generateQRCode()" 
-                  style="width: 100%; padding: 18px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
-            QRコードを生成
-          </button>
-          <button onclick="closeReceiptModal('receiptDisplayModal')" 
-                  style="width: 100%; padding: 18px; background: #666; color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
-            閉じる
-          </button>
+      </div>
+      
+      <div style="text-align: center; margin: 30px 0;">
+        <div style="font-size: 16px; margin-bottom: 10px;">下記の通り<br>領収いたしました</div>
+        <div style="border: 2px solid #000; padding: 20px; margin: 20px 0;">
+          <div style="font-size: 14px; margin-bottom: 5px;">金額</div>
+          <div style="font-size: 36px; font-weight: bold;">¥${invoiceData.total.toLocaleString()}</div>
+          <div style="font-size: 14px; margin-top: 10px; color: #666;">（内消費税 ¥${totalTax.toLocaleString()}）</div>
+        </div>
+      </div>
+      
+      <div style="margin: 30px 0; font-size: 14px;">
+        <div style="margin: 10px 0; line-height: 1.8;">
+          <span style="display: inline-block; width: 100px; vertical-align: top;">但し</span>
+          <span style="display: inline-block; max-width: 200px;">飲食代として</span>
+        </div>
+        <div style="margin: 10px 0;">
+          <span style="display: inline-block; width: 100px;">注文番号</span>
+          <span>#${orderNum}</span>
+        </div>
+        ${invoiceData.tableNumber && invoiceData.tableNumber !== '即会計' ? `<div style="margin: 10px 0;">
+          <span style="display: inline-block; width: 100px;">テーブル</span>
+          <span>${invoiceData.tableNumber}</span>
+        </div>` : ''}
+      </div>
+      
+      <div style="position: relative; text-align: right; font-size: 14px; margin: 40px 0 20px 0;">
+        ${sealImageData ? `<div style="position: absolute; left: 20px; bottom: -20px; width: 80px; height: 80px;">
+          <img src="${sealImageData}" style="width: 100%; height: 100%; object-fit: contain;" alt="電子印鑑">
+        </div>` : ''}
+        <div style="margin: 5px 0;">${dateStr}</div>
+      </div>
+      
+      <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 0;">
+        <div style="text-align: center;">
+          <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>
+          <div style="font-size: 12px; color: #666;">
+            <div>${(receiptAddress || '').replace(/ /g, '<br>')}</div>
+            <div style="margin-top: 5px;">${receiptPhone}</div>
+            <div style="margin-top: 10px;">※この領収書は再発行できません</div>
+          </div>
         </div>
       </div>
     </div>
   `;
   
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
-  console.log('✅ 領収書モーダル表示完了');
+  await showReceiptModal(invoiceHtml, invoiceData, 'invoice');
+  console.log('✅ 領収書表示完了');
 }
 
-// QRコード生成関数
-async function generateQRCode() {
-  console.log('🔨 QRコード生成開始');
+// モーダル表示関数
+async function showReceiptModal(contentHtml, data, type) {
+  const modalId = 'receiptDisplayModal_' + Date.now();
+  const contentId = 'receiptContent_' + Date.now();
   
-  const generateBtn = document.getElementById('generateQRBtn');
-  if (generateBtn) {
-    generateBtn.disabled = true;
-    generateBtn.textContent = '生成中...';
-  }
+  const modal = document.createElement('div');
+  modal.id = modalId;
+  modal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.8) !important; z-index: 9999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
   
-  const receiptContent = document.getElementById('receiptContent');
-  if (!receiptContent) {
-    console.error('❌ レシートコンテンツが見つかりません');
-    if (generateBtn) {
-      generateBtn.disabled = false;
-      generateBtn.textContent = 'QRコードを生成';
+  modal.innerHTML = `
+    <div style="background: white; border-radius: 20px; padding: 20px; max-width: 700px; width: 95%; max-height: 90vh; overflow-y: auto;">
+      <div id="${contentId}" class="receiptContent" style="padding: 0 10px; display: flex; justify-content: center;">
+        ${contentHtml}
+      </div>
+      <div style="margin-top: 30px; display: flex; gap: 15px;">
+        <button onclick="issueReceiptQR('${contentId}')" style="flex: 1; padding: 18px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer;">
+          QRコード発行
+        </button>
+        <button onclick="closeReceiptModal('${modalId}')" style="flex: 1; padding: 18px; background: #666; color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer;">
+          閉じる
+        </button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // モーダルの外側クリックで閉じる
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeReceiptModal(modalId);
     }
+  });
+  
+  console.log('✅ モーダル表示完了');
+}
+
+// QRコード発行関数
+async function issueReceiptQR(contentId) {
+  console.log('🔄 QRコード発行開始');
+  
+  const receiptContent = document.getElementById(contentId);
+  if (!receiptContent) {
+    alert('レシート内容が見つかりません');
     return;
   }
   
   try {
-    console.log('📸 html2canvas実行開始');
+    console.log('📸 Canvas生成中...');
+    
+    // html2canvasの確認
+    if (typeof html2canvas === 'undefined') {
+      throw new Error('html2canvas ライブラリが読み込まれていません');
+    }
+    
     const canvas = await html2canvas(receiptContent, {
-      backgroundColor: '#ffffff',
       scale: 2,
+      backgroundColor: '#ffffff',
       logging: false,
-      useCORS: true
+      useCORS: true,
+      allowTaint: true
     });
     
     const imageData = canvas.toDataURL('image/png');
-    console.log('✅ 画像データ生成完了');
+    console.log('✅ Canvas生成完了');
+    console.log('📏 画像サイズ:', canvas.width, 'x', canvas.height);
     
-    // Firebaseにアップロード
-    console.log('☁️ Firebaseにアップロード開始');
-    const storageRef = window.ref(window.storage, 'receipts/' + Date.now() + '.png');
-    
-    // Base64をBlobに変換
-    const base64Data = imageData.split(',')[1];
-    const byteCharacters = atob(base64Data);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    // Firestore関数の確認
+    if (!window.db || !window.doc || !window.setDoc || !window.Timestamp) {
+      throw new Error('Firestore が初期化されていません');
     }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: 'image/png' });
     
-    await window.uploadBytes(storageRef, blob);
-    const downloadURL = await window.getDownloadURL(storageRef);
+    // Firestoreに保存
+    const receiptId = 'receipt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     
-    console.log('✅ アップロード完了:', downloadURL);
+    console.log('💾 Firestoreに保存中...', receiptId);
+    
+    const receiptRef = window.doc(window.db, 'receipt_images', receiptId);
+    
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+    
+    await window.setDoc(receiptRef, {
+      imageData: imageData,
+      createdAt: window.Timestamp.now(),
+      expiresAt: window.Timestamp.fromDate(expiresAt)
+    });
+    
+    console.log('✅ Firestoreに保存完了:', receiptId);
+    
+    // QRコード表示用のURLを生成
+    const qrUrl = `https://gymnastmasaki-lang.github.io/takoyaki-/receipt-view-firestore.html?id=${receiptId}`;
+    console.log('🔗 QR URL:', qrUrl);
     
     // QRコード表示
-    await showQRCodeModal(downloadURL, imageData);
-    
-    // ボタンを元に戻す
-    if (generateBtn) {
-      generateBtn.disabled = false;
-      generateBtn.textContent = 'QRコードを生成';
-    }
+    await showQRCodeModal(qrUrl, imageData);
     
   } catch (error) {
-    console.error('❌ QRコード生成エラー:', error);
-    alert('QRコード生成に失敗しました: ' + error.message);
-    
-    if (generateBtn) {
-      generateBtn.disabled = false;
-      generateBtn.textContent = 'QRコードを生成';
-    }
+    console.error('❌ QRコード発行エラー:', error);
+    console.error('エラー詳細:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    alert('QRコード発行に失敗しました:\n' + error.message + '\n\nコンソールを確認してください。');
   }
 }
 
@@ -530,7 +604,7 @@ async function showQRCodeModal(qrUrl, imageData) {
   qrModal.innerHTML = `
     <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
-      <div id="qrCodeContainerModal" style="display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 280px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 10px; box-sizing: border-box;"></div>
+      <div id="qrCodeContainerModal" style="display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
@@ -570,6 +644,9 @@ async function showQRCodeModal(qrUrl, imageData) {
       // コンテナをクリア
       qrContainer.innerHTML = '';
       
+      // コンテナのスタイルを事前に設定
+      qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;';
+      
       // QRコードを直接生成
       const qrcode = new QRCode(qrContainer, {
         text: qrUrl,
@@ -582,7 +659,7 @@ async function showQRCodeModal(qrUrl, imageData) {
       
       console.log('✅ QRコード生成完了');
       
-      // 描画完了を待つための関数（修正版）
+      // 描画完了を待つための関数
       const waitForQRRender = (attempts = 0) => {
         if (attempts > 30) {
           console.error('❌ QRコードの描画がタイムアウトしました');
@@ -593,8 +670,6 @@ async function showQRCodeModal(qrUrl, imageData) {
         const canvas = qrContainer.querySelector('canvas');
         const img = qrContainer.querySelector('img');
         
-        console.log(`🔍 描画確認 (試行${attempts + 1}):`, { canvas: !!canvas, img: !!img });
-        
         if (img) {
           console.log('🎨 Img要素を発見');
           
@@ -604,23 +679,18 @@ async function showQRCodeModal(qrUrl, imageData) {
             console.log('🗑️ Canvas要素を削除');
           }
           
-          // imgのスタイルを強制設定（!importantを使用）
+          // imgのスタイルを強制設定
           img.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+          console.log('✅ Img要素を表示しました');
           
           // 親要素のスタイルも再設定
           qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 280px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 10px; box-sizing: border-box;';
           
-          console.log('✅ Img要素を表示しました');
-          
-          // 画像が読み込まれるまで待つ
+          // 画像の読み込み確認
           if (!img.complete) {
             console.log('⏳ 画像の読み込みを待機中...');
-            img.onload = () => {
-              console.log('✅ 画像の読み込み完了');
-            };
-            img.onerror = (e) => {
-              console.error('❌ 画像の読み込みエラー:', e);
-            };
+            img.onload = () => console.log('✅ 画像の読み込み完了');
+            img.onerror = (e) => console.error('❌ 画像の読み込みエラー:', e);
           } else {
             console.log('✅ 画像は既に読み込まれています');
           }
