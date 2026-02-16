@@ -1853,14 +1853,21 @@
           
           const menuBtn = document.createElement('button');
           menuBtn.className = 'checkout-btn';
-          menuBtn.textContent = ' メニュー';
+          menuBtn.textContent = '🍽 メニュー';
           menuBtn.style.background = '#667eea';
           menuBtn.onclick = (e) => { e.stopPropagation(); playTapSound(); openMenu(table.name); };
           tableCard.appendChild(menuBtn);
           
+          const receiptPreviewBtn = document.createElement('button');
+          receiptPreviewBtn.className = 'checkout-btn';
+          receiptPreviewBtn.textContent = '📄 会計票';
+          receiptPreviewBtn.style.background = '#9C27B0';
+          receiptPreviewBtn.onclick = (e) => { e.stopPropagation(); playTapSound(); showReceiptPreview(table.name); };
+          tableCard.appendChild(receiptPreviewBtn);
+          
           const checkoutBtn = document.createElement('button');
           checkoutBtn.className = 'checkout-btn';
-          checkoutBtn.textContent = ' 会計';
+          checkoutBtn.textContent = '💰 会計';
           checkoutBtn.onclick = (e) => { e.stopPropagation(); playTapSound(); openCheckoutForTable(table.name); };
           tableCard.appendChild(checkoutBtn);
           
@@ -1918,6 +1925,121 @@
         }
       } catch (error) {
         console.error('❌ 会計画面表示エラー:', error);
+      }
+    }
+    
+    // 🆕 会計票プレビュー表示（会計処理なし）
+    async function showReceiptPreview(tableName) {
+      try {
+        console.log('📄 会計票表示開始:', tableName);
+        
+        const ordersRef = window.getStoreCollection('orders');
+        const ordersQuery = window.query(ordersRef, window.where('tableNumber', '==', String(tableName)));
+        const ordersSnapshot = await window.getDocs(ordersQuery);
+        
+        const orders = [];
+        ordersSnapshot.forEach(doc => {
+          const order = { id: doc.id, ...doc.data() };
+          if (!order.deleted && !order.cancelledAt && !order.paidAt) {
+            orders.push(order);
+          }
+        });
+        
+        if (orders.length === 0) {
+          await showCustomAlert({ 
+            icon: '📋', 
+            title: '注文なし', 
+            message: `${tableName}\nこのテーブルには注文がありません`, 
+            btnClass: 'modal-btn-success' 
+          });
+          return;
+        }
+        
+        // 注文番号でソート
+        orders.sort((a, b) => (a.orderNumber || 0) - (b.orderNumber || 0));
+        
+        // 注文番号を取得（最初の注文の番号を使用）
+        const orderNumber = orders[0].orderNumber || Date.now().toString().slice(-6);
+        
+        // 税率別集計
+        let tax8Total = 0;
+        let tax10Total = 0;
+        orders.forEach(order => {
+          tax8Total += (order.tax8Total || 0);
+          tax10Total += (order.tax10Total || 0);
+        });
+        
+        // 合計金額を計算
+        const totalAmount = orders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+        
+        // レジ袋情報を取得
+        let bagNeeded = false;
+        let bagQuantity = 0;
+        let bagPrice = 0;
+        orders.forEach(order => {
+          if (order.bagNeeded) {
+            bagNeeded = true;
+            bagQuantity += (order.bagQuantity || 0);
+            bagPrice += (order.bagPrice || 0);
+          }
+        });
+        
+        // レシートデータを作成
+        const receiptData = {
+          orderNum: orderNumber,
+          orderNumber: orderNumber,
+          tableNumber: tableName,
+          items: [],
+          tax8Total: tax8Total,
+          tax10Total: tax10Total,
+          total: totalAmount,
+          timestamp: Date.now(),
+          bagNeeded: bagNeeded,
+          bagQuantity: bagQuantity,
+          bagPrice: bagPrice,
+          paymentMethod: '（未会計）'
+        };
+        
+        // 商品データの整形
+        orders.forEach(order => {
+          if (order.items && Array.isArray(order.items)) {
+            order.items.forEach(item => {
+              const itemData = {
+                name: item.name,
+                toppings: item.toppings || 'なし',
+                price: item.price,
+                basePrice: item.basePrice || item.price,
+                toppingPrice: item.toppingPrice || 0,
+                quantity: item.quantity
+              };
+              
+              // トッピング詳細を保持
+              if (item.toppingDetails && Array.isArray(item.toppingDetails)) {
+                itemData.toppingDetails = item.toppingDetails;
+              } else if (item.toppingsData && Array.isArray(item.toppingsData)) {
+                itemData.toppingsData = item.toppingsData;
+              } else if (item.toppingsList && Array.isArray(item.toppingsList)) {
+                itemData.toppingsList = item.toppingsList;
+              }
+              
+              receiptData.items.push(itemData);
+            });
+          }
+        });
+        
+        console.log('📄 会計票データ:', receiptData);
+        
+        // レシート表示
+        showReceiptDisplay(receiptData);
+        
+      } catch (error) {
+        console.error('❌ 会計票表示エラー:', error);
+        await showCustomAlert({
+          icon: '⚠️',
+          title: 'エラー',
+          message: '会計票の表示に失敗しました: ' + error.message,
+          btnClass: 'modal-btn-danger'
+        });
       }
     }
     
