@@ -604,7 +604,7 @@ async function showQRCodeModal(qrUrl, imageData) {
   qrModal.innerHTML = `
     <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
-      <div id="qrCodeContainerModal" style="display: block !important; text-align: center !important; margin: 20px auto !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 12px !important; box-sizing: border-box !important; overflow: hidden !important;"></div>
+      <div id="qrCodeContainerModal" style="display: block !important; text-align: center !important; margin: 20px auto !important; width: 280px !important;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
@@ -659,51 +659,40 @@ async function showQRCodeModal(qrUrl, imageData) {
       // 描画完了を待つ - モバイル対応の改善版
       const waitForQRRender = async () => {
         let renderAttempts = 0;
-        const maxRenderAttempts = 40;
+        const maxRenderAttempts = 30;
         
         while (renderAttempts < maxRenderAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          
           const canvas = qrContainer.querySelector('canvas');
           const img = qrContainer.querySelector('img');
           
           if (canvas || img) {
-            console.log('🎨 QR要素を発見:', canvas ? 'canvas' : '', img ? 'img' : '', 'attempt:', renderAttempts);
+            console.log('🎨 QR要素を発見:', canvas ? 'canvas' : 'img', 'attempt:', renderAttempts);
             
-            // imgとcanvasの両方がある場合、canvasを削除してimgだけを残す
-            if (img && canvas) {
-              // canvasを削除
-              canvas.remove();
-              console.log('🗑️ Canvas要素を削除しました（Imgを残します）');
-            }
-            
-            // さらに待機して、すべての生成が完了するのを待つ
-            await new Promise(resolve => setTimeout(resolve, 150));
-            
-            // 再度確認して、canvasが残っていないか確認
-            const allCanvases = qrContainer.querySelectorAll('canvas');
-            allCanvases.forEach(c => {
-              c.remove();
-              console.log('🗑️ 追加のCanvas要素を削除');
+            // すべての子要素にスタイルを適用して確実に表示
+            const allChildren = qrContainer.querySelectorAll('*');
+            allChildren.forEach(child => {
+              child.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
             });
             
-            // 最終的にimgだけが残っているはず
-            const finalImg = qrContainer.querySelector('img');
+            // コンテナのスタイルを確実に設定
+            qrContainer.style.cssText = 'display: block !important; text-align: center !important; margin: 20px auto !important; width: 280px !important;';
             
-            if (finalImg) {
-              // imgにスタイルを適用
-              finalImg.style.cssText = 'display: block !important; margin: 0 auto !important; padding: 0 !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
-              console.log('✅ Img要素を表示設定しました');
-            }
+            console.log('✅ QR要素を表示設定しました');
+            console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
             
-            // コンテナのスタイルを設定
-            qrContainer.style.cssText = 'display: block !important; text-align: center !important; margin: 20px auto !important; width: 280px !important; height: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 12px !important; box-sizing: border-box !important; overflow: hidden !important; line-height: 0 !important;';
+            // 要素が実際に描画されるまでさらに待つ
+            await new Promise(resolve => setTimeout(resolve, 200));
             
-            console.log('📦 QRコンテナの最終子要素数:', qrContainer.children.length);
+            // 再度スタイルを確認して設定（モバイルブラウザ対策）
+            allChildren.forEach(child => {
+              child.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+            });
             
             return;
           }
           
+          // まだ描画されていない場合は待機
+          await new Promise(resolve => setTimeout(resolve, 100));
           renderAttempts++;
         }
         
