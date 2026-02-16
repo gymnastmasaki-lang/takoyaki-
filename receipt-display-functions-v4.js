@@ -604,7 +604,7 @@ async function showQRCodeModal(qrUrl, imageData) {
   qrModal.innerHTML = `
     <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
-      <div id="qrCodeContainerModal" style="display: block !important; text-align: center !important; margin: 20px auto !important; min-height: 280px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 12px !important; box-sizing: border-box !important;"></div>
+      <div id="qrCodeContainerModal" style="display: block !important; text-align: center !important; margin: 20px auto !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 12px !important; box-sizing: border-box !important; overflow: hidden !important;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
       <p style="font-size: 12px; color: #999; margin: 10px 0;">有効期限: 7日間</p>
       <div style="margin-top: 30px; display: flex; gap: 15px;">
@@ -680,8 +680,8 @@ async function showQRCodeModal(qrUrl, imageData) {
               displayElement.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
             }
             
-            // コンテナのスタイルを確実に設定
-            qrContainer.style.cssText = 'display: block !important; text-align: center !important; margin: 20px auto !important; height: 280px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 12px !important; box-sizing: border-box !important;';
+            // コンテナのスタイルを確実に設定（高さは自動調整）
+            qrContainer.style.cssText = 'display: block !important; text-align: center !important; margin: 20px auto !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 12px !important; box-sizing: border-box !important; overflow: hidden !important; line-height: 0 !important;';
             
             console.log('✅ QR要素を表示設定しました');
             console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
