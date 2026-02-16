@@ -670,8 +670,10 @@ async function showQRCodeModal(qrUrl, imageData) {
         const canvas = qrContainer.querySelector('canvas');
         const img = qrContainer.querySelector('img');
         
-        if (img) {
-          console.log('🎨 Img要素を発見');
+        console.log(`🔍 試行${attempts + 1}: canvas=${!!canvas}, img=${!!img}`);
+        
+        if (img && img.src) {
+          console.log('🎨 Img要素を発見（src設定済み）');
           
           // canvasを完全に削除
           if (canvas) {
@@ -679,34 +681,72 @@ async function showQRCodeModal(qrUrl, imageData) {
             console.log('🗑️ Canvas要素を削除');
           }
           
-          // imgのスタイルを強制設定
-          img.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
-          console.log('✅ Img要素を表示しました');
+          // imgのスタイルを強制設定（setAttribute使用で強制）
+          img.setAttribute('style', 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;');
           
-          // 親要素のスタイルも再設定
+          // 念のため、JavaScriptからも設定
+          img.style.display = 'block';
+          img.style.margin = '0 auto';
+          img.style.width = '256px';
+          img.style.height = '256px';
+          img.style.visibility = 'visible';
+          img.style.opacity = '1';
+          img.style.position = 'static';
+          
+          console.log('✅ Img要素のスタイルを設定しました');
+          console.log('📷 Img src:', img.src.substring(0, 50) + '...');
+          
+          // 親要素のスタイルを再設定
           qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 280px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 10px; box-sizing: border-box;';
+          
+          // MutationObserverでスタイルの変更を監視
+          const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+              if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+                const currentDisplay = img.style.display;
+                if (currentDisplay !== 'block') {
+                  console.warn('⚠️ imgのdisplayが変更されました:', currentDisplay, '→ block に戻します');
+                  img.style.display = 'block';
+                  img.style.visibility = 'visible';
+                  img.style.opacity = '1';
+                }
+              }
+            });
+          });
+          
+          observer.observe(img, {
+            attributes: true,
+            attributeFilter: ['style']
+          });
+          
+          console.log('👁️ MutationObserverを設定しました');
           
           // 画像の読み込み確認
           if (!img.complete) {
             console.log('⏳ 画像の読み込みを待機中...');
-            img.onload = () => console.log('✅ 画像の読み込み完了');
-            img.onerror = (e) => console.error('❌ 画像の読み込みエラー:', e);
+            img.onload = () => {
+              console.log('✅ 画像の読み込み完了');
+            };
+            img.onerror = (e) => {
+              console.error('❌ 画像の読み込みエラー:', e);
+            };
           } else {
             console.log('✅ 画像は既に読み込まれています');
           }
+        } else if (img) {
+          console.log('⏳ Img要素はあるがsrcが未設定 - 待機');
+          setTimeout(() => waitForQRRender(attempts + 1), 100);
         } else if (canvas) {
           console.log('🎨 Canvas要素のみ発見 - imgの生成を待機');
-          // imgの生成を待つため再試行
           setTimeout(() => waitForQRRender(attempts + 1), 100);
         } else {
           console.log('⏳ QR要素が見つかりません - 再試行');
-          // まだ描画されていない場合は再試行
           setTimeout(() => waitForQRRender(attempts + 1), 100);
         }
       };
       
       // 描画を待つ（初回は少し長めに待つ）
-      setTimeout(() => waitForQRRender(), 200);
+      setTimeout(() => waitForQRRender(), 300);
       
     } catch (error) {
       console.error('❌ QRコード生成エラー:', error);
