@@ -668,14 +668,20 @@ async function showQRCodeModal(qrUrl, imageData) {
           if (canvas || img) {
             console.log('🎨 QR要素を発見:', canvas ? 'canvas' : 'img', 'attempt:', renderAttempts);
             
-            // すべての子要素にスタイルを適用して確実に表示
-            const allChildren = qrContainer.querySelectorAll('*');
-            allChildren.forEach(child => {
-              child.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
-            });
+            // imgがある場合はimgのみ表示、canvasは削除
+            if (img && canvas) {
+              canvas.remove();
+              console.log('🗑️ Canvas要素を削除しました');
+            }
+            
+            // 表示する要素のみにスタイルを適用
+            const displayElement = img || canvas;
+            if (displayElement) {
+              displayElement.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+            }
             
             // コンテナのスタイルを確実に設定
-            qrContainer.style.cssText = 'display: block !important; text-align: center !important; margin: 20px auto !important; min-height: 280px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 12px !important; box-sizing: border-box !important;';
+            qrContainer.style.cssText = 'display: block !important; text-align: center !important; margin: 20px auto !important; height: 280px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; padding: 12px !important; box-sizing: border-box !important;';
             
             console.log('✅ QR要素を表示設定しました');
             console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
@@ -684,9 +690,9 @@ async function showQRCodeModal(qrUrl, imageData) {
             await new Promise(resolve => setTimeout(resolve, 200));
             
             // 再度スタイルを確認して設定（モバイルブラウザ対策）
-            allChildren.forEach(child => {
-              child.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
-            });
+            if (displayElement && displayElement.parentNode === qrContainer) {
+              displayElement.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: static !important;';
+            }
             
             return;
           }
