@@ -602,7 +602,7 @@ async function showQRCodeModal(qrUrl, imageData) {
   qrModal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.9) !important; z-index: 99999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
   
   qrModal.innerHTML = `
-    <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
+    <div onclick="event.stopPropagation();" style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
       <div id="qrCodeContainerModal" style="display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
@@ -714,12 +714,15 @@ async function showQRCodeModal(qrUrl, imageData) {
     }
   }
   
-  // モーダルの外側クリックで閉じる
-  qrModal.addEventListener('click', function(e) {
-    if (e.target === qrModal) {
-      closeQRModal();
-    }
-  });
+  // モーダルの外側クリックで閉じる（スマホ対応：遅延追加）
+  // スマホでの誤動作を防ぐため、モーダル表示から少し遅延させる
+  setTimeout(() => {
+    qrModal.addEventListener('click', function(e) {
+      if (e.target === qrModal) {
+        closeQRModal();
+      }
+    }, { once: false }); // once: false にして複数回クリック可能に
+  }, 300); // 300ms遅延
 }
 
 // 画像ダウンロード関数
