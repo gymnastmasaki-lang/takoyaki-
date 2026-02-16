@@ -602,7 +602,7 @@ async function showQRCodeModal(qrUrl, imageData) {
   qrModal.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(0,0,0,0.9) !important; z-index: 99999999 !important; display: flex !important; align-items: center !important; justify-content: center !important;';
   
   qrModal.innerHTML = `
-    <div onclick="event.stopPropagation();" style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
+    <div style="background: white; border-radius: 20px; padding: 30px; max-width: 600px; width: 95%; text-align: center;">
       <h2 style="margin: 0 0 20px 0; font-size: 24px;">QRコード</h2>
       <div id="qrCodeContainerModal" style="display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;"></div>
       <p style="font-size: 14px; color: #666; margin: 20px 0;">このQRコードをスキャンしてレシート・領収書を表示できます</p>
@@ -645,7 +645,7 @@ async function showQRCodeModal(qrUrl, imageData) {
       qrContainer.innerHTML = '';
       
       // コンテナのスタイルを事前に設定
-      qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important; padding: 10px !important;';
+      qrContainer.style.cssText = 'display: flex !important; justify-content: center !important; align-items: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important;';
       
       // QRコードを直接生成
       const qrcode = new QRCode(qrContainer, {
@@ -659,9 +659,9 @@ async function showQRCodeModal(qrUrl, imageData) {
       
       console.log('✅ QRコード生成完了');
       
-      // 描画完了を待つための関数（改善版）
+      // 描画完了を待つための関数
       const waitForQRRender = (attempts = 0) => {
-        if (attempts > 30) {
+        if (attempts > 20) {
           console.error('❌ QRコードの描画がタイムアウトしました');
           qrContainer.innerHTML = '<div style="color: red; padding: 20px;">QRコードの表示に失敗しました</div>';
           return;
@@ -671,63 +671,43 @@ async function showQRCodeModal(qrUrl, imageData) {
         const img = qrContainer.querySelector('img');
         
         if (canvas || img) {
-          console.log('🎨 QR要素を発見:', canvas ? 'canvas' : 'img', 'at attempt', attempts);
+          console.log('🎨 QR要素を発見:', canvas ? 'canvas' : 'img');
           
-          // 要素が見つかったら、強制的に表示状態を維持
-          const displayElement = img || canvas;
+          // QR要素を保護するフラグを設定
+          if (canvas) canvas.dataset.protected = 'true';
+          if (img) img.dataset.protected = 'true';
           
-          if (displayElement) {
-            // 見つかった要素を強制表示
-            displayElement.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: relative !important; z-index: 10000 !important;';
-            
-            // もし両方ある場合は、imgを優先
-            if (img && canvas) {
-              canvas.style.display = 'none !important';
-              console.log('✅ Img要素を優先表示（canvasは非表示）');
-            } else if (img) {
-              console.log('✅ Img要素を表示');
-            } else {
-              console.log('✅ Canvas要素を表示');
+          // imgがある場合はimgのみ表示、canvasは非表示
+          // imgがない場合のみcanvasを表示
+          if (img) {
+            // canvasを非表示
+            if (canvas) {
+              canvas.style.display = 'none';
             }
-            
-            // コンテナのスタイルは変更しない（既に設定済み）
-            console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
-            
-            // 表示状態を監視して維持する
-            const observer = new MutationObserver((mutations) => {
-              mutations.forEach((mutation) => {
-                if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
-                  const target = mutation.target;
-                  if (target === displayElement) {
-                    // スタイルが変更されたら再適用
-                    displayElement.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: relative !important; z-index: 10000 !important;';
-                    console.log('🔄 QRコードのスタイルを再適用しました');
-                  }
-                }
-              });
-            });
-            
-            // 監視開始
-            observer.observe(displayElement, {
-              attributes: true,
-              attributeFilter: ['style']
-            });
-            
-            // モーダルが閉じられる時に監視を停止
-            qrModal.addEventListener('remove', () => {
-              observer.disconnect();
-            }, { once: true });
-            
+            // imgのみ表示
+            img.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: relative !important; z-index: 1 !important;';
+            console.log('✅ Img要素のみを表示しました');
+          } else if (canvas) {
+            // imgがない場合はcanvasを表示
+            canvas.style.cssText = 'display: block !important; margin: 0 auto !important; width: 256px !important; height: 256px !important; visibility: visible !important; opacity: 1 !important; position: relative !important; z-index: 1 !important;';
+            console.log('✅ Canvas要素を表示しました');
           }
+          
+          // 親要素のスタイルも再設定
+          qrContainer.style.cssText = 'display: block !important; text-align: center !important; margin: 20px auto !important; min-height: 256px !important; width: 280px !important; background: #f0f0f0; border: 2px solid #ccc; overflow: visible !important; padding: 10px !important;';
+          
+          // QRコンテナを保護（innerHTML変更を監視）
+          qrContainer.dataset.qrGenerated = 'true';
+          
+          console.log('📦 QRコンテナの子要素数:', qrContainer.children.length);
         } else {
           // まだ描画されていない場合は再試行
-          console.log('⏳ QR要素待機中...', attempts);
-          setTimeout(() => waitForQRRender(attempts + 1), 100);
+          setTimeout(() => waitForQRRender(attempts + 1), 50);
         }
       };
       
-      // 描画を待つ（初回は少し長めに待つ）
-      setTimeout(() => waitForQRRender(), 200);
+      // 描画を待つ
+      setTimeout(() => waitForQRRender(), 100);
       
     } catch (error) {
       console.error('❌ QRコード生成エラー:', error);
@@ -741,15 +721,32 @@ async function showQRCodeModal(qrUrl, imageData) {
     }
   }
   
-  // モーダルの外側クリックで閉じる（スマホ対応：遅延追加）
-  // スマホでの誤動作を防ぐため、モーダル表示から少し遅延させる
+  // モーダルの外側クリックで閉じる（スマホでの即閉じを防ぐため遅延実行）
+  let modalClickEnabled = false;
+  let lastTouchTime = 0;
+  
   setTimeout(() => {
-    qrModal.addEventListener('click', function(e) {
-      if (e.target === qrModal) {
-        closeQRModal();
-      }
-    }, { once: false }); // once: false にして複数回クリック可能に
-  }, 300); // 300ms遅延
+    modalClickEnabled = true;
+  }, 500); // 500ms後にクリック可能にする
+  
+  // touchstartとclickの二重発火を防ぐ
+  qrModal.addEventListener('touchstart', function(e) {
+    lastTouchTime = Date.now();
+    if (modalClickEnabled && e.target === qrModal) {
+      closeQRModal();
+    }
+  }, { passive: true });
+  
+  qrModal.addEventListener('click', function(e) {
+    // touchstartから300ms以内のclickは無視（二重発火防止）
+    if (Date.now() - lastTouchTime < 300) {
+      console.log('🚫 二重発火防止: clickイベントをスキップ');
+      return;
+    }
+    if (modalClickEnabled && e.target === qrModal) {
+      closeQRModal();
+    }
+  });
 }
 
 // 画像ダウンロード関数
