@@ -2207,68 +2207,94 @@
     }
     
     // ========== ネット回線監視 + 自動リロード ==========
-    
+    // navigator.onLine は不正確なため、実際にfetchで疎通確認する方式を使用
+
     let isOffline = false;
     let offlineNotificationShown = false;
-    let autoReloadTimer = null;      // 1分ごとの自動リロードタイマー
-    let autoReloadCountdown = null;  // カウントダウン表示タイマー
-    
-    // ネット回線の状態を監視
-    function checkOnlineStatus() {
-      if (!navigator.onLine && !isOffline) {
+    let autoReloadTimer = null;
+    let autoReloadCountdown = null;
+    let connectivityCheckInterval = null;
+
+    // 実際にネットに繋がっているか確認（fetchベース）
+    async function checkRealConnectivity() {
+      try {
+        // Googleのfavicon（軽量・CORS不要）をno-cacheで取得して疎通確認
+        const res = await fetch('https://www.google.com/favicon.ico?_=' + Date.now(), {
+          method: 'HEAD',
+          mode: 'no-cors',
+          cache: 'no-store'
+        });
+        return true; // 応答があれば接続OK
+      } catch (e) {
+        return false; // タイムアウト or エラー = オフライン
+      }
+    }
+
+    // メインの接続監視ループ（3秒ごとに実行）
+    async function runConnectivityCheck() {
+      const online = await checkRealConnectivity();
+
+      if (!online && !isOffline) {
         // オフラインになった
         isOffline = true;
         showOfflineNotification();
-        startAutoReload(); // 1分ごと自動リロード開始
-      } else if (navigator.onLine && isOffline) {
-        // オンラインに復帰した
+        startAutoReload();
+        updateIndicator(false);
+      } else if (online && isOffline) {
+        // オンラインに復帰した！
         isOffline = false;
         stopAutoReload();
         hideOfflineNotification();
-        // 復帰後すぐにページをリロードして注文を再取得
+        updateIndicator(true);
         showToast('✅ ネット回線が復旧しました。再接続中...');
-        setTimeout(() => {
-          location.reload();
-        }, 1500);
+        setTimeout(() => location.reload(), 1500);
+      } else if (online && !isOffline) {
+        updateIndicator(true);
       }
     }
-    
-    // 1分ごとの自動リロード開始
+
+    function updateIndicator(online) {
+      const indicator = document.getElementById('connection-indicator');
+      if (!indicator) return;
+      if (online) {
+        indicator.className = 'connection-indicator online';
+        indicator.innerHTML = '<div class="connection-dot"></div><span>オンライン</span>';
+      } else {
+        indicator.className = 'connection-indicator offline';
+        indicator.innerHTML = '<div class="connection-dot"></div><span>オフライン</span>';
+      }
+    }
+
+    // 1分ごとの自動リロード開始（オフライン時のバックアップ）
     function startAutoReload() {
-      stopAutoReload(); // 二重起動防止
+      stopAutoReload();
       let secondsLeft = 60;
       updateCountdownDisplay(secondsLeft);
-      
+
       autoReloadCountdown = setInterval(() => {
         secondsLeft--;
         updateCountdownDisplay(secondsLeft);
-        if (secondsLeft <= 0) {
-          clearInterval(autoReloadCountdown);
-        }
+        if (secondsLeft <= 0) clearInterval(autoReloadCountdown);
       }, 1000);
-      
-      autoReloadTimer = setTimeout(() => {
-        location.reload();
-      }, 60000);
+
+      autoReloadTimer = setTimeout(() => location.reload(), 60000);
     }
-    
-    // 自動リロードを停止
+
     function stopAutoReload() {
       if (autoReloadTimer) { clearTimeout(autoReloadTimer); autoReloadTimer = null; }
       if (autoReloadCountdown) { clearInterval(autoReloadCountdown); autoReloadCountdown = null; }
     }
-    
-    // カウントダウン表示を更新
+
     function updateCountdownDisplay(seconds) {
       const el = document.getElementById('offline-countdown');
       if (el) el.textContent = `接続が回復しない場合、${seconds}秒後に自動更新します`;
     }
-    
+
     // オフライン通知を表示
     function showOfflineNotification() {
       if (offlineNotificationShown) return;
       offlineNotificationShown = true;
-      
+
       const notification = document.createElement('div');
       notification.id = 'offline-notification';
       notification.style.cssText = `
@@ -2283,7 +2309,7 @@
         z-index: 9999;
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
       `;
-      
+
       notification.innerHTML = `
         <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">
           ⚠️ ネット回線が切断されました
@@ -2305,11 +2331,11 @@
           🔄 今すぐ更新
         </button>
       `;
-      
+
       document.body.appendChild(notification);
       showToast('⚠️ ネット回線が切断されました');
     }
-    
+
     // オフライン通知を非表示
     function hideOfflineNotification() {
       const notification = document.getElementById('offline-notification');
@@ -2318,28 +2344,10 @@
         offlineNotificationShown = false;
       }
     }
-    
-    // 音声通知を有効にする（互換性のため残す）
-    window.enableAudioNotification = function() {
-      const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGGi77eifTRAMUKjj8LZjHAY4ktfyzXksBS'
-      );
-      audio.play().then(() => {
-        showToast('✓ 音声通知が有効になりました');
-        hideOfflineNotification();
-      }).catch(e => {
-        showToast('音声の有効化に失敗しました');
-      });
-    };
-    
-    // 初回チェック
-    checkOnlineStatus();
-    
-    // 定期的にチェック（5秒ごと）
-    setInterval(checkOnlineStatus, 5000);
-    
-    // オンライン/オフラインイベントをリッスン
-    window.addEventListener('online', checkOnlineStatus);
-    window.addEventListener('offline', checkOnlineStatus);
+
+    // 監視開始（3秒ごとにfetchで実疎通確認）
+    runConnectivityCheck();
+    connectivityCheckInterval = setInterval(runConnectivityCheck, 3000);
 
     window.loadOrders = loadOrders;
   </script>
