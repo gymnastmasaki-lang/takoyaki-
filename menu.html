@@ -3493,50 +3493,70 @@
           return;
         }
         
-        const now = new Date();
-        const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        
-        const todayStart = new Date(jstNow);
-        todayStart.setHours(1, 0, 0, 0);
-        if (jstNow < todayStart) {
-          todayStart.setDate(todayStart.getDate() - 1);
+        // ========== 送信直前の空カード最終チェック ==========
+        const validCartItems = cart.filter(item => item && item.name && item.price >= 0 && item.quantity > 0);
+        if (validCartItems.length === 0) {
+          console.error('❌ 送信直前カート確認で空を検出。送信中止。');
+          isOrderProcessing = false;
+          if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.style.opacity = '1';
+            confirmBtn.style.cursor = 'pointer';
+            confirmBtn.textContent = '注文を確定する';
+          }
+          return;
         }
+
+        const now = new Date();
+
+        // ========== 注文番号をトランザクションでアトミックに採番 ==========
+        // レースコンディション防止：複数人が同時注文しても重複しない
+        // 朝3時（JST）に619からリセット
+        const { runTransaction } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
         
-        const ordersSnapshot = await getDocs(window.getStoreCollection('orders'));
-        let maxOrderNumber = 618;
-        let hasActiveOrders = false;
+        const counterRef = window.getStoreDoc('settings', 'orderCounter');
         
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
+        const orderNumber = await runTransaction(db, async (transaction) => {
+          const counterSnap = await transaction.get(counterRef);
           
-          // 削除されていない注文があるかチェック
-          if (!data.deleted) {
-            hasActiveOrders = true;
+          const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+          // リセット基準：JST 午前3時
+          const todayReset = new Date(jstNow);
+          todayReset.setHours(3, 0, 0, 0);
+          if (jstNow < todayReset) {
+            todayReset.setDate(todayReset.getDate() - 1);
+          }
+          
+          let nextNumber = 619;
+          
+          if (counterSnap.exists()) {
+            const data = counterSnap.data();
+            const lastReset = data.lastResetAt ? data.lastResetAt.toDate() : null;
+            const lastResetJst = lastReset ? new Date(lastReset.getTime() + (9 * 60 * 60 * 1000)) : null;
             
-            // 削除されていない注文のみから最大番号を取得
-            // timestampが存在する場合のみ日付チェック
-            if (data.timestamp && data.timestamp.toDate) {
-              const orderDate = data.timestamp.toDate();
-              const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
-              
-              if (jstOrderDate >= todayStart && data.orderNumber > maxOrderNumber) {
-                maxOrderNumber = data.orderNumber;
-              }
-            } else if (data.orderNumber > maxOrderNumber) {
-              // timestampがない場合は日付チェックなしで最大番号のみ更新
-              maxOrderNumber = data.orderNumber;
+            // 前回のカウンター更新が今日の3時より前 → リセット
+            const needsReset = !lastResetJst || lastResetJst < todayReset;
+            
+            if (needsReset) {
+              nextNumber = 619; // 毎朝3時にリセット
+            } else {
+              nextNumber = (data.currentNumber || 618) + 1;
             }
           }
+          
+          transaction.set(counterRef, {
+            currentNumber: nextNumber,
+            lastResetAt: Timestamp.fromDate(now),
+            updatedAt: Timestamp.fromDate(now)
+          }, { merge: true });
+          
+          return nextNumber;
         });
         
-        // 削除されていない注文が0件なら619番から開始
-        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
-        
-        console.log('注文番号生成:', {
-          hasActiveOrders,
-          maxOrderNumber,
-          nextOrderNumber: orderNumber
-        });
+        console.log('✅ 注文番号生成（トランザクション）:', orderNumber);
+
+        // 注文アイテム取得（品切れ除去後の有効なカート）
+        const ordersSnapshot = { forEach: () => {} }; // 後続コードとの互換用ダミー
         
         // テイクアウトかどうか判定
         const isTakeout = (tableNumber === 'テイクアウト');
@@ -3625,19 +3645,21 @@
           orderId: docRef.id
         });
         
+        // 待ち順番を計算（注文後にFirestoreから最新データを取得）
+        const freshSnapshot = await getDocs(window.getStoreCollection('orders'));
         const validOrders = [];
-        ordersSnapshot.forEach(doc => {
+        freshSnapshot.forEach(doc => {
           const data = doc.data();
           if (data.deleteAt && 
               data.deleteAt.toDate && 
               data.deleteAt.toDate() > now && 
               !data.deleted &&
               !data.cancelledAt &&
-              !data.completedAt) {  // ✅ 完了済みも除外
+              !data.completedAt) {
             validOrders.push(data.orderNumber);
           }
         });
-        validOrders.push(orderNumber);
+        if (!validOrders.includes(orderNumber)) validOrders.push(orderNumber);
         validOrders.sort((a, b) => a - b);
         const myPosition = validOrders.indexOf(orderNumber);
         const displayPosition = myPosition + 1 + 1; // 通常の順番に+1
@@ -4642,11 +4664,8 @@
         
         console.log('📦 注文データ:', orderData);
         
-        // 注文番号を自動生成
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
+        // ========== ハンディ注文番号もトランザクションで採番（重複防止） ==========
+        const { runTransaction } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
         
         let ordersRef;
         if (storeParam) {
@@ -4655,14 +4674,31 @@
           ordersRef = window.collection(window.db, 'orders');
         }
         
-        // 本日の注文数を取得
-        const q = window.query(
-          ordersRef,
-          window.where('timestamp', '>=', window.Timestamp.fromDate(today)),
-          window.where('timestamp', '<', window.Timestamp.fromDate(tomorrow))
-        );
-        const querySnapshot = await window.getDocs(q);
-        const orderNumber = querySnapshot.size + 1;
+        const handyCounterRef = window.getStoreDoc('settings', 'orderCounter');
+        const handyNow = new Date();
+        
+        const orderNumber = await runTransaction(window.db, async (transaction) => {
+          const counterSnap = await transaction.get(handyCounterRef);
+          const jstNow = new Date(handyNow.getTime() + (9 * 60 * 60 * 1000));
+          const todayReset = new Date(jstNow);
+          todayReset.setHours(3, 0, 0, 0);
+          if (jstNow < todayReset) todayReset.setDate(todayReset.getDate() - 1);
+          
+          let nextNumber = 619;
+          if (counterSnap.exists()) {
+            const data = counterSnap.data();
+            const lastReset = data.lastResetAt ? data.lastResetAt.toDate() : null;
+            const lastResetJst = lastReset ? new Date(lastReset.getTime() + (9 * 60 * 60 * 1000)) : null;
+            const needsReset = !lastResetJst || lastResetJst < todayReset;
+            nextNumber = needsReset ? 619 : (data.currentNumber || 618) + 1;
+          }
+          transaction.set(handyCounterRef, {
+            currentNumber: nextNumber,
+            lastResetAt: window.Timestamp.fromDate(handyNow),
+            updatedAt: window.Timestamp.fromDate(handyNow)
+          }, { merge: true });
+          return nextNumber;
+        });
         
         orderData.orderNumber = orderNumber;
         
