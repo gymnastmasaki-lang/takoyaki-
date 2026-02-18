@@ -302,11 +302,135 @@ async function showReceiptDisplay(receiptData) {
   console.log('✅ レシート表示完了');
 }
 
+// ========== 領収書入力ダイアログ ==========
+function showInvoiceInputDialog() {
+  return new Promise((resolve, reject) => {
+    // 既存ダイアログを削除
+    const existing = document.getElementById('invoiceInputDialog');
+    if (existing) existing.remove();
+
+    const dialog = document.createElement('div');
+    dialog.id = 'invoiceInputDialog';
+    dialog.style.cssText = `
+      position: fixed !important; top: 0 !important; left: 0 !important;
+      width: 100% !important; height: 100% !important;
+      background: rgba(0,0,0,0.7) !important; z-index: 999999999 !important;
+      display: flex !important; align-items: center !important; justify-content: center !important;
+    `;
+
+    dialog.innerHTML = `
+      <div style="background: white; border-radius: 20px; padding: 30px; max-width: 420px; width: 92%; box-shadow: 0 20px 60px rgba(0,0,0,0.4);">
+        <h2 style="margin: 0 0 8px 0; font-size: 20px; text-align: center; letter-spacing: 4px;">領収書発行</h2>
+        <p style="margin: 0 0 24px 0; font-size: 13px; color: #888; text-align: center;">発行情報を入力してください</p>
+
+        <div style="margin-bottom: 20px;">
+          <label style="display: block; font-size: 13px; font-weight: bold; margin-bottom: 8px; color: #333;">
+            宛名 <span style="font-weight: normal; color: #999;">（空欄の場合は空白で発行）</span>
+          </label>
+          <input
+            id="invoiceNameInput"
+            type="text"
+            placeholder="例: 山田太郎"
+            style="width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 16px;
+                   border: 2px solid #ddd; border-radius: 10px; outline: none;
+                   font-family: inherit; transition: border-color 0.2s;"
+            onfocus="this.style.borderColor='#667eea'"
+            onblur="this.style.borderColor='#ddd'"
+          />
+        </div>
+
+        <div style="margin-bottom: 28px;">
+          <label style="display: block; font-size: 13px; font-weight: bold; margin-bottom: 8px; color: #333;">
+            但し書き <span style="font-weight: normal; color: #999;">（編集可）</span>
+          </label>
+          <input
+            id="invoicePurposeInput"
+            type="text"
+            value="食事代として"
+            style="width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 16px;
+                   border: 2px solid #ddd; border-radius: 10px; outline: none;
+                   font-family: inherit; transition: border-color 0.2s;"
+            onfocus="this.style.borderColor='#667eea'"
+            onblur="this.style.borderColor='#ddd'"
+          />
+        </div>
+
+        <div style="display: flex; gap: 12px;">
+          <button id="invoiceDialogCancel"
+            style="flex: 1; padding: 15px; background: #eee; color: #555;
+                   border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
+            キャンセル
+          </button>
+          <button id="invoiceDialogOK"
+            style="flex: 2; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                   color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
+            領収書を発行
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(dialog);
+
+    // フォーカス
+    setTimeout(() => {
+      const nameInput = document.getElementById('invoiceNameInput');
+      if (nameInput) nameInput.focus();
+    }, 100);
+
+    // OK
+    document.getElementById('invoiceDialogOK').addEventListener('click', () => {
+      const name = (document.getElementById('invoiceNameInput').value || '').trim();
+      const purpose = (document.getElementById('invoicePurposeInput').value || '食事代として').trim();
+      dialog.remove();
+      resolve({ name, purpose });
+    });
+
+    // キャンセル
+    document.getElementById('invoiceDialogCancel').addEventListener('click', () => {
+      dialog.remove();
+      reject(new Error('cancelled'));
+    });
+
+    // 背景クリックでキャンセル
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) {
+        dialog.remove();
+        reject(new Error('cancelled'));
+      }
+    });
+
+    // Enterキーで確定
+    dialog.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const name = (document.getElementById('invoiceNameInput').value || '').trim();
+        const purpose = (document.getElementById('invoicePurposeInput').value || '食事代として').trim();
+        dialog.remove();
+        resolve({ name, purpose });
+      }
+    });
+  });
+}
+
 // 領収書表示関数
 async function showInvoiceDisplay(invoiceData) {
   console.log('🧾 ==== 領収書表示開始 ====');
   console.log('🔍 受信データ:', invoiceData);
   console.log('🔢 注文番号:', invoiceData.orderNumber || invoiceData.orderNum);
+
+  // ========== 宛名・但し書き入力ダイアログ ==========
+  let invoiceName = '';
+  let invoicePurpose = '食事代として';
+  try {
+    const inputResult = await showInvoiceInputDialog();
+    invoiceName = inputResult.name;
+    invoicePurpose = inputResult.purpose || '食事代として';
+    console.log('📝 宛名:', invoiceName || '（空欄）', '/ 但し書き:', invoicePurpose);
+  } catch (e) {
+    console.log('❌ 領収書発行キャンセル');
+    return; // キャンセルされたら終了
+  }
+  // ===================================================
   
   const existingModals = document.querySelectorAll('[id^="receiptDisplayModal"], #qrDisplayModal');
   console.log('🗑️ 既存モーダル削除:', existingModals.length);
@@ -422,10 +546,9 @@ async function showInvoiceDisplay(invoiceData) {
       </div>
       
       <div style="margin: 30px 0;">
-        <div style="font-size: 14px; margin-bottom: 10px;">お客様</div>
         <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 30px;">
-          <span style="font-size: 18px; flex: 1; border-bottom: 1px solid transparent;"></span>
-          <span style="font-size: 14px; white-space: nowrap;">様</span>
+          <span style="font-size: 20px; flex: 1;">${invoiceName}</span>
+          <span style="font-size: 16px; white-space: nowrap; margin-left: 8px;">様</span>
         </div>
       </div>
       
@@ -441,7 +564,7 @@ async function showInvoiceDisplay(invoiceData) {
       <div style="margin: 30px 0; font-size: 14px;">
         <div style="margin: 10px 0; line-height: 1.8;">
           <span style="display: inline-block; width: 100px; vertical-align: top;">但し</span>
-          <span style="display: inline-block; max-width: 200px;">飲食代として</span>
+          <span style="display: inline-block; max-width: 200px;">${invoicePurpose}</span>
         </div>
         <div style="margin: 10px 0;">
           <span style="display: inline-block; width: 100px;">注文番号</span>
@@ -801,4 +924,4 @@ window.showReceiptDisplay = showReceiptDisplay;
 window.showInvoiceDisplay = showInvoiceDisplay;
 window.openCashDrawer = openCashDrawer;
 
-console.log('✅ receipt-display-functions-v5.js 読み込み完了');
+console.log('✅ receipt-display-functions-v5.js 読み込み完了（宛名・但し書き入力ダイアログ対応）');
