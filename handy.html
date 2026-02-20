@@ -320,6 +320,13 @@
     }
     .table-memo-btn:hover { background: rgba(102,126,234,0.3); }
     
+    /* メモありテーブルカードの色 */
+    .table-card.has-memo {
+      border: 3px solid #9c27b0 !important;
+      background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%) !important;
+    }
+    .table-card.has-memo .table-name { color: #6a1b9a !important; }
+    
     /* メモモーダル */
     #tableMemoModal {
       display: none;
@@ -1911,6 +1918,10 @@
         };
         tablesGrid.appendChild(instantCheckoutCard);
         
+        // テーブルIDを保存（メモ保存時に使用）
+        if (!window._tableMemoIds) window._tableMemoIds = {};
+        tables.forEach(t => { window._tableMemoIds[t.name] = t.id; });
+        
         tables.forEach(table => {
           const tableCard = document.createElement('div');
           tableCard.className = 'table-card';
@@ -1934,9 +1945,11 @@
           memoBtn.onclick = (e) => { e.stopPropagation(); openTableMemoModal(table.name, e); };
           tableCard.appendChild(memoBtn);
           
-          // 保存済みメモを反映
-          const savedMemo = window._tableMemos && window._tableMemos[table.name];
+          // 保存済みメモを反映（色変更も含む）
+          const savedMemo = table.staffMemo || (window._tableMemos && window._tableMemos[table.name]) || '';
           if (savedMemo) {
+            window._tableMemos[table.name] = savedMemo;
+            tableCard.classList.add('has-memo');
             const memoEl = document.createElement('div');
             memoEl.className = 'table-memo-display';
             memoEl.textContent = savedMemo;
@@ -10025,9 +10038,15 @@ ${totalRedSlipCount > 0 ? `
     if (!_memoCurrentTable) return;
     const text = document.getElementById('tableMemoTextarea').value.trim();
     window._tableMemos[_memoCurrentTable] = text;
+    // tablesコレクションのstaffMemoフィールドに保存（posと共通）
     try {
-      const memoRef = window.doc(window.db, 'stores', window.currentStoreId, 'tableMemos', _memoCurrentTable);
-      await window.setDoc(memoRef, { memo: text, updatedAt: new Date() });
+      const tableId = window._tableMemoIds && window._tableMemoIds[_memoCurrentTable];
+      if (tableId) {
+        await window.setDoc(window.getStoreDoc('tables', tableId), {
+          staffMemo: text,
+          updatedAt: window.Timestamp.now()
+        }, { merge: true });
+      }
     } catch(err) { console.warn('メモ保存エラー（ローカルのみ）:', err); }
     _applyMemoToCard(_memoCurrentTable, text);
     closeTableMemoModal();
@@ -10038,8 +10057,13 @@ ${totalRedSlipCount > 0 ? `
     document.getElementById('tableMemoTextarea').value = '';
     window._tableMemos[_memoCurrentTable] = '';
     try {
-      const memoRef = window.doc(window.db, 'stores', window.currentStoreId, 'tableMemos', _memoCurrentTable);
-      await window.setDoc(memoRef, { memo: '', updatedAt: new Date() });
+      const tableId = window._tableMemoIds && window._tableMemoIds[_memoCurrentTable];
+      if (tableId) {
+        await window.setDoc(window.getStoreDoc('tables', tableId), {
+          staffMemo: '',
+          updatedAt: window.Timestamp.now()
+        }, { merge: true });
+      }
     } catch(err) { console.warn('メモ削除エラー:', err); }
     _applyMemoToCard(_memoCurrentTable, '');
     closeTableMemoModal();
@@ -10047,31 +10071,34 @@ ${totalRedSlipCount > 0 ? `
   
   function _applyMemoToCard(tableName, text) {
     document.querySelectorAll('.table-card').forEach(card => {
-      if (card.getAttribute('data-table-name') === tableName) {
-        let memoEl = card.querySelector('.table-memo-display');
-        if (text) {
-          if (!memoEl) {
-            memoEl = document.createElement('div');
-            memoEl.className = 'table-memo-display';
-            card.appendChild(memoEl);
-          }
-          memoEl.textContent = text;
-        } else {
-          if (memoEl) memoEl.remove();
+      if (card.getAttribute('data-table-name') !== tableName) return;
+      let memoEl = card.querySelector('.table-memo-display');
+      if (text) {
+        card.classList.add('has-memo');
+        if (!memoEl) {
+          memoEl = document.createElement('div');
+          memoEl.className = 'table-memo-display';
+          card.appendChild(memoEl);
         }
+        memoEl.textContent = text;
+      } else {
+        card.classList.remove('has-memo');
+        if (memoEl) memoEl.remove();
       }
     });
   }
   
   async function loadAllTableMemos() {
     try {
-      const storeId = window.currentStoreId;
-      if (!storeId) return;
-      const memosRef = window.collection(window.db, 'stores', storeId, 'tableMemos');
-      const snap = await window.getDocs(memosRef);
+      if (!window._tableMemoIds) window._tableMemoIds = {};
+      // tablesコレクションからstaffMemoを読み込み（posと共通データ）
+      const snap = await window.getDocs(window.getStoreCollection('tables'));
       snap.forEach(doc => {
         const data = doc.data();
-        window._tableMemos[doc.id] = data.memo || '';
+        if (data.name) {
+          window._tableMemoIds[data.name] = doc.id;
+          window._tableMemos[data.name] = data.staffMemo || '';
+        }
       });
       Object.entries(window._tableMemos).forEach(([tableName, text]) => {
         if (text) _applyMemoToCard(tableName, text);
