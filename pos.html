@@ -954,51 +954,12 @@
     }
     .table-memo-btn:hover { background: rgba(102,126,234,0.3); }
     
-    /* メモモーダル */
-    #tableMemoModal {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 9999;
-      align-items: center;
-      justify-content: center;
+    /* メモありテーブルカードの色 */
+    .table-card.has-memo {
+      border-color: #9c27b0 !important;
+      background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%) !important;
     }
-    #tableMemoModal.active { display: flex; }
-    .table-memo-modal-inner {
-      background: white;
-      border-radius: 16px;
-      padding: 28px;
-      width: 340px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.25);
-    }
-    .table-memo-modal-inner h3 { margin: 0 0 14px; font-size: 18px; color: #333; }
-    .table-memo-modal-inner textarea {
-      width: 100%;
-      box-sizing: border-box;
-      border: 2px solid #e0e0e0;
-      border-radius: 8px;
-      padding: 10px;
-      font-size: 14px;
-      resize: vertical;
-      min-height: 120px;
-      outline: none;
-      font-family: inherit;
-    }
-    .table-memo-modal-inner textarea:focus { border-color: #667eea; }
-    .table-memo-modal-btns { display: flex; gap: 10px; margin-top: 16px; }
-    .table-memo-modal-btns button {
-      flex: 1;
-      padding: 10px;
-      border: none;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: bold;
-      cursor: pointer;
-    }
-    .btn-memo-save { background: #667eea; color: white; }
-    .btn-memo-clear { background: #ff7043; color: white; }
-    .btn-memo-cancel { background: #e0e0e0; color: #555; }
+    .table-card.has-memo .table-name { color: #6a1b9a !important; }
     
     .table-card:hover {
       transform: translateY(-5px);
@@ -15570,6 +15531,7 @@ ${redSlipCount > 0 ? `
     // テーブルメモを保存
     window.saveTableMemo = async function() {
       const tableId = document.getElementById('memoTableId').value;
+      const tableName = document.getElementById('memoTableName').textContent;
       const staffMemo = document.getElementById('memoTableStaffMemo').value.trim();
       
       try {
@@ -15582,11 +15544,34 @@ ${redSlipCount > 0 ? `
         closeTableMemoModal();
         await loadTableButtons(); // ボタンの色を更新
         
+        // newTablesGrid のカードも更新
+        _updateNewTableCardMemo(tableName, staffMemo);
+        
       } catch (error) {
         console.error('メモ保存エラー:', error);
         alert('メモの保存に失敗しました: ' + error.message);
       }
     };
+    
+    // newTablesGrid のカードのメモ表示・色を更新する関数
+    function _updateNewTableCardMemo(tableName, staffMemo) {
+      document.querySelectorAll('#newTablesGrid .table-card').forEach(card => {
+        if (card.getAttribute('data-table-name') !== tableName) return;
+        let memoEl = card.querySelector('.table-memo-display');
+        if (staffMemo) {
+          card.classList.add('has-memo');
+          if (!memoEl) {
+            memoEl = document.createElement('div');
+            memoEl.className = 'table-memo-display';
+            card.appendChild(memoEl);
+          }
+          memoEl.textContent = staffMemo;
+        } else {
+          card.classList.remove('has-memo');
+          if (memoEl) memoEl.remove();
+        }
+      });
+    }
     
     // ========== テーブルボタン動的生成 ==========
     
@@ -18272,6 +18257,26 @@ ${redSlipCount > 0 ? `
             <div class="table-order-count">空席</div>
           `;
           
+          // 📝 メモボタンを追加
+          const memoBtn = document.createElement('button');
+          memoBtn.className = 'table-memo-btn';
+          memoBtn.title = 'スタッフメモ';
+          memoBtn.textContent = '📝';
+          memoBtn.onclick = (e) => {
+            e.stopPropagation();
+            window.showTableMemoModal(table.id, table.name, table.staffMemo || '');
+          };
+          card.appendChild(memoBtn);
+          
+          // メモがあれば色変更・表示
+          if (table.staffMemo && table.staffMemo.trim() !== '') {
+            card.classList.add('has-memo');
+            const memoEl = document.createElement('div');
+            memoEl.className = 'table-memo-display';
+            memoEl.textContent = table.staffMemo;
+            card.appendChild(memoEl);
+          }
+          
           container.appendChild(card);
         });
         
@@ -18799,26 +18804,23 @@ ${redSlipCount > 0 ? `
         submitBtn.disabled = true;
         submitBtn.textContent = '注文確定';
         
-        // 🆕 注文番号を生成
+        // 🆕 注文番号を生成（毎朝3時リセット）
         const now = new Date();
         const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
         
         const todayStart = new Date(jstNow);
-        todayStart.setHours(1, 0, 0, 0);
+        todayStart.setHours(3, 0, 0, 0);
         if (jstNow < todayStart) {
           todayStart.setDate(todayStart.getDate() - 1);
         }
         
         const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
         let maxOrderNumber = 618;
-        let hasActiveOrders = false;
         
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
           
           if (!data.deleted) {
-            hasActiveOrders = true;
-            
             const orderDate = data.timestamp && data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp || Date.now());
             const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
             
@@ -18828,10 +18830,10 @@ ${redSlipCount > 0 ? `
           }
         });
         
-        const orderNumber = hasActiveOrders ? (maxOrderNumber + 1) : 619;
+        // 毎朝3時にリセット：当日の注文が1件もなければ619番から開始
+        const orderNumber = maxOrderNumber + 1;
         
         console.log('🆕 新UI注文番号生成:', {
-          hasActiveOrders,
           maxOrderNumber,
           nextOrderNumber: orderNumber
         });
@@ -19775,142 +19777,6 @@ ${redSlipCount > 0 ? `
   console.log('✅ モバイルプリンター統合機能 読み込み完了');
   </script>
 
-  <!-- ========== テーブルメモ機能 ========== -->
-  <div id="tableMemoModal">
-    <div class="table-memo-modal-inner">
-      <h3 id="tableMemoModalTitle">📝 テーブルメモ</h3>
-      <textarea id="tableMemoTextarea" placeholder="例：14:30来店&#10;山田様 3名&#10;アレルギー：えび"></textarea>
-      <div class="table-memo-modal-btns">
-        <button class="btn-memo-save" onclick="saveTableMemo()">保存</button>
-        <button class="btn-memo-clear" onclick="clearTableMemo()">クリア</button>
-        <button class="btn-memo-cancel" onclick="closeTableMemoModal()">閉じる</button>
-      </div>
-    </div>
-  </div>
-
-  <script>
-  // ===== テーブルメモ機能 =====
-  let _memoCurrentTable = null;
-  
-  function openTableMemoModal(tableName, e) {
-    if (e) e.stopPropagation();
-    _memoCurrentTable = tableName;
-    document.getElementById('tableMemoModalTitle').textContent = '📝 ' + tableName + ' メモ';
-    const saved = (window._tableMemos && window._tableMemos[tableName]) || '';
-    document.getElementById('tableMemoTextarea').value = saved;
-    document.getElementById('tableMemoModal').classList.add('active');
-    setTimeout(() => document.getElementById('tableMemoTextarea').focus(), 100);
-  }
-  
-  function closeTableMemoModal() {
-    document.getElementById('tableMemoModal').classList.remove('active');
-    _memoCurrentTable = null;
-  }
-  
-  async function saveTableMemo() {
-    if (!_memoCurrentTable) return;
-    const text = document.getElementById('tableMemoTextarea').value.trim();
-    if (!window._tableMemos) window._tableMemos = {};
-    window._tableMemos[_memoCurrentTable] = text;
-    // Firebaseに保存
-    try {
-      const memoRef = window.doc(window.db, 'stores', window.currentStoreId, 'tableMemos', _memoCurrentTable);
-      await window.setDoc(memoRef, { memo: text, updatedAt: new Date() });
-    } catch(err) { console.warn('メモ保存エラー（ローカルのみ）:', err); }
-    _applyMemoToCard(_memoCurrentTable, text);
-    closeTableMemoModal();
-  }
-  
-  async function clearTableMemo() {
-    if (!_memoCurrentTable) return;
-    document.getElementById('tableMemoTextarea').value = '';
-    if (!window._tableMemos) window._tableMemos = {};
-    window._tableMemos[_memoCurrentTable] = '';
-    try {
-      const memoRef = window.doc(window.db, 'stores', window.currentStoreId, 'tableMemos', _memoCurrentTable);
-      await window.setDoc(memoRef, { memo: '', updatedAt: new Date() });
-    } catch(err) { console.warn('メモ削除エラー:', err); }
-    _applyMemoToCard(_memoCurrentTable, '');
-    closeTableMemoModal();
-  }
-  
-  function _applyMemoToCard(tableName, text) {
-    document.querySelectorAll('.table-card').forEach(card => {
-      if (card.getAttribute('data-table-name') === tableName) {
-        let memoEl = card.querySelector('.table-memo-display');
-        if (text) {
-          if (!memoEl) {
-            memoEl = document.createElement('div');
-            memoEl.className = 'table-memo-display';
-            card.appendChild(memoEl);
-          }
-          memoEl.textContent = text;
-        } else {
-          if (memoEl) memoEl.remove();
-        }
-      }
-    });
-  }
-  
-  async function loadAllTableMemos() {
-    if (!window._tableMemos) window._tableMemos = {};
-    try {
-      const storeId = window.currentStoreId;
-      if (!storeId) return;
-      const memosRef = window.collection(window.db, 'stores', storeId, 'tableMemos');
-      const snap = await window.getDocs(memosRef);
-      snap.forEach(doc => {
-        const data = doc.data();
-        window._tableMemos[doc.id] = data.memo || '';
-      });
-      // カードに反映
-      Object.entries(window._tableMemos).forEach(([tableName, text]) => {
-        if (text) _applyMemoToCard(tableName, text);
-      });
-    } catch(err) { console.warn('メモ読み込みエラー:', err); }
-  }
-  
-  // モーダル外クリックで閉じる
-  document.getElementById('tableMemoModal').addEventListener('click', function(e) {
-    if (e.target === this) closeTableMemoModal();
-  });
-
-  // テーブル一覧描画後にメモボタンを追加するよう元のloadNewTablesをラップ
-  const _origLoadNewTables = typeof loadNewTables === 'function' ? loadNewTables : null;
-  
-  // MutationObserverでテーブルカード追加を監視してメモボタンを注入
-  (function() {
-    const gridEl = document.getElementById('newTablesGrid');
-    if (!gridEl) return;
-    const obs = new MutationObserver(() => {
-      document.querySelectorAll('.table-card:not([data-memo-btn])').forEach(card => {
-        const tableName = card.getAttribute('data-table-name');
-        if (!tableName || tableName === '即会計') { card.setAttribute('data-memo-btn','1'); return; }
-        card.setAttribute('data-memo-btn','1');
-        const btn = document.createElement('button');
-        btn.className = 'table-memo-btn';
-        btn.title = 'メモを編集';
-        btn.textContent = '📝';
-        btn.onclick = (e) => openTableMemoModal(tableName, e);
-        card.appendChild(btn);
-        // 保存済みメモがあれば表示
-        const savedMemo = window._tableMemos && window._tableMemos[tableName];
-        if (savedMemo) {
-          const memoEl = document.createElement('div');
-          memoEl.className = 'table-memo-display';
-          memoEl.textContent = savedMemo;
-          card.appendChild(memoEl);
-        }
-      });
-    });
-    obs.observe(gridEl, { childList: true, subtree: false });
-  })();
-  
-  // ページ読み込み後にメモを取得
-  window.addEventListener('load', () => {
-    setTimeout(loadAllTableMemos, 2000);
-  });
-  </script>
   
 </body>
 </html>
