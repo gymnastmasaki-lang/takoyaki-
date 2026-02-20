@@ -291,6 +291,81 @@
       position: relative;
     }
     
+    .table-memo-display {
+      font-size: 10px;
+      color: #5c6bc0;
+      background: #e8eaf6;
+      border-radius: 6px;
+      padding: 3px 7px;
+      margin-top: 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: pre-line;
+      line-height: 1.3;
+      word-break: break-all;
+    }
+    
+    .table-memo-btn {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      background: rgba(102,126,234,0.15);
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 3px 6px;
+      color: #667eea;
+      z-index: 2;
+    }
+    .table-memo-btn:hover { background: rgba(102,126,234,0.3); }
+    
+    /* メモモーダル */
+    #tableMemoModal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+    }
+    #tableMemoModal.active { display: flex; }
+    .table-memo-modal-inner {
+      background: white;
+      border-radius: 16px;
+      padding: 28px;
+      width: 340px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    }
+    .table-memo-modal-inner h3 { margin: 0 0 14px; font-size: 18px; color: #333; }
+    .table-memo-modal-inner textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 14px;
+      resize: vertical;
+      min-height: 120px;
+      outline: none;
+      font-family: inherit;
+    }
+    .table-memo-modal-inner textarea:focus { border-color: #667eea; }
+    .table-memo-modal-btns { display: flex; gap: 10px; margin-top: 16px; }
+    .table-memo-modal-btns button {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .btn-memo-save { background: #667eea; color: white; }
+    .btn-memo-clear { background: #ff7043; color: white; }
+    .btn-memo-cancel { background: #e0e0e0; color: #555; }
+    
     .table-card:hover {
       transform: translateY(-5px);
       box-shadow: 0 8px 25px rgba(0,0,0,0.2);
@@ -1850,6 +1925,23 @@
             playTapSound(); 
             openMenu(table.name); 
           };
+          
+          // 📝 メモボタン
+          const memoBtn = document.createElement('button');
+          memoBtn.className = 'table-memo-btn';
+          memoBtn.title = 'メモ';
+          memoBtn.textContent = '📝';
+          memoBtn.onclick = (e) => { e.stopPropagation(); openTableMemoModal(table.name, e); };
+          tableCard.appendChild(memoBtn);
+          
+          // 保存済みメモを反映
+          const savedMemo = window._tableMemos && window._tableMemos[table.name];
+          if (savedMemo) {
+            const memoEl = document.createElement('div');
+            memoEl.className = 'table-memo-display';
+            memoEl.textContent = savedMemo;
+            tableCard.appendChild(memoEl);
+          }
           
           const menuBtn = document.createElement('button');
           menuBtn.className = 'checkout-btn';
@@ -9894,6 +9986,106 @@ ${totalRedSlipCount > 0 ? `
   }
   
   console.log('✅ モバイルプリンター統合機能 読み込み完了');
+  </script>
+
+  <!-- ========== テーブルメモ機能 ========== -->
+  <div id="tableMemoModal">
+    <div class="table-memo-modal-inner">
+      <h3 id="tableMemoModalTitle">📝 テーブルメモ</h3>
+      <textarea id="tableMemoTextarea" placeholder="例：14:30来店&#10;山田様 3名&#10;アレルギー：えび"></textarea>
+      <div class="table-memo-modal-btns">
+        <button class="btn-memo-save" onclick="saveTableMemo()">保存</button>
+        <button class="btn-memo-clear" onclick="clearTableMemo()">クリア</button>
+        <button class="btn-memo-cancel" onclick="closeTableMemoModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ===== テーブルメモ機能 (handy) =====
+  if (!window._tableMemos) window._tableMemos = {};
+  let _memoCurrentTable = null;
+  
+  function openTableMemoModal(tableName, e) {
+    if (e) e.stopPropagation();
+    _memoCurrentTable = tableName;
+    document.getElementById('tableMemoModalTitle').textContent = '📝 ' + tableName + ' メモ';
+    const saved = window._tableMemos[tableName] || '';
+    document.getElementById('tableMemoTextarea').value = saved;
+    document.getElementById('tableMemoModal').classList.add('active');
+    setTimeout(() => document.getElementById('tableMemoTextarea').focus(), 100);
+  }
+  
+  function closeTableMemoModal() {
+    document.getElementById('tableMemoModal').classList.remove('active');
+    _memoCurrentTable = null;
+  }
+  
+  async function saveTableMemo() {
+    if (!_memoCurrentTable) return;
+    const text = document.getElementById('tableMemoTextarea').value.trim();
+    window._tableMemos[_memoCurrentTable] = text;
+    try {
+      const memoRef = window.doc(window.db, 'stores', window.currentStoreId, 'tableMemos', _memoCurrentTable);
+      await window.setDoc(memoRef, { memo: text, updatedAt: new Date() });
+    } catch(err) { console.warn('メモ保存エラー（ローカルのみ）:', err); }
+    _applyMemoToCard(_memoCurrentTable, text);
+    closeTableMemoModal();
+  }
+  
+  async function clearTableMemo() {
+    if (!_memoCurrentTable) return;
+    document.getElementById('tableMemoTextarea').value = '';
+    window._tableMemos[_memoCurrentTable] = '';
+    try {
+      const memoRef = window.doc(window.db, 'stores', window.currentStoreId, 'tableMemos', _memoCurrentTable);
+      await window.setDoc(memoRef, { memo: '', updatedAt: new Date() });
+    } catch(err) { console.warn('メモ削除エラー:', err); }
+    _applyMemoToCard(_memoCurrentTable, '');
+    closeTableMemoModal();
+  }
+  
+  function _applyMemoToCard(tableName, text) {
+    document.querySelectorAll('.table-card').forEach(card => {
+      if (card.getAttribute('data-table-name') === tableName) {
+        let memoEl = card.querySelector('.table-memo-display');
+        if (text) {
+          if (!memoEl) {
+            memoEl = document.createElement('div');
+            memoEl.className = 'table-memo-display';
+            card.appendChild(memoEl);
+          }
+          memoEl.textContent = text;
+        } else {
+          if (memoEl) memoEl.remove();
+        }
+      }
+    });
+  }
+  
+  async function loadAllTableMemos() {
+    try {
+      const storeId = window.currentStoreId;
+      if (!storeId) return;
+      const memosRef = window.collection(window.db, 'stores', storeId, 'tableMemos');
+      const snap = await window.getDocs(memosRef);
+      snap.forEach(doc => {
+        const data = doc.data();
+        window._tableMemos[doc.id] = data.memo || '';
+      });
+      Object.entries(window._tableMemos).forEach(([tableName, text]) => {
+        if (text) _applyMemoToCard(tableName, text);
+      });
+    } catch(err) { console.warn('メモ読み込みエラー:', err); }
+  }
+  
+  document.getElementById('tableMemoModal').addEventListener('click', function(e) {
+    if (e.target === this) closeTableMemoModal();
+  });
+  
+  window.addEventListener('load', () => {
+    setTimeout(loadAllTableMemos, 2500);
+  });
   </script>
   
 </body>
