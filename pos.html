@@ -13862,6 +13862,19 @@ ${redSlipCount > 0 ? `
               }
             }
             console.log('✅ 営業時間設定読み込み完了:', label, '現在:', isOpen ? '営業中' : '時間外');
+            // 既に表示中のiframeへ営業時間設定をpostMessageで送信（再送）
+            ['menuIframe', 'newMenuIframe'].forEach(iframeId => {
+              const iframe = document.getElementById(iframeId);
+              if (iframe && iframe.contentWindow) {
+                try {
+                  iframe.contentWindow.postMessage({
+                    type: 'businessHoursSettings',
+                    data: { enabled: true, openTime: bh.openTime, closeTime: bh.closeTime }
+                  }, '*');
+                  console.log('📨 [loadTimeOverride] 営業時間設定をpostMessageで再送:', bh.openTime, '〜', bh.closeTime);
+                } catch(e) {}
+              }
+            });
           } else {
             // 設定なし or 無効 → 非表示にする（「24時間営業」は誤解を招くため）
             window._businessHoursSettings = null;
@@ -13869,6 +13882,18 @@ ${redSlipCount > 0 ? `
               statusEl.style.display = 'none';
             }
             console.log('ℹ️ 営業時間設定: 無効または未設定（制限なし）');
+            // iframeへ無効設定を送信
+            ['menuIframe', 'newMenuIframe'].forEach(iframeId => {
+              const iframe = document.getElementById(iframeId);
+              if (iframe && iframe.contentWindow) {
+                try {
+                  iframe.contentWindow.postMessage({
+                    type: 'businessHoursSettings',
+                    data: { enabled: false }
+                  }, '*');
+                } catch(e) {}
+              }
+            });
           }
         } catch (bhErr) {
           console.warn('営業時間設定読み込みエラー:', bhErr);
@@ -17369,7 +17394,7 @@ ${redSlipCount > 0 ? `
       
       // handyと同じくstore=を常に付ける（currentStoreIdがnullでも渡す）
       const storeParam = window.currentStoreId ? window.currentStoreId : '';
-      const iframeSrc = `menu.html?mode=pos&hideHeader=true&store=${storeParam}&table=${encodeURIComponent('即会計')}&t=${Date.now()}`;
+      const iframeSrc = `menu.html?mode=pos&hideHeader=true&store=${storeParam}&table=${encodeURIComponent('即会計')}&t=${Date.now()}${getBusinessHoursParams()}`;
       console.log('🖼️ menu.htmlのiframeを更新:', iframeSrc);
       
       // iframe srcを設定
@@ -17380,14 +17405,25 @@ ${redSlipCount > 0 ? `
       iframe.onload = function() {
         console.log('✅✅✅ menu.html iframe読み込み完了！');
         // URLパラメータに加えてpostMessageでも業時間設定を送信（二重対応）
-        const bh = window._businessHoursSettings;
-        if (bh && bh.enabled) {
-          iframe.contentWindow.postMessage({
-            type: 'businessHoursSettings',
-            data: { enabled: true, openTime: bh.openTime, closeTime: bh.closeTime }
-          }, '*');
-          console.log('📨 業時間設定をpostMessageで送信:', bh.openTime, '〜', bh.closeTime);
-        }
+        const sendBH = () => {
+          const bh = window._businessHoursSettings;
+          if (bh && bh.enabled) {
+            iframe.contentWindow.postMessage({
+              type: 'businessHoursSettings',
+              data: { enabled: true, openTime: bh.openTime, closeTime: bh.closeTime }
+            }, '*');
+            console.log('📨 業時間設定をpostMessageで送信:', bh.openTime, '〜', bh.closeTime);
+          } else {
+            iframe.contentWindow.postMessage({
+              type: 'businessHoursSettings',
+              data: { enabled: false }
+            }, '*');
+          }
+        };
+        // 即時送信
+        sendBH();
+        // 2秒後にも再送信（loadTimeOverrideStatusの完了を待つ）
+        setTimeout(sendBH, 2000);
       };
       
       iframe.onerror = function(e) {
@@ -18755,7 +18791,7 @@ ${redSlipCount > 0 ? `
       
       // iframeのURLを設定（handyと同じくstore=を常に付ける）
       const storeParam2 = window.currentStoreId ? window.currentStoreId : '';
-      const newSrc = `menu.html?mode=pos&hideHeader=true&store=${storeParam2}&table=${encodeURIComponent(currentSelectedTableName || '即会計')}&t=${Date.now()}`;
+      const newSrc = `menu.html?mode=pos&hideHeader=true&store=${storeParam2}&table=${encodeURIComponent(currentSelectedTableName || '即会計')}&t=${Date.now()}${getBusinessHoursParams()}`;
       iframe.src = newSrc;
       
       // テーブル名を表示
@@ -18767,14 +18803,24 @@ ${redSlipCount > 0 ? `
       
       // 読み込み完了後にpostMessageで業時間設定を送信
       iframe.onload = function() {
-        const bh = window._businessHoursSettings;
-        if (bh && bh.enabled) {
-          iframe.contentWindow.postMessage({
-            type: 'businessHoursSettings',
-            data: { enabled: true, openTime: bh.openTime, closeTime: bh.closeTime }
-          }, '*');
-          console.log('📨 [newUI] 業時間設定をpostMessageで送信:', bh.openTime, '〜', bh.closeTime);
-        }
+        const sendBH2 = () => {
+          const bh = window._businessHoursSettings;
+          if (bh && bh.enabled) {
+            iframe.contentWindow.postMessage({
+              type: 'businessHoursSettings',
+              data: { enabled: true, openTime: bh.openTime, closeTime: bh.closeTime }
+            }, '*');
+            console.log('📨 [newUI] 業時間設定をpostMessageで送信:', bh.openTime, '〜', bh.closeTime);
+          } else {
+            iframe.contentWindow.postMessage({
+              type: 'businessHoursSettings',
+              data: { enabled: false }
+            }, '*');
+          }
+        };
+        sendBH2();
+        // 2秒後にも再送信（loadTimeOverrideStatusの完了を待つ）
+        setTimeout(sendBH2, 2000);
       };
 
       // コンテナを表示
