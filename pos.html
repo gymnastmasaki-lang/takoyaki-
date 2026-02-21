@@ -13845,32 +13845,30 @@ ${redSlipCount > 0 ? `
           const bhSnap = await window.getDoc(bhRef);
           const statusEl = document.getElementById('business-hours-status');
 
-          if (bhSnap.exists()) {
+          if (bhSnap.exists() && bhSnap.data().enabled) {
             const bh = bhSnap.data();
-            if (bh.enabled) {
-              const isOpen = checkIsBusinessOpen(bh);
-              const label = bh.openTime + ' 〜 ' + bh.closeTime;
-              if (statusEl) {
-                if (isOpen) {
-                  statusEl.textContent = '🟢 営業中 ' + label;
-                  statusEl.style.background = 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)';
-                } else {
-                  statusEl.textContent = '🔴 営業時間外 ' + label;
-                  statusEl.style.background = 'linear-gradient(135deg, #f44336 0%, #c62828 100%)';
-                }
-              }
-            } else {
-              if (statusEl) {
-                statusEl.textContent = '🟢 24時間営業';
-                statusEl.style.background = 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)';
-              }
-            }
-          } else {
-            const statusEl = document.getElementById('business-hours-status');
+            // グローバルに保存しておく（menu.htmlへ渡すため）
+            window._businessHoursSettings = bh;
+            const isOpen = checkIsBusinessOpen(bh);
+            const label = bh.openTime + ' 〜 ' + bh.closeTime;
             if (statusEl) {
-              statusEl.textContent = '🟢 24時間営業';
-              statusEl.style.background = 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)';
+              statusEl.style.display = 'flex';
+              if (isOpen) {
+                statusEl.textContent = '🟢 営業中 ' + label;
+                statusEl.style.background = 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)';
+              } else {
+                statusEl.textContent = '🔴 営業時間外 ' + label;
+                statusEl.style.background = 'linear-gradient(135deg, #f44336 0%, #c62828 100%)';
+              }
             }
+            console.log('✅ 営業時間設定読み込み完了:', label, '現在:', isOpen ? '営業中' : '時間外');
+          } else {
+            // 設定なし or 無効 → 非表示にする（「24時間営業」は誤解を招くため）
+            window._businessHoursSettings = null;
+            if (statusEl) {
+              statusEl.style.display = 'none';
+            }
+            console.log('ℹ️ 営業時間設定: 無効または未設定（制限なし）');
           }
         } catch (bhErr) {
           console.warn('営業時間設定読み込みエラー:', bhErr);
@@ -17344,6 +17342,15 @@ ${redSlipCount > 0 ? `
     }
     
     // menu.htmlのiframeのsrcを更新する関数
+    // 営業時間パラメータを生成するヘルパー
+    function getBusinessHoursParams() {
+      const bh = window._businessHoursSettings;
+      if (bh && bh.enabled) {
+        return `&bhEnabled=true&openTime=${encodeURIComponent(bh.openTime)}&closeTime=${encodeURIComponent(bh.closeTime)}`;
+      }
+      return '&bhEnabled=false';
+    }
+
     function updateMenuIframe() {
       console.log('🖼️ updateMenuIframe呼び出し');
       const iframe = document.getElementById('menuIframe');
@@ -17360,13 +17367,14 @@ ${redSlipCount > 0 ? `
       console.log('   iframe.style.display:', iframe.style.display);
       console.log('   iframe親要素の表示状態:', iframe.parentElement ? iframe.parentElement.style.display : 'N/A');
       
+      const bhParams = getBusinessHoursParams();
       let iframeSrc;
       if (window.currentStoreId) {
-        iframeSrc = `menu.html?mode=pos&hideHeader=true&store=${window.currentStoreId}&t=${Date.now()}`;
+        iframeSrc = `menu.html?mode=pos&hideHeader=true&store=${window.currentStoreId}${bhParams}&t=${Date.now()}`;
         console.log('🖼️ menu.htmlのiframeを更新 (店舗ID有):', iframeSrc);
       } else {
         // 旧システム（店舗IDなし）の場合
-        iframeSrc = `menu.html?mode=pos&hideHeader=true&t=${Date.now()}`;
+        iframeSrc = `menu.html?mode=pos&hideHeader=true${bhParams}&t=${Date.now()}`;
         console.log('🖼️ menu.htmlのiframeを更新 (店舗IDなし):', iframeSrc);
       }
       
@@ -17374,9 +17382,18 @@ ${redSlipCount > 0 ? `
       console.log('🔄 iframe srcを設定中...');
       iframe.src = iframeSrc;
       
-      // 読み込み監視
+      // 読み込み監視 - 読み込み完了後にpostMessageで業時間設定を送信
       iframe.onload = function() {
         console.log('✅✅✅ menu.html iframe読み込み完了！');
+        // URLパラメータに加えてpostMessageでも業時間設定を送信（二重対応）
+        const bh = window._businessHoursSettings;
+        if (bh && bh.enabled) {
+          iframe.contentWindow.postMessage({
+            type: 'businessHoursSettings',
+            data: { enabled: true, openTime: bh.openTime, closeTime: bh.closeTime }
+          }, '*');
+          console.log('📨 業時間設定をpostMessageで送信:', bh.openTime, '〜', bh.closeTime);
+        }
       };
       
       iframe.onerror = function(e) {
@@ -18742,11 +18759,15 @@ ${redSlipCount > 0 ? `
       const container = document.getElementById('menuIframeContainer');
       const iframe = document.getElementById('newMenuIframe');
       
-      // iframeのURLを設定（既存のmenuIframeと同じURL）
-      const oldIframe = document.getElementById('menuIframe');
-      if (oldIframe && oldIframe.src) {
-        iframe.src = oldIframe.src;
+      // iframeのURLを設定（業時間パラメータ付き）
+      const bhParams = getBusinessHoursParams();
+      let newSrc;
+      if (window.currentStoreId) {
+        newSrc = `menu.html?mode=pos&hideHeader=true&store=${window.currentStoreId}${bhParams}&t=${Date.now()}`;
+      } else {
+        newSrc = `menu.html?mode=pos&hideHeader=true${bhParams}&t=${Date.now()}`;
       }
+      iframe.src = newSrc;
       
       // テーブル名を表示
       document.getElementById('iframeTableName').textContent = `${currentSelectedTableName} - メニュー選択`;
@@ -18755,6 +18776,18 @@ ${redSlipCount > 0 ? `
       newUICart = [];
       updateIframeCart();
       
+      // 読み込み完了後にpostMessageで業時間設定を送信
+      iframe.onload = function() {
+        const bh = window._businessHoursSettings;
+        if (bh && bh.enabled) {
+          iframe.contentWindow.postMessage({
+            type: 'businessHoursSettings',
+            data: { enabled: true, openTime: bh.openTime, closeTime: bh.closeTime }
+          }, '*');
+          console.log('📨 [newUI] 業時間設定をpostMessageで送信:', bh.openTime, '〜', bh.closeTime);
+        }
+      };
+
       // コンテナを表示
       container.classList.add('show');
     }
