@@ -577,7 +577,7 @@ async function showInvoiceDisplay(invoiceData) {
       </div>
       
       <div style="position: relative; text-align: right; font-size: 14px; margin: 40px 0 20px 0;">
-        ${sealImageData ? `<div style="position: absolute; left: 20px; bottom: -20px; width: 80px; height: 80px;">
+        ${sealImageData ? `<div style="position: absolute; left: 20px; bottom: -20px; width: 40px; height: 40px;">
           <img src="${sealImageData}" style="width: 100%; height: 100%; object-fit: contain;" alt="電子印鑑">
         </div>` : ''}
         <div style="margin: 5px 0;">${dateStr}</div>
