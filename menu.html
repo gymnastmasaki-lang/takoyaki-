@@ -76,31 +76,6 @@
       window.isHandyMode = mode === 'handy';
       // 💳 即会計モードフラグをグローバル変数に設定
       window.isInstantCheckoutMode = instant === 'true';
-
-      // ========== kanri.htmlの営業時間設定をURLパラメータから取得 ==========
-      // pos.htmlが ?bhEnabled=true&openTime=09:00&closeTime=22:00 で渡してくる
-      const bhEnabled = urlParams.get('bhEnabled') === 'true';
-      const bhOpenTime = urlParams.get('openTime');
-      const bhCloseTime = urlParams.get('closeTime');
-      if (bhEnabled && bhOpenTime && bhCloseTime) {
-        window._globalBusinessHours = { enabled: true, openTime: bhOpenTime, closeTime: bhCloseTime };
-        console.log('✅ [URLパラメータ] 営業時間設定を受信:', bhOpenTime, '〜', bhCloseTime);
-      } else {
-        window._globalBusinessHours = null;
-      }
-
-      // postMessageでも受け取る（pos.htmlのiframe.onloadから送信される）
-      window.addEventListener('message', (event) => {
-        if (event.data && event.data.type === 'businessHoursSettings') {
-          const d = event.data.data;
-          if (d && d.enabled && d.openTime && d.closeTime) {
-            window._globalBusinessHours = { enabled: true, openTime: d.openTime, closeTime: d.closeTime };
-            console.log('✅ [postMessage] 営業時間設定を受信:', d.openTime, '〜', d.closeTime);
-          } else {
-            window._globalBusinessHours = null;
-          }
-        }
-      });
       
       console.log('=== リダイレクトチェック ===');
       console.log('tableNumber:', tableNumber);
@@ -1713,52 +1688,25 @@
         }
       }
       
-      // ========== kanri.htmlの営業時間設定をFirestoreから読み込む（最優先） ==========
-      if (!customBusinessHoursEnabled && !timeOverrideEnabled) {
-        try {
-          const bhRef = window.getStoreDoc('business_hours_settings', 'default');
-          const bhSnap = await getDoc(bhRef);
-          if (bhSnap.exists() && bhSnap.data().enabled) {
-            const bhData = bhSnap.data();
-            window._globalBusinessHours = { enabled: true, openTime: bhData.openTime, closeTime: bhData.closeTime };
-            console.log('✅ [Firestore] kanri.html営業時間設定を読み込み:', bhData.openTime, '〜', bhData.closeTime);
-          }
-        } catch (bhErr) {
-          console.warn('kanri.html営業時間設定の読み込みエラー:', bhErr);
-        }
-      }
-
-      // 営業時間の設定（優先順位: テーブル個別 > kanri.html設定 > ハードコード）
+      // 営業時間の設定
       if (customBusinessHoursEnabled) {
-        // テーブル個別のカスタム営業時間を使用
+        // カスタム営業時間を使用
         const [openHour, openMin] = customOpenTime.split(':').map(Number);
         const [closeHour, closeMin] = customCloseTime.split(':').map(Number);
         closedEndTime = openHour * 60 + openMin;
         closedStartTime = closeHour * 60 + closeMin;
         operatingHours = `${customOpenTime} - ${customCloseTime}`;
-        console.log('⏰ テーブルカスタム営業時間:', operatingHours);
-      } else if (window._globalBusinessHours && window._globalBusinessHours.enabled) {
-        // kanri.htmlの営業時間設定を使用
-        const globalOpen = window._globalBusinessHours.openTime;
-        const globalClose = window._globalBusinessHours.closeTime;
-        const [openHour, openMin] = globalOpen.split(':').map(Number);
-        const [closeHour, closeMin] = globalClose.split(':').map(Number);
-        closedEndTime = openHour * 60 + openMin;
-        closedStartTime = closeHour * 60 + closeMin;
-        operatingHours = `${globalOpen} - ${globalClose}`;
-        console.log('⏰ kanri.html営業時間設定を適用:', operatingHours);
+        console.log('⏰ カスタム営業時間:', operatingHours);
       } else if (hasTableParam) {
-        // フォールバック: テーブルあり → 22:00まで
+        // menu.html?table=の場合：22:00-11:00が営業時間外
         closedStartTime = 22 * 60; // 22:00 = 1320分
         closedEndTime = 11 * 60;   // 11:00 = 660分
         operatingHours = '11:00 - 22:00';
-        console.log('⏰ フォールバック(テーブルあり):', operatingHours);
       } else {
-        // フォールバック: テーブルなし → 22:30まで
+        // menu.htmlのみの場合：22:30-11:00が営業時間外
         closedStartTime = 22 * 60 + 30; // 22:30 = 1350分
         closedEndTime = 11 * 60;        // 11:00 = 660分
         operatingHours = '11:00 - 22:30';
-        console.log('⏰ フォールバック(テーブルなし):', operatingHours);
       }
       
       // 営業時間外判定（22:00/22:30以降 または 11:00より前）
@@ -1891,21 +1839,12 @@
             
             let closedStartTime, closedEndTime, operatingHours;
             if (customBusinessHoursEnabled) {
-              // テーブル個別のカスタム営業時間を使用
+              // カスタム営業時間を使用
               const [openHour, openMin] = customOpenTime.split(':').map(Number);
               const [closeHour, closeMin] = customCloseTime.split(':').map(Number);
               closedEndTime = openHour * 60 + openMin;
               closedStartTime = closeHour * 60 + closeMin;
               operatingHours = `${customOpenTime} - ${customCloseTime}`;
-            } else if (window._globalBusinessHours && window._globalBusinessHours.enabled) {
-              // kanri.htmlの営業時間設定を使用
-              const globalOpen = window._globalBusinessHours.openTime;
-              const globalClose = window._globalBusinessHours.closeTime;
-              const [openHour, openMin] = globalOpen.split(':').map(Number);
-              const [closeHour, closeMin] = globalClose.split(':').map(Number);
-              closedEndTime = openHour * 60 + openMin;
-              closedStartTime = closeHour * 60 + closeMin;
-              operatingHours = `${globalOpen} - ${globalClose}`;
             } else if (hasTableParam) {
               closedStartTime = 22 * 60;
               closedEndTime = 11 * 60;
@@ -3333,16 +3272,7 @@
         }
         
         let closedStartTime, closedEndTime, operatingHours;
-        if (window._globalBusinessHours && window._globalBusinessHours.enabled) {
-          // kanri.htmlの営業時間設定を使用
-          const globalOpen = window._globalBusinessHours.openTime;
-          const globalClose = window._globalBusinessHours.closeTime;
-          const [openHour, openMin] = globalOpen.split(':').map(Number);
-          const [closeHour, closeMin] = globalClose.split(':').map(Number);
-          closedEndTime = openHour * 60 + openMin;
-          closedStartTime = closeHour * 60 + closeMin;
-          operatingHours = `${globalOpen} - ${globalClose}`;
-        } else if (hasTableParam) {
+        if (hasTableParam) {
           closedStartTime = 22 * 60;
           closedEndTime = 11 * 60;
           operatingHours = '11:00 - 22:00';
