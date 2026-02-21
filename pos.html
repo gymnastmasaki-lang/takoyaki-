@@ -2474,6 +2474,7 @@
         <div style="display: flex; gap: 10px; align-items: stretch;">
           <button onclick="setAllInventoryToZero()" style="padding: 8px 15px; font-size: 13px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; display: flex; align-items: center;">全商品品切</button>
           <button onclick="clearAllInventoryZero()" style="padding: 8px 15px; font-size: 13px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; display: flex; align-items: center;">全商品復活</button>
+          <div id="business-hours-status" style="padding: 8px 15px; font-size: 13px; background: linear-gradient(135deg, #78909C 0%, #546E7A 100%); color: white; border-radius: 8px; display: flex; align-items: center; font-weight: bold; min-width: 140px; justify-content: center;">読み込み中...</div>
           <button id="time-override-btn-new" onclick="toggleTimeOverride()" style="padding: 8px 15px; font-size: 13px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; display: flex; align-items: center;">時間外営業解除</button>
           <div style="background: linear-gradient(135deg, #FFB74D 0%, #FFA726 100%); padding: 8px 15px; border-radius: 8px; display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 13px; font-weight: bold; color: white;">待ち</span>
@@ -13793,6 +13794,21 @@ ${redSlipCount > 0 ? `
       }
     };
     
+    // kanri.htmlの営業時間設定を使って現在営業中かチェック
+    function checkIsBusinessOpen(settings) {
+      if (!settings || !settings.enabled) return null;
+      const now = new Date();
+      const [openH, openM] = settings.openTime.split(':').map(Number);
+      const [closeH, closeM] = settings.closeTime.split(':').map(Number);
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      const openMinutes = openH * 60 + openM;
+      const closeMinutes = closeH * 60 + closeM;
+      if (closeMinutes < openMinutes) {
+        return nowMinutes >= openMinutes || nowMinutes < closeMinutes;
+      }
+      return nowMinutes >= openMinutes && nowMinutes < closeMinutes;
+    }
+
     // 時間外設定を読み込み
     async function loadTimeOverrideStatus() {
       try {
@@ -13822,6 +13838,46 @@ ${redSlipCount > 0 ? `
             btnNew.style.background = 'linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%)';
           }
         }
+
+        // kanri.htmlの業時間設定を読み込んでヘッダーに表示
+        try {
+          const bhRef = window.getStoreDoc('business_hours_settings', 'default');
+          const bhSnap = await window.getDoc(bhRef);
+          const statusEl = document.getElementById('business-hours-status');
+
+          if (bhSnap.exists()) {
+            const bh = bhSnap.data();
+            if (bh.enabled) {
+              const isOpen = checkIsBusinessOpen(bh);
+              const label = bh.openTime + ' 〜 ' + bh.closeTime;
+              if (statusEl) {
+                if (isOpen) {
+                  statusEl.textContent = '🟢 営業中 ' + label;
+                  statusEl.style.background = 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)';
+                } else {
+                  statusEl.textContent = '🔴 営業時間外 ' + label;
+                  statusEl.style.background = 'linear-gradient(135deg, #f44336 0%, #c62828 100%)';
+                }
+              }
+            } else {
+              if (statusEl) {
+                statusEl.textContent = '🟢 24時間営業';
+                statusEl.style.background = 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)';
+              }
+            }
+          } else {
+            const statusEl = document.getElementById('business-hours-status');
+            if (statusEl) {
+              statusEl.textContent = '🟢 24時間営業';
+              statusEl.style.background = 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)';
+            }
+          }
+        } catch (bhErr) {
+          console.warn('営業時間設定読み込みエラー:', bhErr);
+        }
+
+        // 1分ごとに自動更新
+        setTimeout(loadTimeOverrideStatus, 60000);
       } catch (e) {
         console.error('時間オーバーライド読み込みエラー:', e);
       }
