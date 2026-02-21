@@ -1447,6 +1447,29 @@
   </script>
   
   <script>
+    // ========== ⏰ JST3時基準ヘルパー ==========
+    window.getBusinessDay = function(date) {
+      const d = date || new Date();
+      const JST = 9 * 60 * 60 * 1000;
+      const jstMs = d.getTime() + JST;
+      const jstMidnightMs = jstMs - (jstMs % (24 * 60 * 60 * 1000));
+      const boundary = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - JST);
+      const base = d < boundary
+        ? new Date(boundary.getTime() - 24 * 60 * 60 * 1000)
+        : boundary;
+      const jstBase = new Date(base.getTime() + JST);
+      return {
+        date: base,
+        year:  jstBase.getUTCFullYear(),
+        month: jstBase.getUTCMonth() + 1,
+        day:   jstBase.getUTCDate(),
+        str:   `${jstBase.getUTCFullYear()}-${String(jstBase.getUTCMonth()+1).padStart(2,'0')}-${String(jstBase.getUTCDate()).padStart(2,'0')}`
+      };
+    };
+    // ========== ⏰ JST3時基準ヘルパーここまで ==========
+  </script>
+
+  <script>
     let currentStoreId = null;
     let currentStoreName = null;
     let storesData = {};
@@ -3002,16 +3025,10 @@
     // 営業日の日付文字列を取得（3時基準）
     function getBusinessDateStr() {
       const now = new Date();
-      let businessDate = new Date(now);
-      
-      // 午前3時前なら前日とする
-      if (now.getHours() < 3) {
-        businessDate.setDate(businessDate.getDate() - 1);
-      }
-      
-      const year = businessDate.getFullYear();
-      const month = String(businessDate.getMonth() + 1).padStart(2, '0');
-      const day = String(businessDate.getDate()).padStart(2, '0');
+      const _bd = window.getBusinessDay(now);
+      const year = String(_bd.year);
+      const month = String(_bd.month).padStart(2, '0');
+      const day = String(_bd.day).padStart(2, '0');
       const dateStr = `${year}-${month}-${day}`;
       
       console.log('📅 営業日計算:', {
@@ -3572,11 +3589,7 @@
       try {
         // 本日の日付を取得（3時基準）
         const now = new Date();
-        let today = new Date(now);
-        if (now.getHours() < 3) {
-          today.setDate(today.getDate() - 1);
-        }
-        const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+        const dateStr = window.getBusinessDay(now).str;
         
         console.log('📊 売上取得日付:', dateStr);
         
@@ -4004,11 +4017,7 @@
       
       // 本日の日付をデフォルトに設定
       const now2 = new Date();
-      let today = new Date(now2);
-      if (now2.getHours() < 3) {
-        today.setDate(today.getDate() - 1);
-      }
-      const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+      const dateStr = window.getBusinessDay(now2).str;
       document.getElementById('settlementDate').value = dateStr;
       
       // 売上サマリーを表示
@@ -4313,12 +4322,7 @@
             if (!data.paidAt || !data.items) return;
             
             const orderDate = data.paidAt.toDate();
-            let targetDate = new Date(orderDate);
-            if (orderDate.getHours() < 3) {
-              targetDate.setDate(targetDate.getDate() - 1);
-            }
-            
-            const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+            const orderDateStr = window.getBusinessDay(orderDate).str;
             
             if (orderDateStr === dateStr) {
               data.items.forEach(item => {
@@ -4737,18 +4741,17 @@ ${redSlipCount > 0 ? `
     // 支出モーダルを開く
     window.showExpenseModal = async function() {
       const now = new Date();
-      const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+      // JST 3:00をエポックミリ秒で正確に計算（setHoursはローカルタイム依存のため使用しない）
+      const jstOffsetMs = 9 * 60 * 60 * 1000;
+      const jstNowMs = now.getTime() + jstOffsetMs;
+      const jstMidnightMs = jstNowMs - (jstNowMs % (24 * 60 * 60 * 1000));
+      let todayStart = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - jstOffsetMs);
+      if (now < todayStart) todayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+      const jstTodayStart = new Date(todayStart.getTime() + jstOffsetMs);
       
-      // 本日の日付を取得（午前3時基準）
-      const todayStart = new Date(jstNow);
-      todayStart.setHours(3, 0, 0, 0);
-      if (jstNow.getHours() < 3) {
-        todayStart.setDate(todayStart.getDate() - 1);
-      }
-      
-      const year = todayStart.getFullYear();
-      const month = String(todayStart.getMonth() + 1).padStart(2, '0');
-      const day = String(todayStart.getDate()).padStart(2, '0');
+      const year = jstTodayStart.getUTCFullYear();
+      const month = String(jstTodayStart.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(jstTodayStart.getUTCDate()).padStart(2, '0');
       currentExpenseDate = `${year}-${month}-${day}`;
       
       // 日付入力フィールドに本日の日付を設定
@@ -5223,17 +5226,16 @@ ${fileName}`,
         // デフォルト値を設定（引数がない場合は当月）
         if (!year || !month) {
           const now = new Date();
-          const jstNow = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+          // JST 3:00をエポックミリ秒で正確に計算
+          const jstOffsetMs = 9 * 60 * 60 * 1000;
+          const jstNowMs = now.getTime() + jstOffsetMs;
+          const jstMidnightMs = jstNowMs - (jstNowMs % (24 * 60 * 60 * 1000));
+          let todayStart = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - jstOffsetMs);
+          if (now < todayStart) todayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+          const jstTodayStart = new Date(todayStart.getTime() + jstOffsetMs);
           
-          // 現在の年月を取得（午前3時基準）
-          const todayStart = new Date(jstNow);
-          todayStart.setHours(3, 0, 0, 0);
-          if (jstNow.getHours() < 3) {
-            todayStart.setDate(todayStart.getDate() - 1);
-          }
-          
-          year = todayStart.getFullYear();
-          month = todayStart.getMonth() + 1;
+          year = jstTodayStart.getUTCFullYear();
+          month = jstTodayStart.getUTCMonth() + 1;
         }
         
         console.log(`📊 経費出力: ${year}年${month}月`);
@@ -6145,13 +6147,7 @@ ${fileName}`,
         
         // 営業日を計算（午前3時基準）
         const orderDate = orderData.paidAt?.toDate() || orderData.timestamp?.toDate() || new Date();
-        let businessDate = new Date(orderDate);
-        if (orderDate.getHours() < 3) {
-          businessDate.setDate(businessDate.getDate() - 1);
-        }
-        businessDate.setHours(0, 0, 0, 0);
-        
-        const dateKey = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
+        const dateKey = window.getBusinessDay(orderDate).str;
         
         // 売上データを取得
         const salesRef = window.getStoreDoc('daily_sales', dateKey);
@@ -6245,23 +6241,21 @@ ${fileName}`,
         
         let dateMatch = true;
         if (dateFilter === 'today') {
-          const todayStart = new Date(now);
-          todayStart.setHours(3, 0, 0, 0);
-          if (now.getHours() < 3) {
-            todayStart.setDate(todayStart.getDate() - 1);
-          }
-          const todayEnd = new Date(todayStart);
-          todayEnd.setDate(todayEnd.getDate() + 1);
+          const jstOffsetMs = 9 * 60 * 60 * 1000;
+          const jstNowMs = now.getTime() + jstOffsetMs;
+          const jstMidnightMs = jstNowMs - (jstNowMs % (24 * 60 * 60 * 1000));
+          let todayStart = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - jstOffsetMs);
+          if (now < todayStart) todayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+          const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
           dateMatch = orderDate >= todayStart && orderDate < todayEnd;
         } else if (dateFilter === 'yesterday') {
-          const yesterdayStart = new Date(now);
-          yesterdayStart.setHours(3, 0, 0, 0);
-          if (now.getHours() < 3) {
-            yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-          }
-          yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-          const yesterdayEnd = new Date(yesterdayStart);
-          yesterdayEnd.setDate(yesterdayEnd.getDate() + 1);
+          const jstOffsetMs = 9 * 60 * 60 * 1000;
+          const jstNowMs = now.getTime() + jstOffsetMs;
+          const jstMidnightMs = jstNowMs - (jstNowMs % (24 * 60 * 60 * 1000));
+          let todayStart = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - jstOffsetMs);
+          if (now < todayStart) todayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+          const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+          const yesterdayEnd = todayStart;
           dateMatch = orderDate >= yesterdayStart && orderDate < yesterdayEnd;
         } else if (dateFilter === 'week') {
           const weekAgo = new Date(now);
@@ -6407,13 +6401,7 @@ ${fileName}`,
         
         // 会計日時から営業日を計算（3時基準）
         const paidDate = orderData.paidAt.toDate();
-        let businessDate = new Date(paidDate);
-        
-        if (paidDate.getHours() < 3) {
-          businessDate.setDate(businessDate.getDate() - 1);
-        }
-        
-        const dateStr = `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, '0')}-${String(businessDate.getDate()).padStart(2, '0')}`;
+        const dateStr = window.getBusinessDay(paidDate).str;
         
         // dailySalesを取得
         const dailySalesRef = window.getStoreDoc('dailySales', dateStr);
@@ -6908,14 +6896,7 @@ ${fileName}`,
           }
           
           if (dateToUse) {
-            let targetDate = new Date(dateToUse);
-            
-            // 午前3時より前なら昨日扱い
-            if (dateToUse.getHours() < 3) {
-              targetDate.setDate(targetDate.getDate() - 1);
-            }
-            
-            originalDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth()+1).padStart(2,'0')}-${String(targetDate.getDate()).padStart(2,'0')}`;
+            originalDateStr = window.getBusinessDay(dateToUse).str;
           } else {
             throw new Error('paidAtもtimestampも存在しません');
           }
@@ -7118,11 +7099,7 @@ ${fileName}`,
       
       // 本日の日付をデフォルトに設定
       const now = new Date();
-      let today = new Date(now);
-      if (now.getHours() < 3) {
-        today.setDate(today.getDate() - 1);
-      }
-      const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+      const dateStr = window.getBusinessDay(now).str;
       document.getElementById('expenseDateInput').value = dateStr;
       
       await loadExpensesByDate();
@@ -7352,14 +7329,7 @@ ${fileName}`,
           if (!data.paidAt) return;
           
           const orderDate = data.paidAt.toDate();
-          
-          // 3時基準の営業日計算
-          let targetDate = new Date(orderDate);
-          if (orderDate.getHours() < 3) {
-            targetDate.setDate(targetDate.getDate() - 1);
-          }
-          
-          const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+          const orderDateStr = window.getBusinessDay(orderDate).str;
           
           // 期間内の注文のみ
           if (dates.includes(orderDateStr) && data.items) {
@@ -7507,12 +7477,7 @@ ${fileName}`,
           if (!data.paidAt || !data.items) return;
           
           const orderDate = data.paidAt.toDate();
-          let targetDate = new Date(orderDate);
-          if (orderDate.getHours() < 3) {
-            targetDate.setDate(targetDate.getDate() - 1);
-          }
-          
-          const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+          const orderDateStr = window.getBusinessDay(orderDate).str;
           
           if (dates.includes(orderDateStr)) {
             data.items.forEach(item => {
@@ -7902,11 +7867,7 @@ ${totalRedSlipCount > 0 ? `
         
         // 本日の日付を取得（3時基準）
         const now = new Date();
-        let today = new Date(now);
-        if (now.getHours() < 3) {
-          today.setDate(today.getDate() - 1);
-        }
-        const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+        const dateStr = window.getBusinessDay(now).str;
         
         await executeSettlement(dateStr);
         
@@ -7999,12 +7960,7 @@ ${totalRedSlipCount > 0 ? `
           if (!data.paidAt || !data.items) return;
           
           const orderDate = data.paidAt.toDate();
-          let targetDate = new Date(orderDate);
-          if (orderDate.getHours() < 3) {
-            targetDate.setDate(targetDate.getDate() - 1);
-          }
-          
-          const orderDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+          const orderDateStr = window.getBusinessDay(orderDate).str;
           
           if (orderDateStr === dateStr) {
             data.items.forEach(item => {
