@@ -1313,10 +1313,28 @@
                         const hourlyNetPay = hourlyGrossBeforeExpense - hourlyDeductions.totalDeductions + expenseAmount; // 経費を加算
                         const hourlyTotalGross = hourlyGrossBeforeExpense + expenseAmount;
                         
-                        // 固定給ベース（経費除外で控除計算）
-                        const fixedGrossPay = employee.monthlySalary;
+                        // 固定給ベース（給与変更履歴を考慮して当該月の給与・都道府県を決定）
+                        const salaryHistory = employee.salaryHistory || [];
+                        let applicableSalary = employee.monthlySalary;
+                        let applicablePrefecture = employee.prefecture || '東京';
+                        if (salaryHistory.length > 0) {
+                            // fromYearMonth降順でソートし、yearMonth以前で最新のエントリを取得
+                            const sorted = [...salaryHistory].sort((a, b) => b.fromYearMonth.localeCompare(a.fromYearMonth));
+                            const entry = sorted.find(e => e.fromYearMonth <= yearMonth);
+                            if (entry) {
+                                applicableSalary = entry.monthlySalary;
+                                applicablePrefecture = entry.prefecture;
+                            } else {
+                                // 全エントリより前の月は最古エントリを使用
+                                const oldest = [...salaryHistory].sort((a, b) => a.fromYearMonth.localeCompare(b.fromYearMonth))[0];
+                                applicableSalary = oldest.monthlySalary;
+                                applicablePrefecture = oldest.prefecture;
+                            }
+                        }
+                        const employeeForMonth = { ...employee, monthlySalary: applicableSalary, prefecture: applicablePrefecture };
+                        const fixedGrossPay = applicableSalary;
                         const fixedGrossBeforeExpense = fixedGrossPay + totalAllowancesWithoutExpense;
-                        const fixedDeductions = calculateDeductions(employee, fixedGrossBeforeExpense);
+                        const fixedDeductions = calculateDeductions(employeeForMonth, fixedGrossBeforeExpense);
                         const fixedNetPay = fixedGrossBeforeExpense - fixedDeductions.totalDeductions + expenseAmount; // 経費を加算
                         const fixedTotalGross = fixedGrossBeforeExpense + expenseAmount;
                         
@@ -3870,6 +3888,7 @@
                             rent: 0,
                             utilities: 0
                         },
+                        salaryHistory: [],
                         createdAt: Timestamp.now()
                     });
                     
@@ -3883,7 +3902,7 @@
                 }
             };
 
-            const updateEmployee = async (id, name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches) => {
+            const updateEmployee = async (id, name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches, salaryHistory) => {
                 setIsLoading(true);
                 try {
                     const { doc, updateDoc, Timestamp } = window.firebaseModules;
@@ -3924,6 +3943,7 @@
                             rent: 0,
                             utilities: 0
                         },
+                        salaryHistory: salaryHistory || [],
                         updatedAt: Timestamp.now()
                     });
                     
@@ -8798,8 +8818,22 @@
             const [deductions, setDeductions] = useState(employee?.deductions || {
                 rent: 0, utilities: 0
             });
+            const [salaryHistory, setSalaryHistory] = useState(
+                employee?.salaryHistory ? [...employee.salaryHistory].sort((a, b) => a.fromYearMonth.localeCompare(b.fromYearMonth)) : []
+            );
 
             const prefectures = Object.keys(INSURANCE_DATA.minimumWage);
+            
+            const addSalaryHistoryEntry = () => {
+                setSalaryHistory([...salaryHistory, { fromYearMonth: '', monthlySalary: 0, prefecture: '東京' }]);
+            };
+            const removeSalaryHistoryEntry = (index) => {
+                setSalaryHistory(salaryHistory.filter((_, i) => i !== index));
+            };
+            const updateSalaryHistoryEntry = (index, field, value) => {
+                const updated = salaryHistory.map((entry, i) => i === index ? { ...entry, [field]: field === 'monthlySalary' ? (parseFloat(value) || 0) : value } : entry);
+                setSalaryHistory(updated);
+            };
             
             const handlePrefectureChange = (newPref) => {
                 setPrefecture(newPref);
@@ -9030,11 +9064,84 @@
                         </div>
                     </div>
 
+                    {/* 🆕 給与変更履歴（固定給の場合のみ表示） */}
+                    {salaryType === '固定給' && (
+                        <div className="bg-purple-50 p-3 rounded border border-purple-200">
+                            <div className="flex items-center justify-between mb-2">
+                                <h5 className="text-sm font-bold text-purple-800">給与変更履歴（累計差額計算に使用）</h5>
+                                <button
+                                    type="button"
+                                    onClick={addSalaryHistoryEntry}
+                                    className="text-xs px-2 py-1 bg-purple-500 text-white rounded hover:bg-purple-600"
+                                >
+                                    ＋ 追加
+                                </button>
+                            </div>
+                            <div className="text-xs text-gray-600 mb-2">
+                                ※ 給与・都道府県が変わった場合、変更前の情報をここに登録してください。<br/>
+                                　「適用開始年月」以降は登録した給与・都道府県で計算されます。
+                            </div>
+                            {salaryHistory.length === 0 ? (
+                                <p className="text-xs text-gray-500">履歴なし（全期間、上記の現在の設定で計算）</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {salaryHistory.map((entry, index) => (
+                                        <div key={index} className="flex gap-2 items-center bg-white p-2 rounded border">
+                                            <div className="flex-1">
+                                                <label className="text-xs text-gray-600">適用開始年月</label>
+                                                <input
+                                                    type="month"
+                                                    value={entry.fromYearMonth}
+                                                    onChange={(e) => updateSalaryHistoryEntry(index, 'fromYearMonth', e.target.value)}
+                                                    className="w-full p-1 border rounded text-xs"
+                                                />
+                                            </div>
+                                            <div className="flex-1">
+                                                <label className="text-xs text-gray-600">月額給与（円）</label>
+                                                <input
+                                                    type="number"
+                                                    value={entry.monthlySalary}
+                                                    onChange={(e) => updateSalaryHistoryEntry(index, 'monthlySalary', e.target.value)}
+                                                    className="w-full p-1 border rounded text-xs"
+                                                />
+                                            </div>
+                                            <div className="flex-1">
+                                                <label className="text-xs text-gray-600">都道府県</label>
+                                                <select
+                                                    value={entry.prefecture}
+                                                    onChange={(e) => updateSalaryHistoryEntry(index, 'prefecture', e.target.value)}
+                                                    className="w-full p-1 border rounded text-xs"
+                                                >
+                                                    {Object.keys(INSURANCE_DATA.minimumWage).map(pref => (
+                                                        <option key={pref} value={pref}>{pref}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => removeSalaryHistoryEntry(index)}
+                                                className="text-red-500 hover:text-red-700 text-xs px-1"
+                                                title="削除"
+                                            >✕</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {salaryHistory.length > 0 && (
+                                <div className="text-xs text-purple-700 mt-2 bg-purple-100 p-2 rounded">
+                                    ⚠️ 現在の設定（上記フォーム）が最新期間に適用されます。<br/>
+                                    　例: 履歴「2024-04〜, 給与A, 奈良」＋現在「2025-01〜, 給与B, 東京」の場合、<br/>
+                                    　　2025-01以降は給与B・東京、それ以前は給与A・奈良で計算されます。
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     <div className="flex gap-2 justify-end">
                         <button
                             onClick={() => {
                                 if (employee?.id) {
-                                    onSave(employee.id, name, rate, transport, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches);
+                                    onSave(employee.id, name, rate, transport, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches, salaryHistory);
                                 }
                             }}
                             className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-2"
