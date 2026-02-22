@@ -10496,35 +10496,9 @@ ${redSlipCount > 0 ? `
         
         console.log('💰 合計金額（外税対応）:', totalAmount);
         
-        // 注文番号を生成（menu.htmlと同じ：毎朝3時リセット、619番から連番）
+        // 注文番号を生成（orderCounter トランザクション方式・menu.htmlと共通）
         const now = new Date();
-        // JST 3:00をエポックミリ秒で正確に計算（setHoursはローカルタイム依存のため使用しない）
-        const jstOffsetMs = 9 * 60 * 60 * 1000;
-        const jstNowMs = now.getTime() + jstOffsetMs;
-        const jstMidnightMs = jstNowMs - (jstNowMs % (24 * 60 * 60 * 1000));
-        let todayStart = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - jstOffsetMs);
-        if (now < todayStart) todayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
-        
-        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
-        let maxOrderNumber = 618;
-        
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          // 削除済みも含めて当日の最大番号を取得（取消しても番号は戻さない）
-          const orderDate = data.timestamp && data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp || Date.now());
-          if (orderDate >= todayStart && data.orderNumber > maxOrderNumber) {
-            maxOrderNumber = data.orderNumber;
-          }
-        });
-        
-        // 毎朝3時にリセット：当日の注文が1件もなければ619番から開始
-        const orderNumber = maxOrderNumber + 1;
-        
-        console.log('注文番号生成:', {
-          todayStart: todayStart.toISOString(),
-          maxOrderNumber,
-          nextOrderNumber: orderNumber
-        });
+        const orderNumber = await generateOrderNumber();
         
         const deleteAt = new Date(now.getTime() + 10 * 60 * 1000);
         
@@ -10597,34 +10571,9 @@ ${redSlipCount > 0 ? `
       }
       
       try {
+        // 注文番号を生成（orderCounter トランザクション方式・menu.htmlと共通）
         const now = new Date();
-        // JST 3:00をエポックミリ秒で正確に計算（setHoursはローカルタイム依存のため使用しない）
-        const jstOffsetMs = 9 * 60 * 60 * 1000;
-        const jstNowMs = now.getTime() + jstOffsetMs;
-        const jstMidnightMs = jstNowMs - (jstNowMs % (24 * 60 * 60 * 1000));
-        let todayStart = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - jstOffsetMs);
-        if (now < todayStart) todayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
-        
-        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
-        let maxOrderNumber = 618;
-        
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          // 削除済みも含めて当日の最大番号を取得（取消しても番号は戻さない）
-          const orderDate = data.timestamp && data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp || Date.now());
-          if (orderDate >= todayStart && data.orderNumber > maxOrderNumber) {
-            maxOrderNumber = data.orderNumber;
-          }
-        });
-        
-        // 毎朝3時にリセット：当日の注文が1件もなければ619番から開始
-        const orderNumber = maxOrderNumber + 1;
-        
-        console.log('注文番号生成:', {
-          todayStart: todayStart.toISOString(),
-          maxOrderNumber,
-          nextOrderNumber: orderNumber
-        });
+        const orderNumber = await generateOrderNumber();
         
         let totalAmount = 0;
         manualCart.forEach(item => {
@@ -13825,6 +13774,50 @@ ${redSlipCount > 0 ? `
       } catch (e) {
         console.error('時間オーバーライド読み込みエラー:', e);
       }
+    }
+    
+    // ========== 注文番号生成（menu.htmlと共通方式） ==========
+    // settings/orderCounter を使ったトランザクション方式で毎朝3時にリセット
+    async function generateOrderNumber() {
+      const { runTransaction, Timestamp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+      const now = new Date();
+      const counterRef = window.getStoreDoc('settings', 'orderCounter');
+      
+      const orderNumber = await runTransaction(window.db, async (transaction) => {
+        const counterSnap = await transaction.get(counterRef);
+        
+        // JST 3:00 リセット時刻を計算
+        const jstOffsetMs = 9 * 60 * 60 * 1000;
+        const jstNowMs = now.getTime() + jstOffsetMs;
+        const jstMidnightMs = jstNowMs - (jstNowMs % (24 * 60 * 60 * 1000));
+        let todayReset = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - jstOffsetMs);
+        if (now < todayReset) todayReset = new Date(todayReset.getTime() - 24 * 60 * 60 * 1000);
+        
+        let nextNumber = 619;
+        
+        if (counterSnap.exists()) {
+          const data = counterSnap.data();
+          const lastReset = data.lastResetAt ? data.lastResetAt.toDate() : null;
+          // 前回のカウンター更新が今日の3時より前 → リセット
+          const needsReset = !lastReset || lastReset < todayReset;
+          if (needsReset) {
+            nextNumber = 619;
+          } else {
+            nextNumber = (data.currentNumber || 618) + 1;
+          }
+        }
+        
+        transaction.set(counterRef, {
+          currentNumber: nextNumber,
+          lastResetAt: Timestamp.fromDate(now),
+          updatedAt: Timestamp.fromDate(now)
+        }, { merge: true });
+        
+        return nextNumber;
+      });
+      
+      console.log('✅ 注文番号生成（orderCounter）:', orderNumber);
+      return orderNumber;
     }
     
     // トースト表示
@@ -18823,34 +18816,10 @@ ${redSlipCount > 0 ? `
         submitBtn.disabled = true;
         submitBtn.textContent = '注文確定';
         
-        // 🆕 注文番号を生成（毎朝3時リセット）
+        // 🆕 注文番号を生成（orderCounter トランザクション方式・menu.htmlと共通）
         const now = new Date();
-        // JST 3:00をエポックミリ秒で正確に計算（setHoursはローカルタイム依存のため使用しない）
-        const jstOffsetMs = 9 * 60 * 60 * 1000;
-        const jstNowMs = now.getTime() + jstOffsetMs;
-        const jstMidnightMs = jstNowMs - (jstNowMs % (24 * 60 * 60 * 1000));
-        let todayStart = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - jstOffsetMs);
-        if (now < todayStart) todayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
-        
-        const ordersSnapshot = await window.getDocs(window.getStoreCollection('orders'));
-        let maxOrderNumber = 618;
-        
-        ordersSnapshot.forEach(doc => {
-          const data = doc.data();
-          // 削除済みも含めて当日の最大番号を取得（取消しても番号は戻さない）
-          const orderDate = data.timestamp && data.timestamp.toDate ? data.timestamp.toDate() : new Date(data.timestamp || Date.now());
-          if (orderDate >= todayStart && data.orderNumber > maxOrderNumber) {
-            maxOrderNumber = data.orderNumber;
-          }
-        });
-        
-        // 毎朝3時にリセット：当日の注文が1件もなければ619番から開始
-        const orderNumber = maxOrderNumber + 1;
-        
-        console.log('🆕 新UI注文番号生成:', {
-          maxOrderNumber,
-          nextOrderNumber: orderNumber
-        });
+        const orderNumber = await generateOrderNumber();
+        console.log('🆕 新UI注文番号生成:', orderNumber);
         
         // 🆕 合計金額を計算
         let totalAmount = 0;
