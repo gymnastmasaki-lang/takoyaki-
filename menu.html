@@ -1645,6 +1645,26 @@
         return;
       }
       
+      // 🆕 POSモードでは営業時間チェックを完全にスキップ（店員操作用）
+      if (window.isPOSMode) {
+        console.log('✅ POSモードのため営業時間チェックをスキップします');
+        try {
+          await loadAllData();
+          await loadMenuSettings();
+          await loadAlertSettings();
+          await loadStatusDisplaySettings();
+          await updateTopWaitingCount();
+          setInterval(updateTopWaitingCount, 20000);
+          watchSoldOutItems();
+          onSnapshot(window.getStoreCollection('settings'), () => {
+            updateTopWaitingCount().catch(e => console.error('待ち人数更新エラー:', e));
+          });
+        } catch (e) {
+          console.error('POSモード初期化エラー:', e);
+        }
+        return;
+      }
+      
       // 営業時間チェック
       const now = new Date();
       const hours = now.getHours();
@@ -1688,45 +1708,15 @@
         }
       }
       
-      // 🆕 グローバル営業時間設定をFirestoreから読み込み
-      let globalBusinessHoursEnabled = false;
-      let globalOpenTime = null;
-      let globalCloseTime = null;
-      if (!customBusinessHoursEnabled && !timeOverrideEnabled) {
-        try {
-          const bhRef = window.getStoreDoc('business_hours_settings', 'default');
-          const bhDoc = await getDoc(bhRef);
-          if (bhDoc.exists()) {
-            const bhData = bhDoc.data();
-            if (bhData.enabled) {
-              globalBusinessHoursEnabled = true;
-              globalOpenTime = bhData.openTime || '11:00';
-              globalCloseTime = bhData.closeTime || '22:00';
-              console.log('✅ グローバル営業時間設定を読み込みました:', globalOpenTime, '-', globalCloseTime);
-            }
-          }
-        } catch (e) {
-          console.error('グローバル営業時間設定の読み込みエラー:', e);
-        }
-      }
-      
       // 営業時間の設定
       if (customBusinessHoursEnabled) {
-        // テーブル別カスタム営業時間を使用
+        // カスタム営業時間を使用
         const [openHour, openMin] = customOpenTime.split(':').map(Number);
         const [closeHour, closeMin] = customCloseTime.split(':').map(Number);
         closedEndTime = openHour * 60 + openMin;
         closedStartTime = closeHour * 60 + closeMin;
         operatingHours = `${customOpenTime} - ${customCloseTime}`;
         console.log('⏰ カスタム営業時間:', operatingHours);
-      } else if (globalBusinessHoursEnabled) {
-        // 🆕 kanri.htmlで設定したグローバル営業時間を使用
-        const [openHour, openMin] = globalOpenTime.split(':').map(Number);
-        const [closeHour, closeMin] = globalCloseTime.split(':').map(Number);
-        closedEndTime = openHour * 60 + openMin;
-        closedStartTime = closeHour * 60 + closeMin;
-        operatingHours = `${globalOpenTime} - ${globalCloseTime}`;
-        console.log('⏰ グローバル営業時間設定:', operatingHours);
       } else if (hasTableParam) {
         // menu.html?table=の場合：22:00-11:00が営業時間外
         closedStartTime = 22 * 60; // 22:00 = 1320分
@@ -1875,37 +1865,14 @@
               closedEndTime = openHour * 60 + openMin;
               closedStartTime = closeHour * 60 + closeMin;
               operatingHours = `${customOpenTime} - ${customCloseTime}`;
+            } else if (hasTableParam) {
+              closedStartTime = 22 * 60;
+              closedEndTime = 11 * 60;
+              operatingHours = '11:00 - 22:00';
             } else {
-              // 🆕 グローバル営業時間設定をFirestoreから読み込み
-              let periodicGlobalBhEnabled = false;
-              let periodicGlobalBhOpen = null;
-              let periodicGlobalBhClose = null;
-              if (!timeOverrideEnabled) {
-                try {
-                  const bhDoc3 = await getDoc(window.getStoreDoc('business_hours_settings', 'default'));
-                  if (bhDoc3.exists() && bhDoc3.data().enabled) {
-                    periodicGlobalBhEnabled = true;
-                    periodicGlobalBhOpen = bhDoc3.data().openTime || '11:00';
-                    periodicGlobalBhClose = bhDoc3.data().closeTime || '22:00';
-                  }
-                } catch (e) { /* 無視 */ }
-              }
-              
-              if (periodicGlobalBhEnabled) {
-                const [oh, om] = periodicGlobalBhOpen.split(':').map(Number);
-                const [ch, cm] = periodicGlobalBhClose.split(':').map(Number);
-                closedEndTime = oh * 60 + om;
-                closedStartTime = ch * 60 + cm;
-                operatingHours = `${periodicGlobalBhOpen} - ${periodicGlobalBhClose}`;
-              } else if (hasTableParam) {
-                closedStartTime = 22 * 60;
-                closedEndTime = 11 * 60;
-                operatingHours = '11:00 - 22:00';
-              } else {
-                closedStartTime = 22 * 60 + 30;
-                closedEndTime = 11 * 60;
-                operatingHours = '11:00 - 22:30';
-              }
+              closedStartTime = 22 * 60 + 30;
+              closedEndTime = 11 * 60;
+              operatingHours = '11:00 - 22:30';
             }
             
             const isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
@@ -3305,6 +3272,8 @@
       }
       
       // ========== 営業時間チェック ==========
+      // 🆕 POSモードでは営業時間チェックをスキップ
+      if (!window.isPOSMode) {
       // 🆕 注文確定時に再度営業時間をチェック
       try {
         const now = new Date();
@@ -3324,47 +3293,8 @@
           console.error('時間外解除設定の読み込みエラー:', e);
         }
         
-        // 🆕 グローバル営業時間設定をFirestoreから読み込み
-        let globalBhEnabled = false;
-        let globalBhOpen = null;
-        let globalBhClose = null;
-        if (!timeOverrideEnabled) {
-          try {
-            const bhDoc2 = await getDoc(window.getStoreDoc('business_hours_settings', 'default'));
-            if (bhDoc2.exists() && bhDoc2.data().enabled) {
-              globalBhEnabled = true;
-              globalBhOpen = bhDoc2.data().openTime || '11:00';
-              globalBhClose = bhDoc2.data().closeTime || '22:00';
-            }
-          } catch (e) {
-            console.error('注文確定時 営業時間設定の読み込みエラー:', e);
-          }
-        }
-        
-        // テーブル別カスタム営業時間も確認
-        let orderCustomOpen = null, orderCustomClose = null;
-        if (!timeOverrideEnabled && tableSettings) {
-          if (tableSettings.businessHours && tableSettings.businessHours.enabled) {
-            orderCustomOpen = tableSettings.businessHours.openTime || '11:00';
-            orderCustomClose = tableSettings.businessHours.closeTime || '22:00';
-          }
-        }
-        
         let closedStartTime, closedEndTime, operatingHours;
-        if (orderCustomOpen) {
-          const [oh, om] = orderCustomOpen.split(':').map(Number);
-          const [ch, cm] = orderCustomClose.split(':').map(Number);
-          closedEndTime = oh * 60 + om;
-          closedStartTime = ch * 60 + cm;
-          operatingHours = `${orderCustomOpen} - ${orderCustomClose}`;
-        } else if (globalBhEnabled) {
-          // 🆕 kanri.htmlで設定したグローバル営業時間を使用
-          const [oh, om] = globalBhOpen.split(':').map(Number);
-          const [ch, cm] = globalBhClose.split(':').map(Number);
-          closedEndTime = oh * 60 + om;
-          closedStartTime = ch * 60 + cm;
-          operatingHours = `${globalBhOpen} - ${globalBhClose}`;
-        } else if (hasTableParam) {
+        if (hasTableParam) {
           closedStartTime = 22 * 60;
           closedEndTime = 11 * 60;
           operatingHours = '11:00 - 22:00';
@@ -3383,6 +3313,7 @@
       } catch (e) {
         console.error('営業時間チェックエラー:', e);
       }
+      } // isPOSMode チェック終了
       
       // ========== 二重送信防止 ==========
       // 既に処理中の場合は何もしない
