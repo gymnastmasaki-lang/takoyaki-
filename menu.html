@@ -3261,6 +3261,11 @@
     };
 
     window.confirmOrder = async function() {
+      // ハンディモードはsubmitHandyOrderで処理（注文番号ダイアログあり）
+      if (window.isHandyMode) {
+        await submitHandyOrder();
+        return;
+      }
       // ========== 休業日チェック ==========
       if (isClosedDay) {
         await checkClosedDay();
@@ -4721,8 +4726,15 @@
         
         let orderNumber;
         if (_staffInput !== null) {
-          // 手動入力番号を使用（カウンターは更新しない）
+          // 手動入力番号を使用（counterも更新して次の自動番号が続くようにする）
           orderNumber = _staffInput;
+          try {
+            await window.setDoc(handyCounterRef, {
+              currentNumber: _staffInput,
+              lastResetAt: window.Timestamp.fromDate(handyNow),
+              updatedAt: window.Timestamp.fromDate(handyNow)
+            }, { merge: true });
+          } catch(e) { console.error('counter更新エラー:', e); }
         } else {
           // 自動連番（orderCounterをトランザクションで更新）
           orderNumber = await runTransaction(window.db, async (transaction) => {
