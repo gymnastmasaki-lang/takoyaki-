@@ -1500,7 +1500,64 @@
       const OPEN_END_HOUR = 22;
       const OPEN_END_MINUTE = 30;
       
-      // 時刻が営業時間内かチェック
+      // ========== スタッフ向け任意注文番号入力ダイアログ ==========
+    function askOrderNumberForStaff() {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+          position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
+          display: flex; align-items: center; justify-content: center;
+          z-index: 10001; padding: 20px;
+        `;
+        overlay.innerHTML = \`
+          <div style="background: linear-gradient(135deg, #2d6a4f 0%, #1b4332 100%);
+            border-radius: 24px; padding: 36px; max-width: 400px; width: 90%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.2);">
+            <h3 style="color: white; font-size: 22px; font-weight: bold; margin: 0 0 10px; text-align: center;">
+              📋 注文番号
+            </h3>
+            <p style="color: rgba(255,255,255,0.85); font-size: 14px; text-align: center; margin: 0 0 20px;">
+              空欄のまま確定すると自動連番になります
+            </p>
+            <input id="staffOrderNumInput" type="number" min="1" max="9999"
+              placeholder="例: 619（空欄で自動）"
+              style="width: 100%; padding: 14px; font-size: 20px; text-align: center;
+                border: 2px solid rgba(255,255,255,0.4); border-radius: 12px;
+                background: rgba(255,255,255,0.15); color: white; outline: none;
+                box-sizing: border-box; margin-bottom: 20px;"
+            />
+            <div style="display: flex; gap: 12px;">
+              <button id="staffOrderNumCancel"
+                style="flex: 1; padding: 14px; background: rgba(255,255,255,0.15);
+                  color: white; border: 2px solid rgba(255,255,255,0.3); border-radius: 12px;
+                  font-size: 16px; font-weight: bold; cursor: pointer;">
+                キャンセル
+              </button>
+              <button id="staffOrderNumOk"
+                style="flex: 2; padding: 14px; background: white; color: #2d6a4f;
+                  border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;">
+                確定
+              </button>
+            </div>
+          </div>
+        \`;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('#staffOrderNumInput');
+        input.focus();
+        const close = (val) => { overlay.remove(); resolve(val); };
+        overlay.querySelector('#staffOrderNumOk').onclick = () => {
+          const v = parseInt(input.value);
+          close(isNaN(v) || input.value.trim() === '' ? null : v);
+        };
+        overlay.querySelector('#staffOrderNumCancel').onclick = () => close(false);
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') overlay.querySelector('#staffOrderNumOk').click();
+        });
+      });
+    }
+
+    // 時刻が営業時間内かチェック
       function isWithinBusinessHours(date) {
         const hours = date.getHours();
         const minutes = date.getMinutes();
@@ -3553,8 +3610,10 @@
           if (counterSnap.exists()) {
             const data = counterSnap.data();
             const lastReset = data.lastResetAt ? data.lastResetAt.toDate() : null;
-            // 🔧 修正: lastResetはUTCのままtodayReset(UTC)と比較する（JST変換不要）
-            const needsReset = !lastReset || lastReset < todayReset;
+            const lastResetJst = lastReset ? new Date(lastReset.getTime() + (9 * 60 * 60 * 1000)) : null;
+            
+            // 前回のカウンター更新が今日の3時より前 → リセット
+            const needsReset = !lastResetJst || lastResetJst < todayReset;
             
             if (needsReset) {
               nextNumber = 619; // 毎朝3時にリセット
@@ -4696,29 +4755,40 @@
         const handyCounterRef = window.getStoreDoc('settings', 'orderCounter');
         const handyNow = new Date();
         
-        const orderNumber = await runTransaction(window.db, async (transaction) => {
-          const counterSnap = await transaction.get(handyCounterRef);
-          const jstOffsetMs = 9 * 60 * 60 * 1000;
-          const jstNowMs = handyNow.getTime() + jstOffsetMs;
-          const jstMidnightMs = jstNowMs - (jstNowMs % (24 * 60 * 60 * 1000));
-          let todayReset = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - jstOffsetMs);
-          if (handyNow < todayReset) todayReset = new Date(todayReset.getTime() - 24 * 60 * 60 * 1000);
-          
-          let nextNumber = 619;
-          if (counterSnap.exists()) {
-            const data = counterSnap.data();
-            const lastReset = data.lastResetAt ? data.lastResetAt.toDate() : null;
-            // 🔧 修正: lastResetはUTCのままtodayReset(UTC)と比較する（JST変換不要）
-            const needsReset = !lastReset || lastReset < todayReset;
-            nextNumber = needsReset ? 619 : (data.currentNumber || 618) + 1;
-          }
-          transaction.set(handyCounterRef, {
-            currentNumber: nextNumber,
-            lastResetAt: window.Timestamp.fromDate(handyNow),
-            updatedAt: window.Timestamp.fromDate(handyNow)
-          }, { merge: true });
-          return nextNumber;
-        });
+        // スタッフモードでは任意番号入力ダイアログを表示
+        const _staffAskedNum = await askOrderNumberForStaff();
+        if (_staffAskedNum === false) return; // キャンセル
+        
+        let orderNumber;
+        if (_staffAskedNum !== null) {
+          // 手動入力番号を使用（カウンターは更新しない）
+          orderNumber = _staffAskedNum;
+        } else {
+          // 自動連番（orderCounterを更新）
+          orderNumber = await runTransaction(window.db, async (transaction) => {
+            const counterSnap = await transaction.get(handyCounterRef);
+            const jstOffsetMs = 9 * 60 * 60 * 1000;
+            const jstNowMs = handyNow.getTime() + jstOffsetMs;
+            const jstMidnightMs = jstNowMs - (jstNowMs % (24 * 60 * 60 * 1000));
+            let todayReset = new Date(jstMidnightMs + (3 * 60 * 60 * 1000) - jstOffsetMs);
+            if (handyNow < todayReset) todayReset = new Date(todayReset.getTime() - 24 * 60 * 60 * 1000);
+            
+            let nextNumber = 619;
+            if (counterSnap.exists()) {
+              const data = counterSnap.data();
+              const lastReset = data.lastResetAt ? data.lastResetAt.toDate() : null;
+              // 🔧 修正: lastResetはUTCのままtodayReset(UTC)と比較（JST変換不要）
+              const needsReset = !lastReset || lastReset < todayReset;
+              nextNumber = needsReset ? 619 : (data.currentNumber || 618) + 1;
+            }
+            transaction.set(handyCounterRef, {
+              currentNumber: nextNumber,
+              lastResetAt: window.Timestamp.fromDate(handyNow),
+              updatedAt: window.Timestamp.fromDate(handyNow)
+            }, { merge: true });
+            return nextNumber;
+          });
+        }
         
         orderData.orderNumber = orderNumber;
         
