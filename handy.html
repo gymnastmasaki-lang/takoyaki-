@@ -2522,10 +2522,17 @@
     // ========== Square POS連携 ==========
     async function loadSquareAppId() {
       try {
+        // Firebase初期化完了を待つ
+        let waited = 0;
+        while ((!window.getDoc || !window.getStoreDoc) && waited < 5000) {
+          await new Promise(r => setTimeout(r, 200));
+          waited += 200;
+        }
+        if (!window.getDoc || !window.getStoreDoc) return;
         const snap = await window.getDoc(window.getStoreDoc('settings', 'square'));
         if (snap.exists() && snap.data().applicationId) {
           squareApplicationId = snap.data().applicationId.trim();
-          console.log('✅ Square Application ID読み込み完了');
+          console.log('✅ Square Application ID読み込み完了:', squareApplicationId);
         }
       } catch(e) { console.log('Square設定なし:', e.message); }
     }
@@ -2554,7 +2561,11 @@
       }
     })();
 
-    window.launchSquarePOS = function() {
+    window.launchSquarePOS = async function() {
+      // Application IDが未ロードの場合は再試行
+      if (!squareApplicationId) {
+        await loadSquareAppId();
+      }
       if (!squareApplicationId) {
         alert('Square Application IDが設定されていません\nkanri.htmlのSquare連携設定から設定してください');
         return;
@@ -2569,7 +2580,8 @@
         version: '1.3'
       };
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
-      window.location.href = 'square-commerce-v1://payment/create?data=' + encoded;
+      // client_idはURLパラメータとして必須
+      window.location.href = 'square-commerce-v1://payment/create?data=' + encoded + '&client_id=' + encodeURIComponent(squareApplicationId);
     };
 
     window.selectPaymentMethod = function(method) {
@@ -2580,7 +2592,7 @@
       
       // Squareボタン制御
       let sqBtn = document.getElementById('squareLaunchBtn');
-      if (method === 'emoney' && squareApplicationId) {
+      if ((method === 'emoney' || method === 'credit') && squareApplicationId) {
         document.getElementById('paymentBtn').disabled = true;
         if (!sqBtn) {
           sqBtn = document.createElement('button');
