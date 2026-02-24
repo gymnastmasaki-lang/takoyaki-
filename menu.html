@@ -3272,7 +3272,7 @@
       }
       
       // ========== 営業時間チェック ==========
-      // POSモード・handyモードでは営業時間チェックをスキップ（スタッフ操作用）
+      // POSモード・handyモードでは営業時間チェックをスキップ（スタッフ操作用）v2024-02-24
       if (!window.isPOSMode && !window.isHandyMode) {
       // 🆕 注文確定時に再度営業時間をチェック
       try {
@@ -3284,17 +3284,36 @@
         const urlParams = new URLSearchParams(window.location.search);
         const hasTableParam = urlParams.get('table');
         
-        // 時間外解除設定を確認
+        // 時間外解除設定を確認（テーブル設定 → グローバル設定の順）
         let timeOverrideEnabled = false;
-        try {
-          const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
-          timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
-        } catch (e) {
-          console.error('時間外解除設定の読み込みエラー:', e);
+
+        // テーブルの時間外解除
+        if (tableSettings && tableSettings.timeOverride && tableSettings.timeOverride.enabled) {
+          timeOverrideEnabled = true;
         }
-        
+
+        // グローバル時間外解除
+        if (!timeOverrideEnabled) {
+          try {
+            const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+            timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
+          } catch (e) {
+            console.error('時間外解除設定の読み込みエラー:', e);
+          }
+        }
+
         let closedStartTime, closedEndTime, operatingHours;
-        if (hasTableParam) {
+
+        // テーブルのカスタム営業時間設定を優先
+        if (tableSettings && tableSettings.businessHours && tableSettings.businessHours.enabled) {
+          const openTime  = tableSettings.businessHours.openTime  || '11:00';
+          const closeTime = tableSettings.businessHours.closeTime || '22:00';
+          const [oh, om] = openTime.split(':').map(Number);
+          const [ch, cm] = closeTime.split(':').map(Number);
+          closedEndTime   = oh * 60 + om;
+          closedStartTime = ch * 60 + cm;
+          operatingHours  = `${openTime} - ${closeTime}`;
+        } else if (hasTableParam) {
           closedStartTime = 22 * 60;
           closedEndTime = 11 * 60;
           operatingHours = '11:00 - 22:00';
@@ -3303,7 +3322,7 @@
           closedEndTime = 11 * 60;
           operatingHours = '11:00 - 22:30';
         }
-        
+
         const isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
         
         if (isClosed) {
