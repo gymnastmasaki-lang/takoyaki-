@@ -756,34 +756,25 @@ const AdminSystem = () => {
     const loadAttendanceData = async () => {
         try {
             const { collection, getDocs } = window.firebaseModules;
-            // ドキュメントID "{employeeId}_{YYYY-MM-DD}" を正しく分割するヘルパー
-            // 日付部分は必ず YYYY-MM-DD 形式なので、正規表現で末尾から抽出する
+            // ドキュメントID "{employeeId}_{YYYY-MM-DD}" を正しく分割
             const parseDocId = (docId, docData) => {
-                // パターン: 末尾が YYYY-MM-DD 形式
-                const dateMatch = docId.match(/^(.+?)_(\d{4}-\d{2}-\d{2})$/);
-                if (dateMatch) {
-                    return { employeeId: dateMatch[1], dateKey: dateMatch[2] };
-                }
-                // フォールバック: ドキュメントデータから取得
+                const m = docId.match(/^(.+?)_(\d{4}-\d{2}-\d{2})$/);
+                if (m) return { employeeId: m[1], dateKey: m[2] };
                 return { employeeId: docData.employeeId, dateKey: docData.date || docId };
             };
             if (!window.currentStoreId || window.currentStoreId === null || window.currentStoreId === '') {
-                // 旧パスから勤怠データを取得
                 const attRef = collection(window.db, 'kintai_attendance');
                 const attSnapshot = await getDocs(attRef);
                 const attData = {};
                 attSnapshot.forEach(doc => {
-                    const docId = doc.id;
+                    const { employeeId, dateKey } = parseDocId(doc.id, doc.data());
                     const docData = doc.data();
-                    const { employeeId, dateKey } = parseDocId(docId, docData);
-                    const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
+                    const dateMatch = dateKey && dateKey.match(/^(\d{4})-(\d{2})-/);
                     if (dateMatch && employeeId) {
                         const year = parseInt(dateMatch[1]);
                         const month = parseInt(dateMatch[2]) - 1;
                         if (year === currentYear && month === currentMonth) {
-                            if (!attData[employeeId]) {
-                                attData[employeeId] = {};
-                            }
+                            if (!attData[employeeId]) attData[employeeId] = {};
                             attData[employeeId][dateKey] = docData;
                         }
                     }
@@ -795,18 +786,15 @@ const AdminSystem = () => {
                 const attSnapshot = await getDocs(attRef);
                 const attData = {};
                 attSnapshot.forEach(doc => {
-                    const docId = doc.id;
+                    const { employeeId, dateKey } = parseDocId(doc.id, doc.data());
                     const docData = doc.data();
-                    const { employeeId, dateKey } = parseDocId(docId, docData);
                     if (!employeeId || !dateKey) return;
                     const dateMatch = dateKey.match(/^(\d{4})-(\d{2})-/);
                     if (dateMatch && employeeId) {
                         const year = parseInt(dateMatch[1]);
                         const month = parseInt(dateMatch[2]) - 1;
                         if (year === currentYear && month === currentMonth) {
-                            if (!attData[employeeId]) {
-                                attData[employeeId] = {};
-                            }
+                            if (!attData[employeeId]) attData[employeeId] = {};
                             attData[employeeId][dateKey] = docData;
                         }
                     }
@@ -1201,25 +1189,13 @@ const AdminSystem = () => {
             snapshot.forEach(doc => {
                 const docId = doc.id;
                 const data = doc.data();
-                // ドキュメントID "{employeeId}_{YYYY-MM-DD}" を正しく分割
-                const dateMatch = docId.match(/^(.+?)_(\d{4}-\d{2}-\d{2})$/);
-                let docEmployeeId, dateKey;
-                if (dateMatch) {
-                    docEmployeeId = dateMatch[1];
-                    dateKey = dateMatch[2];
-                } else {
-                    docEmployeeId = data.employeeId;
-                    dateKey = data.date || '';
-                }
+                const m = docId.match(/^(.+?)_(\d{4}-\d{2}-\d{2})$/);
+                let docEmployeeId = m ? m[1] : data.employeeId;
+                let dateKey = m ? m[2] : (data.date || '');
                 if (docEmployeeId === employeeId && data.clockIn && dateKey) {
-                    const yearMonth = dateKey.substring(0, 7); // YYYY-MM
-                    if (!monthlyData[yearMonth]) {
-                        monthlyData[yearMonth] = [];
-                    }
-                    monthlyData[yearMonth].push({
-                        date: dateKey,
-                        record: data
-                    });
+                    const yearMonth = dateKey.substring(0, 7);
+                    if (!monthlyData[yearMonth]) monthlyData[yearMonth] = [];
+                    monthlyData[yearMonth].push({ date: dateKey, record: data });
                 }
             });
             // 各月の差額を計算
@@ -3100,10 +3076,10 @@ const AdminSystem = () => {
                     const attData = doc.data();
                     const docId = doc.id;
                     let attEmployeeId, dateKey;
-                    const dateMatchResult = docId.match(/^(.+?)_(\d{4}-\d{2}-\d{2})$/);
-                    if (dateMatchResult) {
-                        attEmployeeId = dateMatchResult[1];
-                        dateKey = dateMatchResult[2];
+                    const m = docId.match(/^(.+?)_(\d{4}-\d{2}-\d{2})$/);
+                    if (m) {
+                        attEmployeeId = m[1];
+                        dateKey = m[2];
                     }
                     else if (attData.employeeId && attData.date) {
                         attEmployeeId = attData.employeeId;
@@ -5563,7 +5539,7 @@ const AdminSystem = () => {
                         React.createElement("div", { className: "flex gap-2" },
                             React.createElement("button", { onClick: () => setEditingEmployee(emp.id), className: "px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm" },
                                 React.createElement(Edit2, { className: "w-4 h-4" })),
-                            React.createElement("button", { onClick: () => { setSelectedPayslipEmployee(emp.id); setTimeout(() => { const el = document.getElementById('payslip-detail-section'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100); }, className: "px-3 py-1 bg-purple-500 text-white rounded hover:bg-purple-600 text-sm" }, "\u7D66\u4E0E\u660E\u7D30"),
+                            React.createElement("button", { onClick: () => { setSelectedPayslipEmployee(emp.id); setTimeout(() => { const el = document.getElementById('payslip-detail-section'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 150); }, className: "px-3 py-1 bg-purple-500 text-white rounded hover:bg-purple-600 text-sm" }, "\u7D66\u4E0E\u660E\u7D30"),
                             React.createElement("button", { onClick: () => deleteEmployee(emp.id), className: "px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm" }, "\u524A\u9664"))))));
                 })))),
             React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
@@ -5599,9 +5575,8 @@ const AdminSystem = () => {
                     const dailyPay = record ? calculateDailyPay(employee, record) : { base: 0, overtime: 0, holiday: 0, total: 0 };
                     workDays.push({ day, dayOfWeek, record, workHours, dailyPay });
                 }
-                return (React.createElement("div", { id: "payslip-detail-section", className: "fixed inset-0 bg-white z-40 overflow-y-auto print-content", style: { top: 0, left: 0, right: 0, bottom: 0 } },
-                    React.createElement("div", { className: "max-w-5xl mx-auto p-6" },
-                        React.createElement("div", { className: "flex justify-between items-center mb-6 no-print" },
+                return (React.createElement("div", { id: "payslip-detail-section", className: "bg-white rounded-lg shadow-lg p-6 mb-6 print-content" },
+                    React.createElement("div", { className: "flex justify-between items-center mb-6 no-print" },
                         React.createElement("button", { onClick: () => setSelectedPayslipEmployee(null), className: "px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 flex items-center gap-2" },
                             React.createElement(ArrowLeft, { className: "w-4 h-4" }),
                             "\u623B\u308B"),
@@ -6105,8 +6080,7 @@ const AdminSystem = () => {
                     React.createElement("div", { className: "mt-8 text-sm text-gray-600" },
                         React.createElement("p", null, "\u203B\u3053\u306E\u7D66\u4E0E\u660E\u7D30\u66F8\u306F\u52B4\u50CD\u57FA\u6E96\u6CD5\u306B\u57FA\u3065\u304D\u30015\u5E74\u9593\u4FDD\u7BA1\u3057\u3066\u304F\u3060\u3055\u3044\u3002"),
                         React.createElement("p", null, "\u203B\u6642\u9593\u5916\u52B4\u50CD(8\u6642\u9593\u8D85\u904E)\u306F25%\u5272\u5897\u3001\u4F11\u65E5\u51FA\u52E4\u306F35%\u5272\u5897\u3001\u6DF1\u591C\u52B4\u50CD(22\u6642-\u7FCC5\u6642)\u306F25%\u5272\u5897\u306B\u3066\u8A08\u7B97\u3055\u308C\u3066\u3044\u307E\u3059\u3002"),
-                        React.createElement("p", null, "\u203B\u52B4\u50CD\u6642\u9593\u306F15\u5206\u5358\u4F4D\u3067\u8A08\u7B97\u3055\u308C\u3066\u3044\u307E\u3059(\u51FA\u52E4\u306F\u5207\u308A\u4E0A\u3052\u3001\u9000\u52E4\u306F\u5207\u308A\u6368\u3066)")))))
-            );
+                        React.createElement("p", null, "\u203B\u52B4\u50CD\u6642\u9593\u306F15\u5206\u5358\u4F4D\u3067\u8A08\u7B97\u3055\u308C\u3066\u3044\u307E\u3059(\u51FA\u52E4\u306F\u5207\u308A\u4E0A\u3052\u3001\u9000\u52E4\u306F\u5207\u308A\u6368\u3066)"))));
             })()),
         showAddEmployee && (React.createElement("div", { className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" },
             React.createElement("div", { className: "bg-white rounded-lg p-6 w-full max-w-md" },
