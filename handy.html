@@ -1480,7 +1480,6 @@
     
     let selectedPaymentMethod = null;
     let totalAmountToPay = 0;
-    let squareApplicationId = 'sq0idp-V1XdQJC1mm1JXCOnLqd10w'; // ← Application ID直書き
     let cashReceived = 0;
     let changeAmount = 0;
     let customModalResolve = null;
@@ -2519,79 +2518,12 @@
       if (selectedPaymentMethod === 'cash') calculateChange();
     };
     
-    // ========== Square POS連携 ==========
-    async function loadSquareAppId() {
-      try {
-        // Firebase初期化完了を待つ
-        let waited = 0;
-        while ((!window.getDoc || !window.getStoreDoc) && waited < 5000) {
-          await new Promise(r => setTimeout(r, 200));
-          waited += 200;
-        }
-        if (!window.getDoc || !window.getStoreDoc) return;
-        const snap = await window.getDoc(window.getStoreDoc('settings', 'square'));
-        if (snap.exists() && snap.data().applicationId) {
-          squareApplicationId = snap.data().applicationId.trim();
-          console.log('✅ Square Application ID読み込み完了:', squareApplicationId);
-        }
-      } catch(e) { console.log('Square設定なし:', e.message); }
-    }
-    loadSquareAppId();
-
-    // Squareコールバック処理
-    (function handleSquareCallback() {
-      const params = new URLSearchParams(window.location.search);
-      const txId = params.get('com.squareup.pos.TRANSACTION_ID') || params.get('transaction_id');
-      const errorCode = params.get('com.squareup.pos.ERROR_CODE') || params.get('error_code');
-      if (txId) {
-        window.history.replaceState({}, '', window.location.pathname);
-        window.addEventListener('load', () => {
-          setTimeout(async () => {
-            if (typeof window.processPayment === 'function') {
-              window._squareTxId = txId;
-              await window.processPayment();
-            }
-          }, 1500);
-        });
-      } else if (errorCode) {
-        window.history.replaceState({}, '', window.location.pathname);
-        window.addEventListener('load', () => {
-          setTimeout(() => { alert('Square決済がキャンセルまたはエラーになりました\nエラーコード: ' + errorCode); }, 500);
-        });
-      }
-    })();
-
-    // ✅ Square起動は同期関数にする（asyncにするとChromeがURL起動をブロックする）
-    window.launchSquarePOS = function() {
-      if (!squareApplicationId) {
-        alert('Square Application IDが読み込まれていません。\n画面を再読み込みしてください。\n\n現在のID: ' + (squareApplicationId || '(空)'));
-        return;
-      }
-      const amount = totalAmountToPay;
-      if (!amount || amount <= 0) { alert('金額が正しくありません'); return; }
-      const callbackUrl = window.location.href.split('?')[0];
-      const data = {
-        amount_money: { amount: amount, currency_code: 'JPY' },
-        callback_url: callbackUrl,
-        client_transaction_id: 'handy_' + Date.now(),
-        version: '1.3'
-      };
-      data.client_id = squareApplicationId;
-      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
-      const squareUrl = 'square-commerce-v1://payment/create?data=' + encoded;
-      console.log('🟦 Square URL:', squareUrl);
-      // 同期的に即座にURLを開く（ユーザー操作の直接の結果として）
-      window.location.href = squareUrl;
-    };
 
     window.selectPaymentMethod = function(method) {
       playTapSound();
       selectedPaymentMethod = method;
       document.querySelectorAll('.payment-method-btn').forEach(btn => btn.classList.toggle('selected', btn.innerText.includes(method === 'cash' ? '現金' : method === 'emoney' ? '電子' : 'クレジット')));
       document.getElementById('cashInputSection').classList.toggle('hidden', method !== 'cash');
-      
-      // Squareボタン制御
-      let sqBtn = document.getElementById('squareLaunchBtn');
       document.getElementById('paymentBtn').disabled = method === 'cash';
     };
     
