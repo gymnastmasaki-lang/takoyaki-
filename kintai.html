@@ -12,7 +12,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
     <div id="root"></div>
@@ -68,12 +67,6 @@
         const ClockSystem = () => {
             const [employees, setEmployees] = useState([]);
             const [selectedEmployee, setSelectedEmployee] = useState(null);
-            const [editNotifications, setEditNotifications] = useState([]);
-            const [exportMonth, setExportMonth] = useState(() => {
-                const now = new Date();
-                return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-            });
-            const [exportLoading, setExportLoading] = useState(false);
             const [lastAction, setLastAction] = useState(null);
             const [isLoading, setIsLoading] = useState(true);
             const [error, setError] = useState(null);
@@ -203,175 +196,6 @@
             };
 
             const recordTime = async (type, isHoliday = false) => {
-                // ✅ 打刻記録PNG出力
-                const exportToPNG = async () => {
-                    if (!selectedEmployee || !selectedStore) return;
-                    setExportLoading(true);
-                    try {
-                        const { collection, getDocs, query, where } = window.firebaseModules;
-                        const [year, month] = exportMonth.split('-').map(Number);
-                        const daysInMonth = new Date(year, month, 0).getDate();
-
-                        // 全日分のデータを取得
-                        const records = {};
-                        for (let d = 1; d <= daysInMonth; d++) {
-                            const dateKey = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-                            const { doc, getDoc } = window.firebaseModules;
-                            let docRef;
-                            if (selectedStore.id === 'shimoakatsuka' || selectedStore.id === 'shimoarekasuka' || !selectedStore.id) {
-                                docRef = doc(window.db, 'kintai_attendance', `${selectedEmployee.id}_${dateKey}`);
-                            } else {
-                                docRef = doc(window.db, 'stores', selectedStore.id, 'attendance', `${selectedEmployee.id}_${dateKey}`);
-                            }
-                            const snap = await getDoc(docRef);
-                            if (snap.exists()) records[dateKey] = snap.data();
-                        }
-
-                        // 時刻→分変換
-                        const toMin = (t) => {
-                            if (!t) return null;
-                            const [h,m] = t.split(':').map(Number);
-                            return h*60+m;
-                        };
-                        const minToStr = (m) => {
-                            if (m === null || m === undefined || isNaN(m)) return '-';
-                            const h = Math.floor(m/60);
-                            const min = m%60;
-                            return `${h}h${String(min).padStart(2,'0')}m`;
-                        };
-
-                        const dayNames = ['日','月','火','水','木','金','土'];
-                        let totalWorkMin = 0, totalWage = 0;
-                        const rows = [];
-                        for (let d = 1; d <= daysInMonth; d++) {
-                            const dateKey = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-                            const rec = records[dateKey];
-                            const dayOfWeek = new Date(year, month-1, d).getDay();
-                            const dayName = dayNames[dayOfWeek];
-                            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                            if (!rec || !rec.clockIn) {
-                                rows.push({ d, dayName, isWeekend, clockIn:'-', clockOut:'-', break:'-', work:'-', wage:'-', workMin:0 });
-                                continue;
-                            }
-                            // 打刻データから直接計算（editHistoryを使わず生データ）
-                            const rawCi = toMin(rec.clockIn);
-                            const rawCo = toMin(rec.clockOut);
-                            let breakMin = 0;
-                            if (rec.breakStart1 && rec.breakEnd1) {
-                                const b = toMin(rec.breakEnd1) - toMin(rec.breakStart1);
-                                if (b > 0) breakMin += b;
-                            }
-                            if (rec.breakStart2 && rec.breakEnd2) {
-                                const b = toMin(rec.breakEnd2) - toMin(rec.breakStart2);
-                                if (b > 0) breakMin += b;
-                            }
-                            const workMin = (rawCo !== null && rawCi !== null) ? Math.max(0, rawCo - rawCi - breakMin) : null;
-                            const hourlyRate = rec.hourlyRate || selectedEmployee.hourlyRate || 0;
-                            const wage = workMin !== null ? Math.floor(workMin / 60 * hourlyRate) : null;
-                            if (workMin) totalWorkMin += workMin;
-                            if (wage) totalWage += wage;
-                            rows.push({
-                                d, dayName, isWeekend,
-                                clockIn: rec.clockIn || '-',
-                                clockOut: rec.clockOut || '-',
-                                break: breakMin > 0 ? minToStr(breakMin) : '-',
-                                work: workMin !== null ? minToStr(workMin) : '-',
-                                wage: wage !== null ? `¥${wage.toLocaleString()}` : '-',
-                                workMin
-                            });
-                        }
-
-                        // HTML表を生成してキャプチャ
-                        const container = document.createElement('div');
-                        container.style.cssText = 'position:fixed;top:-9999px;left:-9999px;background:white;padding:24px;width:700px;font-family:sans-serif;';
-                        container.innerHTML = `
-                            <div style="text-align:center;margin-bottom:16px;">
-                                <h2 style="font-size:20px;font-weight:bold;margin:0;">${selectedEmployee.name} 打刻記録</h2>
-                                <p style="font-size:14px;color:#666;margin:4px 0;">${year}年${month}月　${selectedStore.storeName || ''}</p>
-                                <p style="font-size:11px;color:#e53e3e;margin:4px 0;">※ これは従業員の打刻記録です（管理者による編集前の生データ）</p>
-                            </div>
-                            <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                                <thead>
-                                    <tr style="background:#2b6cb0;color:white;">
-                                        <th style="padding:6px;border:1px solid #ccc;text-align:center;">日</th>
-                                        <th style="padding:6px;border:1px solid #ccc;text-align:center;">曜</th>
-                                        <th style="padding:6px;border:1px solid #ccc;text-align:center;">出勤</th>
-                                        <th style="padding:6px;border:1px solid #ccc;text-align:center;">退勤</th>
-                                        <th style="padding:6px;border:1px solid #ccc;text-align:center;">休憩</th>
-                                        <th style="padding:6px;border:1px solid #ccc;text-align:center;">実働</th>
-                                        <th style="padding:6px;border:1px solid #ccc;text-align:center;">金額</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${rows.map(r => `
-                                        <tr style="background:${r.isWeekend ? '#fff5f5' : (r.workMin > 0 ? '#f0fff4' : 'white')};">
-                                            <td style="padding:5px;border:1px solid #e2e8f0;text-align:center;">${r.d}</td>
-                                            <td style="padding:5px;border:1px solid #e2e8f0;text-align:center;color:${r.dayName==='日'?'#e53e3e':r.dayName==='土'?'#3182ce':'#333'};">${r.dayName}</td>
-                                            <td style="padding:5px;border:1px solid #e2e8f0;text-align:center;">${r.clockIn}</td>
-                                            <td style="padding:5px;border:1px solid #e2e8f0;text-align:center;">${r.clockOut}</td>
-                                            <td style="padding:5px;border:1px solid #e2e8f0;text-align:center;">${r.break}</td>
-                                            <td style="padding:5px;border:1px solid #e2e8f0;text-align:center;font-weight:bold;">${r.work}</td>
-                                            <td style="padding:5px;border:1px solid #e2e8f0;text-align:center;">${r.wage}</td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                                <tfoot>
-                                    <tr style="background:#ebf8ff;font-weight:bold;">
-                                        <td colspan="5" style="padding:6px;border:1px solid #ccc;text-align:right;">合計</td>
-                                        <td style="padding:6px;border:1px solid #ccc;text-align:center;">${minToStr(totalWorkMin)}</td>
-                                        <td style="padding:6px;border:1px solid #ccc;text-align:center;">¥${totalWage.toLocaleString()}</td>
-                                    </tr>
-                                </tfoot>
-                            </table>
-                            <p style="font-size:10px;color:#999;margin-top:12px;text-align:right;">出力日時: ${new Date().toLocaleString('ja-JP')}</p>
-                        `;
-                        document.body.appendChild(container);
-
-                        const canvas = await html2canvas(container, { scale: 2, backgroundColor: '#ffffff' });
-                        document.body.removeChild(container);
-
-                        const link = document.createElement('a');
-                        link.download = `打刻記録_${selectedEmployee.name}_${year}年${month}月.png`;
-                        link.href = canvas.toDataURL('image/png');
-                        link.click();
-                    } catch(e) {
-                        console.error('PNG出力エラー:', e);
-                        alert('PNG出力に失敗しました: ' + e.message);
-                    } finally {
-                        setExportLoading(false);
-                    }
-                };
-
-                // ✅ 従業員選択時に未読通知を確認
-                const checkNotifications = async (employee) => {
-                    if (!employee || !selectedStore) return;
-                    try {
-                        const { collection, getDocs, query, where, doc, updateDoc } = window.firebaseModules;
-                        const notifRef = collection(window.db, 'stores', selectedStore.id, 'kintai_notifications');
-                        const q = query(notifRef, where('employeeId', '==', employee.id), where('read', '==', false));
-                        const snap = await getDocs(q);
-                        const notifs = [];
-                        snap.forEach(d => notifs.push({ id: d.id, ...d.data() }));
-                        setEditNotifications(notifs);
-                    } catch(e) {
-                        console.error('通知確認エラー:', e);
-                    }
-                };
-
-                // ✅ 通知を既読にする
-                const markNotificationsRead = async (notifs) => {
-                    try {
-                        const { collection, doc, updateDoc } = window.firebaseModules;
-                        for (const n of notifs) {
-                            const ref = doc(window.db, 'stores', selectedStore.id, 'kintai_notifications', n.id);
-                            await updateDoc(ref, { read: true });
-                        }
-                        setEditNotifications([]);
-                    } catch(e) {
-                        console.error('既読処理エラー:', e);
-                    }
-                };
-
                 if (!selectedEmployee) return;
                 
                 const now = new Date();
@@ -611,10 +435,8 @@
                                             className="w-full p-4 border-2 border-gray-300 rounded-xl text-lg focus:border-blue-500 focus:outline-none"
                                             value={selectedEmployee?.id || ''}
                                             onChange={(e) => {
-                                                const emp = employees.find(emp => emp.id === e.target.value);
-                                                setSelectedEmployee(emp);
+                                                setSelectedEmployee(employees.find(emp => emp.id === e.target.value));
                                                 setLastAction(null);
-                                                if (emp) checkNotifications(emp);
                                             }}
                                         >
                                             <option value="">選択してください</option>
@@ -623,27 +445,6 @@
                                             ))}
                                         </select>
                                     </div>
-
-                                    {/* ✅ 管理者編集通知 */}
-                                    {editNotifications.length > 0 && (
-                                        <div className="mb-6 p-4 bg-red-50 border-2 border-red-400 rounded-xl">
-                                            <p className="text-red-700 font-bold text-lg mb-3">⚠️ 管理者があなたの打刻を修正しました</p>
-                                            {editNotifications.map((n, i) => (
-                                                <div key={i} className="bg-white rounded-lg p-3 mb-2 border border-red-200 text-sm">
-                                                    <p className="font-bold text-gray-800">{n.dateKey}　{n.field}</p>
-                                                    <p className="text-gray-600">{n.oldValue} → <span className="text-red-600 font-bold">{n.newValue}</span></p>
-                                                    {n.memo && <p className="text-gray-500 mt-1">メモ: {n.memo}</p>}
-                                                    <p className="text-gray-400 text-xs mt-1">{n.editedAt?.toDate ? n.editedAt.toDate().toLocaleString('ja-JP') : ''}</p>
-                                                </div>
-                                            ))}
-                                            <button
-                                                onClick={() => markNotificationsRead(editNotifications)}
-                                                className="mt-2 w-full py-2 bg-red-500 text-white rounded-lg font-bold hover:bg-red-600"
-                                            >
-                                                確認しました
-                                            </button>
-                                        </div>
-                                    )}
 
                                     {/* 打刻ボタン */}
                                     {selectedEmployee && (
@@ -713,29 +514,6 @@
                                         <div className="mt-6 p-4 bg-green-100 border-2 border-green-500 rounded-xl text-center animate-pulse">
                                             <p className="text-green-800 font-bold text-lg">✓ {lastAction}</p>
                                             <p className="text-green-600 text-sm mt-1">打刻が完了しました</p>
-                                        </div>
-                                    )}
-
-                                    {/* ✅ 打刻記録PNG出力 */}
-                                    {selectedEmployee && (
-                                        <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-xl">
-                                            <p className="text-sm font-bold text-gray-700 mb-3">打刻記録を保存する</p>
-                                            <div className="flex gap-2 items-center">
-                                                <input
-                                                    type="month"
-                                                    value={exportMonth}
-                                                    onChange={(e) => setExportMonth(e.target.value)}
-                                                    className="flex-1 p-2 border border-gray-300 rounded-lg text-sm"
-                                                />
-                                                <button
-                                                    onClick={exportToPNG}
-                                                    disabled={exportLoading}
-                                                    className="px-4 py-2 bg-blue-500 text-white rounded-lg font-bold text-sm hover:bg-blue-600 disabled:opacity-50 whitespace-nowrap"
-                                                >
-                                                    {exportLoading ? '出力中...' : 'PNG保存'}
-                                                </button>
-                                            </div>
-                                            <p className="text-xs text-gray-400 mt-2">※ 管理者編集前の打刻記録を出力します</p>
                                         </div>
                                     )}
                                 </>
