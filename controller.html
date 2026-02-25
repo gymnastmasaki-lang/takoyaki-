@@ -997,6 +997,17 @@
       }
       
       container.innerHTML = '';
+
+      // 🆕 テーブル設定をまとめて取得（サービス告知表示用）
+      const _tableSettingsCache = {};
+      const _uniqueTables = [...new Set(orders.map(o => o.tableNumber).filter(Boolean))];
+      await Promise.all(_uniqueTables.map(async (tableName) => {
+        try {
+          const snap = await getDoc(window.getStoreDoc('tableSettings', tableName));
+          if (snap.exists()) _tableSettingsCache[tableName] = snap.data();
+        } catch (e) { /* 無視 */ }
+      }));
+
       orders.sort((a, b) => a.orderNumber - b.orderNumber).forEach(order => {
         const card = document.createElement('div');
         card.className = 'order-card';
@@ -1134,6 +1145,26 @@
           `;
         } else {
           console.log('レジ袋なし');
+        }
+
+        // 🆕 サービス告知を表示
+        const _tn = order.tableNumber;
+        const _ts = _tableSettingsCache[_tn];
+        const _sn = _ts && _ts.serviceNotice;
+        if (_sn && _sn.enabled && (_sn.title || _sn.body)) {
+          const _opts = (_sn.options || []).filter(o => o)
+            .map(o => `<span style="display:inline-block;padding:3px 10px;background:#FF9800;color:white;border-radius:20px;font-size:12px;font-weight:bold;margin-right:4px;">${o}</span>`)
+            .join('');
+          itemsHTML += `
+            <div class="order-item" style="background:linear-gradient(135deg,#fff8e1,#fff3cd);border-left:4px solid #FF9800;">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                <span style="font-size:15px;">🎁</span>
+                <span style="font-weight:bold;color:#E65100;font-size:13px;">${_sn.title || ''}</span>
+              </div>
+              ${_sn.body ? `<div style="font-size:12px;color:#5D4037;white-space:pre-wrap;line-height:1.5;${_opts ? 'margin-bottom:6px;' : ''}">${_sn.body}</div>` : ''}
+              ${_opts ? `<div>${_opts}</div>` : ''}
+            </div>
+          `;
         }
         
         // お客様メモを追加（pos.htmlと同じ方式）
@@ -1582,7 +1613,46 @@
 
     let currentPaymentOrder = null;
     let selectedPaymentMethod = null;
-    
+
+    // 🆕 テーブル設定を取得
+    async function getTableSettings(tableId) {
+      if (!tableId) return null;
+      try {
+        const ref = window.getStoreDoc('tableSettings', tableId);
+        const snap = await getDoc(ref);
+        return snap.exists() ? snap.data() : null;
+      } catch (e) {
+        console.error('テーブル設定取得エラー:', e);
+        return null;
+      }
+    }
+
+    // 🆕 サービス告知をレンダリング
+    function renderServiceNotice(settings) {
+      const area = document.getElementById('serviceNoticeArea');
+      const titleEl = document.getElementById('serviceNoticeTitle');
+      const bodyEl = document.getElementById('serviceNoticeBody');
+      const optionsEl = document.getElementById('serviceNoticeOptions');
+      if (!area) return;
+      const notice = settings && settings.serviceNotice;
+      if (notice && notice.enabled && (notice.title || notice.body)) {
+        titleEl.textContent = notice.title || '';
+        bodyEl.textContent = notice.body || '';
+        optionsEl.innerHTML = '';
+        if (notice.options && notice.options.length > 0) {
+          notice.options.filter(o => o).forEach(opt => {
+            const span = document.createElement('span');
+            span.textContent = opt;
+            span.style.cssText = 'padding:4px 12px;background:#FF9800;color:white;border-radius:20px;font-size:13px;font-weight:bold;';
+            optionsEl.appendChild(span);
+          });
+        }
+        area.style.display = 'block';
+      } else {
+        area.style.display = 'none';
+      }
+    }
+
     async function togglePaidStatus(order) {
       console.log('🔵 togglePaidStatus呼び出し');
       console.log('注文データ:', order);
@@ -1615,6 +1685,9 @@
             return;
           }
           
+          // 🆕 サービス告知を表示
+          const tableSettings = await getTableSettings(order.tableNumber);
+          renderServiceNotice(tableSettings);
           modal.classList.add('show');
           console.log('モーダル表示完了');
           
@@ -2460,6 +2533,15 @@
   <div id="paymentModal" class="payment-modal-overlay">
     <div class="payment-modal">
       <h3>💳 支払い方法を選択</h3>
+      <!-- 🆕 サービス告知エリア -->
+      <div id="serviceNoticeArea" style="display:none; margin-bottom:16px; padding:14px; background:linear-gradient(135deg,#fff8e1,#fff3cd); border-radius:10px; border:2px solid #FFB74D;">
+        <div style="font-size:13px; font-weight:bold; color:#E65100; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+          <span style="font-size:18px;">🎁</span>
+          <span id="serviceNoticeTitle" style="font-size:15px;"></span>
+        </div>
+        <div id="serviceNoticeBody" style="font-size:13px; color:#5D4037; white-space:pre-wrap; line-height:1.5; margin-bottom:8px;"></div>
+        <div id="serviceNoticeOptions" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+      </div>
       <div id="paymentMethodsList">
         <button class="payment-method-btn" data-method="cash" onclick="selectPaymentMethod('cash', this)">💵 現金</button>
         <button class="payment-method-btn" data-method="emoney" onclick="selectPaymentMethod('emoney', this)">📱 電子マネー</button>
