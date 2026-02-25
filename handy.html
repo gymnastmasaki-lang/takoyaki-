@@ -1186,6 +1186,7 @@
           <button onclick="playTapSound(); showSalesModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">売上</button>
           <button onclick="playTapSound(); showHistoryModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">履歴</button>
           <button onclick="playTapSound(); showExpenseModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">支出</button>
+          <button onclick="playTapSound(); showNativePrinterSettings()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">プリンタ設定</button>
           <button onclick="playTapSound(); openDrawerDirect()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">ドロア開</button>
           <button onclick="playTapSound(); showDrawerSettings()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">ドロア設定</button>
           <button onclick="playTapSound(); showMonthlyReportModal()" style="width: 100%; padding: 12px; margin-bottom: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;">月次</button>
@@ -2562,6 +2563,11 @@
     })();
 
     window.launchSquarePOS = async function() {
+      // Square非対応のため通常会計にフォールバック
+      if (typeof window.processPayment === "function") { window.processPayment("credit"); return; }
+      alert("クレジット/電子マネー会計として処理します");
+      return;
+      // 以下旧Square処理（無効化）
       if (!squareApplicationId) {
         await loadSquareAppId();
       }
@@ -2612,25 +2618,10 @@
       document.querySelectorAll('.payment-method-btn').forEach(btn => btn.classList.toggle('selected', btn.innerText.includes(method === 'cash' ? '現金' : method === 'emoney' ? '電子' : 'クレジット')));
       document.getElementById('cashInputSection').classList.toggle('hidden', method !== 'cash');
       
-      // Squareボタン制御
-      let sqBtn = document.getElementById('squareLaunchBtn');
-      if (method === 'emoney' || method === 'credit') {
-        document.getElementById('paymentBtn').disabled = true;
-        if (!sqBtn) {
-          sqBtn = document.createElement('button');
-          sqBtn.id = 'squareLaunchBtn';
-          sqBtn.className = 'btn';
-          sqBtn.style.cssText = 'width:100%;padding:16px;background:linear-gradient(135deg,#00a9e0,#0066cc);color:white;border:none;border-radius:12px;font-size:18px;font-weight:bold;cursor:pointer;margin-top:12px;';
-          sqBtn.innerHTML = 'Squareで決済';
-          sqBtn.onclick = window.launchSquarePOS;
-          const payBtn = document.getElementById('paymentBtn');
-          payBtn.parentNode.insertBefore(sqBtn, payBtn);
-        }
-        sqBtn.style.display = 'block';
-      } else {
-        document.getElementById('paymentBtn').disabled = method === 'cash';
-        if (sqBtn) sqBtn.style.display = 'none';
-      }
+      // 電子マネー・クレジットも通常会計ボタンで処理
+      const sqBtn = document.getElementById('squareLaunchBtn');
+      if (sqBtn) sqBtn.style.display = 'none';
+      document.getElementById('paymentBtn').disabled = method === 'cash';
     };
     
     window.calculateChange = function() {
@@ -7768,9 +7759,18 @@ ${totalRedSlipCount > 0 ? `
         document.body.removeChild(journalDiv);
         
         const link = document.createElement('a');
-        link.download = `期間ジャーナル_${startDate}_${endDate}.png`;
-        link.href = canvas.toDataURL();
-        link.click();
+        const imgData = canvas.toDataURL('image/png');
+        // ネイティブアプリの場合はNativePrinterで保存、ブラウザの場合はlink.click()
+        if (window.NativePrinter && window.NativePrinter.saveImage) {
+          window.NativePrinter.saveImage(imgData, `期間ジャーナル_${startDate}_${endDate}.png`);
+        } else {
+          const link = document.createElement('a');
+          link.download = `期間ジャーナル_${startDate}_${endDate}.png`;
+          link.href = imgData;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
         
         console.log('✅ 期間ジャーナル生成完了');
         
@@ -8360,10 +8360,17 @@ ${totalRedSlipCount > 0 ? `
         
         document.body.removeChild(journalDiv);
         
-        const link = document.createElement('a');
-        link.download = `精算ジャーナル_${dateStr}.png`;
-        link.href = canvas.toDataURL();
-        link.click();
+        const _imgData = canvas.toDataURL('image/png');
+        if (window.NativePrinter && window.NativePrinter.saveImage) {
+          window.NativePrinter.saveImage(_imgData, `精算ジャーナル_${dateStr}.png`);
+        } else {
+          const link = document.createElement('a');
+          link.download = `精算ジャーナル_${dateStr}.png`;
+          link.href = _imgData;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
         
         await showCustomAlert({
           title: '完了',
