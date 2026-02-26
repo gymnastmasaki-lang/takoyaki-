@@ -2454,9 +2454,6 @@
           <button class="sidebar-button" onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kanri.html', '_blank')" style="font-size: 12px; padding: 8px;">
             <span>設定・管理</span>
           </button>
-          <button class="sidebar-button" onclick="showNativePrinterSettings()" style="font-size: 12px; padding: 8px;">
-            <span>プリンタ設定</span>
-          </button>
           <button class="sidebar-button" onclick="showDrawerSettings()" style="font-size: 12px; padding: 8px;">
             <span>ドロア設定</span>
           </button>
@@ -2733,14 +2730,6 @@
         </div>
       </div>
       
-      <!-- 🆕 サービス告知エリア -->
-      <div id="serviceNoticeArea" style="display:none; margin-bottom:18px; padding:15px; background:linear-gradient(135deg,#fff8e1,#fff3cd); border-radius:12px; border-left:5px solid #FF9800; border:2px solid #FFB74D;">
-        <div style="font-size:13px; font-weight:bold; color:#E65100; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
-          <span id="serviceNoticeTitle" style="font-size:15px;"></span>
-        </div>
-        <div id="serviceNoticeBody" style="font-size:13px; color:#5D4037; white-space:pre-wrap; line-height:1.5; margin-bottom:8px;"></div>
-        <div id="serviceNoticeOptions" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
-      </div>
       <div class="payment-methods">
         <button class="payment-method-btn" onclick="selectPaymentMethod('cash')">
           現金
@@ -3035,6 +3024,7 @@
     let manualCart = [];
     let selectedPaymentMethod = null;
     let totalAmountToPay = 0;
+    let squareApplicationId = ''; // Firestoreから読み込み
     let cashReceived = 0;
     let changeAmount = 0;
     let lastPaymentData = null;
@@ -6596,15 +6586,10 @@
         
         document.body.removeChild(journalDiv);
         
-        const _d1 = canvas.toDataURL('image/png');
-        if (window.NativePrinter && window.NativePrinter.saveImage) {
-          window.NativePrinter.saveImage(_d1, `期間ジャーナル_${startDate}_${endDate}.png`);
-        } else {
-          const link = document.createElement('a');
-          link.download = `期間ジャーナル_${startDate}_${endDate}.png`;
-          link.href = _d1;
-          document.body.appendChild(link); link.click(); document.body.removeChild(link);
-        }
+        const link = document.createElement('a');
+        link.download = `期間ジャーナル_${startDate}_${endDate}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
         
         console.log('✅ 期間ジャーナル生成完了');
         
@@ -7571,25 +7556,6 @@
       try {
         console.log('🔓 ドロアオープン開始');
         
-        // ネイティブアプリ経由でドロアを開く
-        if (window.NativePrinter) {
-          // 未接続の場合は保存済みIPで自動接続
-          const status = window.NativePrinter.getStatus();
-          console.log('🖨️ プリンター状態:', status);
-          if (status === 'disconnected') {
-            const savedIP = localStorage.getItem('nativePrinterIP') || localStorage.getItem('printerIP');
-            const savedPort = parseInt(localStorage.getItem('nativePrinterPort') || '9100');
-            if (savedIP) {
-              console.log('🔄 自動接続試行:', savedIP, savedPort);
-              window.NativePrinter.connectLan(savedIP, savedPort);
-            }
-          }
-          const result = window.NativePrinter.openDrawer();
-          console.log('🖨️ NativePrinter.openDrawer():', result);
-        } else {
-          console.log('ℹ️ NativePrinterなし（ブラウザモード）');
-        }
-        
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         
@@ -7660,13 +7626,6 @@
         showCustomAlert('ドロア開に失敗しました: ' + error.message, 'エラー', '❌');
       }
     };
-    
-    // 🔧 openCashDrawerはopenDrawerのエイリアス（レシート・領収書印刷後のドロアキック用）
-    async function openCashDrawer() {
-      if (typeof window.openDrawer === 'function') {
-        await window.openDrawer();
-      }
-    }
     
     // ========== WiFi自動設定（ビジネスモデル用） ==========
     
@@ -8966,16 +8925,12 @@ ${redSlipCount > 0 ? `
         
         // PNG画像としてダウンロード
         canvas.toBlob((blob) => {
-          const _d2 = canvas.toDataURL('image/png');
-          if (window.NativePrinter && window.NativePrinter.saveImage) {
-            window.NativePrinter.saveImage(_d2, `精算ジャーナル_${dateStr}.png`);
-          } else {
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url; link.download = `精算ジャーナル_${dateStr}.png`;
-            document.body.appendChild(link); link.click(); document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-          }
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `精算ジャーナル_${dateStr}.png`;
+          link.click();
+          URL.revokeObjectURL(url);
           document.body.removeChild(journalDiv);
         });
         
@@ -9049,7 +9004,7 @@ ${redSlipCount > 0 ? `
       document.getElementById('expenseDateInput').value = currentExpenseDate;
       
       console.log('📅 支出モーダル表示 - 本日の日付:', currentExpenseDate);
-      console.log('📅 現在時刻(JST):', new Date(jstNowMs).toLocaleString('ja-JP'));
+      console.log('📅 現在時刻(JST):', jstNow.toLocaleString('ja-JP'));
       
       // Firebaseから本日の支出データを取得
       await loadExpensesByDate();
@@ -10599,7 +10554,6 @@ ${redSlipCount > 0 ? `
         buildTaxRateSelectionList();
         updatePaymentTotal();
         document.getElementById('paymentModal').classList.remove('hidden');
-        renderServiceNotice(currentTableSettings);
         selectedPaymentMethod = null;
         document.querySelectorAll('.payment-method-btn').forEach(btn => {
           btn.classList.remove('selected');
@@ -11123,22 +11077,6 @@ ${redSlipCount > 0 ? `
           </div>
         `;
       }
-
-      // 🆕 サービス告知を表示（ユーザーが選択した値のみ）
-      const _notice = currentTableSettings && currentTableSettings.serviceNotice;
-      if (_notice && _notice.enabled && (_notice.title || _notice.body)) {
-        const _sel = order.serviceNoticeSelection;
-        const _selHtml = _sel
-          ? `<span style="display:inline-block;padding:3px 10px;background:#FF9800;color:white;border-radius:20px;font-size:12px;font-weight:bold;">${_sel}</span>`
-          : '';
-        itemsHtml += `
-          <div class="order-item-detailed" style="background:linear-gradient(135deg,#fff8e1,#fff3cd);border-left:4px solid #FF9800;">
-            <div style="font-weight:bold;color:#E65100;font-size:14px;margin-bottom:4px;">${_notice.title || ''}</div>
-            ${_notice.body ? `<div style="font-size:12px;color:#5D4037;white-space:pre-wrap;line-height:1.5;${_selHtml ? 'margin-bottom:6px;' : ''}">${_notice.body}</div>` : ''}
-            ${_selHtml ? `<div>${_selHtml}</div>` : ''}
-          </div>
-        `;
-      }
       
       // お客様情報を追加
       let customerInfoHtml = '';
@@ -11298,8 +11236,6 @@ ${redSlipCount > 0 ? `
       updatePaymentTotal();
       
       document.getElementById('paymentModal').classList.remove('hidden');
-      // 🆕 サービス告知を表示
-      renderServiceNotice(currentTableSettings);
       selectedPaymentMethod = null;
       document.querySelectorAll('.payment-method-btn').forEach(btn => {
         btn.classList.remove('selected');
@@ -11836,32 +11772,6 @@ ${redSlipCount > 0 ? `
     };
     
     // 支払いモーダルを表示
-    // 🆕 サービス告知をレンダリング
-    function renderServiceNotice(settings) {
-      const area = document.getElementById('serviceNoticeArea');
-      const titleEl = document.getElementById('serviceNoticeTitle');
-      const bodyEl = document.getElementById('serviceNoticeBody');
-      const optionsEl = document.getElementById('serviceNoticeOptions');
-      if (!area) return;
-      const notice = settings && settings.serviceNotice;
-      if (notice && notice.enabled && (notice.title || notice.body)) {
-        titleEl.textContent = notice.title || '';
-        bodyEl.textContent = notice.body || '';
-        optionsEl.innerHTML = '';
-        if (notice.options && notice.options.length > 0) {
-          notice.options.filter(o => o).forEach(opt => {
-            const span = document.createElement('span');
-            span.textContent = opt;
-            span.style.cssText = 'padding:4px 12px;background:#FF9800;color:white;border-radius:20px;font-size:13px;font-weight:bold;';
-            optionsEl.appendChild(span);
-          });
-        }
-        area.style.display = 'block';
-      } else {
-        area.style.display = 'none';
-      }
-    }
-
     window.showPaymentModal = async function() {
       console.log('🔵 showPaymentModal開始');
       console.log('  currentOrders.length:', currentOrders.length);
@@ -12161,10 +12071,28 @@ ${redSlipCount > 0 ? `
       if (method === 'cash') {
         document.getElementById('cashInputSection').classList.remove('hidden');
         document.getElementById('completePaymentBtn').disabled = true;
-
+        const sqBtn = document.getElementById('squareLaunchBtn');
+        if (sqBtn) sqBtn.style.display = 'none';
+      } else if (method === 'emoney' || method === 'credit') {
+        document.getElementById('cashInputSection').classList.add('hidden');
+        document.getElementById('completePaymentBtn').disabled = true;
+        // Squareボタンを表示
+        let sqBtn = document.getElementById('squareLaunchBtn');
+        if (!sqBtn) {
+          sqBtn = document.createElement('button');
+          sqBtn.id = 'squareLaunchBtn';
+          sqBtn.className = 'btn';
+          sqBtn.style.cssText = 'width:100%;padding:16px;background:linear-gradient(135deg,#00a9e0,#0066cc);color:white;border:none;border-radius:12px;font-size:18px;font-weight:bold;cursor:pointer;margin-top:12px;';
+          sqBtn.textContent = 'Squareで決済';
+          sqBtn.onclick = window.launchSquarePOS;
+          document.getElementById('completePaymentBtn').parentNode.insertBefore(sqBtn, document.getElementById('completePaymentBtn'));
+        }
+        sqBtn.style.display = 'block';
       } else {
         document.getElementById('cashInputSection').classList.add('hidden');
         document.getElementById('completePaymentBtn').disabled = false;
+        const sqBtn = document.getElementById('squareLaunchBtn');
+        if (sqBtn) sqBtn.style.display = 'none';
       }
     };
     
@@ -13876,6 +13804,123 @@ ${redSlipCount > 0 ? `
       }
     }
     
+    // ========== Square POS連携 ==========
+
+    // Firestoreからスクエアアプリケーションを読み込み
+    async function loadSquareAppId() {
+      try {
+        // Firebase初期化完了を待つ
+        let waited = 0;
+        while ((!window.getDoc || !window.getStoreDoc) && waited < 5000) {
+          await new Promise(r => setTimeout(r, 200));
+          waited += 200;
+        }
+        if (!window.getDoc || !window.getStoreDoc) return;
+        const snap = await window.getDoc(window.getStoreDoc('settings', 'square'));
+        if (snap.exists() && snap.data().applicationId) {
+          squareApplicationId = snap.data().applicationId.trim();
+          console.log('✅ Square Application ID読み込み完了:', squareApplicationId);
+        }
+      } catch(e) {
+        console.log('Square設定なし:', e.message);
+      }
+    }
+    loadSquareAppId();
+
+    // Squareコールバック処理（Square決済完了後にこのページに戻ってきたとき）
+    (function handleSquareCallback() {
+      const params = new URLSearchParams(window.location.search);
+      const status = params.get('com.squareup.pos.WEB_CALLBACK_URI') ? 'ok' : params.get('status');
+      // Square Android callbackは com.squareup.pos.TRANSACTION_ID などのパラメータを使う
+      const txId = params.get('com.squareup.pos.TRANSACTION_ID') || params.get('transaction_id');
+      const errorCode = params.get('com.squareup.pos.ERROR_CODE') || params.get('error_code');
+      
+      if (status === 'ok' && txId) {
+        // 決済成功 → 自動会計完了
+        console.log('✅ Square決済成功:', txId);
+        // URLパラメータをクリア
+        window.history.replaceState({}, '', window.location.pathname);
+        // 少し待ってから会計完了を実行
+        window.addEventListener('load', () => {
+          setTimeout(async () => {
+            if (typeof window.completePayment === 'function') {
+              // SquareトランザクションIDを保持
+              window._squareTxId = txId;
+              await window.completePayment();
+            }
+          }, 1500);
+        });
+      } else if (errorCode) {
+        console.log('❌ Square決済エラー:', errorCode);
+        window.history.replaceState({}, '', window.location.pathname);
+        window.addEventListener('load', () => {
+          setTimeout(() => {
+            alert('Square決済がキャンセルまたはエラーになりました\nエラーコード: ' + errorCode);
+          }, 500);
+        });
+      }
+    })();
+
+    // Square POSアプリを起動して決済
+    window.launchSquarePOS = async function() {
+      // Application IDが未ロードの場合は再試行
+      if (!squareApplicationId) {
+        await loadSquareAppId();
+      }
+      // それでも空なら直接Firestoreから読む
+      if (!squareApplicationId) {
+        try {
+          if (window.getDoc && window.getStoreDoc) {
+            const snap = await window.getDoc(window.getStoreDoc('settings', 'square'));
+            if (snap.exists() && snap.data().applicationId) {
+              squareApplicationId = snap.data().applicationId.trim();
+            }
+          }
+        } catch(e) {}
+      }
+      if (!squareApplicationId) {
+        alert('Square Application IDが未設定です\nkanri.htmlのSquare連携設定でApplication IDを保存してください\n\n現在のID: ' + (squareApplicationId || '(空)'));
+        return;
+      }
+      
+      const amount = totalAmountToPay;
+      if (!amount || amount <= 0) {
+        alert('金額が正しくありません');
+        return;
+      }
+      
+      const callbackUrl = window.location.href.split('?')[0];
+      const clientTxId = 'pos_' + Date.now();
+      
+      const data = {
+        amount_money: { amount: amount, currency_code: 'JPY' },
+        callback_url: callbackUrl,
+        client_transaction_id: clientTxId,
+        version: '1.3',
+        notes: '注文番号: ' + (window._currentOrderNumbers || '')
+      };
+      
+      // client_idはJSON内に含める（URLパラメータではない）
+      data.client_id = squareApplicationId;
+      
+      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+      const squareUrl = 'square-commerce-v1://payment/create?data=' + encoded;
+      
+      const squareUrl = 'square-commerce-v1://payment/create?data=' + encoded;
+      console.log('🟦 Square URL:', squareUrl);
+      
+      // 方法1: iframeで起動（Chromeでカスタムスキームを開く最も確実な方法）
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = squareUrl;
+      document.body.appendChild(iframe);
+      
+      // 方法2: タイムアウト後にwindow.locationでも試みる
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+        window.location.href = squareUrl;
+      }, 500);
+    };
 
     // ========== 任意注文番号入力ダイアログ（スタッフ用）==========
     function askOrderNumber() {
@@ -18727,21 +18772,6 @@ ${redSlipCount > 0 ? `
               </div>
             </div>`;
           }
-          // 🆕 サービス告知を追加（ユーザーが選択した値のみ）
-          const _n = currentTableSettings && currentTableSettings.serviceNotice;
-          let serviceNoticeHTML = '';
-          if (_n && _n.enabled && (_n.title || _n.body)) {
-            const _sel = order.serviceNoticeSelection;
-            const _selSpan = _sel
-              ? `<span style="display:inline-block;padding:3px 10px;background:#FF9800;color:white;border-radius:20px;font-size:12px;font-weight:bold;">${_sel}</span>`
-              : '';
-            serviceNoticeHTML = `
-            <div style="padding:10px;background:linear-gradient(135deg,#fff8e1,#fff3cd);border-left:4px solid #FF9800;border-bottom:1px solid #FFD580;">
-              <div style="font-weight:bold;color:#E65100;font-size:14px;margin-bottom:4px;">${_n.title || ''}</div>
-              ${_n.body ? `<div style="font-size:12px;color:#5D4037;white-space:pre-wrap;line-height:1.5;${_selSpan ? 'margin-bottom:6px;' : ''}">${_n.body}</div>` : ''}
-              ${_selSpan ? `<div>${_selSpan}</div>` : ''}
-            </div>`;
-          }
           
           const total = items.reduce((sum, item) => sum + (item.price + (item.toppingPrice || 0)) * (item.quantity || 1), 0) + (order.bagNeeded && order.bagQuantity > 0 ? (order.bagPrice || (order.bagQuantity * 3)) : 0);
           
@@ -18784,7 +18814,6 @@ ${redSlipCount > 0 ? `
             ${customerInfoHTML}
             ${itemsHTML}
             ${bagHTML}
-            ${serviceNoticeHTML}
             <div style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #667eea; padding-bottom: 10px;">
               <div style="text-align: right; font-size: 18px; font-weight: bold; color: #667eea; margin-bottom: 10px;">
                 合計: ¥${total.toLocaleString()}
@@ -19116,7 +19145,6 @@ ${redSlipCount > 0 ? `
         updatePaymentTotal();
         
         document.getElementById('paymentModal').classList.remove('hidden');
-        renderServiceNotice(currentTableSettings);
         selectedPaymentMethod = null;
         document.querySelectorAll('.payment-method-btn').forEach(btn => {
           btn.classList.remove('selected');
@@ -19168,7 +19196,6 @@ ${redSlipCount > 0 ? `
         updatePaymentTotal();
         
         document.getElementById('paymentModal').classList.remove('hidden');
-        renderServiceNotice(currentTableSettings);
         selectedPaymentMethod = null;
         document.querySelectorAll('.payment-method-btn').forEach(btn => {
           btn.classList.remove('selected');
@@ -19816,14 +19843,11 @@ ${redSlipCount > 0 ? `
         return;
       }
       
-      if (window.NativePrinter && window.NativePrinter.saveImage) {
-        window.NativePrinter.saveImage(receipt.imageData, `${receipt.type}_${receipt.orderNumber || 'none'}_${receipt.timestamp}.png`);
-      } else {
-        const link = document.createElement('a');
-        link.download = `${receipt.type}_${receipt.orderNumber || 'none'}_${receipt.timestamp}.png`;
-        link.href = receipt.imageData;
-        document.body.appendChild(link); link.click(); document.body.removeChild(link);
-      }
+      const link = document.createElement('a');
+      link.download = `${receipt.type}_${receipt.orderNumber || 'none'}_${receipt.timestamp}.png`;
+      link.href = receipt.imageData;
+      link.click();
+      
       // 印刷案内を表示
       showPrintInstructions();
       
@@ -19927,104 +19951,253 @@ ${redSlipCount > 0 ? `
   console.log('✅ モバイルプリンター統合機能 読み込み完了');
   </script>
 
-  
+  <!-- 🔧 NativePrinterブリッジ読み込み（APK内のnative-printer.jsを使用） -->
+  <script src="native-printer.js"></script>
 
+  <script>
+  // ============================================================
+  // 🔧 修正1: openCashDrawer を定義（openDrawerのエイリアス）
+  // ============================================================
+  async function openCashDrawer() {
+    try {
+      // NativePrinterが使える場合（APK環境）
+      if (window.NativePrinter) {
+        const status = window.NativePrinter.getStatus();
+        if (status !== 'disconnected') {
+          const ok = window.NativePrinter.openDrawer();
+          console.log('🔓 NativePrinter.openDrawer():', ok);
+          return;
+        }
+        // 未接続ならIP自動接続試行
+        const savedIP = localStorage.getItem('nativePrinterIP') || localStorage.getItem('printerLanIp') || localStorage.getItem('printerIP');
+        const savedPort = parseInt(localStorage.getItem('nativePrinterPort') || localStorage.getItem('printerLanPort') || '9100');
+        if (savedIP) {
+          console.log('🔄 自動接続試行:', savedIP, savedPort);
+          window.NativePrinter.connectLan(savedIP, savedPort);
+          await new Promise(r => setTimeout(r, 800));
+          window.NativePrinter.openDrawer();
+          return;
+        }
+      }
+      // Raspberry Pi経由（drawerIp設定がある場合）
+      const drawerIp = localStorage.getItem('drawerIp');
+      if (drawerIp) {
+        try {
+          const controller = new AbortController();
+          setTimeout(() => controller.abort(), 3000);
+          await fetch(`http://${drawerIp}:3000/open`, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ duration: 500 })
+          });
+          console.log('✅ ドロアキック（RasPi経由）');
+          return;
+        } catch(e) {
+          console.warn('RasPiドロアキック失敗:', e.message);
+        }
+      }
+      // openDrawer関数にフォールバック
+      if (typeof window.openDrawer === 'function') {
+        await window.openDrawer();
+      }
+    } catch(e) {
+      console.error('openCashDrawer エラー:', e);
+    }
+  }
 
-<!-- ===== ネイティブプリンタ設定モーダル ===== -->
-<div id="nativePrinterModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:20000; align-items:center; justify-content:center;">
-  <div style="background:white; border-radius:20px; padding:40px; max-width:480px; width:90%; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
-    <h3 style="font-size:24px; font-weight:bold; text-align:center; margin-bottom:25px; color:#333;">プリンタ設定</h3>
-    <div style="margin-bottom:20px;">
-      <label style="display:block; font-weight:bold; margin-bottom:8px; color:#333;">接続方式</label>
-      <select id="nativePrinterType" onchange="toggleNativePrinterFields()" style="width:100%; padding:12px; font-size:16px; border:2px solid #e0e0e0; border-radius:10px;">
-        <option value="lan">WiFi / LAN</option>
-        <option value="bluetooth">Bluetooth</option>
-      </select>
-    </div>
-    <div id="nativeLanFields">
-      <div style="margin-bottom:20px;">
-        <label style="display:block; font-weight:bold; margin-bottom:8px; color:#333;">プリンタ IPアドレス</label>
-        <input type="text" id="nativePrinterIP" placeholder="例: 192.168.244.41" style="width:100%; padding:12px; font-size:16px; border:2px solid #e0e0e0; border-radius:10px; box-sizing:border-box;">
-      </div>
-      <div style="margin-bottom:20px;">
-        <label style="display:block; font-weight:bold; margin-bottom:8px; color:#333;">ポート番号</label>
-        <input type="number" id="nativePrinterPort" value="9100" style="width:100%; padding:12px; font-size:16px; border:2px solid #e0e0e0; border-radius:10px; box-sizing:border-box;">
-      </div>
-      <button onclick="connectNativeLanPrinter()" style="width:100%; padding:14px; background:linear-gradient(135deg,#4CAF50 0%,#45a049 100%); color:white; border:none; border-radius:10px; font-size:16px; font-weight:bold; cursor:pointer; margin-bottom:10px;">接続テスト</button>
-    </div>
-    <div id="nativeBluetoothFields" style="display:none;">
-      <div style="margin-bottom:20px;">
-        <label style="display:block; font-weight:bold; margin-bottom:8px; color:#333;">Bluetoothデバイス</label>
-        <select id="nativeBtDeviceSelect" style="width:100%; padding:12px; font-size:16px; border:2px solid #e0e0e0; border-radius:10px;"><option value="">デバイスを選択...</option></select>
-      </div>
-      <button onclick="searchNativeBtDevices()" style="width:100%; padding:14px; background:linear-gradient(135deg,#2196F3 0%,#1976D2 100%); color:white; border:none; border-radius:10px; font-size:16px; font-weight:bold; cursor:pointer; margin-bottom:10px;">デバイス検索</button>
-      <button onclick="connectNativeBtPrinter()" style="width:100%; padding:14px; background:linear-gradient(135deg,#4CAF50 0%,#45a049 100%); color:white; border:none; border-radius:10px; font-size:16px; font-weight:bold; cursor:pointer; margin-bottom:10px;">接続</button>
-    </div>
-    <div id="nativePrinterStatus" style="margin:15px 0; padding:12px; border-radius:8px; font-weight:bold; text-align:center; display:none;"></div>
-    <button onclick="saveNativePrinterSettings()" style="width:100%; padding:14px; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:none; border-radius:10px; font-size:16px; font-weight:bold; cursor:pointer; margin-bottom:10px;">保存</button>
-    <button onclick="closeNativePrinterModal()" style="width:100%; padding:14px; background:#e0e0e0; color:#666; border:none; border-radius:10px; font-size:16px; font-weight:bold; cursor:pointer;">閉じる</button>
-  </div>
-</div>
-<script>
-function nativeAutoConnect() {
-  if (!window.NativePrinter) return false;
-  if (window.NativePrinter.getStatus() !== 'disconnected') return true;
-  const ip = localStorage.getItem('nativePrinterIP') || localStorage.getItem('printerIP');
-  const port = parseInt(localStorage.getItem('nativePrinterPort') || '9100');
-  if (ip) return window.NativePrinter.connectLan(ip, port);
-  return false;
-}
-window.openDrawerNative = function() {
-  if (window.NativePrinter) { nativeAutoConnect(); window.NativePrinter.openDrawer(); }
-};
-window.showNativePrinterSettings = function() {
-  document.getElementById('nativePrinterIP').value = localStorage.getItem('nativePrinterIP') || '';
-  document.getElementById('nativePrinterPort').value = localStorage.getItem('nativePrinterPort') || '9100';
-  document.getElementById('nativePrinterType').value = localStorage.getItem('nativePrinterType') || 'lan';
-  toggleNativePrinterFields();
-  document.getElementById('nativePrinterStatus').style.display = 'none';
-  document.getElementById('nativePrinterModal').style.display = 'flex';
-};
-window.closeNativePrinterModal = function() { document.getElementById('nativePrinterModal').style.display = 'none'; };
-window.toggleNativePrinterFields = function() {
-  const t = document.getElementById('nativePrinterType').value;
-  document.getElementById('nativeLanFields').style.display = t === 'lan' ? 'block' : 'none';
-  document.getElementById('nativeBluetoothFields').style.display = t === 'bluetooth' ? 'block' : 'none';
-};
-window.connectNativeLanPrinter = function() {
-  const ip = document.getElementById('nativePrinterIP').value.trim();
-  const port = parseInt(document.getElementById('nativePrinterPort').value) || 9100;
-  if (!ip) { showNativePrinterStatus('IPアドレスを入力してください', '#fee', '#c00'); return; }
-  showNativePrinterStatus('接続中...', '#fff8e1', '#FF9800');
-  if (window.NativePrinter) {
-    showNativePrinterStatus(window.NativePrinter.connectLan(ip, port) ? '✅ 接続成功！' : '❌ 接続失敗', window.NativePrinter.connectLan(ip, port) ? '#e8f5e9' : '#fee', window.NativePrinter.connectLan(ip, port) ? '#4CAF50' : '#c00');
-  } else { showNativePrinterStatus('ネイティブアプリでのみ使用できます', '#fff8e1', '#FF9800'); }
-};
-window.searchNativeBtDevices = function() {
-  if (!window.NativePrinter) return;
-  const devices = JSON.parse(window.NativePrinter.getBluetoothDevices());
-  const sel = document.getElementById('nativeBtDeviceSelect');
-  sel.innerHTML = '<option value="">選択...</option>';
-  devices.forEach(d => { const o = document.createElement('option'); o.value = d.address; o.textContent = d.name; sel.appendChild(o); });
-  showNativePrinterStatus(devices.length + '台見つかりました', '#e8f5e9', '#4CAF50');
-};
-window.connectNativeBtPrinter = function() {
-  const addr = document.getElementById('nativeBtDeviceSelect').value;
-  if (!addr) return;
-  if (window.NativePrinter && window.NativePrinter.connectBluetooth(addr)) { showNativePrinterStatus('✅ 接続成功！', '#e8f5e9', '#4CAF50'); }
-};
-window.saveNativePrinterSettings = function() {
-  localStorage.setItem('nativePrinterIP', document.getElementById('nativePrinterIP').value.trim());
-  localStorage.setItem('nativePrinterPort', document.getElementById('nativePrinterPort').value);
-  localStorage.setItem('nativePrinterType', document.getElementById('nativePrinterType').value);
-  showNativePrinterStatus('✅ 保存しました', '#e8f5e9', '#4CAF50');
-  setTimeout(() => closeNativePrinterModal(), 1200);
-};
-function showNativePrinterStatus(msg, bg, color) {
-  const el = document.getElementById('nativePrinterStatus');
-  el.style.display = 'block'; el.style.background = bg; el.style.color = color; el.textContent = msg;
-}
-</script>
+  // ============================================================
+  // 🔧 修正2: openDrawer に NativePrinter のドロアキックを追加
+  // ============================================================
+  (function() {
+    const _origOpenDrawer = window.openDrawer;
+    window.openDrawer = async function() {
+      // NativePrinterでドロアをキック
+      if (window.NativePrinter) {
+        try {
+          const status = window.NativePrinter.getStatus();
+          if (status !== 'disconnected') {
+            window.NativePrinter.openDrawer();
+            console.log('✅ NativePrinter.openDrawer() 実行');
+          } else {
+            const savedIP = localStorage.getItem('printerLanIp') || localStorage.getItem('printerIP');
+            const savedPort = parseInt(localStorage.getItem('printerLanPort') || '9100');
+            if (savedIP) {
+              window.NativePrinter.connectLan(savedIP, savedPort);
+              await new Promise(r => setTimeout(r, 800));
+              window.NativePrinter.openDrawer();
+            } else {
+              console.log('⚠️ プリンターIP未設定のためドロアキックスキップ');
+            }
+          }
+        } catch(e) {
+          console.error('NativePrinterドロアキックエラー:', e);
+        }
+      }
+      // 元の処理（Firestoreカウント更新等）も実行
+      if (_origOpenDrawer) await _origOpenDrawer();
+    };
+    console.log('✅ openDrawer NativePrinter対応でオーバーライド完了');
+  })();
+
+  // ============================================================
+  // 🔧 修正3: Android WebView対応ダウンロード
+  // XLSX・PNG・CSV全てに対応
+  // ============================================================
+  window._isAndroidWebView = (function() {
+    if (window.NativePrinter) return true; // APK環境
+    const ua = navigator.userAgent;
+    return /Android/.test(ua) && /wv/.test(ua);
+  })();
+
+  // ファイル保存ダイアログをモーダルで表示（長押し保存 or データURIリンク）
+  window.androidSaveModal = function(dataUrl, fileName, mimeType) {
+    const old = document.getElementById('_android_save_modal');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = '_android_save_modal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999999;display:flex;align-items:center;justify-content:center;padding:20px;';
+
+    const box = document.createElement('div');
+    box.style.cssText = 'background:white;border-radius:16px;padding:24px;width:100%;max-width:380px;text-align:center;';
+
+    const isImage = mimeType && mimeType.startsWith('image');
+    const isXLSX = fileName.endsWith('.xlsx');
+
+    let content = `<div style="font-size:40px;margin-bottom:12px;">${isXLSX ? '📊' : '📄'}</div>
+      <div style="font-size:17px;font-weight:bold;margin-bottom:8px;">ファイル保存</div>
+      <div style="font-size:13px;color:#666;margin-bottom:20px;word-break:break-all;">${fileName}</div>`;
+
+    if (isImage) {
+      content += `<img src="${dataUrl}" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:8px;margin-bottom:16px;border:1px solid #eee;">
+        <div style="font-size:12px;color:#888;margin-bottom:16px;">画像を長押し →「画像を保存」</div>`;
+    }
+
+    content += `<a href="${dataUrl}" download="${fileName}" style="display:block;padding:14px;background:#4CAF50;color:white;border-radius:10px;font-weight:bold;font-size:15px;text-decoration:none;margin-bottom:10px;">⬇ ダウンロード</a>
+      <button onclick="document.getElementById('_android_save_modal').remove()" style="width:100%;padding:12px;background:#9e9e9e;color:white;border:none;border-radius:10px;font-size:14px;cursor:pointer;">閉じる</button>`;
+
+    box.innerHTML = content;
+    overlay.appendChild(box);
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+    document.body.appendChild(overlay);
+  };
+
+  // XLSX保存
+  window.androidSaveXLSX = function(wb, fileName) {
+    if (!window._isAndroidWebView) {
+      XLSX.writeFile(wb, fileName);
+      return;
+    }
+    try {
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+      const dataUrl = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + wbout;
+      window.androidSaveModal(dataUrl, fileName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    } catch(e) {
+      console.error('XLSX保存エラー:', e);
+      XLSX.writeFile(wb, fileName); // フォールバック
+    }
+  };
+
+  // PNG/CSV Blob保存
+  window.androidSaveBlob = function(blob, fileName) {
+    if (!window._isAndroidWebView) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = e => window.androidSaveModal(e.target.result, fileName, blob.type);
+    reader.readAsDataURL(blob);
+  };
+
+  // ============================================================
+  // 🔧 修正4: 既存のXLSX.writeFile・link.downloadをオーバーライド
+  // ============================================================
+  (function() {
+    // XLSX.writeFileをオーバーライド
+    if (typeof XLSX !== 'undefined') {
+      const _origWriteFile = XLSX.writeFile;
+      XLSX.writeFile = function(wb, fileName, opts) {
+        if (window._isAndroidWebView) {
+          window.androidSaveXLSX(wb, fileName);
+        } else {
+          _origWriteFile.call(XLSX, wb, fileName, opts);
+        }
+      };
+      console.log('✅ XLSX.writeFile Android対応でオーバーライド');
+    } else {
+      // XLSXが後から読み込まれる場合に備えてポーリング
+      let xlsxWatchCount = 0;
+      const xlsxWatch = setInterval(() => {
+        xlsxWatchCount++;
+        if (typeof XLSX !== 'undefined') {
+          clearInterval(xlsxWatch);
+          const _origWriteFile = XLSX.writeFile;
+          XLSX.writeFile = function(wb, fileName, opts) {
+            if (window._isAndroidWebView) {
+              window.androidSaveXLSX(wb, fileName);
+            } else {
+              _origWriteFile.call(XLSX, wb, fileName, opts);
+            }
+          };
+          console.log('✅ XLSX.writeFile Android対応でオーバーライド（遅延）');
+        }
+        if (xlsxWatchCount > 50) clearInterval(xlsxWatch);
+      }, 200);
+    }
+
+    // createObjectURL + link.download パターンをandroidSaveBlobで置換
+    // 既存コードがBlobを作ってURLを作る箇所をインターセプト
+    const _origCreateObjectURL = URL.createObjectURL.bind(URL);
+    const _blobMap = new WeakMap();
+    URL.createObjectURL = function(blob) {
+      const url = _origCreateObjectURL(blob);
+      if (window._isAndroidWebView) {
+        _blobMap.set({ url }, blob); // urlとblobを紐付け保存
+        window._lastCreatedBlob = blob;
+        window._lastCreatedBlobUrl = url;
+      }
+      return url;
+    };
+    console.log('✅ Android ダウンロード対応 初期化完了');
+  })();
+
+  // downloadSavedReceipt のAndroid対応オーバーライド
+  (function() {
+    const _origDSR = window.downloadSavedReceipt;
+    window.downloadSavedReceipt = async function(id) {
+      if (!window._isAndroidWebView) {
+        if (_origDSR) return _origDSR(id);
+        return;
+      }
+      // Android: IndexedDBから取得してモーダル表示
+      try {
+        const db = await new Promise((resolve, reject) => {
+          const req = indexedDB.open('ReceiptDB', 1);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+        const receipt = await new Promise((resolve, reject) => {
+          const tx = db.transaction('receipts', 'readonly');
+          const req = tx.objectStore('receipts').get(id);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+        if (!receipt) { alert('レシートが見つかりません'); return; }
+        const fileName = `${receipt.type}_${receipt.orderNumber || 'none'}_${receipt.timestamp}.png`;
+        window.androidSaveModal(receipt.imageData, fileName, 'image/png');
+      } catch(e) {
+        console.error('レシートダウンロードエラー:', e);
+        if (_origDSR) _origDSR(id);
+      }
+    };
+  })();
+  </script>
 
 </body>
 </html>
