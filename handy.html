@@ -10383,5 +10383,72 @@ function showNativePrinterStatus(msg, bg, color) {
 }
 </script>
 
+<!-- ===== 🔧 修正パッチ ===== -->
+<script>
+(function() {
+
+  // ----------------------------------------------------------
+  // 1. openCashDrawer を定義（未定義のため会計後にドロアが開かない問題を修正）
+  // ----------------------------------------------------------
+  window.openCashDrawer = async function() {
+    if (typeof window.openDrawerDirect === 'function') {
+      await window.openDrawerDirect();
+    }
+  };
+
+  // ----------------------------------------------------------
+  // 2. openDrawerDirect に実際のドロアキックを追加
+  //    元の処理（Firestoreカウント更新）はそのまま残す
+  // ----------------------------------------------------------
+  const _origOpenDrawerDirect = window.openDrawerDirect;
+  window.openDrawerDirect = async function() {
+    // NativePrinter経由でドロアをキック
+    if (window.NativePrinter) {
+      try {
+        const status = window.NativePrinter.getStatus();
+        if (status !== 'disconnected') {
+          window.NativePrinter.openDrawer();
+        } else {
+          const ip   = localStorage.getItem('nativePrinterIP') || localStorage.getItem('printerLanIp') || '';
+          const port = parseInt(localStorage.getItem('nativePrinterPort') || localStorage.getItem('printerLanPort') || '9100');
+          if (ip) {
+            window.NativePrinter.connectLan(ip, port);
+            await new Promise(r => setTimeout(r, 800));
+            window.NativePrinter.openDrawer();
+          }
+        }
+      } catch(e) {
+        console.error('[patch] openDrawerDirect NativePrinterエラー:', e);
+      }
+    }
+    // 元の処理（Firestoreカウント更新）も実行
+    if (_origOpenDrawerDirect) {
+      await _origOpenDrawerDirect();
+    }
+  };
+
+  // ----------------------------------------------------------
+  // 3. XLSX保存を NativePrinter.saveXLSX 対応に上書き
+  // ----------------------------------------------------------
+  if (typeof XLSX !== 'undefined') {
+    const _orig = XLSX.writeFile;
+    XLSX.writeFile = function(wb, fileName, opts) {
+      if (window.NativePrinter && typeof window.NativePrinter.saveXLSX === 'function') {
+        try {
+          const base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+          window.NativePrinter.saveXLSX(base64, fileName);
+          return;
+        } catch(e) {
+          console.error('[patch] NativePrinter.saveXLSX エラー:', e);
+        }
+      }
+      _orig.call(XLSX, wb, fileName, opts);
+    };
+  }
+
+  console.log('[patch] handy.html 修正パッチ 適用完了');
+})();
+</script>
+
 </body>
 </html>
