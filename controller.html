@@ -756,6 +756,16 @@
       document.body.appendChild(overlay);
     }
 
+    // 🔧 重複防止用デバウンスタイマー
+    let _loadOrdersDebounceTimer = null;
+    function debouncedLoadOrders() {
+      if (_loadOrdersDebounceTimer) clearTimeout(_loadOrdersDebounceTimer);
+      _loadOrdersDebounceTimer = setTimeout(() => {
+        _loadOrdersDebounceTimer = null;
+        loadOrders();
+      }, 300);
+    }
+
     function watchOrders() {
       const storeId = window.currentStoreId || currentStoreId;
       const ordersCol = storeId
@@ -773,7 +783,8 @@
           lastOrderCount = currentCount;
           isFirstOrderLoad = false;
           
-          loadOrders();
+          // 🔧 デバウンスで重複呼び出しを防止
+          debouncedLoadOrders();
         }
       );
       
@@ -795,14 +806,16 @@
     }
     
     // 待ち人数をリアルタイムで更新する関数
+    // 🔧 注文重複防止: ordersの監視はwatchOrders()に一本化
+    //    ここではsettingsのみ監視し、orders変更はwatchOrdersのSnapshotから待ち人数を計算する
     function watchTotalWaitingCount() {
-      // ordersコレクションを監視
+      // ordersコレクションを監視（待ち人数更新のみ・loadOrdersは呼ばない）
       const _storeId = window.currentStoreId || currentStoreId;
       const _ordersCol = _storeId
         ? collection(db, 'stores', _storeId, 'orders')
         : window.getStoreCollection('orders');
       onSnapshot(_ordersCol, async () => {
-        await updateTotalWaitingCount();
+        await updateTotalWaitingCount(); // 🔧 loadOrders()は呼ばない
       });
       
       // settingsコレクションも監視
