@@ -10383,70 +10383,79 @@ function showNativePrinterStatus(msg, bg, color) {
 }
 </script>
 
-<!-- ===== 🔧 修正パッチ ===== -->
+
+<!-- ===== 🔧 修正パッチ: ドロアキック + XLSX保存 ===== -->
 <script>
 (function() {
 
   // ----------------------------------------------------------
-  // 1. openCashDrawer を定義（未定義のため会計後にドロアが開かない問題を修正）
+  // Star mC-Print3 に直接ESC/POSドロアキックコマンドを送る
+  // WebPRNT API: http://{IP}/StarWebPRNT/SendMessage
+  // ----------------------------------------------------------
+  async function kickDrawer() {
+    const ip = localStorage.getItem('nativePrinterIP') || localStorage.getItem('printerIP') || '';
+    if (!ip) {
+      console.warn('[drawer] プリンターIP未設定');
+      return false;
+    }
+    // ESC/POSドロアキックコマンド（Pin2: p ú）
+    const drawerCmd = 'p ú';
+    // StarWebPRNT APIエンドポイント
+    const url = 'http://' + ip + '/StarWebPRNT/SendMessage';
+    try {
+      const ctrl = new AbortController();
+      setTimeout(function(){ ctrl.abort(); }, 3000);
+      const res = await fetch(url, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        body: drawerCmd
+      });
+      console.log('[drawer] キック送信:', res.status);
+      return true;
+    } catch(e) {
+      console.error('[drawer] キック失敗:', e.message);
+      return false;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // openCashDrawer を定義
   // ----------------------------------------------------------
   window.openCashDrawer = async function() {
-    if (typeof window.openDrawerDirect === 'function') {
-      await window.openDrawerDirect();
+    await kickDrawer();
+    if (typeof window.openDrawer === 'function') {
+      await window.openDrawer();
     }
   };
 
   // ----------------------------------------------------------
-  // 2. openDrawerDirect に実際のドロアキックを追加
-  //    元の処理（Firestoreカウント更新）はそのまま残す
+  // openDrawer をオーバーライド（ドロアキックを追加）
   // ----------------------------------------------------------
-  const _origOpenDrawerDirect = window.openDrawerDirect;
-  window.openDrawerDirect = async function() {
-    // NativePrinter経由でドロアをキック
-    if (window.NativePrinter) {
-      try {
-        const status = window.NativePrinter.getStatus();
-        if (status !== 'disconnected') {
-          window.NativePrinter.openDrawer();
-        } else {
-          const ip   = localStorage.getItem('nativePrinterIP') || localStorage.getItem('printerLanIp') || '';
-          const port = parseInt(localStorage.getItem('nativePrinterPort') || localStorage.getItem('printerLanPort') || '9100');
-          if (ip) {
-            window.NativePrinter.connectLan(ip, port);
-            await new Promise(r => setTimeout(r, 800));
-            window.NativePrinter.openDrawer();
-          }
-        }
-      } catch(e) {
-        console.error('[patch] openDrawerDirect NativePrinterエラー:', e);
-      }
-    }
-    // 元の処理（Firestoreカウント更新）も実行
-    if (_origOpenDrawerDirect) {
-      await _origOpenDrawerDirect();
-    }
+  var _orig = window.openDrawer;
+  window.openDrawer = async function() {
+    await kickDrawer();
+    if (_orig) await _orig();
   };
 
   // ----------------------------------------------------------
-  // 3. XLSX保存を NativePrinter.saveXLSX 対応に上書き
+  // XLSX保存（NativePrinter.saveXLSX があればネイティブ保存）
   // ----------------------------------------------------------
   if (typeof XLSX !== 'undefined') {
-    const _orig = XLSX.writeFile;
+    var _origXLSX = XLSX.writeFile;
     XLSX.writeFile = function(wb, fileName, opts) {
       if (window.NativePrinter && typeof window.NativePrinter.saveXLSX === 'function') {
         try {
-          const base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+          var base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
           window.NativePrinter.saveXLSX(base64, fileName);
           return;
-        } catch(e) {
-          console.error('[patch] NativePrinter.saveXLSX エラー:', e);
-        }
+        } catch(e) { console.error('[patch] saveXLSX エラー:', e); }
       }
-      _orig.call(XLSX, wb, fileName, opts);
+      _origXLSX.call(XLSX, wb, fileName, opts);
     };
   }
 
-  console.log('[patch] handy.html 修正パッチ 適用完了');
+  console.log('[patch] ドロアキック修正パッチ 適用完了');
 })();
 </script>
 

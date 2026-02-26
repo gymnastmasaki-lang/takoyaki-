@@ -20019,41 +20019,79 @@ function showNativePrinterStatus(msg, bg, color) {
 }
 </script>
 
-<!-- ===== 🔧 修正パッチ: openCashDrawer定義 + XLSX保存対応 ===== -->
+
+<!-- ===== 🔧 修正パッチ: ドロアキック + XLSX保存 ===== -->
 <script>
 (function() {
 
   // ----------------------------------------------------------
-  // 1. openCashDrawer を定義（3箇所で呼ばれているが未定義のため）
+  // Star mC-Print3 に直接ESC/POSドロアキックコマンドを送る
+  // WebPRNT API: http://{IP}/StarWebPRNT/SendMessage
+  // ----------------------------------------------------------
+  async function kickDrawer() {
+    const ip = localStorage.getItem('nativePrinterIP') || localStorage.getItem('printerIP') || '';
+    if (!ip) {
+      console.warn('[drawer] プリンターIP未設定');
+      return false;
+    }
+    // ESC/POSドロアキックコマンド（Pin2: p ú）
+    const drawerCmd = 'p ú';
+    // StarWebPRNT APIエンドポイント
+    const url = 'http://' + ip + '/StarWebPRNT/SendMessage';
+    try {
+      const ctrl = new AbortController();
+      setTimeout(function(){ ctrl.abort(); }, 3000);
+      const res = await fetch(url, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        body: drawerCmd
+      });
+      console.log('[drawer] キック送信:', res.status);
+      return true;
+    } catch(e) {
+      console.error('[drawer] キック失敗:', e.message);
+      return false;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // openCashDrawer を定義
   // ----------------------------------------------------------
   window.openCashDrawer = async function() {
+    await kickDrawer();
     if (typeof window.openDrawer === 'function') {
       await window.openDrawer();
     }
   };
 
   // ----------------------------------------------------------
-  // 2. XLSX保存を NativePrinter.saveXLSX 対応に上書き
-  //    NativePrinter.saveXLSX がある → ネイティブ保存（Downloadsフォルダ）
-  //    ない場合 → 元の XLSX.writeFile をそのまま実行
+  // openDrawer をオーバーライド（ドロアキックを追加）
+  // ----------------------------------------------------------
+  var _orig = window.openDrawer;
+  window.openDrawer = async function() {
+    await kickDrawer();
+    if (_orig) await _orig();
+  };
+
+  // ----------------------------------------------------------
+  // XLSX保存（NativePrinter.saveXLSX があればネイティブ保存）
   // ----------------------------------------------------------
   if (typeof XLSX !== 'undefined') {
-    const _orig = XLSX.writeFile;
+    var _origXLSX = XLSX.writeFile;
     XLSX.writeFile = function(wb, fileName, opts) {
       if (window.NativePrinter && typeof window.NativePrinter.saveXLSX === 'function') {
         try {
-          const base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+          var base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
           window.NativePrinter.saveXLSX(base64, fileName);
           return;
-        } catch(e) {
-          console.error('[patch] NativePrinter.saveXLSX エラー:', e);
-        }
+        } catch(e) { console.error('[patch] saveXLSX エラー:', e); }
       }
-      _orig.call(XLSX, wb, fileName, opts);
+      _origXLSX.call(XLSX, wb, fileName, opts);
     };
   }
 
-  console.log('[patch] pos.html 修正パッチ 適用完了');
+  console.log('[patch] ドロアキック修正パッチ 適用完了');
 })();
 </script>
 
