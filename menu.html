@@ -368,10 +368,12 @@
     .wizard-slides-outer {
       overflow: hidden;
       border-radius: 16px;
+      transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .wizard-slides {
       display: flex;
       transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      align-items: flex-start;
     }
     .wizard-slide {
       min-width: 100%;
@@ -791,6 +793,23 @@
       background: #fff8e1;
       border-color: #ffe082;
       color: #e65100;
+    }
+    .topping-tag.inactive {
+      background: #f5f5f5;
+      border-color: #e0e0e0;
+      color: #bbb;
+      font-weight: normal;
+    }
+    .topping-tag.inactive.paid {
+      background: #f5f5f5;
+      border-color: #e0e0e0;
+      color: #bbb;
+    }
+    .topping-tag.active {
+      box-shadow: 0 2px 6px rgba(76,175,80,0.3);
+    }
+    .topping-tag.active.paid {
+      box-shadow: 0 2px 6px rgba(230,81,0,0.25);
     }
     @keyframes tagPop {
       0%   { transform: scale(0.6); opacity: 0; }
@@ -2910,6 +2929,7 @@
         document.getElementById('topping-wizard').style.display = 'block';
         document.getElementById('topping-final').classList.add('hidden');
         buildToppingWizard(item.toppingSets);
+        initToppingsPreview(item.toppingSets);
         showPage('page-topping');
       } else if (item.toppingsId) {
         // 後方互換性: 古いtoppingsId形式
@@ -3015,27 +3035,24 @@
 
     function updateToppingsPreview() {
       const preview = document.getElementById('toppings-preview');
-      if (!preview) return;
+      if (!preview || !wizardSets || wizardSets.length === 0) return;
 
-      // 既存タグをクリア（ラベル以外）
-      const label = preview.querySelector('.selected-toppings-preview-label');
-      preview.innerHTML = '';
-      if (label) preview.appendChild(label);
-
-      if (selectedToppings.length === 0) {
-        preview.style.display = 'none';
-        return;
-      }
-
+      preview.innerHTML = '<div class="selected-toppings-preview-label">✓ 選択中のトッピング</div>';
       preview.style.display = 'flex';
 
-      selectedToppings.forEach(t => {
-        const tag = document.createElement('span');
-        tag.className = 'topping-tag' + (t.price > 0 ? ' paid' : '');
-        tag.textContent = t.price > 0
-          ? `${t.name} +¥${t.price.toLocaleString()}`
-          : `${t.name}`;
-        preview.appendChild(tag);
+      // 全オプションを固定表示し、選択済みをハイライト
+      wizardSets.forEach((set, setIndex) => {
+        set.options.forEach((option, optionIndex) => {
+          const isSelected = selectedToppings.some(
+            t => t.setIndex === setIndex && t.optionIndex === optionIndex
+          );
+          const tag = document.createElement('span');
+          tag.className = 'topping-tag' + (option.price > 0 ? ' paid' : '') + (isSelected ? ' active' : ' inactive');
+          tag.textContent = option.price > 0
+            ? `${option.name} +¥${option.price.toLocaleString()}`
+            : `${option.name}`;
+          preview.appendChild(tag);
+        });
       });
     }
     
@@ -3080,6 +3097,26 @@
     // ===================================================
     // トッピングスライドウィザード
     // ===================================================
+
+    function initToppingsPreview(sets) {
+      const preview = document.getElementById('toppings-preview');
+      if (!preview) return;
+      preview.innerHTML = '<div class="selected-toppings-preview-label">✓ 選択中のトッピング</div>';
+      preview.style.display = 'flex';
+
+      sets.forEach((set, setIndex) => {
+        set.options.forEach((option, optionIndex) => {
+          // デフォルト選択（single型の最初）はactive、それ以外はinactive
+          const isDefault = set.type === 'single' && optionIndex === 0;
+          const tag = document.createElement('span');
+          tag.className = 'topping-tag' + (option.price > 0 ? ' paid' : '') + (isDefault ? ' active' : ' inactive');
+          tag.textContent = option.price > 0
+            ? `${option.name} +¥${option.price.toLocaleString()}`
+            : `${option.name}`;
+          preview.appendChild(tag);
+        });
+      });
+    }
     let wizardSets = [];
     let wizardCurrentStep = 0;
 
@@ -3188,6 +3225,13 @@
     function updateWizardSlide(step, direction) {
       const slidesEl = document.getElementById('wizard-slides');
       slidesEl.style.transform = `translateX(-${step * 100}%)`;
+
+      // 外側コンテナの高さを現在のスライドに合わせる
+      const outer = document.querySelector('.wizard-slides-outer');
+      const slides = slidesEl.querySelectorAll('.wizard-slide');
+      if (outer && slides[step]) {
+        outer.style.height = slides[step].scrollHeight + 'px';
+      }
 
       // ドットを更新
       wizardSets.forEach((_, i) => {
