@@ -368,12 +368,10 @@
     .wizard-slides-outer {
       overflow: hidden;
       border-radius: 16px;
-      transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .wizard-slides {
       display: flex;
       transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-      align-items: flex-start;
     }
     .wizard-slide {
       min-width: 100%;
@@ -793,23 +791,6 @@
       background: #fff8e1;
       border-color: #ffe082;
       color: #e65100;
-    }
-    .topping-tag.inactive {
-      background: #f5f5f5;
-      border-color: #e0e0e0;
-      color: #bbb;
-      font-weight: normal;
-    }
-    .topping-tag.inactive.paid {
-      background: #f5f5f5;
-      border-color: #e0e0e0;
-      color: #bbb;
-    }
-    .topping-tag.active {
-      box-shadow: 0 2px 6px rgba(76,175,80,0.3);
-    }
-    .topping-tag.active.paid {
-      box-shadow: 0 2px 6px rgba(230,81,0,0.25);
     }
     @keyframes tagPop {
       0%   { transform: scale(0.6); opacity: 0; }
@@ -2929,7 +2910,6 @@
         document.getElementById('topping-wizard').style.display = 'block';
         document.getElementById('topping-final').classList.add('hidden');
         buildToppingWizard(item.toppingSets);
-        initToppingsPreview(item.toppingSets);
         showPage('page-topping');
       } else if (item.toppingsId) {
         // 後方互換性: 古いtoppingsId形式
@@ -3035,24 +3015,27 @@
 
     function updateToppingsPreview() {
       const preview = document.getElementById('toppings-preview');
-      if (!preview || !wizardSets || wizardSets.length === 0) return;
+      if (!preview) return;
 
-      preview.innerHTML = '<div class="selected-toppings-preview-label">✓ 選択中のトッピング</div>';
+      // 既存タグをクリア（ラベル以外）
+      const label = preview.querySelector('.selected-toppings-preview-label');
+      preview.innerHTML = '';
+      if (label) preview.appendChild(label);
+
+      if (selectedToppings.length === 0) {
+        preview.style.display = 'none';
+        return;
+      }
+
       preview.style.display = 'flex';
 
-      // 全オプションを固定表示し、選択済みをハイライト
-      wizardSets.forEach((set, setIndex) => {
-        set.options.forEach((option, optionIndex) => {
-          const isSelected = selectedToppings.some(
-            t => t.setIndex === setIndex && t.optionIndex === optionIndex
-          );
-          const tag = document.createElement('span');
-          tag.className = 'topping-tag' + (option.price > 0 ? ' paid' : '') + (isSelected ? ' active' : ' inactive');
-          tag.textContent = option.price > 0
-            ? `${option.name} +¥${option.price.toLocaleString()}`
-            : `${option.name}`;
-          preview.appendChild(tag);
-        });
+      selectedToppings.forEach(t => {
+        const tag = document.createElement('span');
+        tag.className = 'topping-tag' + (t.price > 0 ? ' paid' : '');
+        tag.textContent = t.price > 0
+          ? `${t.name} +¥${t.price.toLocaleString()}`
+          : `${t.name}`;
+        preview.appendChild(tag);
       });
     }
     
@@ -3097,26 +3080,6 @@
     // ===================================================
     // トッピングスライドウィザード
     // ===================================================
-
-    function initToppingsPreview(sets) {
-      const preview = document.getElementById('toppings-preview');
-      if (!preview) return;
-      preview.innerHTML = '<div class="selected-toppings-preview-label">✓ 選択中のトッピング</div>';
-      preview.style.display = 'flex';
-
-      sets.forEach((set, setIndex) => {
-        set.options.forEach((option, optionIndex) => {
-          // デフォルト選択（single型の最初）はactive、それ以外はinactive
-          const isDefault = set.type === 'single' && optionIndex === 0;
-          const tag = document.createElement('span');
-          tag.className = 'topping-tag' + (option.price > 0 ? ' paid' : '') + (isDefault ? ' active' : ' inactive');
-          tag.textContent = option.price > 0
-            ? `${option.name} +¥${option.price.toLocaleString()}`
-            : `${option.name}`;
-          preview.appendChild(tag);
-        });
-      });
-    }
     let wizardSets = [];
     let wizardCurrentStep = 0;
 
@@ -3194,7 +3157,6 @@
                 name: option.name, price: option.price,
                 id: `${setIndex}-${optionIndex}`
               });
-              selectedToppings.sort((a, b) => a.setIndex !== b.setIndex ? a.setIndex - b.setIndex : a.optionIndex - b.optionIndex);
             } else {
               div.classList.toggle('selected');
               const idx = selectedToppings.findIndex(t => t.setIndex === setIndex && t.optionIndex === optionIndex);
@@ -3206,8 +3168,6 @@
                   name: option.name, price: option.price,
                   id: `${setIndex}-${optionIndex}`
                 });
-                // setIndex/optionIndex順を維持
-                selectedToppings.sort((a, b) => a.setIndex !== b.setIndex ? a.setIndex - b.setIndex : a.optionIndex - b.optionIndex);
               }
             }
             updateSubtotal();
@@ -3228,13 +3188,6 @@
     function updateWizardSlide(step, direction) {
       const slidesEl = document.getElementById('wizard-slides');
       slidesEl.style.transform = `translateX(-${step * 100}%)`;
-
-      // 外側コンテナの高さを現在のスライドに合わせる
-      const outer = document.querySelector('.wizard-slides-outer');
-      const slides = slidesEl.querySelectorAll('.wizard-slide');
-      if (outer && slides[step]) {
-        outer.style.height = slides[step].scrollHeight + 'px';
-      }
 
       // ドットを更新
       wizardSets.forEach((_, i) => {
@@ -3312,16 +3265,8 @@
       
       let toppingPrice = 0;
       
-      // 🆕 toppingSetsの定義順にソートしてから処理
-      const sortedToppings = (currentItem.toppingSets && currentItem.toppingSets.length > 0)
-        ? [...selectedToppings].sort((a, b) => {
-            if (a.setIndex !== b.setIndex) return a.setIndex - b.setIndex;
-            return a.optionIndex - b.optionIndex;
-          })
-        : selectedToppings;
-
       // 🆕 トッピングセット情報を含めた構造化データ
-      const toppingsData = sortedToppings.map(t => {
+      const toppingsData = selectedToppings.map(t => {
         toppingPrice += t.price || 0;
         return {
           setName: t.setName || 'トッピング',
@@ -3331,7 +3276,7 @@
       });
       
       // 表示用のテキスト（後方互換性のため残す）
-      const toppingNames = sortedToppings.map(t => t.name).join(', ') || '標準トッピング';
+      const toppingNames = selectedToppings.map(t => t.name).join(', ') || '標準トッピング';
       
       // カテゴリが「包材」の場合は税率を10%に強制設定
       // それ以外はデータベースの設定を使用
