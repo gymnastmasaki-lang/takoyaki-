@@ -6597,7 +6597,14 @@
         document.body.removeChild(journalDiv);
         
         const _d1 = canvas.toDataURL('image/png');
-        saveFileWebViewSafe(_d1, `期間ジャーナル_${startDate}_${endDate}.png`, 'image/png');
+        if (window.NativePrinter && window.NativePrinter.saveImage) {
+          window.NativePrinter.saveImage(_d1, `期間ジャーナル_${startDate}_${endDate}.png`);
+        } else {
+          const link = document.createElement('a');
+          link.download = `期間ジャーナル_${startDate}_${endDate}.png`;
+          link.href = _d1;
+          document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        }
         
         console.log('✅ 期間ジャーナル生成完了');
         
@@ -6871,7 +6878,14 @@
         // BOMを追加してExcelで文字化けを防ぐ
         const bom = '\uFEFF';
         const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
-        saveFileWebViewSafe(blob, `期間ジャーナル_${startDate}_${endDate}.csv`, 'text/csv');
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `期間ジャーナル_${startDate}_${endDate}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
         
         showCustomAlert('CSV出力完了', `期間ジャーナルをCSV形式で出力しました`, 'success');
         
@@ -7568,6 +7582,8 @@
             if (savedIP) {
               console.log('🔄 自動接続試行:', savedIP, savedPort);
               window.NativePrinter.connectLan(savedIP, savedPort);
+              // TCP接続完了を待つ
+              await new Promise(resolve => setTimeout(resolve, 1500));
             }
           }
           const result = window.NativePrinter.openDrawer();
@@ -8946,7 +8962,15 @@ ${redSlipCount > 0 ? `
         // PNG画像としてダウンロード
         canvas.toBlob((blob) => {
           const _d2 = canvas.toDataURL('image/png');
-          saveFileWebViewSafe(blob, `精算ジャーナル_${dateStr}.png`, 'image/png');
+          if (window.NativePrinter && window.NativePrinter.saveImage) {
+            window.NativePrinter.saveImage(_d2, `精算ジャーナル_${dateStr}.png`);
+          } else {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url; link.download = `精算ジャーナル_${dateStr}.png`;
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+          }
           document.body.removeChild(journalDiv);
         });
         
@@ -19787,7 +19811,14 @@ ${redSlipCount > 0 ? `
         return;
       }
       
-      saveFileWebViewSafe(receipt.imageData, `${receipt.type}_${receipt.orderNumber || 'none'}_${receipt.timestamp}.png`, 'image/png');
+      if (window.NativePrinter && window.NativePrinter.saveImage) {
+        window.NativePrinter.saveImage(receipt.imageData, `${receipt.type}_${receipt.orderNumber || 'none'}_${receipt.timestamp}.png`);
+      } else {
+        const link = document.createElement('a');
+        link.download = `${receipt.type}_${receipt.orderNumber || 'none'}_${receipt.timestamp}.png`;
+        link.href = receipt.imageData;
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+      }
       // 印刷案内を表示
       showPrintInstructions();
       
@@ -19999,42 +20030,29 @@ function showNativePrinterStatus(msg, bg, color) {
   // Star mC-Print3 に直接ESC/POSドロアキックコマンドを送る
   // WebPRNT API: http://{IP}/StarWebPRNT/SendMessage
   // ----------------------------------------------------------
-  window.kickDrawer = async function kickDrawer() {
+  async function kickDrawer() {
     const ip = localStorage.getItem('nativePrinterIP') || localStorage.getItem('printerIP') || '';
     if (!ip) {
       console.warn('[drawer] プリンターIP未設定');
       return false;
     }
-    // Star mC-Print3 StarWebPRNT 正しいXML形式でドロアキック
-    // 公式仕様: <root><peripheral channel="1" on="200" off="200"/></root>
-    const xmlBody = '<?xml version="1.0" encoding="utf-8"?><root><peripheral channel="1" on="200" off="200"/></root>';
+    // ESC/POSドロアキックコマンド（Pin2: p ú）
+    const drawerCmd = 'p ú';
+    // StarWebPRNT APIエンドポイント
     const url = 'http://' + ip + '/StarWebPRNT/SendMessage';
     try {
       const ctrl = new AbortController();
-      setTimeout(function(){ ctrl.abort(); }, 5000);
+      setTimeout(function(){ ctrl.abort(); }, 3000);
       const res = await fetch(url, {
         method: 'POST',
         signal: ctrl.signal,
-        headers: { 'Content-Type': 'text/xml; charset=utf-8' },
-        body: xmlBody
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        body: drawerCmd
       });
-      console.log('[drawer] StarWebPRNT キック送信 status:', res.status);
-      return res.ok;
+      console.log('[drawer] キック送信:', res.status);
+      return true;
     } catch(e) {
-      console.error('[drawer] StarWebPRNT キック失敗:', e.message);
-      // Mixed Content / ネットワークエラーを画面表示
-      if (typeof showCustomAlert === 'function') {
-        showCustomAlert('ドロアキック失敗: ' + e.message + '\nURL: ' + url, 'エラー詳細', '❌');
-      } else {
-        alert('ドロアキック失敗: ' + e.message + '\nURL: ' + url);
-      }
-      if (window.NativePrinter) {
-        try {
-          const result = window.NativePrinter.openDrawer();
-          console.log('[drawer] NativePrinter.openDrawer():', result);
-          return true;
-        } catch(e2) { console.error('[drawer] NativePrinter fallback 失敗:', e2.message); }
-      }
+      console.error('[drawer] キック失敗:', e.message);
       return false;
     }
   }
@@ -20059,8 +20077,7 @@ function showNativePrinterStatus(msg, bg, color) {
   };
 
   // ----------------------------------------------------------
-  // ----------------------------------------------------------
-  // XLSX保存（NativePrinter or saveFileWebViewSafe で処理）
+  // XLSX保存（NativePrinter.saveXLSX があればネイティブ保存）
   // ----------------------------------------------------------
   if (typeof XLSX !== 'undefined') {
     var _origXLSX = XLSX.writeFile;
@@ -20070,109 +20087,14 @@ function showNativePrinterStatus(msg, bg, color) {
           var base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
           window.NativePrinter.saveXLSX(base64, fileName);
           return;
-        } catch(e) { console.error('[patch] saveXLSX error:', e); }
+        } catch(e) { console.error('[patch] saveXLSX エラー:', e); }
       }
-      // WebView/ブラウザ共通: saveFileWebViewSafeで処理
-      var mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      try {
-        var base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
-        var dataUrl = 'data:' + mime + ';base64,' + base64;
-        saveFileWebViewSafe(dataUrl, fileName, mime);
-        return;
-      } catch(e) { console.error('[patch] XLSX share error:', e); }
       _origXLSX.call(XLSX, wb, fileName, opts);
     };
   }
 
   console.log('[patch] ドロアキック修正パッチ 適用完了');
 })();
-
-
-    // ===== Android共有インテント対応ヘルパー =====
-    // PNG/CSV/XLSXを「アプリで開く」シェアダイアログで共有する
-    function saveFileWebViewSafe(dataUrlOrBlob, fileName, mimeType) {
-      var isAndroidWebView = /Android/.test(navigator.userAgent) && !window.chrome;
-
-      // NativePrinterブリッジがある場合はそちらを優先
-      if (window.NativePrinter && window.NativePrinter.saveImage) {
-        var dataUrl = (typeof dataUrlOrBlob === 'string') ? dataUrlOrBlob : URL.createObjectURL(dataUrlOrBlob);
-        window.NativePrinter.saveImage(dataUrl, fileName);
-        return;
-      }
-
-      if (isAndroidWebView) {
-        // Base64データを取得してAndroid共有インテントで開く
-        function doShare(base64, mime, fname) {
-          // intent:// スキームでAndroid共有インテントを起動
-          // データはdata URIとしてリンクを作り、ユーザーにタップしてもらう
-          var dataUri = 'data:' + mime + ';base64,' + base64;
-          showShareDialog(dataUri, mime, fname);
-        }
-
-        function showShareDialog(dataUri, mime, fname) {
-          var overlay = document.createElement('div');
-          overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
-
-          var isImg = mime.startsWith('image/');
-          var isXlsx = mime.indexOf('spreadsheet') !== -1 || fname.match(/\.xlsx$/i);
-          var isCsv = mime.indexOf('csv') !== -1 || fname.match(/\.csv$/i);
-
-          var icon = isImg ? '&#x1F5BC;' : isXlsx ? '&#x1F4CA;' : isCsv ? '&#x1F4CB;' : '&#x1F4C4;';
-          var label = isImg ? '&#x753B;&#x50CF;' : isXlsx ? '&#x65E5;&#x8A08;&#x8868;' : isCsv ? 'CSV' : '&#x30D5;&#x30A1;&#x30A4;&#x30EB;';
-
-          var box = document.createElement('div');
-          box.style.cssText = 'background:white;border-radius:20px;padding:24px;width:100%;max-width:400px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
-
-          var previewHtml = '';
-          if (isImg) {
-            previewHtml = '<img src="' + dataUri + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;margin-bottom:12px;border:1px solid #eee;" />';
-          }
-
-          box.innerHTML = previewHtml
-            + '<div style="font-size:28px;margin-bottom:6px;">' + icon + '</div>'
-            + '<div style="font-size:17px;font-weight:bold;margin-bottom:4px;">' + label + '</div>'
-            + '<div style="font-size:12px;color:#888;margin-bottom:18px;word-break:break-all;">' + fname + '</div>'
-            + '<a href="' + dataUri + '" download="' + fname + '" style="display:block;padding:14px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border-radius:12px;font-size:16px;font-weight:bold;text-decoration:none;margin-bottom:10px;">'
-            + '&#x1F4F1; &#x30A2;&#x30D7;&#x30EA;&#x3067;&#x958B;&#x304F;</a>'
-            + '<div style="font-size:11px;color:#999;margin-bottom:14px;">&#x9577;&#x62BC;&#x3057;&#x3067;&#x300C;&#x5225;&#x306E;&#x30A2;&#x30D7;&#x30EA;&#x3067;&#x958B;&#x304F;&#x300D;&#x3082;&#x9078;&#x629C;&#x53EF;&#x80FD;</div>'
-            + '<button onclick="this.closest(\'div\').parentElement.remove()" style="width:100%;padding:12px;background:#f0f0f0;color:#555;border:none;border-radius:12px;font-size:14px;cursor:pointer;">&#x9589;&#x3058;&#x308B;</button>';
-
-          overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
-          overlay.appendChild(box);
-          document.body.appendChild(overlay);
-        }
-
-        // Blob or DataURL を base64に変換してダイアログ表示
-        if (typeof dataUrlOrBlob === 'string') {
-          // 既にdataURL
-          var parts = dataUrlOrBlob.split(',');
-          var b64 = parts[1] || '';
-          var m = (parts[0].match(/data:([^;]+)/) || [])[1] || mimeType || 'application/octet-stream';
-          showShareDialog(dataUrlOrBlob, m, fileName);
-        } else if (dataUrlOrBlob instanceof Blob) {
-          var reader = new FileReader();
-          reader.onload = function(e) {
-            showShareDialog(e.target.result, dataUrlOrBlob.type || mimeType || 'application/octet-stream', fileName);
-          };
-          reader.readAsDataURL(dataUrlOrBlob);
-        }
-        return;
-      }
-
-      // 通常ブラウザ（PC等）は従来通りダウンロード
-      if (dataUrlOrBlob instanceof Blob) {
-        var url = URL.createObjectURL(dataUrlOrBlob);
-        var link = document.createElement('a');
-        link.href = url; link.download = fileName;
-        document.body.appendChild(link); link.click(); document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      } else {
-        var link2 = document.createElement('a');
-        link2.href = dataUrlOrBlob; link2.download = fileName;
-        document.body.appendChild(link2); link2.click(); document.body.removeChild(link2);
-      }
-    }
-
 </script>
 
 </body>
