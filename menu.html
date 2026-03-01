@@ -1727,7 +1727,185 @@
       }
     }
     
-    // 🆕 引取時間計算
+    // 🆕 引取スロット設定（Firestoreから読み込み）
+    let pickupSlotConfig = { enabled: false, intervalMinutes: 30, maxPerSlot: 3 };
+    
+    // 🆕 引取スロット設定を読み込む
+    async function loadPickupSlotConfig() {
+      try {
+        const ref = currentStoreId ?
+          doc(db, 'stores', currentStoreId, 'pickup_slot_settings', 'default') :
+          doc(db, 'pickup_slot_settings', 'default');
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          pickupSlotConfig = snap.data();
+          console.log('✅ 引取スロット設定読み込み:', pickupSlotConfig);
+        }
+      } catch (e) {
+        console.error('引取スロット設定読み込みエラー:', e);
+      }
+    }
+
+    // 🆕 予約数を取得する関数
+    async function getReservationCount(dateStr, slotKey) {
+      try {
+        const ref = currentStoreId ?
+          doc(db, 'stores', currentStoreId, 'pickup_reservations', `${dateStr}_${slotKey}`) :
+          doc(db, 'pickup_reservations', `${dateStr}_${slotKey}`);
+        const snap = await getDoc(ref);
+        if (snap.exists()) return snap.data().count || 0;
+      } catch (e) { }
+      return 0;
+    }
+
+    // 🆕 スロット一覧を生成する（日付・営業時間から）
+    function generateSlots(dateStr, openTime, closeTime, intervalMinutes) {
+      const slots = [];
+      const [oh, om] = openTime.split(':').map(Number);
+      const [ch, cm] = closeTime.split(':').map(Number);
+      const openTotalMin = oh * 60 + om;
+      const closeTotalMin = ch * 60 + cm;
+      for (let start = openTotalMin; start + intervalMinutes <= closeTotalMin; start += intervalMinutes) {
+        const end = start + intervalMinutes;
+        const sh = String(Math.floor(start / 60)).padStart(2, '0');
+        const sm = String(start % 60).padStart(2, '0');
+        const eh = String(Math.floor(end / 60)).padStart(2, '0');
+        const em = String(end % 60).padStart(2, '0');
+        const slotKey = `${sh}${sm}_${eh}${em}`;
+        const label = `${sh}:${sm}〜${eh}:${em}`;
+        slots.push({ slotKey, label, startMin: start, endMin: end });
+      }
+      return slots;
+    }
+
+    // 🆕 日付選択UIと時間帯スロットUIを構築
+    async function buildPickupSlotUI(openTime, closeTime) {
+      const section = document.getElementById('pickup-time-section');
+      if (!section) return;
+
+      // 今日〜7日後までの選択肢（休業日除く）
+      const today = new Date();
+      const dateOptions = [];
+      for (let i = 0; i < 14; i++) {
+        const d = new Date(today);
+        d.setDate(today.getDate() + i);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+        const dayName = dayNames[d.getDay()];
+        dateOptions.push({ value: `${yyyy}-${mm}-${dd}`, label: `${mm}月${dd}日（${dayName}）` });
+      }
+
+      section.innerHTML = `
+        <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;">
+          🕐 引取日時<span id="pickup-time-required-mark" style="color: #f44336; margin-left: 5px; display: none;">*</span>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 13px; color: #666; display: block; margin-bottom: 6px;">📅 日付を選択</label>
+          <select id="pickup-date-select" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;">
+            <option value="">-- 日付を選択してください --</option>
+            ${dateOptions.map(d => `<option value="${d.value}">${d.label}</option>`).join('')}
+          </select>
+        </div>
+        <div id="pickup-slot-container" style="display: none;">
+          <label style="font-size: 13px; color: #666; display: block; margin-bottom: 6px;">⏰ 時間帯を選択</label>
+          <div id="pickup-slot-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;"></div>
+          <input type="hidden" id="customer-pickup-time" value="">
+          <input type="hidden" id="customer-pickup-slot-key" value="">
+          <input type="hidden" id="customer-pickup-date" value="">
+        </div>
+      `;
+
+      document.getElementById('pickup-date-select').addEventListener('change', async function() {
+        const dateStr = this.value;
+        const slotContainer = document.getElementById('pickup-slot-container');
+        const slotGrid = document.getElementById('pickup-slot-grid');
+        
+        // 隠しフィールドをリセット
+        document.getElementById('customer-pickup-time').value = '';
+        document.getElementById('customer-pickup-slot-key').value = '';
+        document.getElementById('customer-pickup-date').value = dateStr;
+
+        if (!dateStr) {
+          slotContainer.style.display = 'none';
+          return;
+        }
+
+        slotGrid.innerHTML = '<div style="color: #999; font-size: 13px; padding: 8px;">読み込み中...</div>';
+        slotContainer.style.display = 'block';
+
+        const slots = generateSlots(dateStr, openTime, closeTime, pickupSlotConfig.intervalMinutes);
+        const maxPerSlot = pickupSlotConfig.maxPerSlot;
+
+        // 各スロットの予約数を並行取得
+        const counts = await Promise.all(slots.map(s => getReservationCount(dateStr, s.slotKey)));
+
+        // 今日の場合は過去の時間帯を無効化
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+
+        slotGrid.innerHTML = '';
+        slots.forEach((slot, idx) => {
+          const count = counts[idx];
+          const isFull = count >= maxPerSlot;
+          const isPast = (dateStr === todayStr) && (slot.endMin <= nowMin);
+          const disabled = isFull || isPast;
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.dataset.slotKey = slot.slotKey;
+          btn.dataset.slotLabel = slot.label;
+          btn.dataset.dateStr = dateStr;
+          
+          let statusText = '';
+          let bgStyle = '';
+          if (isPast) {
+            statusText = '⏰ 終了';
+            bgStyle = 'background: #f0f0f0; color: #bbb; border: 2px solid #ddd; cursor: not-allowed;';
+          } else if (isFull) {
+            statusText = '🔒 満員';
+            bgStyle = 'background: #f5f5f5; color: #bbb; border: 2px dashed #ccc; cursor: not-allowed;';
+          } else {
+            const remaining = maxPerSlot - count;
+            statusText = remaining <= maxPerSlot ? `残り${remaining}枠` : '';
+            bgStyle = 'background: white; color: #333; border: 2px solid #e0e0e0; cursor: pointer;';
+          }
+
+          btn.style.cssText = `padding: 10px 6px; border-radius: 10px; font-size: 13px; font-weight: bold; text-align: center; transition: all 0.2s; ${bgStyle}`;
+          btn.innerHTML = `<div>${slot.label}</div><div style="font-size: 11px; margin-top: 3px; color: inherit;">${statusText}</div>`;
+          btn.disabled = disabled;
+
+          if (!disabled) {
+            btn.addEventListener('click', function() {
+              // 全ボタンのスタイルをリセット
+              slotGrid.querySelectorAll('button').forEach(b => {
+                if (!b.disabled) {
+                  b.style.background = 'white';
+                  b.style.color = '#333';
+                  b.style.border = '2px solid #e0e0e0';
+                }
+              });
+              // 選択スタイル
+              this.style.background = '#E3F2FD';
+              this.style.color = '#1565C0';
+              this.style.border = '2px solid #1565C0';
+
+              // 値をセット
+              const dateLabel = document.getElementById('pickup-date-select').options[document.getElementById('pickup-date-select').selectedIndex].text;
+              document.getElementById('customer-pickup-time').value = `${dateLabel} ${this.dataset.slotLabel}`;
+              document.getElementById('customer-pickup-slot-key').value = this.dataset.slotKey;
+              document.getElementById('customer-pickup-date').value = this.dataset.dateStr;
+            });
+          }
+
+          slotGrid.appendChild(btn);
+        });
+      });
+    }
+
+    // 旧: 相対時刻方式（スロット無効時のフォールバック）
     function getPickupTimeOptions() {
       const now = new Date();
       const options = [];
@@ -1794,6 +1972,9 @@
       if (tableNumber) {
         await loadTableSettings(tableNumber);
       }
+      
+      // 🆕 引取スロット設定を読み込み
+      await loadPickupSlotConfig();
       
       // まず注文情報の復元を試みる（営業時間外でも注文番号画面は表示）
       const hasStoredOrder = localStorage.getItem('currentOrder_' + tableNumber);
@@ -3366,7 +3547,7 @@
       }
     }
 
-    window.showCart = function() {
+    window.showCart = async function() {
       if (cart.length === 0) {
         showCustomAlert('カートが空です');
         return;
@@ -3477,19 +3658,45 @@
         const pickupTimeRequired = document.getElementById('pickup-time-required-mark');
         if (fields.pickupTime?.visible) {
           pickupTimeSection.style.display = 'block';
-          pickupTimeRequired.style.display = fields.pickupTime.required ? 'inline' : 'none';
-          
-          // プルダウンを生成
-          const select = document.getElementById('customer-pickup-time');
-          select.innerHTML = '<option value="">-- 選択してください --</option>';
-          const options = getPickupTimeOptions();
-          options.forEach(opt => {
-            const option = document.createElement('option');
-            option.value = opt.value;
-            option.textContent = opt.label;
-            option.dataset.time = opt.time;
-            select.appendChild(option);
-          });
+          // スロット設定が有効ならスロットUI、無効なら従来のドロップダウン
+          if (pickupSlotConfig.enabled) {
+            // 営業時間設定を読み込んでスロットUI構築
+            let openTime = '09:00';
+            let closeTime = '22:00';
+            try {
+              const bhRef = currentStoreId ?
+                doc(db, 'stores', currentStoreId, 'business_hours_settings', 'default') :
+                doc(db, 'business_hours_settings', 'default');
+              const bhSnap = await getDoc(bhRef);
+              if (bhSnap.exists() && bhSnap.data().enabled) {
+                openTime = bhSnap.data().openTime || '09:00';
+                closeTime = bhSnap.data().closeTime || '22:00';
+              }
+            } catch (e) { console.error('営業時間読み込みエラー:', e); }
+            await buildPickupSlotUI(openTime, closeTime);
+            // 必須マークを設定
+            const mark = document.getElementById('pickup-time-required-mark');
+            if (mark) mark.style.display = fields.pickupTime.required ? 'inline' : 'none';
+          } else {
+            // 従来のドロップダウン
+            pickupTimeSection.innerHTML = `
+              <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;">
+                🕐 引取時間<span id="pickup-time-required-mark" style="color: #f44336; margin-left: 5px; display: ${fields.pickupTime.required ? 'inline' : 'none'};"></span>
+              </div>
+              <select id="customer-pickup-time" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;">
+                <option value="">-- 選択してください --</option>
+              </select>
+            `;
+            const select = document.getElementById('customer-pickup-time');
+            const options = getPickupTimeOptions();
+            options.forEach(opt => {
+              const option = document.createElement('option');
+              option.value = opt.value;
+              option.textContent = opt.label;
+              option.dataset.time = opt.time;
+              select.appendChild(option);
+            });
+          }
         } else {
           pickupTimeSection.style.display = 'none';
         }
@@ -3796,9 +4003,14 @@
         
         // 引取時間
         if (fields.pickupTime?.visible && fields.pickupTime?.required) {
-          const pickupTime = document.getElementById('customer-pickup-time')?.value;
-          if (!pickupTime) {
-            showCustomAlert('引取時間を選択してください');
+          let ptVal = '';
+          if (pickupSlotConfig.enabled) {
+            ptVal = document.getElementById('customer-pickup-time')?.value || '';
+          } else {
+            ptVal = document.getElementById('customer-pickup-time')?.value || '';
+          }
+          if (!ptVal) {
+            showCustomAlert('引取日時を選択してください');
             isOrderProcessing = false;
             if (confirmBtn) {
               confirmBtn.disabled = false;
@@ -4070,12 +4282,19 @@
         const customerEmail = document.getElementById('customer-email') ? document.getElementById('customer-email').value.trim() : '';
         const customerPhone = document.getElementById('customer-phone') ? document.getElementById('customer-phone').value.trim() : '';
         
-        // 🆕 引取時間を取得
+        // 🆕 引取時間を取得（スロット方式 or 旧方式）
         let pickupTime = '';
-        const pickupTimeSelect = document.getElementById('customer-pickup-time');
-        if (pickupTimeSelect && pickupTimeSelect.value) {
-          const selectedOption = pickupTimeSelect.options[pickupTimeSelect.selectedIndex];
-          pickupTime = selectedOption.dataset.time || '';
+        if (pickupSlotConfig.enabled) {
+          // スロット方式: hiddenフィールドから取得
+          const hiddenTime = document.getElementById('customer-pickup-time');
+          if (hiddenTime) pickupTime = hiddenTime.value || '';
+        } else {
+          // 旧方式: selectから取得
+          const pickupTimeSelect = document.getElementById('customer-pickup-time');
+          if (pickupTimeSelect && pickupTimeSelect.value) {
+            const selectedOption = pickupTimeSelect.options[pickupTimeSelect.selectedIndex];
+            pickupTime = selectedOption.dataset.time || '';
+          }
         }
         
         const orderData = {
@@ -4112,6 +4331,28 @@
         await updateDoc(docRef, {
           orderId: docRef.id
         });
+        
+        // 🆕 スロット方式の場合、予約カウントをインクリメント
+        if (pickupSlotConfig.enabled) {
+          const slotKey = document.getElementById('customer-pickup-slot-key')?.value;
+          const dateStr = document.getElementById('customer-pickup-date')?.value;
+          if (slotKey && dateStr) {
+            try {
+              const { runTransaction: rt2 } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+              const resRef = currentStoreId ?
+                doc(db, 'stores', currentStoreId, 'pickup_reservations', `${dateStr}_${slotKey}`) :
+                doc(db, 'pickup_reservations', `${dateStr}_${slotKey}`);
+              await rt2(db, async (txn) => {
+                const snap = await txn.get(resRef);
+                const current = snap.exists() ? (snap.data().count || 0) : 0;
+                txn.set(resRef, { count: current + 1, orderId: docRef.id, updatedAt: Timestamp.fromDate(now) }, { merge: true });
+              });
+              console.log('✅ 引取予約カウント保存:', dateStr, slotKey);
+            } catch (e) {
+              console.error('予約カウント保存エラー:', e);
+            }
+          }
+        }
         
         // 待ち順番を計算（注文後にFirestoreから最新データを取得）
         const freshSnapshot = await getDocs(window.getStoreCollection('orders'));
