@@ -204,22 +204,35 @@
             // 🆕 管理者修正の承認確認
             const checkPendingApproval = async (emp) => {
                 try {
-                    const { doc, getDoc, setDoc, Timestamp } = window.firebaseModules;
-                    const now = new Date();
-                    const dateKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-                    let docRef;
-                    if (!selectedStore || selectedStore.id === 'shimoakatsuka' || selectedStore.id === 'shimoarekasuka') {
-                        docRef = doc(window.db, 'kintai_attendance', `${emp.id}_${dateKey}`);
-                    } else {
-                        docRef = doc(window.db, 'stores', selectedStore.id, 'attendance', `${emp.id}_${dateKey}`);
-                    }
-                    const snap = await getDoc(docRef);
-                    if (!snap.exists()) return;
-                    const data = snap.data();
-                    if (!data.pendingEmployeeApproval) return;
+                    const { collection, query, where, getDocs, doc, setDoc, Timestamp } = window.firebaseModules;
 
-                    const raw = data.rawClockData || {};
-                    const fields = [
+                    // 全期間の pendingEmployeeApproval:true を一括取得
+                    let pendingSnaps;
+                    if (!selectedStore || selectedStore.id === 'shimoakatsuka' || selectedStore.id === 'shimoarekasuka') {
+                        const q = query(
+                            collection(window.db, 'kintai_attendance'),
+                            where('employeeId', '==', emp.id),
+                            where('pendingEmployeeApproval', '==', true)
+                        );
+                        pendingSnaps = await getDocs(q);
+                    } else {
+                        const q = query(
+                            collection(window.db, 'stores', selectedStore.id, 'attendance'),
+                            where('employeeId', '==', emp.id),
+                            where('pendingEmployeeApproval', '==', true)
+                        );
+                        pendingSnaps = await getDocs(q);
+                    }
+                    if (pendingSnaps.empty) return;
+
+                    // 日付順にソート
+                    const pendingList = [];
+                    pendingSnaps.forEach(snap => {
+                        pendingList.push({ docRef: snap.ref, data: snap.data() });
+                    });
+                    pendingList.sort((a, b) => (a.data.date || '').localeCompare(b.data.date || ''));
+
+                    const timeFields = [
                         { key: 'clockIn', label: '出勤' },
                         { key: 'breakStart1', label: '休憩入1' },
                         { key: 'breakEnd1', label: '休憩出1' },
@@ -227,55 +240,64 @@
                         { key: 'breakEnd2', label: '休憩出2' },
                         { key: 'clockOut', label: '退勤' },
                     ];
-                    let diffHtml = '<table style="width:100%;border-collapse:collapse;margin:10px 0;font-size:13px;">';
-                    diffHtml += '<tr style="background:#f0f0f0;"><th style="padding:6px;border:1px solid #ccc;">項目</th><th style="padding:6px;border:1px solid #ccc;">あなたの打刻</th><th style="padding:6px;border:1px solid #ccc;">管理者修正後</th></tr>';
-                    fields.forEach(f => {
-                        const rawVal = raw[f.key] || '—';
-                        const newVal = data[f.key] || '—';
-                        const changed = rawVal !== newVal;
-                        diffHtml += `<tr style="background:${changed ? '#fff3cd' : '#fff'};">`;
-                        diffHtml += `<td style="padding:6px;border:1px solid #ccc;font-weight:bold;">${f.label}</td>`;
-                        diffHtml += `<td style="padding:6px;border:1px solid #ccc;color:#1565C0;">${rawVal}</td>`;
-                        diffHtml += `<td style="padding:6px;border:1px solid #ccc;color:${changed ? '#c62828' : '#333'};">${newVal}</td>`;
-                        diffHtml += '</tr>';
-                    });
-                    diffHtml += '</table>';
-                    const memo = data.editHistory && data.editHistory.length > 0 ? (data.editHistory[data.editHistory.length-1].memo || '') : '';
-                    if (memo) diffHtml += `<div style="margin-top:8px;font-size:12px;color:#555;">管理者メモ: ${memo}</div>`;
 
-                    const result = await Swal.fire({
-                        title: '管理者が勤怠を修正しました',
-                        html: `<div style="text-align:left;">修正依頼をしましたか？${diffHtml}</div>`,
-                        icon: 'warning',
-                        showCancelButton: true,
-                        confirmButtonText: 'はい（修正を承認する）',
-                        cancelButtonText: 'いいえ（元の打刻に戻す）',
-                        confirmButtonColor: '#2196F3',
-                        cancelButtonColor: '#f44336',
-                        allowOutsideClick: false,
-                        allowEscapeKey: false,
-                        width: '90%',
-                    });
+                    for (const { docRef, data } of pendingList) {
+                        const raw = data.rawClockData || {};
+                        // 日付を見やすく表示
+                        const dateStr = data.date || '';
+                        const [dy, dm, dd] = dateStr.split('-');
+                        const dateLabel = dy && dm && dd ? `${dy}年${parseInt(dm)}月${parseInt(dd)}日` : dateStr;
 
-                    if (result.isConfirmed) {
-                        await setDoc(docRef, { pendingEmployeeApproval: false, approvedAt: new Date().toISOString(), approvedBy: emp.name }, { merge: true });
-                    } else {
-                        // 元の打刻に戻す
-                        await setDoc(docRef, {
-                            ...data,
-                            clockIn: raw.clockIn || null,
-                            breakStart1: raw.breakStart1 || null,
-                            breakEnd1: raw.breakEnd1 || null,
-                            breakStart2: raw.breakStart2 || null,
-                            breakEnd2: raw.breakEnd2 || null,
-                            clockOut: raw.clockOut || null,
-                            isHoliday: raw.isHoliday || false,
-                            pendingEmployeeApproval: false,
-                            rejectedAt: new Date().toISOString(),
-                            rejectedBy: emp.name,
-                            updatedAt: Timestamp.now()
+                        let diffHtml = `<div style="font-size:13px;font-weight:bold;margin-bottom:8px;">${dateLabel}の修正</div>`;
+                        diffHtml += '<table style="width:100%;border-collapse:collapse;margin:6px 0;font-size:13px;">';
+                        diffHtml += '<tr style="background:#f0f0f0;"><th style="padding:6px;border:1px solid #ccc;">項目</th><th style="padding:6px;border:1px solid #ccc;">あなたの打刻</th><th style="padding:6px;border:1px solid #ccc;">管理者修正後</th></tr>';
+                        timeFields.forEach(f => {
+                            const rawVal = raw[f.key] || '—';
+                            const newVal = data[f.key] || '—';
+                            const changed = rawVal !== newVal;
+                            diffHtml += `<tr style="background:${changed ? '#fff3cd' : '#fff'};">`;
+                            diffHtml += `<td style="padding:6px;border:1px solid #ccc;font-weight:bold;">${f.label}</td>`;
+                            diffHtml += `<td style="padding:6px;border:1px solid #ccc;color:#1565C0;">${rawVal}</td>`;
+                            diffHtml += `<td style="padding:6px;border:1px solid #ccc;color:${changed ? '#c62828' : '#333'};">${newVal}</td>`;
+                            diffHtml += '</tr>';
                         });
-                        await Swal.fire({ title: '元の打刻に戻しました', icon: 'success', confirmButtonText: 'OK' });
+                        diffHtml += '</table>';
+                        const memo = data.editHistory && data.editHistory.length > 0 ? (data.editHistory[data.editHistory.length-1].memo || '') : '';
+                        if (memo) diffHtml += `<div style="margin-top:6px;font-size:12px;color:#555;">管理者メモ: ${memo}</div>`;
+
+                        const result = await Swal.fire({
+                            title: '管理者が勤怠を修正しました',
+                            html: `<div style="text-align:left;">修正依頼をしましたか？${diffHtml}</div>`,
+                            icon: 'warning',
+                            showCancelButton: true,
+                            confirmButtonText: 'はい（修正を承認する）',
+                            cancelButtonText: 'いいえ（元の打刻に戻す）',
+                            confirmButtonColor: '#2196F3',
+                            cancelButtonColor: '#f44336',
+                            allowOutsideClick: false,
+                            allowEscapeKey: false,
+                            width: '90%',
+                        });
+
+                        if (result.isConfirmed) {
+                            await setDoc(docRef, { pendingEmployeeApproval: false, approvedAt: new Date().toISOString(), approvedBy: emp.name }, { merge: true });
+                        } else {
+                            await setDoc(docRef, {
+                                ...data,
+                                clockIn: raw.clockIn || null,
+                                breakStart1: raw.breakStart1 || null,
+                                breakEnd1: raw.breakEnd1 || null,
+                                breakStart2: raw.breakStart2 || null,
+                                breakEnd2: raw.breakEnd2 || null,
+                                clockOut: raw.clockOut || null,
+                                isHoliday: raw.isHoliday || false,
+                                pendingEmployeeApproval: false,
+                                rejectedAt: new Date().toISOString(),
+                                rejectedBy: emp.name,
+                                updatedAt: Timestamp.now()
+                            });
+                            await Swal.fire({ title: `${dateLabel}の打刻を元に戻しました`, icon: 'success', timer: 1500, showConfirmButton: false });
+                        }
                     }
                 } catch(err) {
                     console.error('承認確認エラー:', err);
