@@ -19,7 +19,7 @@
 
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-        import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, doc, setDoc, query, where, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, doc, setDoc, query, where, Timestamp, deleteField } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
         // Firebase設定（既存のものを使用）
         const firebaseConfig = {
@@ -37,7 +37,7 @@
         // Reactコンポーネントをグローバルに公開
         window.FirebaseReady = true;
         window.db = db;
-        window.firebaseModules = { collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, doc, setDoc, query, where, Timestamp };
+        window.firebaseModules = { collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, doc, setDoc, query, where, Timestamp, deleteField };
     </script>
 
     <script type="text/babel">
@@ -80,6 +80,8 @@
             // 🆕 勤怠詳細モーダル
             const [showAttendanceDetail, setShowAttendanceDetail] = useState(false);
             const [attendanceDetailData, setAttendanceDetailData] = useState([]);
+            const [detailYear, setDetailYear] = useState(new Date().getFullYear());
+            const [detailMonth, setDetailMonth] = useState(new Date().getMonth() + 1);
 
             // 現在時刻を更新
             useEffect(() => {
@@ -280,7 +282,8 @@
                         });
 
                         if (result.isConfirmed) {
-                            await setDoc(docRef, { pendingEmployeeApproval: false, approvedAt: new Date().toISOString(), approvedBy: emp.name }, { merge: true });
+                            const { deleteField } = window.firebaseModules;
+                            await setDoc(docRef, { pendingEmployeeApproval: false, approvedAt: new Date().toISOString(), approvedBy: emp.name, rejectedAt: deleteField(), rejectedBy: deleteField() }, { merge: true });
                         } else {
                             await setDoc(docRef, {
                                 ...data,
@@ -304,14 +307,13 @@
                 }
             };
 
-            // 🆕 勤怠詳細を開く（当月全日分をFirestoreから取得）
-            const openAttendanceDetail = async () => {
+            // 🆕 勤怠詳細を開く（年月指定対応）
+            const openAttendanceDetail = async (y, m) => {
                 if (!selectedEmployee) return;
+                const year = y || new Date().getFullYear();
+                const month = (m || new Date().getMonth() + 1) - 1; // 0-indexed
                 try {
                     const { doc, getDoc } = window.firebaseModules;
-                    const now = new Date();
-                    const year = now.getFullYear();
-                    const month = now.getMonth();
                     const daysInMonth = new Date(year, month + 1, 0).getDate();
                     const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
                     const rows = [];
@@ -328,6 +330,8 @@
                         const dayOfWeek = dayNames[new Date(year, month, day).getDay()];
                         rows.push({ day, dayOfWeek, record, dateKey });
                     }
+                    setDetailYear(year);
+                    setDetailMonth(month + 1);
                     setAttendanceDetailData(rows);
                     setShowAttendanceDetail(true);
                 } catch(err) {
@@ -338,9 +342,8 @@
             // 🆕 勤怠詳細をPNGで保存（kanri.htmlと同じ形式）
             const downloadAttendancePNG = async () => {
                 if (!selectedEmployee) return;
-                const now = new Date();
-                const year = now.getFullYear();
-                const month = now.getMonth() + 1;
+                const year = detailYear;
+                const month = detailMonth;
                 const tempDiv = document.createElement('div');
                 tempDiv.style.cssText = 'position:absolute;left:-9999px;background:white;padding:30px;width:1200px;font-family:Arial,sans-serif;';
                 const timeFields = [
@@ -739,9 +742,18 @@
                                     {showAttendanceDetail && (
                                         <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.7)',zIndex:9999,overflowY:'auto',padding:'20px'}}>
                                             <div style={{background:'white',borderRadius:'16px',padding:'24px',maxWidth:'900px',margin:'0 auto'}}>
-                                                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'16px'}}>
-                                                    <h2 style={{fontSize:'20px',fontWeight:'bold'}}>勤怠詳細 - {selectedEmployee?.name} ({new Date().getFullYear()}年{new Date().getMonth()+1}月)</h2>
-                                                    <div style={{display:'flex',gap:'10px'}}>
+                                                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'16px',flexWrap:'wrap',gap:'8px'}}>
+                                                    <h2 style={{fontSize:'18px',fontWeight:'bold'}}>勤怠詳細 - {selectedEmployee?.name}</h2>
+                                                    <div style={{display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap'}}>
+                                                        {/* 年月ナビ */}
+                                                        <button onClick={() => { const d = new Date(detailYear, detailMonth-2); openAttendanceDetail(d.getFullYear(), d.getMonth()+1); }} style={{padding:'6px 10px',background:'#E5E7EB',border:'none',borderRadius:'6px',cursor:'pointer',fontWeight:'bold'}}>◀</button>
+                                                        <select value={detailYear} onChange={e => openAttendanceDetail(parseInt(e.target.value), detailMonth)} style={{padding:'6px',border:'1px solid #ccc',borderRadius:'6px'}}>
+                                                            {Array.from({length: 5}, (_,i) => new Date().getFullYear() - i).map(y => <option key={y} value={y}>{y}年</option>)}
+                                                        </select>
+                                                        <select value={detailMonth} onChange={e => openAttendanceDetail(detailYear, parseInt(e.target.value))} style={{padding:'6px',border:'1px solid #ccc',borderRadius:'6px'}}>
+                                                            {Array.from({length:12},(_,i)=>i+1).map(m => <option key={m} value={m}>{m}月</option>)}
+                                                        </select>
+                                                        <button onClick={() => { const d = new Date(detailYear, detailMonth); openAttendanceDetail(d.getFullYear(), d.getMonth()+1); }} style={{padding:'6px 10px',background:'#E5E7EB',border:'none',borderRadius:'6px',cursor:'pointer',fontWeight:'bold'}}>▶</button>
                                                         <button onClick={() => downloadAttendancePNG()} style={{padding:'8px 16px',background:'#7C3AED',color:'white',border:'none',borderRadius:'8px',fontWeight:'bold',cursor:'pointer'}}>PNG保存</button>
                                                         <button onClick={() => setShowAttendanceDetail(false)} style={{padding:'8px 16px',background:'#6B7280',color:'white',border:'none',borderRadius:'8px',fontWeight:'bold',cursor:'pointer'}}>閉じる</button>
                                                     </div>
