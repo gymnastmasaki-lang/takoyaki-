@@ -74,6 +74,8 @@
             const [stores, setStores] = useState([]);
             const [selectedStore, setSelectedStore] = useState(null);
             const [showStoreSelect, setShowStoreSelect] = useState(true);
+            // 🆕 管理者修正承認待ち
+            const [pendingApprovalData, setPendingApprovalData] = useState(null);
 
             // 現在時刻を更新
             useEffect(() => {
@@ -193,6 +195,132 @@
                 } finally {
                     setIsLoading(false);
                 }
+            };
+
+            // 🆕 管理者修正の承認確認
+            const checkPendingApproval = async (emp) => {
+                try {
+                    const { doc, getDoc, setDoc, Timestamp } = window.firebaseModules;
+                    // 今日の出勤記録を確認
+                    const now = new Date();
+                    const dateKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                    let docRef;
+                    if (!selectedStore || selectedStore.id === 'shimoakatsuka' || selectedStore.id === 'shimoarekasuka') {
+                        docRef = doc(window.db, 'kintai_attendance', `${emp.id}_${dateKey}`);
+                    } else {
+                        docRef = doc(window.db, 'stores', selectedStore.id, 'attendance', `${emp.id}_${dateKey}`);
+                    }
+                    const snap = await getDoc(docRef);
+                    if (!snap.exists()) return;
+                    const data = snap.data();
+                    if (!data.pendingEmployeeApproval) return;
+
+                    // 修正内容をまとめて表示
+                    const raw = data.rawClockData || {};
+                    const fields = [
+                        { key: 'clockIn', label: '出勤' },
+                        { key: 'breakStart1', label: '休憩入1' },
+                        { key: 'breakEnd1', label: '休憩出1' },
+                        { key: 'breakStart2', label: '休憩入2' },
+                        { key: 'breakEnd2', label: '休憩出2' },
+                        { key: 'clockOut', label: '退勤' },
+                    ];
+                    let diffHtml = '<table style="width:100%;border-collapse:collapse;margin:10px 0;font-size:14px;">';
+                    diffHtml += '<tr style="background:#f0f0f0;"><th style="padding:6px;border:1px solid #ccc;">項目</th><th style="padding:6px;border:1px solid #ccc;">あなたの打刻</th><th style="padding:6px;border:1px solid #ccc;">管理者修正後</th></tr>';
+                    fields.forEach(f => {
+                        const rawVal = raw[f.key] || '—';
+                        const newVal = data[f.key] || '—';
+                        const changed = rawVal !== newVal;
+                        diffHtml += `<tr style="background:${changed ? '#fff3cd' : '#fff'};">`;
+                        diffHtml += `<td style="padding:6px;border:1px solid #ccc;font-weight:bold;">${f.label}</td>`;
+                        diffHtml += `<td style="padding:6px;border:1px solid #ccc;color:#1565C0;">${rawVal}</td>`;
+                        diffHtml += `<td style="padding:6px;border:1px solid #ccc;color:${changed ? '#c62828' : '#333'};">${newVal}</td>`;
+                        diffHtml += '</tr>';
+                    });
+                    diffHtml += '</table>';
+                    const memo = data.editHistory && data.editHistory.length > 0 ? (data.editHistory[data.editHistory.length-1].memo || '') : '';
+                    if (memo) diffHtml += `<div style="margin-top:8px;font-size:13px;color:#555;">管理者メモ: ${memo}</div>`;
+
+                    const result = await Swal.fire({
+                        title: '管理者が勤怠を修正しました',
+                        html: `<div style="text-align:left;">修正依頼をしましたか？${diffHtml}</div>`,
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonText: 'はい（修正を承認する）',
+                        cancelButtonText: 'いいえ（元の打刻に戻す）',
+                        confirmButtonColor: '#2196F3',
+                        cancelButtonColor: '#f44336',
+                        allowOutsideClick: false,
+                        allowEscapeKey: false,
+                        width: '90%',
+                    });
+
+                    if (result.isConfirmed) {
+                        // 承認: pendingフラグを解除するだけ（編集データをそのまま使用）
+                        await setDoc(docRef, { pendingEmployeeApproval: false, approvedAt: new Date().toISOString(), approvedBy: emp.name }, { merge: true });
+                    } else {
+                        // 拒否: 生の打刻データに戻す + CSVダウンロード
+                        const restoreData = {
+                            ...data,
+                            clockIn: raw.clockIn || null,
+                            breakStart1: raw.breakStart1 || null,
+                            breakEnd1: raw.breakEnd1 || null,
+                            breakStart2: raw.breakStart2 || null,
+                            breakEnd2: raw.breakEnd2 || null,
+                            clockOut: raw.clockOut || null,
+                            isHoliday: raw.isHoliday || false,
+                            pendingEmployeeApproval: false,
+                            rejectedAt: new Date().toISOString(),
+                            rejectedBy: emp.name,
+                            updatedAt: Timestamp.now()
+                        };
+                        await setDoc(docRef, restoreData);
+                        // 生データをCSVダウンロード
+                        downloadRawCsv(emp.name, dateKey, raw, data);
+                        await Swal.fire({
+                            title: '元の打刻に戻しました',
+                            html: '生の打刻データをCSVでダウンロードしました。<br>このファイルを保管しておいてください。',
+                            icon: 'success',
+                            confirmButtonText: 'OK',
+                        });
+                    }
+                } catch(err) {
+                    console.error('承認確認エラー:', err);
+                }
+            };
+
+            // 🆕 生データCSVダウンロード
+            const downloadRawCsv = (empName, dateKey, raw, adminData) => {
+                const fields = [
+                    { key: 'clockIn', label: '出勤' },
+                    { key: 'breakStart1', label: '休憩入1' },
+                    { key: 'breakEnd1', label: '休憩出1' },
+                    { key: 'breakStart2', label: '休憩入2' },
+                    { key: 'breakEnd2', label: '休憩出2' },
+                    { key: 'clockOut', label: '退勤' },
+                ];
+                let csv = '\uFEFF'; // BOM for Excel
+                csv += `従業員名,${empName}\n`;
+                csv += `日付,${dateKey}\n`;
+                csv += `出力日時,${new Date().toLocaleString('ja-JP')}\n\n`;
+                csv += '項目,あなたの打刻（生データ）,管理者修正後\n';
+                fields.forEach(f => {
+                    const rawVal = raw[f.key] || '';
+                    const adminVal = adminData[f.key] || '';
+                    csv += `${f.label},${rawVal},${adminVal}\n`;
+                });
+                csv += `\n管理者修正日時,${adminData.pendingApprovalAt || ''}\n`;
+                const editMemo = adminData.editHistory && adminData.editHistory.length > 0 ? (adminData.editHistory[adminData.editHistory.length-1].memo || '') : '';
+                if (editMemo) csv += `管理者メモ,${editMemo}\n`;
+                csv += `\nこのファイルはあなたの元の打刻記録です。保管しておいてください。\n`;
+
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `打刻記録_${empName}_${dateKey}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
             };
 
             const recordTime = async (type, isHoliday = false) => {
@@ -434,9 +562,14 @@
                                         <select
                                             className="w-full p-4 border-2 border-gray-300 rounded-xl text-lg focus:border-blue-500 focus:outline-none"
                                             value={selectedEmployee?.id || ''}
-                                            onChange={(e) => {
-                                                setSelectedEmployee(employees.find(emp => emp.id === e.target.value));
+                                            onChange={async (e) => {
+                                                const emp = employees.find(emp => emp.id === e.target.value);
+                                                setSelectedEmployee(emp);
                                                 setLastAction(null);
+                                                // 🆕 管理者修正の承認確認
+                                                if (emp) {
+                                                    await checkPendingApproval(emp);
+                                                }
                                             }}
                                         >
                                             <option value="">選択してください</option>
