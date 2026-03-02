@@ -635,18 +635,18 @@ const AdminSystem = () => {
     // セッション復元
     useEffect(() => {
         // CRITICAL: 古い値を強制削除
-        const storedStoreId = sessionStorage.getItem('kanriStoreId');
+        const storedStoreId = localStorage.getItem('kanriStoreId');
         if (storedStoreId === 'shimoarekasuka' || storedStoreId === 'shimoakatsuka') {
             console.warn('⚠️ 下赤塚店のID "' + storedStoreId + '" を検出 → null に変換（旧パス使用）');
-            sessionStorage.setItem('kanriStoreId', ''); // 空文字列に変換
+            localStorage.setItem('kanriStoreId', ''); // 空文字列に変換
             window.currentStoreId = null;
-            const storedStoreName = sessionStorage.getItem('kanriStoreName');
+            const storedStoreName = localStorage.getItem('kanriStoreName');
             window.currentStoreName = storedStoreName;
             setIsAdminAuthenticated(true);
             console.log('✅ セッション復元: storeId = null (下赤塚店), storeName =', storedStoreName);
             return;
         }
-        const storedStoreName = sessionStorage.getItem('kanriStoreName');
+        const storedStoreName = localStorage.getItem('kanriStoreName');
         if (storedStoreName) {
             // storeIdが空文字列またはnullの場合はnull（下赤塚店）
             let actualStoreId = null;
@@ -856,13 +856,13 @@ const AdminSystem = () => {
             // 下赤塚店（旧システム）の特別処理
             if (storeNameInput === '粉もん屋 八' && passwordInput === 'hachi888') {
                 // sessionStorageをクリア
-                sessionStorage.removeItem('kanriStoreId');
-                sessionStorage.removeItem('kanriStoreName');
+                localStorage.removeItem('kanriStoreId');
+                localStorage.removeItem('kanriStoreName');
                 window.currentStoreId = null; // デフォルト = null
                 window.currentStoreName = '粉もん屋 八';
                 // 空文字列で保存（nullは保存できないため）
-                sessionStorage.setItem('kanriStoreId', '');
-                sessionStorage.setItem('kanriStoreName', '粉もん屋 八');
+                localStorage.setItem('kanriStoreId', '');
+                localStorage.setItem('kanriStoreName', '粉もん屋 八');
                 setIsAdminAuthenticated(true);
                 setPasswordInput('');
                 setIsLoading(false);
@@ -898,14 +898,20 @@ const AdminSystem = () => {
                 if (storeDocId === 'shimoarekasuka' || storeDocId === 'shimoakatsuka') {
                     console.log('🔧 下赤塚店のIDを検出: ' + storeDocId + ' → null (旧パス使用)');
                     window.currentStoreId = null;
-                    sessionStorage.setItem('kanriStoreId', '');
+                    localStorage.setItem('kanriStoreId', '');
                 }
                 else {
                     window.currentStoreId = storeDocId;
-                    sessionStorage.setItem('kanriStoreId', storeDocId);
+                    localStorage.setItem('kanriStoreId', storeDocId);
                 }
                 window.currentStoreName = storeData.storeName;
-                sessionStorage.setItem('kanriStoreName', storeData.storeName);
+                localStorage.setItem('kanriStoreName', storeData.storeName);
+                localStorage.setItem('kanriSessionVersion', String(storeData.sessionVersion || ''));
+                const now = new Date();
+                const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+                const jstH = jstNow.getUTCHours();
+                const jstD = new Date(jstNow.getTime() - (jstH < 3 ? 86400000 : 0));
+                localStorage.setItem('kanriLoginDate', jstD.toISOString().slice(0,10));
                 setIsAdminAuthenticated(true);
                 setPasswordInput('');
             }
@@ -921,6 +927,58 @@ const AdminSystem = () => {
             setIsLoading(false);
         }
     };
+    // ========== 朝3時自動ログアウト + パスワード変更チェック ==========
+    React.useEffect(() => {
+        if (!isAdminAuthenticated) return;
+        const intervalId = setInterval(async () => {
+            // 朝3時チェック（営業日が変わったか）
+            const loginDate = localStorage.getItem('kanriLoginDate') || '';
+            const now = new Date();
+            const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+            const jstH = jstNow.getUTCHours();
+            const jstD = new Date(jstNow.getTime() - (jstH < 3 ? 86400000 : 0));
+            const currentDate = jstD.toISOString().slice(0, 10);
+            if (loginDate && currentDate && loginDate !== currentDate) {
+                localStorage.removeItem('kanriStoreId');
+                localStorage.removeItem('kanriStoreName');
+                localStorage.removeItem('kanriSessionVersion');
+                localStorage.removeItem('kanriLoginDate');
+                setIsAdminAuthenticated(false);
+                alert('営業日が変わりました。再度ログインしてください。');
+                return;
+            }
+            // sessionVersionチェック（パスワード変更・無効化）
+            const savedStoreId = localStorage.getItem('kanriStoreId');
+            if (!savedStoreId || savedStoreId === '') return;
+            try {
+                const { doc, getDoc } = window.firebaseModules;
+                const snap = await getDoc(doc(window.db, 'stores', savedStoreId));
+                if (!snap.exists()) return;
+                const data = snap.data();
+                if (data.isActive === false) {
+                    localStorage.removeItem('kanriStoreId');
+                    localStorage.removeItem('kanriStoreName');
+                    localStorage.removeItem('kanriSessionVersion');
+                    localStorage.removeItem('kanriLoginDate');
+                    setIsAdminAuthenticated(false);
+                    alert('この店舗は無効化されました。');
+                    return;
+                }
+                const savedVersion = localStorage.getItem('kanriSessionVersion') || '';
+                const currentVersion = String(data.sessionVersion || '');
+                if (savedVersion && currentVersion && savedVersion !== currentVersion) {
+                    localStorage.removeItem('kanriStoreId');
+                    localStorage.removeItem('kanriStoreName');
+                    localStorage.removeItem('kanriSessionVersion');
+                    localStorage.removeItem('kanriLoginDate');
+                    setIsAdminAuthenticated(false);
+                    alert('パスワードが変更されました。新しいパスワードでログインしてください。');
+                }
+            } catch(e) {}
+        }, 60 * 1000);
+        return () => clearInterval(intervalId);
+    }, [isAdminAuthenticated]);
+
     const getDaysInMonth = (month, year) => {
         return new Date(year, month + 1, 0).getDate();
     };
@@ -4567,7 +4625,7 @@ const AdminSystem = () => {
                 React.createElement("div", { className: "flex justify-between items-center" },
                     React.createElement("div", null,
                         React.createElement("h1", { className: "text-3xl font-bold text-gray-800" }, "\u7BA1\u7406\u753B\u9762")),
-                    React.createElement("button", { onClick: () => setIsAdminAuthenticated(false), className: "px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600" }, "\u30ED\u30B0\u30A2\u30A6\u30C8"))),
+                    React.createElement("button", { onClick: () => { localStorage.removeItem('kanriStoreId'); localStorage.removeItem('kanriStoreName'); localStorage.removeItem('kanriSessionVersion'); localStorage.removeItem('kanriLoginDate'); setIsAdminAuthenticated(false); }, className: "px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600" }, "\u30ED\u30B0\u30A2\u30A6\u30C8"))),
             React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
                 React.createElement("div", { className: "flex items-center gap-4" },
                     React.createElement("label", { className: "font-medium text-gray-700" }, "\u5BFE\u8C61\u6708:"),

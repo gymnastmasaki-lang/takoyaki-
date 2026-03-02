@@ -379,7 +379,7 @@
       
       // 営業日を保存
       window.selectedBusinessDate = formatDateISO(selectedDate);
-      sessionStorage.setItem('businessDate', window.selectedBusinessDate);
+      localStorage.setItem('businessDate', window.selectedBusinessDate);
       
       console.log('📅 営業日選択:', window.selectedBusinessDate);
       
@@ -16830,9 +16830,9 @@ ${redSlipCount > 0 ? `
           window.currentStoreId = null; // nullの場合は旧パスを使う
           window.currentStoreName = currentStoreName;
           
-          sessionStorage.setItem('posStoreId', '');
-          sessionStorage.setItem('posStoreName', currentStoreName);
-          sessionStorage.setItem('posAuthenticated', 'true');
+          localStorage.setItem('posStoreId', '');
+          localStorage.setItem('posStoreName', currentStoreName);
+          localStorage.setItem('posAuthenticated', 'true');
           
           const headerTitle = document.querySelector('.header-title');
           if (headerTitle) {
@@ -16893,9 +16893,11 @@ ${redSlipCount > 0 ? `
             window.currentStoreId = currentStoreId;
             window.currentStoreName = currentStoreName;
             
-            sessionStorage.setItem('posStoreId', currentStoreId || '');
-            sessionStorage.setItem('posStoreName', currentStoreName);
-            sessionStorage.setItem('posAuthenticated', 'true');
+            localStorage.setItem('posStoreId', currentStoreId || '');
+            localStorage.setItem('posStoreName', currentStoreName);
+            localStorage.setItem('posAuthenticated', 'true');
+            localStorage.setItem('posSessionVersion', String(storeData.sessionVersion || ''));
+            localStorage.setItem('posLoginDate', window.getBusinessDay(new Date()).str);
             
             // ヘッダーに店舗名を表示
             const headerTitle = document.querySelector('.header-title');
@@ -16924,9 +16926,9 @@ ${redSlipCount > 0 ? `
           window.currentStoreId = null; // nullの場合は旧パスを使う
           window.currentStoreName = currentStoreName;
           
-          sessionStorage.setItem('posStoreId', '');
-          sessionStorage.setItem('posStoreName', currentStoreName);
-          sessionStorage.setItem('posAuthenticated', 'true');
+          localStorage.setItem('posStoreId', '');
+          localStorage.setItem('posStoreName', currentStoreName);
+          localStorage.setItem('posAuthenticated', 'true');
           
           console.log('セッションストレージ保存完了');
           
@@ -17037,9 +17039,9 @@ ${redSlipCount > 0 ? `
         }
       });
       
-      const isAuthenticated = sessionStorage.getItem('posAuthenticated');
-      const savedStoreId = sessionStorage.getItem('posStoreId');
-      const savedStoreName = sessionStorage.getItem('posStoreName');
+      const isAuthenticated = localStorage.getItem('posAuthenticated');
+      const savedStoreId = localStorage.getItem('posStoreId');
+      const savedStoreName = localStorage.getItem('posStoreName');
       
       if (isAuthenticated === 'true' && savedStoreName) {
         //  下赤塚店の特別処理: IDが shimoarekasuka または shimoakatsuka の場合は null に変換
@@ -17056,7 +17058,7 @@ ${redSlipCount > 0 ? `
         window.currentStoreName = currentStoreName;
         
         // 🆕 営業日をセッションから復元
-        const savedBusinessDate = sessionStorage.getItem('businessDate');
+        const savedBusinessDate = localStorage.getItem('businessDate');
         if (savedBusinessDate) {
           window.selectedBusinessDate = savedBusinessDate;
           console.log('📅 営業日復元:', window.selectedBusinessDate);
@@ -17104,6 +17106,59 @@ ${redSlipCount > 0 ? `
       }
     });
     
+    // ========== 朝3時自動ログアウト + パスワード変更チェック ==========
+    function forceLogout(reason) {
+      localStorage.removeItem('posAuthenticated');
+      localStorage.removeItem('posStoreId');
+      localStorage.removeItem('posStoreName');
+      localStorage.removeItem('businessDate');
+      localStorage.removeItem('posSessionVersion');
+      localStorage.removeItem('posLoginDate');
+      window.currentStoreId = null;
+      window.currentStoreName = null;
+      window.selectedBusinessDate = null;
+      document.getElementById('mainContent').style.display = 'none';
+      document.getElementById('loginScreen').style.display = 'flex';
+      if (reason) alert(reason);
+    }
+
+    // 1分ごとに朝3時チェック + sessionVersionチェック
+    setInterval(async () => {
+      const isAuth = localStorage.getItem('posAuthenticated');
+      if (isAuth !== 'true') return;
+
+      const now = new Date();
+      const loginDate = localStorage.getItem('posLoginDate') || '';
+      const currentBusinessDay = window.getBusinessDay ? window.getBusinessDay(now).str : '';
+
+      // 朝3時をまたいだ（営業日が変わった）
+      if (loginDate && currentBusinessDay && loginDate !== currentBusinessDay) {
+        forceLogout('営業日が変わりました。再度ログインしてください。');
+        return;
+      }
+
+      // sessionVersionチェック（パスワード変更・無効化）
+      const savedStoreId = localStorage.getItem('posStoreId');
+      if (!savedStoreId || savedStoreId === '') return; // 旧システムはスキップ
+      try {
+        const { doc, getDoc } = window.firebaseModules;
+        const snap = await getDoc(doc(window.db, 'stores', savedStoreId));
+        if (!snap.exists()) return;
+        const data = snap.data();
+        // 無効化チェック
+        if (data.isActive === false) {
+          forceLogout('この店舗は無効化されました。管理者にお問い合わせください。');
+          return;
+        }
+        // sessionVersionチェック（パスワード変更）
+        const savedVersion = localStorage.getItem('posSessionVersion') || '';
+        const currentVersion = String(data.sessionVersion || '');
+        if (savedVersion && currentVersion && savedVersion !== currentVersion) {
+          forceLogout('パスワードが変更されました。新しいパスワードでログインしてください。');
+        }
+      } catch(e) { /* ネットエラー時はそのまま */ }
+    }, 60 * 1000); // 1分ごと
+
     // アプリケーション初期化処理
     function initializeApp() {
       // 既存の初期化処理が自動実行されるため、ここでは何もしない
@@ -17457,10 +17512,12 @@ ${redSlipCount > 0 ? `
       });
       
       if (confirmed) {
-        sessionStorage.removeItem('posAuthenticated');
-        sessionStorage.removeItem('posStoreId');
-        sessionStorage.removeItem('posStoreName');
-        sessionStorage.removeItem('businessDate');  // 🆕 営業日もクリア
+        localStorage.removeItem('posAuthenticated');
+        localStorage.removeItem('posStoreId');
+        localStorage.removeItem('posStoreName');
+        localStorage.removeItem('businessDate');  // 営業日もクリア
+        localStorage.removeItem('posSessionVersion');
+        localStorage.removeItem('posLoginDate');
         window.currentStoreId = null;
         window.currentStoreName = null;
         window.selectedBusinessDate = null;  // 🆕

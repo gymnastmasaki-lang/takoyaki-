@@ -1462,7 +1462,7 @@
         await updateDoc(window.getStoreDoc('orders', order.id), { memo: newMemo });
         showToast('✓ メモを保存しました');
         overlay.remove();
-        // loadOrders()はwatchOrdersのSnapshotリスナーが自動呼び出し
+        loadOrders();
       };
       
       document.getElementById('close-detail-btn').onclick = () => overlay.remove();
@@ -1485,7 +1485,7 @@
         });
         
         showToast('✓ 完了しました');
-        // loadOrders()はwatchOrdersのSnapshotリスナーが自動呼び出し
+        loadOrders();
       } catch (e) {
         console.error(e);
         showToast('エラー: ' + e.message);
@@ -1530,7 +1530,8 @@
         console.log('✅ 商品チェック状態を更新:', orderId, 'item', itemIndex, '=', itemsChecked[itemIndex]);
         showToast(`✓ ${itemsChecked[itemIndex] ? 'チェック' : 'チェック解除'}しました`);
         
-        // loadOrders()はwatchOrdersのSnapshotリスナーが自動呼び出し
+        // 注文一覧を再読み込み
+        loadOrders();
       } catch (e) {
         console.error('❌ チェック状態更新エラー:', e);
         showToast('エラーが発生しました: ' + e.message);
@@ -1608,7 +1609,7 @@
         });
         
         showToast('✓ キャンセルしました');
-        // loadOrders()はwatchOrdersのSnapshotリスナーが自動呼び出し
+        loadOrders();
       } catch (e) {
         console.error(e);
         showToast('エラー: ' + e.message);
@@ -1623,7 +1624,7 @@
           deletedAt: Timestamp.now()
         });
         showToast('✓ 注文を削除しました');
-        // loadOrders()はwatchOrdersのSnapshotリスナーが自動呼び出し
+        loadOrders();
       } catch (e) {
         console.error(e);
         showToast('エラー: ' + e.message);
@@ -1687,7 +1688,7 @@
           });
           
           showToast('✓ 会計を未済に戻しました');
-          // loadOrders()はwatchOrdersのSnapshotリスナーが自動呼び出し
+          loadOrders();
         } else {
           console.log('未済 → 支払い方法選択モーダルを表示');
           // 支払い方法選択モーダルを表示
@@ -1847,7 +1848,7 @@
         
         closePaymentModal();
         showToast('✓ 会計済みにしました');
-        // loadOrders()はwatchOrdersのSnapshotリスナーが自動呼び出し
+        loadOrders();
         
         // 会計完了後にレシート/領収書の選択モーダルを表示
         const checkoutData = {
@@ -2587,7 +2588,7 @@
         if (storeName === '下赤塚' && password === 'K12290619T') {
           document.getElementById('loginScreen').style.display = 'none';
           document.getElementById('mainContent').style.display = 'block';
-          sessionStorage.setItem('controllerAuth', 'true');
+          localStorage.setItem('controllerAuth', 'true');
           
           console.log('✅ ログイン成功（旧システム）');
           return false;
@@ -2612,12 +2613,20 @@
           if (found) {
             currentStoreId = window.currentStoreId;
             currentStoreName = window.currentStoreName;
+            // sessionVersionとloginDateを保存
+            let sessionVer = '';
+            snapshot.forEach(d => { if (d.id === currentStoreId) sessionVer = String(d.data().sessionVersion || ''); });
+            const nowC = new Date();
+            const jstNowC = new Date(nowC.getTime() + 9 * 60 * 60 * 1000);
+            const jstHC = jstNowC.getUTCHours();
+            const jstDC = new Date(jstNowC.getTime() - (jstHC < 3 ? 86400000 : 0));
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('mainContent').style.display = 'block';
-            sessionStorage.setItem('controllerAuth', 'true');
-            sessionStorage.setItem('controllerStoreId', currentStoreId);
-            sessionStorage.setItem('controllerStoreName', currentStoreName);
-            
+            localStorage.setItem('controllerAuth', 'true');
+            localStorage.setItem('controllerStoreId', currentStoreId);
+            localStorage.setItem('controllerStoreName', currentStoreName);
+            localStorage.setItem('controllerSessionVersion', sessionVer);
+            localStorage.setItem('controllerLoginDate', jstDC.toISOString().slice(0,10));
             console.log('✅ ログイン成功:', currentStoreName);
             return false;
           }
@@ -2644,9 +2653,11 @@
       });
       
       if (confirmed) {
-        sessionStorage.removeItem('controllerAuth');
-        sessionStorage.removeItem('controllerStoreId');
-        sessionStorage.removeItem('controllerStoreName');
+        localStorage.removeItem('controllerAuth');
+        localStorage.removeItem('controllerStoreId');
+        localStorage.removeItem('controllerStoreName');
+        localStorage.removeItem('controllerSessionVersion');
+        localStorage.removeItem('controllerLoginDate');
         window.currentStoreId = null;
         window.currentStoreName = null;
         
@@ -2663,9 +2674,9 @@
     
     // ページ読み込み時の認証チェック
     window.addEventListener('DOMContentLoaded', () => {
-      const isAuth = sessionStorage.getItem('controllerAuth');
-      const savedStoreId = sessionStorage.getItem('controllerStoreId');
-      const savedStoreName = sessionStorage.getItem('controllerStoreName');
+      const isAuth = localStorage.getItem('controllerAuth');
+      const savedStoreId = localStorage.getItem('controllerStoreId');
+      const savedStoreName = localStorage.getItem('controllerStoreName');
       
       if (isAuth === 'true') {
         currentStoreId = savedStoreId || null;
@@ -2681,6 +2692,54 @@
         document.getElementById('loginScreen').style.display = 'flex';
         document.getElementById('mainContent').style.display = 'none';
       }
+
+      // ========== 朝3時自動ログアウト + パスワード変更チェック ==========
+      function controllerForceLogout(reason) {
+        localStorage.removeItem('controllerAuth');
+        localStorage.removeItem('controllerStoreId');
+        localStorage.removeItem('controllerStoreName');
+        localStorage.removeItem('controllerSessionVersion');
+        localStorage.removeItem('controllerLoginDate');
+        window.currentStoreId = null;
+        window.currentStoreName = null;
+        document.getElementById('mainContent').style.display = 'none';
+        document.getElementById('loginScreen').style.display = 'flex';
+        if (reason) alert(reason);
+      }
+
+      setInterval(async () => {
+        const isAuth = localStorage.getItem('controllerAuth');
+        if (isAuth !== 'true') return;
+        // 朝3時チェック
+        const loginDate = localStorage.getItem('controllerLoginDate') || '';
+        const now = new Date();
+        const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+        const jstH = jstNow.getUTCHours();
+        const jstD = new Date(jstNow.getTime() - (jstH < 3 ? 86400000 : 0));
+        const currentDate = jstD.toISOString().slice(0, 10);
+        if (loginDate && currentDate && loginDate !== currentDate) {
+          controllerForceLogout('営業日が変わりました。再度ログインしてください。');
+          return;
+        }
+        // sessionVersionチェック
+        const savedStoreId = localStorage.getItem('controllerStoreId');
+        if (!savedStoreId) return;
+        try {
+          const snap = await getDoc(doc(db, 'stores', savedStoreId));
+          if (!snap.exists()) return;
+          const data = snap.data();
+          if (data.isActive === false) {
+            controllerForceLogout('この店舗は無効化されました。');
+            return;
+          }
+          const savedVersion = localStorage.getItem('controllerSessionVersion') || '';
+          const currentVersion = String(data.sessionVersion || '');
+          if (savedVersion && currentVersion && savedVersion !== currentVersion) {
+            controllerForceLogout('パスワードが変更されました。新しいパスワードでログインしてください。');
+          }
+        } catch(e) {}
+      }, 60 * 1000);
+
     });
   </script>
   
