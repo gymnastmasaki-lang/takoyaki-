@@ -12,6 +12,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
     <div id="root"></div>
@@ -76,6 +77,9 @@
             const [showStoreSelect, setShowStoreSelect] = useState(true);
             // 🆕 管理者修正承認待ち
             const [pendingApprovalData, setPendingApprovalData] = useState(null);
+            // 🆕 勤怠詳細モーダル
+            const [showAttendanceDetail, setShowAttendanceDetail] = useState(false);
+            const [attendanceDetailData, setAttendanceDetailData] = useState([]);
 
             // 現在時刻を更新
             useEffect(() => {
@@ -201,7 +205,6 @@
             const checkPendingApproval = async (emp) => {
                 try {
                     const { doc, getDoc, setDoc, Timestamp } = window.firebaseModules;
-                    // 今日の出勤記録を確認
                     const now = new Date();
                     const dateKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
                     let docRef;
@@ -215,7 +218,6 @@
                     const data = snap.data();
                     if (!data.pendingEmployeeApproval) return;
 
-                    // 修正内容をまとめて表示
                     const raw = data.rawClockData || {};
                     const fields = [
                         { key: 'clockIn', label: '出勤' },
@@ -225,7 +227,7 @@
                         { key: 'breakEnd2', label: '休憩出2' },
                         { key: 'clockOut', label: '退勤' },
                     ];
-                    let diffHtml = '<table style="width:100%;border-collapse:collapse;margin:10px 0;font-size:14px;">';
+                    let diffHtml = '<table style="width:100%;border-collapse:collapse;margin:10px 0;font-size:13px;">';
                     diffHtml += '<tr style="background:#f0f0f0;"><th style="padding:6px;border:1px solid #ccc;">項目</th><th style="padding:6px;border:1px solid #ccc;">あなたの打刻</th><th style="padding:6px;border:1px solid #ccc;">管理者修正後</th></tr>';
                     fields.forEach(f => {
                         const rawVal = raw[f.key] || '—';
@@ -239,7 +241,7 @@
                     });
                     diffHtml += '</table>';
                     const memo = data.editHistory && data.editHistory.length > 0 ? (data.editHistory[data.editHistory.length-1].memo || '') : '';
-                    if (memo) diffHtml += `<div style="margin-top:8px;font-size:13px;color:#555;">管理者メモ: ${memo}</div>`;
+                    if (memo) diffHtml += `<div style="margin-top:8px;font-size:12px;color:#555;">管理者メモ: ${memo}</div>`;
 
                     const result = await Swal.fire({
                         title: '管理者が勤怠を修正しました',
@@ -256,11 +258,10 @@
                     });
 
                     if (result.isConfirmed) {
-                        // 承認: pendingフラグを解除するだけ（編集データをそのまま使用）
                         await setDoc(docRef, { pendingEmployeeApproval: false, approvedAt: new Date().toISOString(), approvedBy: emp.name }, { merge: true });
                     } else {
-                        // 拒否: 生の打刻データに戻す + CSVダウンロード
-                        const restoreData = {
+                        // 元の打刻に戻す
+                        await setDoc(docRef, {
                             ...data,
                             clockIn: raw.clockIn || null,
                             breakStart1: raw.breakStart1 || null,
@@ -273,25 +274,54 @@
                             rejectedAt: new Date().toISOString(),
                             rejectedBy: emp.name,
                             updatedAt: Timestamp.now()
-                        };
-                        await setDoc(docRef, restoreData);
-                        // 生データをCSVダウンロード
-                        downloadRawCsv(emp.name, dateKey, raw, data);
-                        await Swal.fire({
-                            title: '元の打刻に戻しました',
-                            html: '生の打刻データをCSVでダウンロードしました。<br>このファイルを保管しておいてください。',
-                            icon: 'success',
-                            confirmButtonText: 'OK',
                         });
+                        await Swal.fire({ title: '元の打刻に戻しました', icon: 'success', confirmButtonText: 'OK' });
                     }
                 } catch(err) {
                     console.error('承認確認エラー:', err);
                 }
             };
 
-            // 🆕 生データCSVダウンロード
-            const downloadRawCsv = (empName, dateKey, raw, adminData) => {
-                const fields = [
+            // 🆕 勤怠詳細を開く（当月全日分をFirestoreから取得）
+            const openAttendanceDetail = async () => {
+                if (!selectedEmployee) return;
+                try {
+                    const { doc, getDoc } = window.firebaseModules;
+                    const now = new Date();
+                    const year = now.getFullYear();
+                    const month = now.getMonth();
+                    const daysInMonth = new Date(year, month + 1, 0).getDate();
+                    const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+                    const rows = [];
+                    for (let day = 1; day <= daysInMonth; day++) {
+                        const dateKey = `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                        let docRef;
+                        if (!selectedStore || selectedStore.id === 'shimoakatsuka' || selectedStore.id === 'shimoarekasuka') {
+                            docRef = doc(window.db, 'kintai_attendance', `${selectedEmployee.id}_${dateKey}`);
+                        } else {
+                            docRef = doc(window.db, 'stores', selectedStore.id, 'attendance', `${selectedEmployee.id}_${dateKey}`);
+                        }
+                        const snap = await getDoc(docRef);
+                        const record = snap.exists() ? snap.data() : null;
+                        const dayOfWeek = dayNames[new Date(year, month, day).getDay()];
+                        rows.push({ day, dayOfWeek, record, dateKey });
+                    }
+                    setAttendanceDetailData(rows);
+                    setShowAttendanceDetail(true);
+                } catch(err) {
+                    console.error('勤怠詳細取得エラー:', err);
+                }
+            };
+
+            // 🆕 勤怠詳細をPNGで保存（kanri.htmlと同じ形式）
+            const downloadAttendancePNG = async () => {
+                if (!selectedEmployee) return;
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = now.getMonth() + 1;
+                const tempDiv = document.createElement('div');
+                tempDiv.style.cssText = 'position:absolute;left:-9999px;background:white;padding:30px;width:1200px;font-family:Arial,sans-serif;';
+                const timeFields = [
                     { key: 'clockIn', label: '出勤' },
                     { key: 'breakStart1', label: '休憩入1' },
                     { key: 'breakEnd1', label: '休憩出1' },
@@ -299,28 +329,56 @@
                     { key: 'breakEnd2', label: '休憩出2' },
                     { key: 'clockOut', label: '退勤' },
                 ];
-                let csv = '\uFEFF'; // BOM for Excel
-                csv += `従業員名,${empName}\n`;
-                csv += `日付,${dateKey}\n`;
-                csv += `出力日時,${new Date().toLocaleString('ja-JP')}\n\n`;
-                csv += '項目,あなたの打刻（生データ）,管理者修正後\n';
-                fields.forEach(f => {
-                    const rawVal = raw[f.key] || '';
-                    const adminVal = adminData[f.key] || '';
-                    csv += `${f.label},${rawVal},${adminVal}\n`;
+                let tableHTML = `
+                    <div style="text-align:center;margin-bottom:20px;">
+                        <h1 style="font-size:24px;font-weight:bold;margin-bottom:10px;">勤怠詳細</h1>
+                        <div style="font-size:14px;color:#666;">${selectedEmployee.name} - ${year}年${month}月</div>
+                    </div>
+                    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                        <thead style="background:#f3f4f6;">
+                            <tr>
+                                <th style="border:2px solid #000;padding:8px;">日付</th>
+                                ${timeFields.map(f => `<th style="border:2px solid #000;padding:8px;">${f.label}</th>`).join('')}
+                                <th style="border:2px solid #000;padding:8px;">備考</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+                attendanceDetailData.forEach(({ day, dayOfWeek, record }) => {
+                    const isRejected = record && record.rejectedAt;
+                    const raw = (record && record.rawClockData) || {};
+                    const rowBg = isRejected ? '#FFCDD2' : (!record || !record.clockIn) ? '#f5f5f5' : 'white';
+                    const remarkText = isRejected ? '非承認' : '';
+                    tableHTML += `<tr>
+                        <td style="border:2px solid #000;padding:8px;text-align:center;background:#f9fafb;">${day}日(${dayOfWeek})</td>`;
+                    timeFields.forEach(f => {
+                        // 非承認の場合は生データを表示
+                        const val = (isRejected ? raw[f.key] : (record && record[f.key])) || '-';
+                        tableHTML += `<td style="border:2px solid #000;padding:8px;text-align:center;background:${rowBg};">${val}</td>`;
+                    });
+                    tableHTML += `<td style="border:2px solid #000;padding:8px;font-size:9px;background:#f9fafb;">${remarkText || '-'}</td>
+                    </tr>`;
                 });
-                csv += `\n管理者修正日時,${adminData.pendingApprovalAt || ''}\n`;
-                const editMemo = adminData.editHistory && adminData.editHistory.length > 0 ? (adminData.editHistory[adminData.editHistory.length-1].memo || '') : '';
-                if (editMemo) csv += `管理者メモ,${editMemo}\n`;
-                csv += `\nこのファイルはあなたの元の打刻記録です。保管しておいてください。\n`;
-
-                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `打刻記録_${empName}_${dateKey}.csv`;
-                a.click();
-                URL.revokeObjectURL(url);
+                tableHTML += `</tbody></table>
+                    <div style="margin-top:12px;font-size:11px;color:#666;">
+                        <span style="display:inline-block;width:12px;height:12px;background:#FFCDD2;border:1px solid #ccc;margin-right:4px;"></span>非承認（元の打刻に戻した日）
+                    </div>`;
+                tempDiv.innerHTML = tableHTML;
+                document.body.appendChild(tempDiv);
+                try {
+                    const canvas = await html2canvas(tempDiv, { scale: 2, backgroundColor: '#ffffff', logging: false });
+                    document.body.removeChild(tempDiv);
+                    canvas.toBlob(blob => {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `勤怠詳細_${selectedEmployee.name}_${year}年${month}月.png`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                    });
+                } catch(err) {
+                    document.body.removeChild(tempDiv);
+                    console.error('PNG出力エラー:', err);
+                }
             };
 
             const recordTime = async (type, isHoliday = false) => {
@@ -566,10 +624,7 @@
                                                 const emp = employees.find(emp => emp.id === e.target.value);
                                                 setSelectedEmployee(emp);
                                                 setLastAction(null);
-                                                // 🆕 管理者修正の承認確認
-                                                if (emp) {
-                                                    await checkPendingApproval(emp);
-                                                }
+                                                if (emp) await checkPendingApproval(emp);
                                             }}
                                         >
                                             <option value="">選択してください</option>
@@ -632,13 +687,21 @@
                                                 </button>
                                             </div>
                                             
-                                            {/* 退勤 */}
-                                            <button
-                                                onClick={() => recordTime('clockOut')}
-                                                className="w-full p-6 bg-red-500 text-white rounded-xl hover:bg-red-600 font-bold text-lg shadow-lg transform transition hover:scale-105"
-                                            >
-                                                退勤
-                                            </button>
+                                            {/* 退勤・勤怠詳細 */}
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <button
+                                                    onClick={() => recordTime('clockOut')}
+                                                    className="p-6 bg-red-500 text-white rounded-xl hover:bg-red-600 font-bold text-lg shadow-lg transform transition hover:scale-105"
+                                                >
+                                                    退勤
+                                                </button>
+                                                <button
+                                                    onClick={() => openAttendanceDetail()}
+                                                    className="p-6 bg-gray-600 text-white rounded-xl hover:bg-gray-700 font-bold text-lg shadow-lg transform transition hover:scale-105"
+                                                >
+                                                    勤怠詳細
+                                                </button>
+                                            </div>
                                         </div>
                                     )}
 
@@ -647,6 +710,60 @@
                                         <div className="mt-6 p-4 bg-green-100 border-2 border-green-500 rounded-xl text-center animate-pulse">
                                             <p className="text-green-800 font-bold text-lg">✓ {lastAction}</p>
                                             <p className="text-green-600 text-sm mt-1">打刻が完了しました</p>
+                                        </div>
+                                    )}
+
+                                    {/* 🆕 勤怠詳細モーダル */}
+                                    {showAttendanceDetail && (
+                                        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.7)',zIndex:9999,overflowY:'auto',padding:'20px'}}>
+                                            <div style={{background:'white',borderRadius:'16px',padding:'24px',maxWidth:'900px',margin:'0 auto'}}>
+                                                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'16px'}}>
+                                                    <h2 style={{fontSize:'20px',fontWeight:'bold'}}>勤怠詳細 - {selectedEmployee?.name} ({new Date().getFullYear()}年{new Date().getMonth()+1}月)</h2>
+                                                    <div style={{display:'flex',gap:'10px'}}>
+                                                        <button onClick={() => downloadAttendancePNG()} style={{padding:'8px 16px',background:'#7C3AED',color:'white',border:'none',borderRadius:'8px',fontWeight:'bold',cursor:'pointer'}}>PNG保存</button>
+                                                        <button onClick={() => setShowAttendanceDetail(false)} style={{padding:'8px 16px',background:'#6B7280',color:'white',border:'none',borderRadius:'8px',fontWeight:'bold',cursor:'pointer'}}>閉じる</button>
+                                                    </div>
+                                                </div>
+                                                <div style={{overflowX:'auto'}}>
+                                                    <table id="attendance-detail-table" style={{width:'100%',borderCollapse:'collapse',fontSize:'12px'}}>
+                                                        <thead style={{background:'#F3F4F6'}}>
+                                                            <tr>
+                                                                {['日付','出勤','休憩入1','休憩出1','休憩入2','休憩出2','退勤','備考'].map(h => (
+                                                                    <th key={h} style={{border:'2px solid #000',padding:'8px',textAlign:'center'}}>{h}</th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {attendanceDetailData.map(({day, dayOfWeek, record}) => {
+                                                                const isRejected = record?.rejectedAt;
+                                                                const raw = record?.rawClockData || {};
+                                                                const rowBg = isRejected ? '#FFEBEE' : (!record || !record.clockIn) ? '#F5F5F5' : 'white';
+                                                                const fields = ['clockIn','breakStart1','breakEnd1','breakStart2','breakEnd2','clockOut'];
+                                                                return (
+                                                                    <tr key={day} style={{background: rowBg}}>
+                                                                        <td style={{border:'2px solid #000',padding:'6px',textAlign:'center',background:'#F9FAFB',fontWeight:'bold'}}>{day}日({dayOfWeek})</td>
+                                                                        {fields.map((f) => {
+                                                                            // 非承認の場合は生データを表示
+                                                                            const val = (isRejected ? raw[f] : record?.[f]) || '-';
+                                                                            return (
+                                                                                <td key={f} style={{border:'2px solid #000',padding:'6px',textAlign:'center',background: rowBg}}>
+                                                                                    {val}
+                                                                                </td>
+                                                                            );
+                                                                        })}
+                                                                        <td style={{border:'2px solid #000',padding:'6px',fontSize:'10px',background:'#F9FAFB'}}>
+                                                                            {isRejected && <span style={{color:'#C62828',fontWeight:'bold'}}>非承認</span>}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <div style={{marginTop:'12px',fontSize:'12px',color:'#666'}}>
+                                                    <span style={{display:'inline-block',width:'12px',height:'12px',background:'#FFEBEE',border:'1px solid #ccc',marginRight:'4px'}}></span>非承認（元の打刻に戻した日）
+                                                </div>
+                                            </div>
                                         </div>
                                     )}
                                 </>
