@@ -790,85 +790,6 @@ const AdminSystem = () => {
         }
     };
 
-    // 給与明細を開いたとき・月が変わったとき → 住民税を自動計算
-    useEffect(() => {
-        if (!selectedPayslipEmployee) return;
-        const employee = employees.find(e => e.id === selectedPayslipEmployee);
-        if (!employee) return;
-        autoCalcResidentTax(selectedPayslipEmployee, employee);
-    }, [selectedPayslipEmployee, currentMonth, currentYear]);
-
-    // 勤怠データから前年所得を集計して住民税を自動計算
-    const autoCalcResidentTax = async (employeeId, employee) => {
-        try {
-            while (!window.FirebaseReady || !window.db) {
-                await new Promise(r => setTimeout(r, 100));
-            }
-            const { collection, getDocs } = window.firebaseModules;
-            // 1〜5月表示中 → 前々年所得、6〜12月 → 前年所得
-            const targetYear = currentMonth >= 5 ? currentYear - 1 : currentYear - 2;
-            const collPath = (!window.currentStoreId || window.currentStoreId === '')
-                ? collection(window.db, 'kintai_attendance')
-                : collection(window.db, 'stores', window.currentStoreId, 'attendance');
-            const snapshot = await getDocs(collPath);
-            const byMonth = {};
-            snapshot.forEach(docSnap => {
-                const parts = docSnap.id.split('_');
-                if (parts.length < 2) return;
-                const empId = parts[0];
-                const dateKey = parts.slice(1).join('_');
-                const m = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-                if (!m || empId !== employeeId || parseInt(m[1]) !== targetYear) return;
-                const mo = parseInt(m[2]) - 1;
-                if (!byMonth[mo]) byMonth[mo] = {};
-                byMonth[mo][dateKey] = docSnap.data();
-            });
-            if (Object.keys(byMonth).length === 0) return;
-            let annualGross = 0, annualSocialIns = 0;
-            for (let mo = 0; mo <= 11; mo++) {
-                const records = byMonth[mo] || {};
-                if (!Object.keys(records).length) continue;
-                let basePay = 0, overtime = 0, holiday = 0, lateNight = 0, workDays = 0;
-                Object.values(records).forEach(rec => {
-                    if (!rec || !rec.clockIn) return;
-                    workDays++;
-                    const d = calculateDailyPay(employee, rec);
-                    basePay += d.base; overtime += d.overtime; holiday += d.holiday; lateNight += d.lateNight;
-                });
-                const transport = (employee.transportAllowance || 0) * workDays;
-                const allowances = employee.allowances || {};
-                const gross = basePay + overtime + holiday + lateNight + transport
-                    + (allowances.family || 0) + (allowances.sales || 0)
-                    + (allowances.position || 0) + (allowances.housing || 0);
-                annualGross += gross;
-                const ded = calculateDeductions(employee, gross, 'hourly');
-                annualSocialIns += (ded.healthInsurance || 0) + (ded.pension || 0) + (ded.employmentInsurance || 0);
-            }
-            if (annualGross <= 0) return;
-            // 給与所得控除
-            let empDed = 0;
-            if (annualGross <= 1625000) empDed = 550000;
-            else if (annualGross <= 1800000) empDed = Math.floor(annualGross * 0.4 - 100000);
-            else if (annualGross <= 3600000) empDed = Math.floor(annualGross * 0.3 + 80000);
-            else if (annualGross <= 6600000) empDed = Math.floor(annualGross * 0.2 + 440000);
-            else if (annualGross <= 8500000) empDed = Math.floor(annualGross * 0.1 + 1100000);
-            else empDed = 1950000;
-            const taxableIncome = Math.max(0,
-                Math.max(0, annualGross - empDed) - Math.round(annualSocialIns) - 480000);
-            const annualTax = Math.floor(taxableIncome * 0.10) + 5500; // 所得割10% + 均等割（東京）
-            const monthly = Math.floor(annualTax / 12);
-            setCalculatedResidentTaxes(prev => {
-                const next = { ...prev,
-                    [employeeId + '_hourly']: monthly,
-                    [employeeId + '_fixed']: monthly };
-                try { localStorage.setItem('calculatedResidentTaxes', JSON.stringify(next)); } catch(e) {}
-                return next;
-            });
-            console.log('住民税自動計算:', employee.name, targetYear + '年収¥' + Math.round(annualGross).toLocaleString(), '→ 月額¥' + monthly.toLocaleString());
-        } catch(err) {
-            console.error('住民税自動計算エラー:', err);
-        }
-    };
     const loadAllData = async () => {
         setIsLoading(true);
         setError(null);
@@ -6367,7 +6288,7 @@ const AdminSystem = () => {
                                         residentTaxOverrides[selectedPayslipEmployee] != null && React.createElement("button", {
                                             onClick: () => { const next = { ...residentTaxOverrides }; delete next[selectedPayslipEmployee]; setResidentTaxOverrides(next); try { localStorage.setItem("residentTaxOverrides", JSON.stringify(next)); } catch(e) {} setShowResidentTaxEdit(false); },
                                             className: "text-xs px-2 py-1 bg-red-100 hover:bg-red-200 text-red-600 rounded border border-red-300"
-                                        }, "修正リセット")))),
+                                        }, "修正リセット"))),
                             (false) ? null : (React.createElement(React.Fragment, null,
 
                             React.createElement("table", { className: "w-full border-collapse border" },
