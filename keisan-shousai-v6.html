@@ -59,7 +59,7 @@
             const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
             const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
             
-            // 前年所得入力フォーム
+            // 前年所得入力フォーム - localStorageから復元
             const [previousYearIncome, setPreviousYearIncome] = useState({
                 year: new Date().getFullYear() - 1,
                 totalIncome: 0,
@@ -67,6 +67,8 @@
                 socialInsurance: 0,
                 incomeType: 'salary'
             });
+            // 従業員ごとの保存データキー
+            const getSavedKey = (empId) => `residentTaxInput_${empId}`;
             
             // 計算タイプ（時給 or 固定給）- URLパラメータから取得
             const [salaryType, setSalaryType] = useState('hourly');
@@ -147,10 +149,29 @@
             // 従業員選択時
             useEffect(() => {
                 if (selectedEmployee) {
-                    // 🆕 前年所得を自動取得
+                    // localStorageから保存済みデータを復元
+                    try {
+                        const saved = localStorage.getItem(getSavedKey(selectedEmployee.id));
+                        if (saved) {
+                            const parsed = JSON.parse(saved);
+                            setPreviousYearIncome(parsed);
+                            console.log('✅ 保存済みデータを復元:', parsed);
+                            return; // 保存済みがあればFirebase取得をスキップ
+                        }
+                    } catch(e) {}
+                    // 保存済みデータがなければFirebaseから取得
                     loadPreviousYearIncome(selectedEmployee.id);
                 }
             }, [selectedEmployee]);
+
+            // 入力値の変更をlocalStorageに自動保存
+            useEffect(() => {
+                if (selectedEmployee && previousYearIncome.totalIncome > 0) {
+                    try {
+                        localStorage.setItem(getSavedKey(selectedEmployee.id), JSON.stringify(previousYearIncome));
+                    } catch(e) {}
+                }
+            }, [previousYearIncome, selectedEmployee]);
 
             // 🆕 カスタムアラート
             const showCustomAlert = (title, message, type = 'info') => {
@@ -209,12 +230,17 @@
                     
                     // 自動入力
                     if (totalIncome > 0) {
-                        setPreviousYearIncome(prev => ({
-                            ...prev,
-                            year: prevYear,
-                            totalIncome: Math.round(totalIncome),
-                            socialInsurance: Math.round(totalSocialInsurance)
-                        }));
+                        setPreviousYearIncome(prev => {
+                            const updated = {
+                                ...prev,
+                                year: prevYear,
+                                totalIncome: Math.round(totalIncome),
+                                socialInsurance: Math.round(totalSocialInsurance)
+                            };
+                            // localStorageにも保存
+                            try { localStorage.setItem(getSavedKey(employeeId), JSON.stringify(updated)); } catch(e) {}
+                            return updated;
+                        });
                         
                         console.log(`✅ ${prevYear}年の所得を取得しました:`, {
                             総所得: totalIncome,
@@ -407,8 +433,29 @@
                             </div>
                             
                             {/* 前年所得入力 */}
+                            {/* 前年所得入力 */}
                             <div className="border-t-2 pt-6 mb-6">
-                                <h2 className="text-xl font-bold text-gray-800 mb-4">前年の年間所得</h2>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-xl font-bold text-gray-800">前年の年間所得</h2>
+                                    {selectedEmployee && (() => {
+                                        try {
+                                            const saved = localStorage.getItem(getSavedKey(selectedEmployee.id));
+                                            if (saved) return (
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-green-700 bg-green-100 px-3 py-1 rounded-full font-bold">💾 前回の入力を復元中</span>
+                                                    <button
+                                                        onClick={() => {
+                                                            try { localStorage.removeItem(getSavedKey(selectedEmployee.id)); } catch(e) {}
+                                                            loadPreviousYearIncome(selectedEmployee.id);
+                                                        }}
+                                                        className="text-sm text-gray-500 underline hover:text-red-500"
+                                                    >クリア</button>
+                                                </div>
+                                            );
+                                        } catch(e) {}
+                                        return null;
+                                    })()}
+                                </div>
                                 
                                 <div className="grid grid-cols-2 gap-4 mb-4">
                                     <div>
