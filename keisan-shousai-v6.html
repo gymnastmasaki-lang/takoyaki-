@@ -59,7 +59,7 @@
             const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
             const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
             
-            // 前年所得入力フォーム - localStorageから復元
+            // 前年所得入力フォーム
             const [previousYearIncome, setPreviousYearIncome] = useState({
                 year: new Date().getFullYear() - 1,
                 totalIncome: 0,
@@ -67,8 +67,6 @@
                 socialInsurance: 0,
                 incomeType: 'salary'
             });
-            // 従業員ごとの保存データキー
-            const getSavedKey = (empId) => `residentTaxInput_${empId}`;
             
             // 計算タイプ（時給 or 固定給）- URLパラメータから取得
             const [salaryType, setSalaryType] = useState('hourly');
@@ -149,29 +147,10 @@
             // 従業員選択時
             useEffect(() => {
                 if (selectedEmployee) {
-                    // localStorageから保存済みデータを復元
-                    try {
-                        const saved = localStorage.getItem(getSavedKey(selectedEmployee.id));
-                        if (saved) {
-                            const parsed = JSON.parse(saved);
-                            setPreviousYearIncome(parsed);
-                            console.log('✅ 保存済みデータを復元:', parsed);
-                            return; // 保存済みがあればFirebase取得をスキップ
-                        }
-                    } catch(e) {}
-                    // 保存済みデータがなければFirebaseから取得
+                    // 🆕 前年所得を自動取得
                     loadPreviousYearIncome(selectedEmployee.id);
                 }
             }, [selectedEmployee]);
-
-            // 入力値の変更をlocalStorageに自動保存
-            useEffect(() => {
-                if (selectedEmployee && previousYearIncome.totalIncome > 0) {
-                    try {
-                        localStorage.setItem(getSavedKey(selectedEmployee.id), JSON.stringify(previousYearIncome));
-                    } catch(e) {}
-                }
-            }, [previousYearIncome, selectedEmployee]);
 
             // 🆕 カスタムアラート
             const showCustomAlert = (title, message, type = 'info') => {
@@ -230,17 +209,12 @@
                     
                     // 自動入力
                     if (totalIncome > 0) {
-                        setPreviousYearIncome(prev => {
-                            const updated = {
-                                ...prev,
-                                year: prevYear,
-                                totalIncome: Math.round(totalIncome),
-                                socialInsurance: Math.round(totalSocialInsurance)
-                            };
-                            // localStorageにも保存
-                            try { localStorage.setItem(getSavedKey(employeeId), JSON.stringify(updated)); } catch(e) {}
-                            return updated;
-                        });
+                        setPreviousYearIncome(prev => ({
+                            ...prev,
+                            year: prevYear,
+                            totalIncome: Math.round(totalIncome),
+                            socialInsurance: Math.round(totalSocialInsurance)
+                        }));
                         
                         console.log(`✅ ${prevYear}年の所得を取得しました:`, {
                             総所得: totalIncome,
@@ -248,7 +222,7 @@
                         });
                         
                         showCustomAlert(
-                            '✅ 前年所得データを読み込みました',
+                            '前年所得データを読み込みました',
                             `${prevYear}年の所得データを自動取得しました\n\n` +
                             `📊 総所得: ¥${Math.round(totalIncome).toLocaleString()}\n` +
                             `💳 社会保険料: ¥${Math.round(totalSocialInsurance).toLocaleString()}\n\n` +
@@ -256,7 +230,7 @@
                             'success'
                         );
                     } else {
-                        console.log(`⚠️ ${prevYear}年のデータがありません`);
+                        console.log(`${prevYear}年のデータがありません`);
                         setPreviousYearIncome(prev => ({
                             ...prev,
                             year: prevYear,
@@ -273,7 +247,7 @@
             const calculateResidentTax = () => {
                 
                 if (previousYearIncome.totalIncome <= 0) {
-                    showCustomAlert('⚠️ 前年の年間所得を入力してください', '前年の年間所得を入力してから計算してください', 'warning');
+                    showCustomAlert('前年の年間所得を入力してください', '前年の年間所得を入力してから計算してください', 'warning');
                     return;
                 }
                 
@@ -358,7 +332,7 @@
             // kanri.htmlに結果を送信して閉じる
             const sendResultAndClose = () => {
                 if (!calculationDetails) {
-                    showCustomAlert('⚠️ 先に計算を実行してください', '住民税を計算してから送信してください', 'warning');
+                    showCustomAlert('先に計算を実行してください', '住民税を計算してから送信してください', 'warning');
                     return;
                 }
                 
@@ -386,7 +360,7 @@
                         window.close();
                     }, 500);
                 } else {
-                    showCustomAlert('⚠️ 親ウィンドウが見つかりません', 'このウィンドウを手動で閉じてください', 'error');
+                    showCustomAlert('親ウィンドウが見つかりません', 'このウィンドウを手動で閉じてください', 'error');
                 }
             };
 
@@ -394,7 +368,7 @@
                 <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 p-4">
                     <div className="max-w-4xl mx-auto">
                         <div className="bg-white rounded-2xl shadow-2xl p-8">
-                            <h1 className="text-3xl font-bold text-gray-800 mb-6">💰 住民税計算システム</h1>
+                            <h1 className="text-3xl font-bold text-gray-800 mb-6">住民税計算システム</h1>
                             
                             {/* 従業員選択 */}
                             <div className="mb-6">
@@ -433,29 +407,8 @@
                             </div>
                             
                             {/* 前年所得入力 */}
-                            {/* 前年所得入力 */}
                             <div className="border-t-2 pt-6 mb-6">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h2 className="text-xl font-bold text-gray-800">前年の年間所得</h2>
-                                    {selectedEmployee && (() => {
-                                        try {
-                                            const saved = localStorage.getItem(getSavedKey(selectedEmployee.id));
-                                            if (saved) return (
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm text-green-700 bg-green-100 px-3 py-1 rounded-full font-bold">💾 前回の入力を復元中</span>
-                                                    <button
-                                                        onClick={() => {
-                                                            try { localStorage.removeItem(getSavedKey(selectedEmployee.id)); } catch(e) {}
-                                                            loadPreviousYearIncome(selectedEmployee.id);
-                                                        }}
-                                                        className="text-sm text-gray-500 underline hover:text-red-500"
-                                                    >クリア</button>
-                                                </div>
-                                            );
-                                        } catch(e) {}
-                                        return null;
-                                    })()}
-                                </div>
+                                <h2 className="text-xl font-bold text-gray-800 mb-4">前年の年間所得</h2>
                                 
                                 <div className="grid grid-cols-2 gap-4 mb-4">
                                     <div>
@@ -534,7 +487,7 @@
                                 onClick={calculateResidentTax}
                                 className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white py-4 rounded-lg font-bold text-lg hover:opacity-90 mb-4"
                             >
-                                💰 住民税を計算
+                                住民税を計算
                             </button>
                             
                             {/* 計算結果 */}
@@ -599,8 +552,7 @@
                             {calculationDetails && (
                                 <div className="bg-blue-50 border-2 border-blue-500 rounded-lg p-4 mb-4">
                                     <div className="flex items-center gap-2 mb-2">
-                                        <span className="text-2xl">⚠️</span>
-                                        <h4 className="font-bold text-blue-800 text-lg">重要：必ず送信ボタンをクリックしてください</h4>
+                                    <h4 className="font-bold text-blue-800 text-lg">重要：必ず送信ボタンをクリックしてください</h4>
                                     </div>
                                     <p className="text-sm text-blue-700 mb-2">
                                         ×ボタンで閉じると、計算結果がkanri.htmlに反映されません。
@@ -622,7 +574,7 @@
                                     onClick={sendResultAndClose}
                                     className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-6 rounded-lg font-bold text-xl hover:opacity-90 shadow-lg"
                                 >
-                                    ✅ 計算結果を送信してkanri.htmlに戻る
+                                    計算結果を送信してkanri.htmlに戻る
                                 </button>
                             )}
                         </div>
