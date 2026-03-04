@@ -729,43 +729,70 @@ const AdminSystem = () => {
                 byMonth[mo][dateKey] = docSnap.data();
             });
             if (Object.keys(byMonth).length === 0) return;
-            let annualGross = 0, annualSocialInsurance = 0;
+            // 時間給ベースと固定給ベースを別々に計算
+            const isFixed = employee.salaryType === '固定給' && employee.monthlySalary > 0;
+            const minimumWage = employee.minimumWage || 1000;
+            const tempEmployeeFixed = Object.assign({}, employee, { hourlyRate: minimumWage });
+            let annualGrossHourly = 0, annualSocialInsuranceHourly = 0;
+            let annualGrossFixed = 0, annualSocialInsuranceFixed = 0;
             for (let mo = 0; mo <= 11; mo++) {
                 const records = byMonth[mo] || {};
                 if (!Object.keys(records).length) continue;
-                let monthBasePay = 0, monthOvertimePay = 0, monthHolidayPay = 0, monthLateNight = 0, workDays = 0;
+                let monthBasePay = 0, monthOvertimePay = 0, monthHolidayPay = 0, monthLateNight = 0;
+                let monthBasePayFixed = 0, monthOvertimePayFixed = 0, monthHolidayPayFixed = 0, monthLateNightFixed = 0;
+                let workDays = 0;
                 Object.entries(records).forEach(([_k, rec]) => {
                     if (!rec || !rec.clockIn) return;
                     workDays++;
                     const daily = calculateDailyPay(employee, rec);
                     monthBasePay += daily.base; monthOvertimePay += daily.overtime;
                     monthHolidayPay += daily.holiday; monthLateNight += daily.lateNight;
+                    if (isFixed) {
+                        const dailyFixed = calculateDailyPay(tempEmployeeFixed, rec);
+                        monthBasePayFixed += dailyFixed.base; monthOvertimePayFixed += dailyFixed.overtime;
+                        monthHolidayPayFixed += dailyFixed.holiday; monthLateNightFixed += dailyFixed.lateNight;
+                    }
                 });
                 const transport = (employee.transportAllowance || 0) * workDays;
                 const allowances = employee.allowances || {};
-                const monthGross = monthBasePay + monthOvertimePay + monthHolidayPay + monthLateNight + transport
-                    + (allowances.family || 0) + (allowances.sales || 0)
+                const extraAllowances = (allowances.family || 0) + (allowances.sales || 0)
                     + (allowances.position || 0) + (allowances.housing || 0);
-                annualGross += monthGross;
-                const ded = calculateDeductions(employee, monthGross, 'hourly');
-                annualSocialInsurance += (ded.healthInsurance || 0) + (ded.pension || 0) + (ded.employmentInsurance || 0);
+                // 時間給ベース年収
+                const monthGrossHourly = monthBasePay + monthOvertimePay + monthHolidayPay + monthLateNight + transport + extraAllowances;
+                annualGrossHourly += monthGrossHourly;
+                const dedH = calculateDeductions(employee, monthGrossHourly, 'hourly');
+                annualSocialInsuranceHourly += (dedH.healthInsurance || 0) + (dedH.pension || 0) + (dedH.employmentInsurance || 0);
+                // 固定給ベース年収（固定給従業員の場合のみ）
+                if (isFixed) {
+                    const monthGrossFixed = employee.monthlySalary + extraAllowances;
+                    annualGrossFixed += monthGrossFixed;
+                    const dedF = calculateDeductions(employee, monthGrossFixed, 'fixed');
+                    annualSocialInsuranceFixed += (dedF.healthInsurance || 0) + (dedF.pension || 0) + (dedF.employmentInsurance || 0);
+                }
             }
-            if (annualGross <= 0) return;
-            let empIncDed = 0;
-            if (annualGross <= 1625000) empIncDed = 550000;
-            else if (annualGross <= 1800000) empIncDed = Math.floor(annualGross * 0.4 - 100000);
-            else if (annualGross <= 3600000) empIncDed = Math.floor(annualGross * 0.3 + 80000);
-            else if (annualGross <= 6600000) empIncDed = Math.floor(annualGross * 0.2 + 440000);
-            else if (annualGross <= 8500000) empIncDed = Math.floor(annualGross * 0.1 + 1100000);
-            else empIncDed = 1950000;
-            const taxableIncome = Math.max(0,
-                Math.max(0, annualGross - empIncDed) - Math.round(annualSocialInsurance) - 480000);
-            const annualTax = Math.floor(taxableIncome * 0.10) + 5500;
-            const monthly = Math.floor(annualTax / 12);
+            // 給与所得控除の計算関数
+            const calcEmpIncDed = (gross) => {
+                if (gross <= 1625000) return 550000;
+                if (gross <= 1800000) return Math.floor(gross * 0.4 - 100000);
+                if (gross <= 3600000) return Math.floor(gross * 0.3 + 80000);
+                if (gross <= 6600000) return Math.floor(gross * 0.2 + 440000);
+                if (gross <= 8500000) return Math.floor(gross * 0.1 + 1100000);
+                return 1950000;
+            };
+            // 時間給住民税計算
+            if (annualGrossHourly <= 0) return;
+            const taxableHourly = Math.max(0, Math.max(0, annualGrossHourly - calcEmpIncDed(annualGrossHourly)) - Math.round(annualSocialInsuranceHourly) - 480000);
+            const monthlyHourly = Math.floor((Math.floor(taxableHourly * 0.10) + 5500) / 12);
+            // 固定給住民税計算
+            let monthlyFixed = monthlyHourly; // デフォルトは時間給と同じ
+            if (isFixed && annualGrossFixed > 0) {
+                const taxableFixed = Math.max(0, Math.max(0, annualGrossFixed - calcEmpIncDed(annualGrossFixed)) - Math.round(annualSocialInsuranceFixed) - 480000);
+                monthlyFixed = Math.floor((Math.floor(taxableFixed * 0.10) + 5500) / 12);
+            }
             setCalculatedResidentTaxes(prev => {
                 const next = Object.assign({}, prev, {
-                    [employeeId + '_hourly']: monthly,
-                    [employeeId + '_fixed']: monthly
+                    [employeeId + '_hourly']: monthlyHourly,
+                    [employeeId + '_fixed']: monthlyFixed
                 });
                 try { localStorage.setItem('calculatedResidentTaxes', JSON.stringify(next)); } catch(e) {}
                 return next;
@@ -1306,7 +1333,7 @@ const AdminSystem = () => {
         const hourlyBasePay = totalBasePay + totalOvertimePay + totalHolidayPay + totalLateNightPay + transport;
         const hourlyGrossBeforeExpense = hourlyBasePay + totalAllowances; // 経費除外の総支給額
         window.currentSalaryCalculationType = 'hourly'; // 🆕 時間給計算を明示
-        const hourlyDeductions = calculateDeductions(employee, hourlyGrossBeforeExpense, 0); // 経費0で計算
+        const hourlyDeductions = calculateDeductions(employee, hourlyGrossBeforeExpense, 'hourly'); // 経費0で計算
         const hourlyNetPay = hourlyGrossBeforeExpense - hourlyDeductions.totalDeductions + expenseAmount; // 経費を加算
         const hourlyTotalGross = hourlyGrossBeforeExpense + expenseAmount; // 最後に経費を加算（表示用）
         // ========== 固定給ベースの計算（経費を除外して計算） ==========
@@ -1326,7 +1353,7 @@ const AdminSystem = () => {
             fixedGrossPay = fixedSalary; // 固定給は日割りしない
             const fixedGrossBeforeExpense = fixedGrossPay + totalAllowances; // 経費除外の総支給額
             window.currentSalaryCalculationType = 'fixed'; // 🆕 固定給計算を明示
-            fixedDeductions = calculateDeductions(employee, fixedGrossBeforeExpense, 0); // 経費0で計算
+            fixedDeductions = calculateDeductions(employee, fixedGrossBeforeExpense, 'fixed'); // 経費0で計算
             fixedNetPay = fixedGrossBeforeExpense - fixedDeductions.totalDeductions + expenseAmount; // 経費を加算
             fixedTotalGross = fixedGrossBeforeExpense + expenseAmount; // 最後に経費を加算（表示用）
             // 差額計算（内部計算は正確に）
@@ -3662,7 +3689,7 @@ const AdminSystem = () => {
     };
     // 社会保険料・税金計算関数
     // ★重要：この関数に渡されるgrossPayには既に経費が含まれていない
-    const calculateDeductions = (employee, grossPay, salaryTypeOverride) => {
+    const calculateDeductions = (employee, grossPay) => {
         var _a, _b;
         if (!employee)
             return {
@@ -6246,17 +6273,21 @@ const AdminSystem = () => {
                                                 : "住民税（自動計算）"),
                                         React.createElement("p", { className: "text-xl font-bold text-blue-900" },
                                             "¥",
-                                            (residentTaxOverrides[selectedPayslipEmployee] != null
-                                                ? residentTaxOverrides[selectedPayslipEmployee]
-                                                : (calculatedResidentTaxes[`${selectedPayslipEmployee}_hourly`] || 0)
-                                            ).toLocaleString(), " /月")),
+                                            (() => {
+                                                const _emp = employees.find(e => e.id === selectedPayslipEmployee);
+                                                const _taxKey = (_emp && _emp.salaryType === '固定給' && _emp.monthlySalary > 0) ? `${selectedPayslipEmployee}_fixed` : `${selectedPayslipEmployee}_hourly`;
+                                                return (residentTaxOverrides[selectedPayslipEmployee] != null
+                                                    ? residentTaxOverrides[selectedPayslipEmployee]
+                                                    : (calculatedResidentTaxes[_taxKey] || 0)
+                                                ).toLocaleString();
+                                            })(), " /月")),
                                     React.createElement("div", { className: "flex gap-2" },
                                         React.createElement("button", {
                                             onClick: () => { const emp = employees.find(e => e.id === selectedPayslipEmployee); if (emp) autoCalcResidentTax(selectedPayslipEmployee, emp); },
                                             className: "text-xs px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded border border-blue-300"
                                         }, "自動再計算"),
                                         React.createElement("button", {
-                                            onClick: () => { const cur = residentTaxOverrides[selectedPayslipEmployee]; const auto = calculatedResidentTaxes[`${selectedPayslipEmployee}_hourly`] || 0; setResidentTaxEditValue(String(cur != null ? cur : auto)); setShowResidentTaxEdit(v => !v); },
+                                            onClick: () => { const cur = residentTaxOverrides[selectedPayslipEmployee]; const _empX = employees.find(e => e.id === selectedPayslipEmployee); const _keyX = (_empX && _empX.salaryType === '固定給' && _empX.monthlySalary > 0) ? `${selectedPayslipEmployee}_fixed` : `${selectedPayslipEmployee}_hourly`; const auto = calculatedResidentTaxes[_keyX] || 0; setResidentTaxEditValue(String(cur != null ? cur : auto)); setShowResidentTaxEdit(v => !v); },
                                             className: "text-xs px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded border border-amber-300"
                                         }, "手動修正"))),
                                 showResidentTaxEdit && React.createElement("div", { className: "mt-3 p-3 bg-white rounded border border-blue-200" },
