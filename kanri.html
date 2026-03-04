@@ -342,12 +342,8 @@ const AdminSystem = () => {
     const [editingTime, setEditingTime] = useState(null);
     const [editingValue, setEditingValue] = useState('');
     const [editingMemo, setEditingMemo] = useState('');
-    const [calculatedResidentTaxes, setCalculatedResidentTaxes] = useState(() => {
-        try { var s=localStorage.getItem('calcResidentTax'); return s?JSON.parse(s):{}; } catch(e){return{};}
-    });
-    const [residentTaxOverrides, setResidentTaxOverrides] = useState(() => {
-        try { var s=localStorage.getItem('residentTaxOverrides'); return s?JSON.parse(s):{}; } catch(e){return{};}
-    });
+    const [calculatedResidentTaxes, setCalculatedResidentTaxes] = useState({});
+    const [residentTaxOverrides, setResidentTaxOverrides] = useState({});
     const [showResidentTaxEdit, setShowResidentTaxEdit] = useState(false);
     const [residentTaxEditValue, setResidentTaxEditValue] = useState('');
     // レシート設定用のstate
@@ -687,72 +683,6 @@ const AdminSystem = () => {
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
     }, []);
-    useEffect(() => {
-        if (!selectedPayslipEmployee) return;
-        var emp = employees.find(function(e){return e.id===selectedPayslipEmployee;});
-        if (emp) autoCalcResidentTax(selectedPayslipEmployee, emp);
-    }, [selectedPayslipEmployee, currentMonth, currentYear]);
-
-    const autoCalcResidentTax = async (employeeId, employee) => {
-        try {
-            while (!window.FirebaseReady || !window.db) await new Promise(function(r){setTimeout(r,100);});
-            var col = window.firebaseModules.collection, gd = window.firebaseModules.getDocs;
-            var targetYear = currentMonth >= 5 ? currentYear - 1 : currentYear - 2;
-            var collPath = (!window.currentStoreId || window.currentStoreId === '')
-                ? col(window.db, 'kintai_attendance')
-                : col(window.db, 'stores', window.currentStoreId, 'attendance');
-            var snap = await gd(collPath);
-            var byMonth = {};
-            snap.forEach(function(docSnap) {
-                var parts = docSnap.id.split('_');
-                if (parts.length < 2) return;
-                var empId = parts[0];
-                var dateKey = parts.slice(1).join('_');
-                var m = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-                if (!m || empId !== employeeId || parseInt(m[1]) !== targetYear) return;
-                var mo = parseInt(m[2]) - 1;
-                if (!byMonth[mo]) byMonth[mo] = {};
-                byMonth[mo][dateKey] = docSnap.data();
-            });
-            if (!Object.keys(byMonth).length) return;
-            var annualGross = 0, annualSI = 0;
-            for (var mo2 = 0; mo2 <= 11; mo2++) {
-                var recs = byMonth[mo2];
-                if (!recs || !Object.keys(recs).length) continue;
-                var base=0, ot=0, hol=0, ln=0, days=0;
-                Object.values(recs).forEach(function(rec) {
-                    if (!rec || !rec.clockIn) return;
-                    days++;
-                    var d = calculateDailyPay(employee, rec);
-                    base+=d.base; ot+=d.overtime; hol+=d.holiday; ln+=d.lateNight;
-                });
-                var allow = employee.allowances || {};
-                var gross = base+ot+hol+ln+(employee.transportAllowance||0)*days
-                    +(allow.family||0)+(allow.sales||0)+(allow.position||0)+(allow.housing||0);
-                annualGross += gross;
-                var ded = calculateDeductions(employee, gross);
-                annualSI += (ded.healthInsurance||0)+(ded.pension||0)+(ded.employmentInsurance||0);
-            }
-            if (annualGross <= 0) return;
-            var empDed = 0;
-            if (annualGross<=1625000) empDed=550000;
-            else if (annualGross<=1800000) empDed=Math.floor(annualGross*0.4-100000);
-            else if (annualGross<=3600000) empDed=Math.floor(annualGross*0.3+80000);
-            else if (annualGross<=6600000) empDed=Math.floor(annualGross*0.2+440000);
-            else if (annualGross<=8500000) empDed=Math.floor(annualGross*0.1+1100000);
-            else empDed=1950000;
-            var taxable = Math.max(0, Math.max(0,annualGross-empDed)-Math.round(annualSI)-480000);
-            var monthly = Math.floor((Math.floor(taxable*0.10)+5500)/12);
-            setCalculatedResidentTaxes(function(prev) {
-                var next = Object.assign({}, prev);
-                next[employeeId+'_hourly'] = monthly;
-                next[employeeId+'_fixed'] = monthly;
-                try{localStorage.setItem('calcResidentTax',JSON.stringify(next));}catch(e){}
-                return next;
-            });
-        } catch(err) { console.error('住民税自動計算エラー:', err); }
-    };
-
     const loadAllData = async () => {
         setIsLoading(true);
         setError(null);
@@ -3721,12 +3651,14 @@ const AdminSystem = () => {
                 incomeTax = Math.floor((annualTaxableIncome * 0.45 - 4796000) / 12);
             }
         }
+        // 🆕 住民税は外部計算（keisan-shousai-v6.html）からのみ取得
         let residentTax = 0;
         if (insuranceSwitches.residentTax) {
             if (residentTaxOverrides[employee.id] != null) {
                 residentTax = residentTaxOverrides[employee.id];
             } else {
-                residentTax = calculatedResidentTaxes[employee.id + '_hourly'] || 0;
+                const salaryTypeKey = window.currentSalaryCalculationType || 'hourly';
+                residentTax = calculatedResidentTaxes[`${employee.id}_${salaryTypeKey}`] || 0;
             }
         }
         // 家賃・光熱費（従業員データから取得）
@@ -6214,7 +6146,7 @@ const AdminSystem = () => {
                                     React.createElement("br", null),
                                     "\u30D7\u30E9\u30B9\u306E\u5834\u5408\u3001\u4F1A\u793E\u306B\u8ACB\u6C42\u53EF\u80FD\u306A\u91D1\u984D\u3067\u3059\u3002")),
                             React.createElement(CumulativeDifferenceDisplay, { employeeId: selectedPayslipEmployee }),
-                            React.createElement("div", { className: "mt-4 bg-blue-50 border border-blue-300 rounded-lg p-4" },
+                            React.createElement("div", { className: "mt-4 p-4 bg-blue-50 border border-blue-300 rounded-lg" },
                                 React.createElement("div", { className: "flex items-center justify-between" },
                                     React.createElement("div", null,
                                         React.createElement("p", { className: "text-xs text-blue-500" },
@@ -6226,31 +6158,54 @@ const AdminSystem = () => {
                                             (residentTaxOverrides[selectedPayslipEmployee] != null
                                                 ? residentTaxOverrides[selectedPayslipEmployee]
                                                 : (calculatedResidentTaxes[selectedPayslipEmployee + "_hourly"] || 0)
-                                            ).toLocaleString(), " /\u6708")),
+                                            ).toLocaleString(),
+                                            " /\u6708")),
                                     React.createElement("div", { className: "flex gap-2" },
-                                        React.createElement("button",
-                                            { onClick: function() { var e=employees.find(function(x){return x.id===selectedPayslipEmployee;}); if(e) autoCalcResidentTax(selectedPayslipEmployee,e); }, className: "text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded border border-blue-300" },
-                                            "\u81ea\u52d5\u518d\u8a08\u7b97"),
-                                        React.createElement("button",
-                                            { onClick: function() { setResidentTaxEditValue(String(residentTaxOverrides[selectedPayslipEmployee]!=null?residentTaxOverrides[selectedPayslipEmployee]:(calculatedResidentTaxes[selectedPayslipEmployee+"_hourly"]||0))); setShowResidentTaxEdit(function(v){return !v;}); }, className: "text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded border border-amber-300" },
-                                            "\u624b\u52d5\u4fee\u6b63"))),
+                                        React.createElement("button", {
+                                            onClick: function() {
+                                                var cur = residentTaxOverrides[selectedPayslipEmployee];
+                                                var auto = calculatedResidentTaxes[selectedPayslipEmployee + "_hourly"] || 0;
+                                                setResidentTaxEditValue(String(cur != null ? cur : auto));
+                                                setShowResidentTaxEdit(function(v) { return !v; });
+                                            },
+                                            className: "text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded border border-amber-300"
+                                        }, "\u624b\u52d5\u4fee\u6b63"))),
                                 showResidentTaxEdit
                                     ? React.createElement("div", { className: "mt-2 p-3 bg-white rounded border border-blue-200" },
-                                        React.createElement("p", { className: "text-xs text-gray-500 mb-1" }, "\u526f\u696d\u53ce\u5165\u304c\u3042\u308b\u5834\u5408\u3001\u6b63\u3057\u3044\u6708\u984d\u4f4f\u6c11\u7a0e\u3092\u5165\u529b\u3067\u304d\u307e\u3059"),
+                                        React.createElement("p", { className: "text-xs text-gray-500 mb-1" }, "\u526f\u696d\u53ce\u5165\u304c\u3042\u308b\u5834\u5408\u3001\u6b63\u3057\u3044\u6708\u984d\u4f4f\u6c11\u7a0e\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044"),
                                         React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
                                             React.createElement("span", { className: "text-sm" }, "\u6708\u984d:\u00a5"),
-                                            React.createElement("input",
-                                                { type: "number", min: "0", value: residentTaxEditValue, onChange: function(e){setResidentTaxEditValue(e.target.value);}, className: "border rounded px-2 py-1 w-28 text-sm", placeholder: "0" }),
-                                            React.createElement("button",
-                                                { onClick: function() { var v=parseInt(residentTaxEditValue,10); if(!isNaN(v)&&v>=0){var n=Object.assign({},residentTaxOverrides); n[selectedPayslipEmployee]=v; setResidentTaxOverrides(n); try{localStorage.setItem('residentTaxOverrides',JSON.stringify(n));}catch(e){} setShowResidentTaxEdit(false);} }, className: "px-3 py-1 bg-green-500 text-white rounded font-bold" },
-                                                "\u78ba\u5b9a"),
+                                            React.createElement("input", {
+                                                type: "number", min: "0", value: residentTaxEditValue,
+                                                onChange: function(ev) { setResidentTaxEditValue(ev.target.value); },
+                                                className: "border rounded px-2 py-1 w-28 text-sm", placeholder: "0"
+                                            }),
+                                            React.createElement("button", {
+                                                onClick: function() {
+                                                    var v = parseInt(residentTaxEditValue, 10);
+                                                    if (!isNaN(v) && v >= 0) {
+                                                        var n = Object.assign({}, residentTaxOverrides);
+                                                        n[selectedPayslipEmployee] = v;
+                                                        setResidentTaxOverrides(n);
+                                                        try { localStorage.setItem("residentTaxOverrides", JSON.stringify(n)); } catch(e) {}
+                                                        setShowResidentTaxEdit(false);
+                                                    }
+                                                },
+                                                className: "px-3 py-1 bg-green-500 text-white rounded"
+                                            }, "\u78ba\u5b9a"),
                                             residentTaxOverrides[selectedPayslipEmployee] != null
-                                                ? React.createElement("button",
-                                                    { onClick: function(){var n=Object.assign({},residentTaxOverrides); delete n[selectedPayslipEmployee]; setResidentTaxOverrides(n); try{localStorage.setItem('residentTaxOverrides',JSON.stringify(n));}catch(e){} setShowResidentTaxEdit(false);}, className: "text-xs px-2 py-1 bg-red-100 text-red-600 rounded border border-red-300" },
-                                                    "\u4fee\u6b63\u30ea\u30bb\u30c3\u30c8")
+                                                ? React.createElement("button", {
+                                                    onClick: function() {
+                                                        var n = Object.assign({}, residentTaxOverrides);
+                                                        delete n[selectedPayslipEmployee];
+                                                        setResidentTaxOverrides(n);
+                                                        try { localStorage.setItem("residentTaxOverrides", JSON.stringify(n)); } catch(e) {}
+                                                        setShowResidentTaxEdit(false);
+                                                    },
+                                                    className: "text-xs px-2 py-1 bg-red-100 text-red-600 rounded border border-red-300"
+                                                }, "\u30ea\u30bb\u30c3\u30c8")
                                                 : null))
-                                    : null),
-                            (false) ? null)) : (React.createElement(React.Fragment, null,
+                                    : null))) : (React.createElement(React.Fragment, null,
                             React.createElement("table", { className: "w-full border-collapse border" },
                                 React.createElement("thead", { className: "bg-gray-100" },
                                     React.createElement("tr", null,
