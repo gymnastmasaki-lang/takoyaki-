@@ -342,19 +342,11 @@ const AdminSystem = () => {
     const [editingTime, setEditingTime] = useState(null);
     const [editingValue, setEditingValue] = useState('');
     const [editingMemo, setEditingMemo] = useState('');
-    // 計算された住民税（自動）と手動上書き - どちらもlocalStorageで永続化
     const [calculatedResidentTaxes, setCalculatedResidentTaxes] = useState(() => {
-        try {
-            const saved = localStorage.getItem('calculatedResidentTaxes');
-            return saved ? JSON.parse(saved) : {};
-        } catch (e) { return {}; }
+        try { var s=localStorage.getItem('calcResidentTax'); return s?JSON.parse(s):{}; } catch(e){return{};}
     });
-    // 手動上書き値 { employeeId: 月額 }
     const [residentTaxOverrides, setResidentTaxOverrides] = useState(() => {
-        try {
-            const saved = localStorage.getItem('residentTaxOverrides');
-            return saved ? JSON.parse(saved) : {};
-        } catch (e) { return {}; }
+        try { var s=localStorage.getItem('residentTaxOverrides'); return s?JSON.parse(s):{}; } catch(e){return{};}
     });
     const [showResidentTaxEdit, setShowResidentTaxEdit] = useState(false);
     const [residentTaxEditValue, setResidentTaxEditValue] = useState('');
@@ -695,84 +687,70 @@ const AdminSystem = () => {
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
     }, []);
-
-    // 給与明細を開いたとき・月が変わったとき → 住民税を自動計算
     useEffect(() => {
         if (!selectedPayslipEmployee) return;
-        const employee = employees.find(e => e.id === selectedPayslipEmployee);
-        if (!employee) return;
-        autoCalcResidentTax(selectedPayslipEmployee, employee);
+        var emp = employees.find(function(e){return e.id===selectedPayslipEmployee;});
+        if (emp) autoCalcResidentTax(selectedPayslipEmployee, emp);
     }, [selectedPayslipEmployee, currentMonth, currentYear]);
 
-    // 勤怠データから前年所得を集計して住民税を自動計算する
     const autoCalcResidentTax = async (employeeId, employee) => {
         try {
-            while (!window.FirebaseReady || !window.db) {
-                await new Promise(r => setTimeout(r, 100));
-            }
-            const { collection, getDocs } = window.firebaseModules;
-            const targetYear = currentMonth >= 5 ? currentYear - 1 : currentYear - 2;
-            const collPath = (!window.currentStoreId || window.currentStoreId === '')
-                ? collection(window.db, 'kintai_attendance')
-                : collection(window.db, 'stores', window.currentStoreId, 'attendance');
-            const snapshot = await getDocs(collPath);
-            const byMonth = {};
-            snapshot.forEach(docSnap => {
-                const parts = docSnap.id.split('_');
+            while (!window.FirebaseReady || !window.db) await new Promise(function(r){setTimeout(r,100);});
+            var col = window.firebaseModules.collection, gd = window.firebaseModules.getDocs;
+            var targetYear = currentMonth >= 5 ? currentYear - 1 : currentYear - 2;
+            var collPath = (!window.currentStoreId || window.currentStoreId === '')
+                ? col(window.db, 'kintai_attendance')
+                : col(window.db, 'stores', window.currentStoreId, 'attendance');
+            var snap = await gd(collPath);
+            var byMonth = {};
+            snap.forEach(function(docSnap) {
+                var parts = docSnap.id.split('_');
                 if (parts.length < 2) return;
-                const empId = parts[0];
-                const dateKey = parts.slice(1).join('_');
-                const m = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                var empId = parts[0];
+                var dateKey = parts.slice(1).join('_');
+                var m = dateKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
                 if (!m || empId !== employeeId || parseInt(m[1]) !== targetYear) return;
-                const mo = parseInt(m[2]) - 1;
+                var mo = parseInt(m[2]) - 1;
                 if (!byMonth[mo]) byMonth[mo] = {};
                 byMonth[mo][dateKey] = docSnap.data();
             });
-            if (Object.keys(byMonth).length === 0) return;
-            let annualGross = 0, annualSocialInsurance = 0;
-            for (let mo = 0; mo <= 11; mo++) {
-                const records = byMonth[mo] || {};
-                if (!Object.keys(records).length) continue;
-                let monthBasePay = 0, monthOvertimePay = 0, monthHolidayPay = 0, monthLateNight = 0, workDays = 0;
-                Object.entries(records).forEach(([_k, rec]) => {
+            if (!Object.keys(byMonth).length) return;
+            var annualGross = 0, annualSI = 0;
+            for (var mo2 = 0; mo2 <= 11; mo2++) {
+                var recs = byMonth[mo2];
+                if (!recs || !Object.keys(recs).length) continue;
+                var base=0, ot=0, hol=0, ln=0, days=0;
+                Object.values(recs).forEach(function(rec) {
                     if (!rec || !rec.clockIn) return;
-                    workDays++;
-                    const daily = calculateDailyPay(employee, rec);
-                    monthBasePay += daily.base; monthOvertimePay += daily.overtime;
-                    monthHolidayPay += daily.holiday; monthLateNight += daily.lateNight;
+                    days++;
+                    var d = calculateDailyPay(employee, rec);
+                    base+=d.base; ot+=d.overtime; hol+=d.holiday; ln+=d.lateNight;
                 });
-                const transport = (employee.transportAllowance || 0) * workDays;
-                const allowances = employee.allowances || {};
-                const monthGross = monthBasePay + monthOvertimePay + monthHolidayPay + monthLateNight + transport
-                    + (allowances.family || 0) + (allowances.sales || 0)
-                    + (allowances.position || 0) + (allowances.housing || 0);
-                annualGross += monthGross;
-                const ded = calculateDeductions(employee, monthGross, 'hourly');
-                annualSocialInsurance += (ded.healthInsurance || 0) + (ded.pension || 0) + (ded.employmentInsurance || 0);
+                var allow = employee.allowances || {};
+                var gross = base+ot+hol+ln+(employee.transportAllowance||0)*days
+                    +(allow.family||0)+(allow.sales||0)+(allow.position||0)+(allow.housing||0);
+                annualGross += gross;
+                var ded = calculateDeductions(employee, gross);
+                annualSI += (ded.healthInsurance||0)+(ded.pension||0)+(ded.employmentInsurance||0);
             }
             if (annualGross <= 0) return;
-            let empIncDed = 0;
-            if (annualGross <= 1625000) empIncDed = 550000;
-            else if (annualGross <= 1800000) empIncDed = Math.floor(annualGross * 0.4 - 100000);
-            else if (annualGross <= 3600000) empIncDed = Math.floor(annualGross * 0.3 + 80000);
-            else if (annualGross <= 6600000) empIncDed = Math.floor(annualGross * 0.2 + 440000);
-            else if (annualGross <= 8500000) empIncDed = Math.floor(annualGross * 0.1 + 1100000);
-            else empIncDed = 1950000;
-            const taxableIncome = Math.max(0,
-                Math.max(0, annualGross - empIncDed) - Math.round(annualSocialInsurance) - 480000);
-            const annualTax = Math.floor(taxableIncome * 0.10) + 5500;
-            const monthly = Math.floor(annualTax / 12);
-            setCalculatedResidentTaxes(prev => {
-                const next = Object.assign({}, prev, {
-                    [employeeId + '_hourly']: monthly,
-                    [employeeId + '_fixed']: monthly
-                });
-                try { localStorage.setItem('calculatedResidentTaxes', JSON.stringify(next)); } catch(e) {}
+            var empDed = 0;
+            if (annualGross<=1625000) empDed=550000;
+            else if (annualGross<=1800000) empDed=Math.floor(annualGross*0.4-100000);
+            else if (annualGross<=3600000) empDed=Math.floor(annualGross*0.3+80000);
+            else if (annualGross<=6600000) empDed=Math.floor(annualGross*0.2+440000);
+            else if (annualGross<=8500000) empDed=Math.floor(annualGross*0.1+1100000);
+            else empDed=1950000;
+            var taxable = Math.max(0, Math.max(0,annualGross-empDed)-Math.round(annualSI)-480000);
+            var monthly = Math.floor((Math.floor(taxable*0.10)+5500)/12);
+            setCalculatedResidentTaxes(function(prev) {
+                var next = Object.assign({}, prev);
+                next[employeeId+'_hourly'] = monthly;
+                next[employeeId+'_fixed'] = monthly;
+                try{localStorage.setItem('calcResidentTax',JSON.stringify(next));}catch(e){}
                 return next;
             });
-        } catch(err) {
-            console.error('住民税自動計算エラー:', err);
-        }
+        } catch(err) { console.error('住民税自動計算エラー:', err); }
     };
 
     const loadAllData = async () => {
@@ -3743,16 +3721,15 @@ const AdminSystem = () => {
                 incomeTax = Math.floor((annualTaxableIncome * 0.45 - 4796000) / 12);
             }
         }
-        // 住民税: 手動上書きがあれば優先、なければ自動計算値
         let residentTax = 0;
         if (insuranceSwitches.residentTax) {
             if (residentTaxOverrides[employee.id] != null) {
                 residentTax = residentTaxOverrides[employee.id];
             } else {
-                const key = `${employee.id}_${salaryTypeOverride || 'hourly'}`;
-                residentTax = calculatedResidentTaxes[key] || 0;
+                residentTax = calculatedResidentTaxes[employee.id + '_hourly'] || 0;
             }
-        }        // 家賃・光熱費（従業員データから取得）
+        }
+        // 家賃・光熱費（従業員データから取得）
         const rent = ((_a = employee.deductions) === null || _a === void 0 ? void 0 : _a.rent) || 0;
         const utilities = ((_b = employee.deductions) === null || _b === void 0 ? void 0 : _b.utilities) || 0;
         const totalDeductions = healthInsurance + pension + employmentInsurance + incomeTax + residentTax + rent + utilities;
@@ -6238,41 +6215,42 @@ const AdminSystem = () => {
                                     "\u30D7\u30E9\u30B9\u306E\u5834\u5408\u3001\u4F1A\u793E\u306B\u8ACB\u6C42\u53EF\u80FD\u306A\u91D1\u984D\u3067\u3059\u3002")),
                             React.createElement(CumulativeDifferenceDisplay, { employeeId: selectedPayslipEmployee }),
                             React.createElement("div", { className: "mt-4 bg-blue-50 border border-blue-300 rounded-lg p-4" },
-                                React.createElement("div", { className: "flex items-center justify-between mb-1" },
+                                React.createElement("div", { className: "flex items-center justify-between" },
                                     React.createElement("div", null,
-                                        React.createElement("p", { className: "text-xs text-blue-500 mb-0.5" },
+                                        React.createElement("p", { className: "text-xs text-blue-500" },
                                             residentTaxOverrides[selectedPayslipEmployee] != null
-                                                ? "住民税（手動修正済）"
-                                                : "住民税（自動計算）"),
+                                                ? "\u4f4f\u6c11\u7a0e\uff08\u624b\u52d5\u4fee\u6b63\u6e08\uff09"
+                                                : "\u4f4f\u6c11\u7a0e\uff08\u81ea\u52d5\u8a08\u7b97\uff09"),
                                         React.createElement("p", { className: "text-xl font-bold text-blue-900" },
-                                            "¥",
+                                            "\u00a5",
                                             (residentTaxOverrides[selectedPayslipEmployee] != null
                                                 ? residentTaxOverrides[selectedPayslipEmployee]
-                                                : (calculatedResidentTaxes[`${selectedPayslipEmployee}_hourly`] || 0)
-                                            ).toLocaleString(), " /月")),
+                                                : (calculatedResidentTaxes[selectedPayslipEmployee + "_hourly"] || 0)
+                                            ).toLocaleString(), " /\u6708")),
                                     React.createElement("div", { className: "flex gap-2" },
-                                        React.createElement("button", {
-                                            onClick: () => { const emp = employees.find(e => e.id === selectedPayslipEmployee); if (emp) autoCalcResidentTax(selectedPayslipEmployee, emp); },
-                                            className: "text-xs px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded border border-blue-300"
-                                        }, "自動再計算"),
-                                        React.createElement("button", {
-                                            onClick: () => { const cur = residentTaxOverrides[selectedPayslipEmployee]; const auto = calculatedResidentTaxes[`${selectedPayslipEmployee}_hourly`] || 0; setResidentTaxEditValue(String(cur != null ? cur : auto)); setShowResidentTaxEdit(v => !v); },
-                                            className: "text-xs px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded border border-amber-300"
-                                        }, "手動修正"))),
-                                showResidentTaxEdit && React.createElement("div", { className: "mt-3 p-3 bg-white rounded border border-blue-200" },
-                                    React.createElement("p", { className: "text-xs text-gray-500 mb-2" }, "副業収入がある場合は正しい月額住民税を直接入力できます"),
-                                    React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
-                                        React.createElement("span", { className: "text-sm font-medium" }, "月額: ¥"),
-                                        React.createElement("input", { type: "number", min: "0", value: residentTaxEditValue, onChange: e => setResidentTaxEditValue(e.target.value), className: "border rounded px-2 py-1 w-32 text-sm", placeholder: "0" }),
-                                        React.createElement("span", { className: "text-sm text-gray-500" }, "/月"),
-                                        React.createElement("button", {
-                                            onClick: () => { const val = parseInt(residentTaxEditValue, 10); if (isNaN(val) || val < 0) return; const next = Object.assign({}, residentTaxOverrides, { [selectedPayslipEmployee]: val }); setResidentTaxOverrides(next); try { localStorage.setItem("residentTaxOverrides", JSON.stringify(next)); } catch(e) {} setShowResidentTaxEdit(false); },
-                                            className: "text-sm px-4 py-1 bg-green-500 hover:bg-green-600 text-white rounded font-bold"
-                                        }, "確定"),
-                                        residentTaxOverrides[selectedPayslipEmployee] != null && React.createElement("button", {
-                                            onClick: () => { const next = Object.assign({}, residentTaxOverrides); delete next[selectedPayslipEmployee]; setResidentTaxOverrides(next); try { localStorage.setItem("residentTaxOverrides", JSON.stringify(next)); } catch(e) {} setShowResidentTaxEdit(false); },
-                                            className: "text-xs px-2 py-1 bg-red-100 hover:bg-red-200 text-red-600 rounded border border-red-300"
-                                        }, "修正リセット")))))) : (React.createElement(React.Fragment, null,
+                                        React.createElement("button",
+                                            { onClick: function() { var e=employees.find(function(x){return x.id===selectedPayslipEmployee;}); if(e) autoCalcResidentTax(selectedPayslipEmployee,e); }, className: "text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded border border-blue-300" },
+                                            "\u81ea\u52d5\u518d\u8a08\u7b97"),
+                                        React.createElement("button",
+                                            { onClick: function() { setResidentTaxEditValue(String(residentTaxOverrides[selectedPayslipEmployee]!=null?residentTaxOverrides[selectedPayslipEmployee]:(calculatedResidentTaxes[selectedPayslipEmployee+"_hourly"]||0))); setShowResidentTaxEdit(function(v){return !v;}); }, className: "text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded border border-amber-300" },
+                                            "\u624b\u52d5\u4fee\u6b63"))),
+                                showResidentTaxEdit
+                                    ? React.createElement("div", { className: "mt-2 p-3 bg-white rounded border border-blue-200" },
+                                        React.createElement("p", { className: "text-xs text-gray-500 mb-1" }, "\u526f\u696d\u53ce\u5165\u304c\u3042\u308b\u5834\u5408\u3001\u6b63\u3057\u3044\u6708\u984d\u4f4f\u6c11\u7a0e\u3092\u5165\u529b\u3067\u304d\u307e\u3059"),
+                                        React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                                            React.createElement("span", { className: "text-sm" }, "\u6708\u984d:\u00a5"),
+                                            React.createElement("input",
+                                                { type: "number", min: "0", value: residentTaxEditValue, onChange: function(e){setResidentTaxEditValue(e.target.value);}, className: "border rounded px-2 py-1 w-28 text-sm", placeholder: "0" }),
+                                            React.createElement("button",
+                                                { onClick: function() { var v=parseInt(residentTaxEditValue,10); if(!isNaN(v)&&v>=0){var n=Object.assign({},residentTaxOverrides); n[selectedPayslipEmployee]=v; setResidentTaxOverrides(n); try{localStorage.setItem('residentTaxOverrides',JSON.stringify(n));}catch(e){} setShowResidentTaxEdit(false);} }, className: "px-3 py-1 bg-green-500 text-white rounded font-bold" },
+                                                "\u78ba\u5b9a"),
+                                            residentTaxOverrides[selectedPayslipEmployee] != null
+                                                ? React.createElement("button",
+                                                    { onClick: function(){var n=Object.assign({},residentTaxOverrides); delete n[selectedPayslipEmployee]; setResidentTaxOverrides(n); try{localStorage.setItem('residentTaxOverrides',JSON.stringify(n));}catch(e){} setShowResidentTaxEdit(false);}, className: "text-xs px-2 py-1 bg-red-100 text-red-600 rounded border border-red-300" },
+                                                    "\u4fee\u6b63\u30ea\u30bb\u30c3\u30c8")
+                                                : null))
+                                    : null),
+                            (false) ? null)) : (React.createElement(React.Fragment, null,
                             React.createElement("table", { className: "w-full border-collapse border" },
                                 React.createElement("thead", { className: "bg-gray-100" },
                                     React.createElement("tr", null,
