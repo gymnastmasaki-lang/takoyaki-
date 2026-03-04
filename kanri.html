@@ -3686,6 +3686,7 @@ const AdminSystem = () => {
                     utilities: 0
                 },
                 salaryHistory: [],
+                fixedStandardRemuneration: 0,
                 createdAt: Timestamp.now()
             });
             await loadAllData();
@@ -3699,7 +3700,7 @@ const AdminSystem = () => {
             setIsLoading(false);
         }
     };
-    const updateEmployee = async (id, name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches, salaryHistory) => {
+    const updateEmployee = async (id, name, hourlyRate, transportAllowance, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches, salaryHistory, fixedStandardRemuneration) => {
         setIsLoading(true);
         try {
             const { doc, updateDoc, Timestamp } = window.firebaseModules;
@@ -3740,6 +3741,7 @@ const AdminSystem = () => {
                     utilities: 0
                 },
                 salaryHistory: salaryHistory || [],
+                fixedStandardRemuneration: parseFloat(fixedStandardRemuneration) || 0,
                 updatedAt: Timestamp.now()
             });
             await loadAllData();
@@ -3785,12 +3787,18 @@ const AdminSystem = () => {
         let pension = 0;
         if (shouldCalculateInsurance) {
             // 標準報酬月額を決定
+            // 従業員設定に固定値があればそれを優先（年1回の算定基礎届・随時改定で設定）
             let standardRemuneration = 58000;
-            const monthlySalary = employee.monthlySalary || grossPay;
-            for (const bracket of INSURANCE_DATA.standardMonthlyRemuneration) {
-                if (monthlySalary >= bracket.min && monthlySalary < bracket.max) {
-                    standardRemuneration = bracket.standard;
-                    break;
+            if (employee.fixedStandardRemuneration && employee.fixedStandardRemuneration > 0) {
+                // 手動設定値をそのまま使用（年金事務所の通知書の金額）
+                standardRemuneration = employee.fixedStandardRemuneration;
+            } else {
+                const monthlySalary = employee.monthlySalary || grossPay;
+                for (const bracket of INSURANCE_DATA.standardMonthlyRemuneration) {
+                    if (monthlySalary >= bracket.min && monthlySalary < bracket.max) {
+                        standardRemuneration = bracket.standard;
+                        break;
+                    }
                 }
             }
             // 健康保険料計算（スイッチONの場合のみ）
@@ -3810,32 +3818,223 @@ const AdminSystem = () => {
         if (insuranceSwitches.employmentInsurance) {
             employmentInsurance = Math.floor(grossPay * 0.0055);
         }
-        // 所得税計算
+        // 所得税計算（国税庁・給与所得の源泉徴収税額表 月額表 甲欄 扶養0人）
         const socialInsuranceTotal = healthInsurance + pension + employmentInsurance;
-        const taxableIncome = grossPay - socialInsuranceTotal - 88000;
+        // 課税給与所得金額 = 総支給額 - 社会保険料合計
+        const taxBase = grossPay - socialInsuranceTotal;
         let incomeTax = 0;
-        if (taxableIncome > 0) {
-            const annualTaxableIncome = taxableIncome * 12;
-            if (annualTaxableIncome <= 1950000) {
-                incomeTax = Math.floor(annualTaxableIncome * 0.05 / 12);
-            }
-            else if (annualTaxableIncome <= 3300000) {
-                incomeTax = Math.floor((annualTaxableIncome * 0.10 - 97500) / 12);
-            }
-            else if (annualTaxableIncome <= 6950000) {
-                incomeTax = Math.floor((annualTaxableIncome * 0.20 - 427500) / 12);
-            }
-            else if (annualTaxableIncome <= 9000000) {
-                incomeTax = Math.floor((annualTaxableIncome * 0.23 - 636000) / 12);
-            }
-            else if (annualTaxableIncome <= 18000000) {
-                incomeTax = Math.floor((annualTaxableIncome * 0.33 - 1536000) / 12);
-            }
-            else if (annualTaxableIncome <= 40000000) {
-                incomeTax = Math.floor((annualTaxableIncome * 0.40 - 2796000) / 12);
-            }
-            else {
-                incomeTax = Math.floor((annualTaxableIncome * 0.45 - 4796000) / 12);
+        if (taxBase > 0) {
+            // 月額表（甲欄・扶養親族0人）2024年版
+            // 「社会保険料等控除後の給与等の金額」に対する税額
+            const TAX_TABLE = [
+                { min: 0,      max: 88000,  tax: 0 },
+                { min: 88000,  max: 89000,  tax: 130 },
+                { min: 89000,  max: 90000,  tax: 180 },
+                { min: 90000,  max: 91000,  tax: 230 },
+                { min: 91000,  max: 92000,  tax: 290 },
+                { min: 92000,  max: 93000,  tax: 340 },
+                { min: 93000,  max: 94000,  tax: 390 },
+                { min: 94000,  max: 95000,  tax: 440 },
+                { min: 95000,  max: 96000,  tax: 490 },
+                { min: 96000,  max: 97000,  tax: 540 },
+                { min: 97000,  max: 98000,  tax: 590 },
+                { min: 98000,  max: 99000,  tax: 640 },
+                { min: 99000,  max: 101000, tax: 720 },
+                { min: 101000, max: 103000, tax: 830 },
+                { min: 103000, max: 105000, tax: 930 },
+                { min: 105000, max: 107000, tax: 1030 },
+                { min: 107000, max: 109000, tax: 1130 },
+                { min: 109000, max: 111000, tax: 1240 },
+                { min: 111000, max: 113000, tax: 1340 },
+                { min: 113000, max: 115000, tax: 1440 },
+                { min: 115000, max: 117000, tax: 1540 },
+                { min: 117000, max: 119000, tax: 1640 },
+                { min: 119000, max: 121000, tax: 1750 },
+                { min: 121000, max: 123000, tax: 1850 },
+                { min: 123000, max: 125000, tax: 1950 },
+                { min: 125000, max: 127000, tax: 2050 },
+                { min: 127000, max: 129000, tax: 2150 },
+                { min: 129000, max: 131000, tax: 2260 },
+                { min: 131000, max: 133000, tax: 2360 },
+                { min: 133000, max: 135000, tax: 2460 },
+                { min: 135000, max: 137000, tax: 2560 },
+                { min: 137000, max: 139000, tax: 2660 },
+                { min: 139000, max: 141000, tax: 2760 },
+                { min: 141000, max: 143000, tax: 2870 },
+                { min: 143000, max: 145000, tax: 2970 },
+                { min: 145000, max: 147000, tax: 3070 },
+                { min: 147000, max: 149000, tax: 3170 },
+                { min: 149000, max: 151000, tax: 3270 },
+                { min: 151000, max: 153000, tax: 3380 },
+                { min: 153000, max: 155000, tax: 3480 },
+                { min: 155000, max: 157000, tax: 3580 },
+                { min: 157000, max: 159000, tax: 3680 },
+                { min: 159000, max: 161000, tax: 3780 },
+                { min: 161000, max: 163000, tax: 3880 },
+                { min: 163000, max: 165000, tax: 3990 },
+                { min: 165000, max: 167000, tax: 4090 },
+                { min: 167000, max: 169000, tax: 4190 },
+                { min: 169000, max: 171000, tax: 4290 },
+                { min: 171000, max: 173000, tax: 4390 },
+                { min: 173000, max: 175000, tax: 4490 },
+                { min: 175000, max: 177000, tax: 4600 },
+                { min: 177000, max: 179000, tax: 4700 },
+                { min: 179000, max: 181000, tax: 4800 },
+                { min: 181000, max: 183000, tax: 4900 },
+                { min: 183000, max: 185000, tax: 5000 },
+                { min: 185000, max: 187000, tax: 5100 },
+                { min: 187000, max: 189000, tax: 5210 },
+                { min: 189000, max: 191000, tax: 5310 },
+                { min: 191000, max: 193000, tax: 5410 },
+                { min: 193000, max: 195000, tax: 5510 },
+                { min: 195000, max: 197000, tax: 5610 },
+                { min: 197000, max: 199000, tax: 5720 },
+                { min: 199000, max: 201000, tax: 5820 },
+                { min: 201000, max: 203000, tax: 5920 },
+                { min: 203000, max: 205000, tax: 6020 },
+                { min: 205000, max: 207000, tax: 6120 },
+                { min: 207000, max: 209000, tax: 6220 },
+                { min: 209000, max: 211000, tax: 6330 },
+                { min: 211000, max: 213000, tax: 6430 },
+                { min: 213000, max: 215000, tax: 6530 },
+                { min: 215000, max: 217000, tax: 6630 },
+                { min: 217000, max: 219000, tax: 6730 },
+                { min: 219000, max: 221000, tax: 6840 },
+                { min: 221000, max: 224000, tax: 7000 },
+                { min: 224000, max: 227000, tax: 7210 },
+                { min: 227000, max: 230000, tax: 7420 },
+                { min: 230000, max: 233000, tax: 7630 },
+                { min: 233000, max: 236000, tax: 7840 },
+                { min: 236000, max: 239000, tax: 8050 },
+                { min: 239000, max: 242000, tax: 8260 },
+                { min: 242000, max: 245000, tax: 8470 },
+                { min: 245000, max: 248000, tax: 8680 },
+                { min: 248000, max: 251000, tax: 8890 },
+                { min: 251000, max: 254000, tax: 9100 },
+                { min: 254000, max: 257000, tax: 9310 },
+                { min: 257000, max: 260000, tax: 9520 },
+                { min: 260000, max: 263000, tax: 9740 },
+                { min: 263000, max: 266000, tax: 9950 },
+                { min: 266000, max: 269000, tax: 10160 },
+                { min: 269000, max: 272000, tax: 10370 },
+                { min: 272000, max: 275000, tax: 10580 },
+                { min: 275000, max: 278000, tax: 10790 },
+                { min: 278000, max: 281000, tax: 11000 },
+                { min: 281000, max: 284000, tax: 11210 },
+                { min: 284000, max: 287000, tax: 11420 },
+                { min: 287000, max: 290000, tax: 11630 },
+                { min: 290000, max: 293000, tax: 11840 },
+                { min: 293000, max: 296000, tax: 12050 },
+                { min: 296000, max: 299000, tax: 12260 },
+                { min: 299000, max: 302000, tax: 12480 },
+                { min: 302000, max: 305000, tax: 12740 },
+                { min: 305000, max: 308000, tax: 13000 },
+                { min: 308000, max: 311000, tax: 13260 },
+                { min: 311000, max: 314000, tax: 13520 },
+                { min: 314000, max: 317000, tax: 13780 },
+                { min: 317000, max: 320000, tax: 14040 },
+                { min: 320000, max: 323000, tax: 14300 },
+                { min: 323000, max: 326000, tax: 14560 },
+                { min: 326000, max: 329000, tax: 14820 },
+                { min: 329000, max: 332000, tax: 15080 },
+                { min: 332000, max: 335000, tax: 15340 },
+                { min: 335000, max: 338000, tax: 15600 },
+                { min: 338000, max: 341000, tax: 15860 },
+                { min: 341000, max: 344000, tax: 16120 },
+                { min: 344000, max: 347000, tax: 16380 },
+                { min: 347000, max: 350000, tax: 16640 },
+                { min: 350000, max: 353000, tax: 16900 },
+                { min: 353000, max: 356000, tax: 17160 },
+                { min: 356000, max: 359000, tax: 17420 },
+                { min: 359000, max: 362000, tax: 17680 },
+                { min: 362000, max: 365000, tax: 17940 },
+                { min: 365000, max: 368000, tax: 18200 },
+                { min: 368000, max: 371000, tax: 18460 },
+                { min: 371000, max: 374000, tax: 18720 },
+                { min: 374000, max: 377000, tax: 18980 },
+                { min: 377000, max: 380000, tax: 19240 },
+                { min: 380000, max: 383000, tax: 19500 },
+                { min: 383000, max: 386000, tax: 19760 },
+                { min: 386000, max: 389000, tax: 20020 },
+                { min: 389000, max: 392000, tax: 20280 },
+                { min: 392000, max: 395000, tax: 20540 },
+                { min: 395000, max: 398000, tax: 20800 },
+                { min: 398000, max: 401000, tax: 21060 },
+                { min: 401000, max: 404000, tax: 21320 },
+                { min: 404000, max: 407000, tax: 21580 },
+                { min: 407000, max: 410000, tax: 21840 },
+                { min: 410000, max: 413000, tax: 22100 },
+                { min: 413000, max: 416000, tax: 22360 },
+                { min: 416000, max: 419000, tax: 22620 },
+                { min: 419000, max: 422000, tax: 22880 },
+                { min: 422000, max: 425000, tax: 23140 },
+                { min: 425000, max: 428000, tax: 23400 },
+                { min: 428000, max: 431000, tax: 23660 },
+                { min: 431000, max: 434000, tax: 23920 },
+                { min: 434000, max: 437000, tax: 24180 },
+                { min: 437000, max: 440000, tax: 24440 },
+                { min: 440000, max: 443000, tax: 24700 },
+                { min: 443000, max: 446000, tax: 24960 },
+                { min: 446000, max: 449000, tax: 25220 },
+                { min: 449000, max: 452000, tax: 25480 },
+                { min: 452000, max: 455000, tax: 25740 },
+                { min: 455000, max: 458000, tax: 26000 },
+                { min: 458000, max: 461000, tax: 26260 },
+                { min: 461000, max: 464000, tax: 26520 },
+                { min: 464000, max: 467000, tax: 26780 },
+                { min: 467000, max: 470000, tax: 27040 },
+                { min: 470000, max: 473000, tax: 27300 },
+                { min: 473000, max: 476000, tax: 27560 },
+                { min: 476000, max: 479000, tax: 27820 },
+                { min: 479000, max: 482000, tax: 28080 },
+                { min: 482000, max: 485000, tax: 28340 },
+                { min: 485000, max: 488000, tax: 28600 },
+                { min: 488000, max: 491000, tax: 28860 },
+                { min: 491000, max: 494000, tax: 29120 },
+                { min: 494000, max: 497000, tax: 29380 },
+                { min: 497000, max: 500000, tax: 29640 },
+                { min: 500000, max: 503000, tax: 29900 },
+                { min: 503000, max: 506000, tax: 30840 },
+                { min: 506000, max: 509000, tax: 31780 },
+                { min: 509000, max: 512000, tax: 32730 },
+                { min: 512000, max: 515000, tax: 33670 },
+                { min: 515000, max: 518000, tax: 34610 },
+                { min: 518000, max: 521000, tax: 35560 },
+                { min: 521000, max: 524000, tax: 36500 },
+                { min: 524000, max: 527000, tax: 37440 },
+                { min: 527000, max: 530000, tax: 38390 },
+                { min: 530000, max: 533000, tax: 39330 },
+                { min: 533000, max: 536000, tax: 40270 },
+                { min: 536000, max: 539000, tax: 41220 },
+                { min: 539000, max: 542000, tax: 42160 },
+                { min: 542000, max: 545000, tax: 43100 },
+                { min: 545000, max: 548000, tax: 44050 },
+                { min: 548000, max: 551000, tax: 44990 },
+                { min: 551000, max: 554000, tax: 45930 },
+                { min: 554000, max: 557000, tax: 46880 },
+                { min: 557000, max: 560000, tax: 47820 },
+                { min: 560000, max: 563000, tax: 48760 },
+                { min: 563000, max: 566000, tax: 49710 },
+                { min: 566000, max: 569000, tax: 50650 },
+                { min: 569000, max: 572000, tax: 51590 },
+                { min: 572000, max: 575000, tax: 52540 },
+                { min: 575000, max: 578000, tax: 53480 },
+                { min: 578000, max: 581000, tax: 54420 },
+                { min: 581000, max: 584000, tax: 55370 },
+                { min: 584000, max: 587000, tax: 56310 },
+                { min: 587000, max: 590000, tax: 57250 },
+                { min: 590000, max: 593000, tax: 58200 },
+                { min: 593000, max: 596000, tax: 59140 },
+                { min: 596000, max: 599000, tax: 60080 },
+                { min: 599000, max: 602000, tax: 61030 },
+                { min: 602000, max: Infinity, tax: -1 } // 上限超え：別途計算
+            ];
+            const entry = TAX_TABLE.find(r => taxBase >= r.min && taxBase < r.max);
+            if (entry && entry.tax >= 0) {
+                incomeTax = entry.tax;
+            } else if (taxBase >= 602000) {
+                // 602,000円以上：(taxBase - 602000) * 40.84% + 61030 の近似式（国税庁準拠）
+                incomeTax = Math.floor((taxBase - 602000) * 0.4084 + 61030);
             }
         }
         // 住民税: 手動上書きがあれば優先、なければ自動計算値
@@ -4276,7 +4475,7 @@ const AdminSystem = () => {
                                 • <strong>健康保険</strong>: 標準報酬月額 × 保険料率 ÷ 2（40歳以上は介護保険料を含む）<br/>
                                 • <strong>厚生年金</strong>: 標準報酬月額 × 18.3% ÷ 2<br/>
                                 • <strong>雇用保険</strong>: 総支給額（経費除く） × 0.55%<br/>
-                                • <strong>所得税</strong>: (総支給額 - 社会保険料 - 給与所得控除) に対する累進課税<br/>
+                                • <strong>所得税</strong>: 国税庁「給与所得の源泉徴収税額表（月額表・甲欄）」に基づく計算<br/>
                                 • <strong>住民税</strong>: 課税所得 × 10%（概算）<br/>
                                 ※時間給の場合、88,000円未満は健康保険・厚生年金が免除されます
                             </div>
@@ -6642,6 +6841,7 @@ const EditEmployeeForm = ({ employee, onSave, onCancel }) => {
         rent: 0, utilities: 0
     });
     const [salaryHistory, setSalaryHistory] = useState((employee === null || employee === void 0 ? void 0 : employee.salaryHistory) ? [...employee.salaryHistory].sort((a, b) => a.fromYearMonth.localeCompare(b.fromYearMonth)) : []);
+    const [fixedStandardRemuneration, setFixedStandardRemuneration] = useState((employee === null || employee === void 0 ? void 0 : employee.fixedStandardRemuneration) || 0);
     const prefectures = Object.keys(INSURANCE_DATA.minimumWage);
     const addSalaryHistoryEntry = () => {
         setSalaryHistory([...salaryHistory, { fromYearMonth: '', monthlySalary: 0, prefecture: '東京' }]);
@@ -6693,6 +6893,10 @@ const EditEmployeeForm = ({ employee, onSave, onCancel }) => {
         salaryType === '固定給' && (React.createElement("div", null,
             React.createElement("label", { className: "text-sm font-medium" }, "\u56FA\u5B9A\u7D66(\u6708\u984D\u30FB\u5186)"),
             React.createElement("input", { type: "number", value: monthlySalary, onChange: (e) => setMonthlySalary(e.target.value), className: "w-full p-2 border rounded" }))),
+        React.createElement("div", { className: "bg-blue-50 border border-blue-200 rounded p-3" },
+            React.createElement("label", { className: "text-sm font-bold text-blue-800" }, "\u6a19\u6e96\u5831\u916c\u6708\u984d\uff08\u56fa\u5b9a\uff09"),
+            React.createElement("input", { type: "number", value: fixedStandardRemuneration || '', onChange: (e) => setFixedStandardRemuneration(e.target.value), className: "w-full p-2 border rounded mt-1", placeholder: "0\uff08\u81ea\u52d5\u8a08\u7b97\uff09" }),
+            React.createElement("div", { className: "text-xs text-blue-600 mt-1" }, "\u2605 \u5e74\u91d1\u4e8b\u52d9\u6240\u304b\u3089\u5c4a\u3044\u305f\u300c\u6a19\u6e96\u5831\u916c\u6c7a\u5b9a\u901a\u77e5\u66f8\u300d\u306e\u91d1\u984d\u3092\u5165\u529b\u3059\u308b\u3068\u793e\u4f1a\u4fdd\u967a\u6599\u304c\u6b63\u78ba\u306b\u306a\u308a\u307e\u3059\u3002\u672a\u5165\u529b\u306e\u5834\u5408\u306f\u7d66\u4e0e\u984d\u304b\u3089\u81ea\u52d5\u8a08\u7b97\u3002")),
         React.createElement("div", { className: "bg-yellow-50 p-2 rounded" },
             React.createElement("h5", { className: "text-sm font-bold mb-2" }, "\u652F\u7D66\u9805\u76EE\uFF08\u624B\u5F53\uFF09"),
             React.createElement("div", { className: "grid grid-cols-3 gap-2" },
@@ -6767,7 +6971,7 @@ const EditEmployeeForm = ({ employee, onSave, onCancel }) => {
         React.createElement("div", { className: "flex gap-2 justify-end" },
             React.createElement("button", { onClick: () => {
                     if (employee === null || employee === void 0 ? void 0 : employee.id) {
-                        onSave(employee.id, name, rate, transport, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches, salaryHistory);
+                        onSave(employee.id, name, rate, transport, salaryType, monthlySalary, prefecture, age, allowances, deductions, minimumWage, insuranceSwitches, salaryHistory, parseFloat(fixedStandardRemuneration) || 0);
                     }
                 }, className: "px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 flex items-center gap-2" },
                 React.createElement(Save, { className: "w-4 h-4" }),
