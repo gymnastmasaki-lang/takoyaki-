@@ -1854,9 +1854,6 @@
           const isPast = (dateStr === todayStr) && (slot.startMin <= nowMin);
           const disabled = isFull || isPast;
 
-          // 選択不可スロットは非表示
-          if (disabled) return;
-
           const btn = document.createElement('button');
           btn.type = 'button';
           btn.dataset.slotKey = slot.slotKey;
@@ -1876,7 +1873,7 @@
             bgStyle = 'background: white; color: #333; border: 2px solid #e0e0e0; cursor: pointer;';
           }
 
-          btn.style.cssText = `padding: 10px 6px; border-radius: 10px; font-size: 13px; font-weight: bold; text-align: center; transition: all 0.2s; ${bgStyle}`;
+          btn.style.cssText = `padding: 10px 6px; border-radius: 10px; font-size: 13px; font-weight: bold; text-align: center; transition: all 0.2s; ${bgStyle}${disabled ? ' opacity: 0.5;' : ''}`;
           // statusTextがある場合のみ小テキストを表示
           btn.innerHTML = statusText
             ? `<div>${slot.label}</div><div style="font-size: 11px; margin-top: 3px; color: inherit;">${statusText}</div>`
@@ -3667,16 +3664,26 @@
           // スロット設定が有効ならスロットUI、無効なら従来のドロップダウン
           if (pickupSlotConfig.enabled) {
             // 営業時間設定を読み込んでスロットUI構築
-            let openTime = '09:00';
+            // テーブル別カスタム営業時間を優先、なければグローバル設定を参照
+            let openTime = '11:00';
             let closeTime = '22:00';
             try {
-              const bhRef = currentStoreId ?
-                doc(db, 'stores', currentStoreId, 'business_hours_settings', 'default') :
-                doc(db, 'business_hours_settings', 'default');
-              const bhSnap = await getDoc(bhRef);
-              if (bhSnap.exists() && bhSnap.data().enabled) {
-                openTime = bhSnap.data().openTime || '09:00';
-                closeTime = bhSnap.data().closeTime || '22:00';
+              if (tableSettings && tableSettings.businessHours && tableSettings.businessHours.enabled) {
+                // テーブル別カスタム営業時間を使用
+                openTime = tableSettings.businessHours.openTime || '11:00';
+                closeTime = tableSettings.businessHours.closeTime || '22:00';
+                console.log('✅ テーブル別営業時間をスロットUIに適用:', openTime, '-', closeTime);
+              } else {
+                // グローバル営業時間設定を参照
+                const bhRef = currentStoreId ?
+                  doc(db, 'stores', currentStoreId, 'business_hours_settings', 'default') :
+                  doc(db, 'business_hours_settings', 'default');
+                const bhSnap = await getDoc(bhRef);
+                if (bhSnap.exists() && bhSnap.data().enabled) {
+                  openTime = bhSnap.data().openTime || '11:00';
+                  closeTime = bhSnap.data().closeTime || '22:00';
+                  console.log('✅ グローバル営業時間をスロットUIに適用:', openTime, '-', closeTime);
+                }
               }
             } catch (e) { console.error('営業時間読み込みエラー:', e); }
             await buildPickupSlotUI(openTime, closeTime);
