@@ -2419,7 +2419,7 @@
       
       <!-- メインメニュー -->
       <div class="sidebar-section">
-        <button class="sidebar-button" onclick="window.location.href='/kintai.html'">
+        <button class="sidebar-button" onclick="window.location.href='https://gymnastmasaki-lang.github.io/takoyaki-/kintai.html'">
           <span>勤怠</span>
         </button>
         <button class="sidebar-button" id="salesMenuBtn" onclick="toggleSalesMenu()">
@@ -2451,7 +2451,7 @@
           <button class="sidebar-button" onclick="window.open('/order.html', '_blank')" style="font-size: 12px; padding: 8px;">
             <span>発注</span>
           </button>
-          <button class="sidebar-button" onclick="window.open('/kanri.html', '_blank')" style="font-size: 12px; padding: 8px;">
+          <button class="sidebar-button" onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kanri.html', '_blank')" style="font-size: 12px; padding: 8px;">
             <span>設定・管理</span>
           </button>
           <button class="sidebar-button" onclick="showDrawerSettings()" style="font-size: 12px; padding: 8px;">
@@ -2573,7 +2573,7 @@
       <div class="header-right" style="display: flex; gap: 15px; align-items: flex-start;">
         
         <div style="display: flex; flex-direction: column; gap: 10px;">
-          <button onclick="window.location.href='/kintai.html'" style="padding: 10px 45px; font-size: 16px; background: linear-gradient(135deg, #3F51B5 0%, #303F9F 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: space-evenly; line-height: 1.2; height: 122px; box-sizing: border-box;">
+          <button onclick="window.location.href='https://gymnastmasaki-lang.github.io/takoyaki-/kintai.html'" style="padding: 10px 45px; font-size: 16px; background: linear-gradient(135deg, #3F51B5 0%, #303F9F 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: space-evenly; line-height: 1.2; height: 122px; box-sizing: border-box;">
             <div style="font-size: 26px; margin-bottom: 2px;">⏰</div>
             <div style="font-size: 15px;">勤怠</div>
           </button>
@@ -2596,7 +2596,7 @@
           </div>
         </div>
         <div style="display: flex; flex-direction: column; gap: 10px;">
-          <button onclick="window.open('/kanri.html', '_blank')" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">設定•管理</button>
+          <button onclick="window.open('https://gymnastmasaki-lang.github.io/takoyaki-/kanri.html', '_blank')" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">設定•管理</button>
           <button onclick="handleLogout()" style="padding: 12px 40px; font-size: 16px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold;">ログアウト</button>
         </div>
       </div>
@@ -20271,3 +20271,88 @@ function showNativePrinterStatus(msg, bg, color) {
 <script src="raspi_bridge.js"></script>
 </body>
 </html>
+<script>
+// ======== オフラインPOSログイン ========
+(function() {
+  function setupOfflineLogin() {
+    const btn = document.getElementById('posLoginBtn') || document.querySelector('#loginScreen button');
+    if (!btn) { setTimeout(setupOfflineLogin, 300); return; }
+    btn.addEventListener('click', async function(e) {
+      if (window.db && window.currentStoreId) return; // Firebase正常なら通常処理
+      const firebase_ok = window.db && typeof window.getStoreCollection === 'function';
+      if (firebase_ok) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      const nameEl = document.getElementById('storeNameInput');
+      const passEl = document.getElementById('storePasswordInput');
+      if (!nameEl || !passEl) return;
+      const name = nameEl.value.trim();
+      const pass = passEl.value.trim();
+      if (!name || !pass) { alert('店舗名とパスワードを入力してください'); return; }
+      try {
+        const r = await fetch('/offline_stores.json');
+        if (!r.ok) throw new Error('店舗リスト取得失敗');
+        const stores = await r.json();
+        const match = stores.find(s => s.name === name && s.password === pass);
+        if (!match) { alert('店舗名またはパスワードが違います'); return; }
+        const fk = match.file_key || match.id;
+        const dr = await fetch('/offline_data_' + encodeURIComponent(fk) + '.json');
+        if (!dr.ok) throw new Error('オフラインデータ取得失敗');
+        const d = await dr.json();
+        // グローバル変数セット
+        window._isOfflineMode = true;
+        window.currentStoreId = match.id;
+        window.currentStoreName = match.name;
+        window._offlineMenuItems = d.menuItems || [];
+        window._offlineTables = d.tables || [];
+        window._offlineEmployees = d.employees || [];
+        window._offlineToppings = d.toppings || [];
+        window.TABLES = (d.tables||[]).map(t=>t.tableNumber||t.number||t.id||t.name).filter(Boolean);
+        // Firebase関数をオフライン用に上書き
+        window.getStoreCollection = (n) => ({ _offlineCollection: n });
+        window.getDocs = async (ref) => {
+          const m = {menus:window._offlineMenuItems, toppings:window._offlineToppings,
+                     employees:window._offlineEmployees, tables:window._offlineTables};
+          const arr = (ref && ref._offlineCollection && m[ref._offlineCollection]) || [];
+          return { docs: arr.map(x=>({id:x.id,data:()=>x})), forEach:(fn)=>arr.forEach(x=>fn({id:x.id,data:()=>x})) };
+        };
+        window.collection = (db,...a) => ({ _offlineCollection: a[a.length-1] });
+        window.query = (...a) => a[0];
+        window.where = window.orderBy = window.limit = () => ({});
+        window.addDoc = async (col, data) => {
+          const id = 'offline_' + Date.now();
+          try {
+            const pf = '/pending_sync.json';
+            let pending = [];
+            try { const pr = await fetch(pf); if(pr.ok) pending = await pr.json(); } catch(e){}
+            pending.push({id, collection: col._offlineCollection||'orders', data, ts: new Date().toISOString()});
+            await fetch('/save_pending', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(pending)}).catch(()=>{});
+          } catch(e) {}
+          return { id };
+        };
+        window.setDoc = window.updateDoc = window.deleteDoc = async () => {};
+        window.getDoc = async () => ({ exists:()=>false, data:()=>({}) });
+        window.onSnapshot = (ref, cb) => { cb({docs:[],forEach:()=>{}}); return ()=>{}; };
+        // localStorage
+        localStorage.setItem('posStoreId', match.id);
+        localStorage.setItem('posStoreName', match.name);
+        localStorage.setItem('posAuthenticated', 'true');
+        localStorage.setItem('_offlineMode', 'true');
+        // ログイン画面を閉じる
+        const ls = document.getElementById('loginScreen');
+        if (ls) ls.style.display = 'none';
+        if (typeof showDateSelectionModal === 'function') showDateSelectionModal();
+        console.log('✅ オフラインログイン成功:', match.name);
+      } catch(err) {
+        alert('オフラインログインエラー: ' + err.message);
+        console.error(err);
+      }
+    }, true);
+    console.log('✅ オフラインログイン設定完了');
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupOfflineLogin);
+  } else { setupOfflineLogin(); }
+})();
+// ======== オフラインPOSログイン ここまで ========
+</script>
