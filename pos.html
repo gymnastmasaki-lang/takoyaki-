@@ -124,10 +124,10 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-    import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, query, where, getDocs, updateDoc, doc, Timestamp, onSnapshot, addDoc, orderBy, getDoc, setDoc, limit, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-    import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
-    import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+    import { initializeApp } from "/firebase/firebase-app.js";
+    import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, query, where, getDocs, updateDoc, doc, Timestamp, onSnapshot, addDoc, orderBy, getDoc, setDoc, limit, deleteDoc } from "/firebase/firebase-firestore.js";
+    import { getStorage, ref, uploadBytes, getDownloadURL } from "/firebase/firebase-storage.js";
+    import { getAuth, signOut } from "/firebase/firebase-auth.js";
     
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -211,6 +211,7 @@
     
     // 初期化完了イベントを発行
     window.dispatchEvent(new Event('firebaseReady'));
+    window._firebaseActuallyReady = true;
 
     // ========== 📡 オフライン/オンライン状態管理 ==========
     function showOfflineBanner() {
@@ -3145,11 +3146,19 @@
     // window loadでの自動初期化は削除（ログイン前に実行されエラーになるため）
     
     async function initializeSystem() {
-      // Firebaseの初期化完了を待つ
+      // Firebaseの初期化完了を待つ（最大5秒）
       if (!window.firebaseReady) {
         console.log('⏳ Firebase初期化待機中...');
-        await new Promise(resolve => window.addEventListener('firebaseReady', resolve, { once: true }));
-        console.log('✅ Firebase初期化完了');
+        await new Promise(resolve => {
+          if (window.firebaseReady) { resolve(); return; }
+          const timer = setTimeout(() => {
+            console.warn('⚠️ Firebase初期化タイムアウト - オフラインモードで続行');
+            window.firebaseReady = true;
+            resolve();
+          }, 5000);
+          window.addEventListener('firebaseReady', () => { clearTimeout(timer); resolve(); }, { once: true });
+        });
+        console.log('✅ Firebase初期化完了（またはタイムアウト）');
       }
       // デフォルト税率設定を読み込み
       await loadDefaultTaxRateSettings();
