@@ -7,6 +7,63 @@
   <meta name="googlebot" content="noindex, nofollow, noarchive">
   <meta name="bingbot" content="noindex, nofollow, noarchive">
   <title>レジシステム</title>
+  <!-- Google Identity Services (Drive自動保存用) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script>
+    const GOOGLE_CLIENT_ID = '104494752890-evqlmfhk2lnj62hq7imksmqgd3rcs3j9.apps.googleusercontent.com';
+    const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+    let googleAccessToken = null;
+
+    // Google Drive にファイルをアップロード
+    async function uploadToGoogleDrive(fileName, content, mimeType) {
+      if (!googleAccessToken) {
+        await new Promise((resolve, reject) => {
+          const client = google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: DRIVE_SCOPE,
+            callback: (response) => {
+              if (response.error) { reject(response); return; }
+              googleAccessToken = response.access_token;
+              resolve();
+            }
+          });
+          client.requestAccessToken({ prompt: 'consent' });
+        });
+      }
+
+      // POSバックアップフォルダを検索または作成
+      let folderId = null;
+      const folderSearch = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=name='POSバックアップ' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+        { headers: { Authorization: `Bearer ${googleAccessToken}` } }
+      );
+      const folderData = await folderSearch.json();
+      if (folderData.files && folderData.files.length > 0) {
+        folderId = folderData.files[0].id;
+      } else {
+        const createFolder = await fetch('https://www.googleapis.com/drive/v3/files', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${googleAccessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'POSバックアップ', mimeType: 'application/vnd.google-apps.folder' })
+        });
+        const folderResult = await createFolder.json();
+        folderId = folderResult.id;
+      }
+
+      // ファイルをアップロード
+      const metadata = { name: fileName, parents: [folderId] };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      form.append('file', new Blob([content], { type: mimeType }));
+
+      const uploadRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${googleAccessToken}` },
+        body: form
+      });
+      return uploadRes.ok;
+    }
+  </script>
   <!-- ========== 📦 Service Worker 登録（オフライン対応） ========== -->
   <script>
     if ('serviceWorker' in navigator) {
@@ -8970,11 +9027,30 @@ ${redSlipCount > 0 ? `
           logging: false
         });
         
-        // PNG画像としてダウンロード
-        canvas.toBlob((blob) => {
+        // PNG画像としてダウンロード＆Google Drive自動保存
+        canvas.toBlob(async (blob) => {
           const _d2 = canvas.toDataURL('image/png');
           saveFileWebViewSafe(blob, `精算ジャーナル_${dateStr}.png`, 'image/png');
           document.body.removeChild(journalDiv);
+
+          // Google Drive自動保存
+          try {
+            const arrayBuffer = await blob.arrayBuffer();
+            const pngContent = new Uint8Array(arrayBuffer);
+            const fileName = `精算ジャーナル_${dateStr}.png`;
+            const uploaded = await uploadToGoogleDrive(fileName, pngContent, 'image/png');
+            if (uploaded) {
+              console.log('✅ Google Driveに自動保存しました:', fileName);
+              // 小さな通知を表示
+              const notice = document.createElement('div');
+              notice.style.cssText = 'position:fixed;bottom:80px;right:20px;background:#4CAF50;color:white;padding:12px 20px;border-radius:8px;z-index:999999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+              notice.textContent = '☁️ Google Driveに保存しました';
+              document.body.appendChild(notice);
+              setTimeout(() => notice.remove(), 4000);
+            }
+          } catch (driveErr) {
+            console.warn('⚠️ Google Drive保存をスキップ:', driveErr.message);
+          }
         });
         
         // ===== 精算記録をFirebaseに保存 =====

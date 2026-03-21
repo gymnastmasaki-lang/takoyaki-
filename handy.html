@@ -4,6 +4,75 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ハンディシステム</title>
+  <!-- Google Identity Services (Drive自動保存用) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script>
+    const GOOGLE_CLIENT_ID = '104494752890-evqlmfhk2lnj62hq7imksmqgd3rcs3j9.apps.googleusercontent.com';
+    const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+    let googleAccessToken = null;
+
+    async function uploadToGoogleDrive(fileName, content, mimeType) {
+      if (!googleAccessToken) {
+        await new Promise((resolve, reject) => {
+          const client = google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: DRIVE_SCOPE,
+            callback: (response) => {
+              if (response.error) { reject(response); return; }
+              googleAccessToken = response.access_token;
+              resolve();
+            }
+          });
+          client.requestAccessToken({ prompt: 'consent' });
+        });
+      }
+
+      let folderId = null;
+      const folderSearch = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=name='POSバックアップ' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+        { headers: { Authorization: `Bearer ${googleAccessToken}` } }
+      );
+      const folderData = await folderSearch.json();
+      if (folderData.files && folderData.files.length > 0) {
+        folderId = folderData.files[0].id;
+      } else {
+        const createFolder = await fetch('https://www.googleapis.com/drive/v3/files', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${googleAccessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'POSバックアップ', mimeType: 'application/vnd.google-apps.folder' })
+        });
+        const folderResult = await createFolder.json();
+        folderId = folderResult.id;
+      }
+
+      const metadata = { name: fileName, parents: [folderId] };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      form.append('file', new Blob([content], { type: mimeType }));
+
+      const uploadRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${googleAccessToken}` },
+        body: form
+      });
+      return uploadRes.ok;
+    }
+
+    async function driveUploadWithNotice(fileName, content, mimeType) {
+      try {
+        const uploaded = await uploadToGoogleDrive(fileName, content, mimeType);
+        if (uploaded) {
+          const notice = document.createElement('div');
+          notice.style.cssText = 'position:fixed;bottom:80px;right:20px;background:#4CAF50;color:white;padding:12px 20px;border-radius:8px;z-index:999999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+          notice.textContent = '☁️ Google Driveに保存しました';
+          document.body.appendChild(notice);
+          setTimeout(() => notice.remove(), 4000);
+        }
+      } catch (e) {
+        console.warn('⚠️ Google Drive保存をスキップ:', e.message);
+      }
+    }
+  </script>
   <!-- ========== 📦 Service Worker 登録（オフライン対応） ========== -->
   <script>
     if ('serviceWorker' in navigator) {
@@ -4803,13 +4872,15 @@ ${redSlipCount > 0 ? `
           logging: false
         });
         
-        // PNG画像としてダウンロード
-        canvas.toBlob((blob) => {
+        // PNG画像としてダウンロード＆Google Drive自動保存
+        canvas.toBlob(async (blob) => {
           const url = URL.createObjectURL(blob);
           const imgData2 = canvas.toDataURL('image/png');
 saveFileWebViewSafe(imgData2, `精算ジャーナル_${dateStr}.png`, 'image/png');
           URL.revokeObjectURL(url);
           document.body.removeChild(journalDiv);
+          const ab = await blob.arrayBuffer();
+          await driveUploadWithNotice(`精算ジャーナル_${dateStr}.png`, new Uint8Array(ab), 'image/png');
         });
         
         // ===== 精算記録をFirebaseに保存 =====
@@ -8376,6 +8447,15 @@ saveFileWebViewSafe(imgData, `期間ジャーナル_${startDate}_${endDate}.png`
         
         const _imgData = canvas.toDataURL('image/png');
 saveFileWebViewSafe(_imgData, `精算ジャーナル_${dateStr}.png`, 'image/png');
+
+        // Google Drive自動保存
+        (async () => {
+          try {
+            const res = await fetch(_imgData);
+            const ab = await res.arrayBuffer();
+            await driveUploadWithNotice(`精算ジャーナル_${dateStr}.png`, new Uint8Array(ab), 'image/png');
+          } catch(e) { console.warn('Drive保存スキップ:', e.message); }
+        })();
         
         await showCustomAlert({
           title: '完了',
