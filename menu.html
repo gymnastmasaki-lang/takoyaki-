@@ -1046,7 +1046,7 @@
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, deleteDoc, doc, Timestamp, setDoc, query, where } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, deleteDoc, doc, Timestamp, setDoc, query, where, runTransaction } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -1070,6 +1070,7 @@
     window.Timestamp = Timestamp;
     window.query = query;
     window.where = where;
+    window.runTransaction = runTransaction;
 
     // 店舗ID管理
     let currentStoreId = null;
@@ -1393,11 +1394,18 @@
     
     // 休業日フラグ
     let isClosedDay = false;
+    let _closedDayCheckedAt = 0; // キャッシュタイムスタンプ
+    let _cachedGlobalTimeOverride = null; // グローバル時間外解除設定キャッシュ
     
     const tableNumber = urlParams.get('table') || 'テイクアウト';
 
     // 休業日チェック関数
     async function checkClosedDay() {
+      // ✅ 修正: 5分以内に確認済みであればFirestoreへのアクセスをスキップ
+      const now = Date.now();
+      if (now - _closedDayCheckedAt < 5 * 60 * 1000) {
+        return isClosedDay;
+      }
       try {
         const closedDaysRef = await getDoc(window.getStoreDoc('closed_days_settings', 'default'));
         if (closedDaysRef.exists()) {
@@ -1410,6 +1418,7 @@
           const isSpecificClosedDate = closedDaysSettings.specificClosedDates && closedDaysSettings.specificClosedDates.includes(todayDate);
           
           isClosedDay = isWeeklyClosedDay || isSpecificClosedDate;
+          _closedDayCheckedAt = Date.now(); // キャッシュ更新
           
           if (isClosedDay) {
             console.log('休業日が検出されました');
@@ -1425,6 +1434,7 @@
           }
         }
         isClosedDay = false;
+        _closedDayCheckedAt = Date.now(); // キャッシュ更新
         return false;
       } catch (e) {
         console.error('休業日チェックエラー:', e);
@@ -2204,16 +2214,21 @@
         }
       }
       
-      // グローバル時間外解除設定も確認（後方互換性）
+      // グローバル時間外解除設定も確認（キャッシュ使用）
       if (!timeOverrideEnabled) {
-        try {
-          const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
-          if (settingsRef.exists() && settingsRef.data().enabled) {
-            timeOverrideEnabled = true;
-            console.log('✅ グローバル時間外解除設定が有効です');
+        if (_cachedGlobalTimeOverride !== null) {
+          timeOverrideEnabled = _cachedGlobalTimeOverride;
+        } else {
+          try {
+            const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+            _cachedGlobalTimeOverride = settingsRef.exists() ? settingsRef.data().enabled : false;
+            if (_cachedGlobalTimeOverride) {
+              timeOverrideEnabled = true;
+              console.log('✅ グローバル時間外解除設定が有効です');
+            }
+          } catch (e) {
+            console.error('時間外解除設定の読み込みエラー:', e);
           }
-        } catch (e) {
-          console.error('時間外解除設定の読み込みエラー:', e);
         }
       }
       
@@ -2354,15 +2369,18 @@
               }
             }
             
-            // グローバル時間外解除設定も確認
+            // グローバル時間外解除設定も確認（キャッシュ使用）
             if (!timeOverrideEnabled) {
-              try {
-                const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
-                if (settingsRef.exists() && settingsRef.data().enabled) {
-                  timeOverrideEnabled = true;
+              if (_cachedGlobalTimeOverride !== null) {
+                timeOverrideEnabled = _cachedGlobalTimeOverride;
+              } else {
+                try {
+                  const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+                  _cachedGlobalTimeOverride = settingsRef.exists() ? settingsRef.data().enabled : false;
+                  if (_cachedGlobalTimeOverride) timeOverrideEnabled = true;
+                } catch (e) {
+                  console.error('時間外解除設定の読み込みエラー:', e);
                 }
-              } catch (e) {
-                console.error('時間外解除設定の読み込みエラー:', e);
               }
             }
             
@@ -3992,13 +4010,19 @@
           timeOverrideEnabled = true;
         }
 
-        // グローバル時間外解除
+        // グローバル時間外解除（キャッシュを使用してFirestoreアクセスを省略）
         if (!timeOverrideEnabled) {
-          try {
-            const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
-            timeOverrideEnabled = settingsRef.exists() ? settingsRef.data().enabled : false;
-          } catch (e) {
-            console.error('時間外解除設定の読み込みエラー:', e);
+          if (_cachedGlobalTimeOverride !== null) {
+            // ✅ キャッシュ済みの値を使用
+            timeOverrideEnabled = _cachedGlobalTimeOverride;
+          } else {
+            try {
+              const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+              _cachedGlobalTimeOverride = settingsRef.exists() ? settingsRef.data().enabled : false;
+              timeOverrideEnabled = _cachedGlobalTimeOverride;
+            } catch (e) {
+              console.error('時間外解除設定の読み込みエラー:', e);
+            }
           }
         }
 
@@ -4290,7 +4314,8 @@
         // ========== 注文番号をトランザクションでアトミックに採番 ==========
         // レースコンディション防止：複数人が同時注文しても重複しない
         // 朝3時（JST）に619からリセット
-        const { runTransaction } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+        // ✅ 修正: 動的importをやめてページ読み込み時にimport済みのものを使用
+        const runTransaction = window.runTransaction;
         
         const counterRef = window.getStoreDoc('settings', 'orderCounter');
 
@@ -4434,59 +4459,72 @@
         
         const docRef = await addDoc(window.getStoreCollection('orders'), orderData);
         
-        await updateDoc(docRef, {
-          orderId: docRef.id
-        });
-        
-        // 🆕 スロット方式の場合、予約カウントをインクリメント
-        if (pickupSlotConfig.enabled) {
-          const slotKey = document.getElementById('customer-pickup-slot-key')?.value;
-          const dateStr = document.getElementById('customer-pickup-date')?.value;
-          if (slotKey && dateStr) {
-            try {
-              const { runTransaction: rt2 } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
-              const resRef = currentStoreId ?
-                doc(db, 'stores', currentStoreId, 'pickup_reservations', `${dateStr}_${slotKey}`) :
-                doc(db, 'pickup_reservations', `${dateStr}_${slotKey}`);
-              await rt2(db, async (txn) => {
-                const snap = await txn.get(resRef);
-                const current = snap.exists() ? (snap.data().count || 0) : 0;
-                txn.set(resRef, { count: current + 1, orderId: docRef.id, updatedAt: Timestamp.fromDate(now) }, { merge: true });
-              });
-              console.log('✅ 引取予約カウント保存:', dateStr, slotKey);
-            } catch (e) {
-              console.error('予約カウント保存エラー:', e);
-            }
-          }
-        }
-        
-        // 待ち順番を計算（注文後にFirestoreから最新データを取得）
-        const freshSnapshot = await getDocs(window.getStoreCollection('orders'));
-        const validOrders = [];
-        freshSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.deleteAt && 
-              data.deleteAt.toDate && 
-              data.deleteAt.toDate() > now && 
-              !data.deleted &&
-              !data.cancelledAt &&
-              !data.completedAt) {
-            validOrders.push(data.orderNumber);
-          }
-        });
-        if (!validOrders.includes(orderNumber)) validOrders.push(orderNumber);
-        validOrders.sort((a, b) => a - b);
-        const myPosition = validOrders.indexOf(orderNumber);
-        const displayPosition = myPosition + 1 + 1; // 通常の順番に+1
-        
-        await updateDoc(docRef, {
-          myPosition: displayPosition
-        });
-        
+        // ✅ 修正: addDoc直後に即座に画面を切り替える
         document.getElementById('order-num').textContent = orderNumber;
-        document.getElementById('waiting').textContent = displayPosition;
+        document.getElementById('waiting').textContent = '...'; // バックグラウンドで更新
         document.getElementById('order-total').textContent = '¥' + totalAmount.toLocaleString();
         document.getElementById('eat-style').textContent = tableNumber;
+        
+        // ✅ 修正: 重いFirestore処理をバックグラウンドで実行（awaitしない）
+        const _docRefBg = docRef;
+        const _orderNumberBg = orderNumber;
+        const _nowBg = now;
+        const _slotEnabled = pickupSlotConfig.enabled;
+        const _slotKey = document.getElementById('customer-pickup-slot-key')?.value;
+        const _dateStr = document.getElementById('customer-pickup-date')?.value;
+        (async () => {
+          try {
+            // orderId書き戻し
+            await updateDoc(_docRefBg, { orderId: _docRefBg.id });
+            
+            // 🆕 スロット方式の場合、予約カウントをインクリメント
+            if (_slotEnabled && _slotKey && _dateStr) {
+              try {
+                const resRef = currentStoreId ?
+                  doc(db, 'stores', currentStoreId, 'pickup_reservations', `${_dateStr}_${_slotKey}`) :
+                  doc(db, 'pickup_reservations', `${_dateStr}_${_slotKey}`);
+                await runTransaction(db, async (txn) => {
+                  const snap = await txn.get(resRef);
+                  const current = snap.exists() ? (snap.data().count || 0) : 0;
+                  txn.set(resRef, { count: current + 1, orderId: _docRefBg.id, updatedAt: Timestamp.fromDate(_nowBg) }, { merge: true });
+                });
+                console.log('✅ 引取予約カウント保存:', _dateStr, _slotKey);
+              } catch (e) {
+                console.error('予約カウント保存エラー:', e);
+              }
+            }
+            
+            // 待ち順番を計算してバックグラウンドで更新
+            const freshSnapshot = await getDocs(window.getStoreCollection('orders'));
+            const validOrders = [];
+            freshSnapshot.forEach(d => {
+              const data = d.data();
+              if (data.deleteAt &&
+                  data.deleteAt.toDate &&
+                  data.deleteAt.toDate() > _nowBg &&
+                  !data.deleted &&
+                  !data.cancelledAt &&
+                  !data.completedAt) {
+                validOrders.push(data.orderNumber);
+              }
+            });
+            if (!validOrders.includes(_orderNumberBg)) validOrders.push(_orderNumberBg);
+            validOrders.sort((a, b) => a - b);
+            const myPos = validOrders.indexOf(_orderNumberBg);
+            const displayPos = myPos + 1 + 1;
+            
+            await updateDoc(_docRefBg, { myPosition: displayPos });
+            
+            // 待ち順表示を更新（まだ注文完了画面が表示中の場合のみ）
+            const waitingEl = document.getElementById('waiting');
+            if (waitingEl) waitingEl.textContent = displayPos;
+            console.log('✅ バックグラウンド更新完了: 待ち順', displayPos);
+          } catch (e) {
+            console.error('バックグラウンド更新エラー:', e);
+          }
+        })();
+        
+        const displayPosition = 1; // バックグラウンドで上書きされるため初期値のみ
         
         const list = document.getElementById('order-items');
         list.innerHTML = '';
@@ -5480,7 +5518,8 @@
         console.log('📦 注文データ:', orderData);
         
         // ========== ハンディ注文番号もトランザクションで採番（重複防止） ==========
-        const { runTransaction } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+        // ✅ 修正: 動的importをやめてページ読み込み時にimport済みのものを使用
+        const runTransaction = window.runTransaction;
         
         let ordersRef;
         if (storeParam) {
