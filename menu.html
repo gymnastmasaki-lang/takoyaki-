@@ -2059,33 +2059,66 @@
     }
 
     window.onload = async function() {
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('🚀 ページ読み込み開始 (window.onload)');
-      console.log('   現在の店舗ID:', window.currentStoreId);
-      console.log('   現在の店舗名:', currentStoreName);
-      console.log('   テーブル番号:', tableNumber);
-      console.log('   POSモード:', window.isPOSMode);
-      console.log('   ハンディモード:', window.isHandyMode);
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      
-      // 🆕 テーブル設定を読み込み
-      if (tableNumber) {
-        await loadTableSettings(tableNumber);
-      }
-      
-      // 🆕 引取スロット設定を読み込み
-      await loadPickupSlotConfig();
-      
-      // まず注文情報の復元を試みる（営業時間外でも注文番号画面は表示）
+      console.log('🚀 ページ読み込み開始');
+
+      // ✅ 修正: LocalStorageに保存済みの注文があれば即座に注文番号画面を表示し、
+      //         残りのFirestore処理はバックグラウンドで実行する
       const hasStoredOrder = localStorage.getItem('currentOrder_' + tableNumber);
-      
-      // テーブルパラメータがある場合、テーブルの存在確認
+      if (hasStoredOrder && tableNumber) {
+        const quickRestored = restoreOrderFromStorage();
+        if (quickRestored) {
+          console.log('✅ 保存済み注文を即座に表示しました');
+          // バックグラウンドで残りの初期化を実行
+          (async () => {
+            try {
+              if (tableNumber) await loadTableSettings(tableNumber);
+              await loadPickupSlotConfig();
+              await checkClosedDay();
+              if (!window.isPOSMode && !window.isHandyMode) {
+                // キャッシュ済みのtimeOverrideを読み込んでおく
+                if (_cachedGlobalTimeOverride === null) {
+                  try {
+                    const s = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+                    _cachedGlobalTimeOverride = s.exists() ? s.data().enabled : false;
+                  } catch(e) {}
+                }
+              }
+              await updateTopWaitingCount();
+              setInterval(updateTopWaitingCount, 20000);
+              watchSoldOutItems();
+              onSnapshot(window.getStoreCollection('settings'), () => {
+                updateTopWaitingCount().catch(e => console.error('待ち人数更新エラー:', e));
+              });
+              onSnapshot(window.getStoreDoc('closed_days_settings', 'default'), async () => {
+                await checkClosedDay();
+              });
+              // メニューデータも読み込んでおく（「買い物を続ける」ボタン用）
+              await loadAllData();
+              await loadMenuSettings();
+              await loadAlertSettings();
+              await loadStatusDisplaySettings();
+              console.log('✅ バックグラウンド初期化完了');
+            } catch(e) {
+              console.error('バックグラウンド初期化エラー:', e);
+            }
+          })();
+          return; // 即座にreturnして画面を表示
+        }
+      }
+
+      // ===== 通常フロー（保存済み注文なし） =====
+      // テーブル設定・スロット設定を並列で読み込む
+      await Promise.all([
+        tableNumber ? loadTableSettings(tableNumber) : Promise.resolve(),
+        loadPickupSlotConfig()
+      ]);
+
+      // テーブルの存在確認（テイクアウト・即会計は除く）
       if (tableNumber && tableNumber !== 'テイクアウト' && tableNumber !== '即会計') {
         try {
           const tablesSnapshot = await getDocs(window.getStoreCollection('tables'));
           let tableExists = false;
           let tableMemoEnabled = false;
-          
           tablesSnapshot.forEach(doc => {
             const data = doc.data();
             if (data.name === tableNumber) {
@@ -2093,78 +2126,30 @@
               tableMemoEnabled = data.memoEnabled;
             }
           });
-          
           if (!tableExists) {
-            // 保存された注文がある場合は、それを表示（テーブルが削除されていても）
-            if (hasStoredOrder) {
-              console.log('⚠️ テーブルは削除されていますが、保存された注文を表示します');
-              // 初期化を実行してから注文を復元
-              try {
-                await loadAllData();
-                await updateTopWaitingCount();
-                watchSoldOutItems();
-                const restored = restoreOrderFromStorage();
-                if (restored) {
-                  console.log('✅ 保存された注文を復元しました（テーブル削除済み）');
-                  return;
-                }
-              } catch (e) {
-                console.error('注文復元エラー:', e);
-              }
-            }
-            
-            // 保存された注文もない場合はエラー画面を表示
-            document.body.innerHTML = `
-              <div style="
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 100vh;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                text-align: center;
-                padding: 20px;
-                font-family: sans-serif;
-              ">
-                <div style="
-                  background: rgba(255, 255, 255, 0.1);
-                  padding: 40px;
-                  border-radius: 20px;
-                  backdrop-filter: blur(10px);
-                  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                  max-width: 400px;
-                ">
-                  <h1 style="font-size: 48px; margin: 0 0 20px 0;">⚠️</h1>
-                  <p style="font-size: 24px; font-weight: bold; margin: 10px 0;">このテーブルは存在しません</p>
-                  <p style="font-size: 18px; line-height: 1.8; margin: 20px 0;">
-                    テーブル「${tableNumber}」は<br>
-                    削除されたか、<br>
-                    存在しません
-                  </p>
-                  <p style="font-size: 16px; margin: 10px 0; opacity: 0.8;">
-                    店舗スタッフにお声がけください
-                  </p>
+            document.body.innerHTML = \`
+              <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;text-align:center;padding:20px;font-family:sans-serif;">
+                <div style="background:rgba(255,255,255,0.1);padding:40px;border-radius:20px;backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(0,0,0,0.3);max-width:400px;">
+                  <h1 style="font-size:48px;margin:0 0 20px 0;">⚠️</h1>
+                  <p style="font-size:24px;font-weight:bold;margin:10px 0;">このテーブルは存在しません</p>
+                  <p style="font-size:18px;line-height:1.8;margin:20px 0;">テーブル「\${tableNumber}」は<br>削除されたか、存在しません</p>
+                  <p style="font-size:16px;margin:10px 0;opacity:0.8;">店舗スタッフにお声がけください</p>
                 </div>
               </div>
-            `;
+            \`;
             return;
           }
-          
-          // メモ機能は常に表示（memoEnabledに関係なく）
-          console.log(`✅ テーブル「${tableNumber}」を確認しました（メモ機能: 常時表示）`);
-          
+          console.log(\`✅ テーブル「\${tableNumber}」を確認しました\`);
         } catch (error) {
           console.error('テーブル検証エラー:', error);
         }
       }
-      
+
       // 休業日チェック
       const closedCheck = await checkClosedDay();
-      if (closedCheck) {
-        return;
-      }
-      
-      // POSモード・handyモードでは営業時間チェックを完全にスキップ（スタッフ操作用）
+      if (closedCheck) return;
+
+      // POSモード・ハンディモード
       if (window.isPOSMode || window.isHandyMode) {
         console.log('✅ POSモードのため営業時間チェックをスキップします');
         try {
@@ -2183,38 +2168,30 @@
         }
         return;
       }
-      
+
       // 営業時間チェック
       const now = new Date();
       const hours = now.getHours();
       const minutes = now.getMinutes();
-      const currentTime = hours * 60 + minutes; // 分単位に変換
-      
+      const currentTime = hours * 60 + minutes;
       const hasTableParam = urlParams.get('table');
-      let closedStartTime, closedEndTime, operatingHours;
-      
-      // 🆕 テーブル別の時間外解除設定を確認
+
       let timeOverrideEnabled = false;
       let customBusinessHoursEnabled = false;
       let customOpenTime = null;
       let customCloseTime = null;
-      
+
       if (tableNumber && tableSettings) {
-        // テーブル設定から時間外解除を確認
         if (tableSettings.timeOverride && tableSettings.timeOverride.enabled) {
           timeOverrideEnabled = true;
-          console.log('✅ このテーブルは時間外解除が有効です（24時間営業）');
-        }
-        // カスタム営業時間を確認
-        else if (tableSettings.businessHours && tableSettings.businessHours.enabled) {
+        } else if (tableSettings.businessHours && tableSettings.businessHours.enabled) {
           customBusinessHoursEnabled = true;
           customOpenTime = tableSettings.businessHours.openTime || '11:00';
           customCloseTime = tableSettings.businessHours.closeTime || '22:00';
-          console.log('✅ このテーブルはカスタム営業時間が設定されています:', customOpenTime, '-', customCloseTime);
         }
       }
-      
-      // グローバル時間外解除設定も確認（キャッシュ使用）
+
+      // グローバル時間外解除設定（キャッシュ使用）
       if (!timeOverrideEnabled) {
         if (_cachedGlobalTimeOverride !== null) {
           timeOverrideEnabled = _cachedGlobalTimeOverride;
@@ -2231,200 +2208,114 @@
           }
         }
       }
-      
-      // 営業時間の設定
+
+      let closedStartTime, closedEndTime, operatingHours;
       if (customBusinessHoursEnabled) {
-        // カスタム営業時間を使用
         const [openHour, openMin] = customOpenTime.split(':').map(Number);
         const [closeHour, closeMin] = customCloseTime.split(':').map(Number);
         closedEndTime = openHour * 60 + openMin;
         closedStartTime = closeHour * 60 + closeMin;
-        operatingHours = `${customOpenTime} - ${customCloseTime}`;
-        console.log('⏰ カスタム営業時間:', operatingHours);
+        operatingHours = \`\${customOpenTime} - \${customCloseTime}\`;
       } else if (hasTableParam) {
-        // menu.html?table=の場合：22:00-11:00が営業時間外
-        closedStartTime = 22 * 60; // 22:00 = 1320分
-        closedEndTime = 11 * 60;   // 11:00 = 660分
+        closedStartTime = 22 * 60;
+        closedEndTime = 11 * 60;
         operatingHours = '11:00 - 22:00';
       } else {
-        // menu.htmlのみの場合：22:30-11:00が営業時間外
-        closedStartTime = 22 * 60 + 30; // 22:30 = 1350分
-        closedEndTime = 11 * 60;        // 11:00 = 660分
+        closedStartTime = 22 * 60 + 30;
+        closedEndTime = 11 * 60;
         operatingHours = '11:00 - 22:30';
       }
-      
-      // 営業時間外判定（22:00/22:30以降 または 11:00より前）
-      // 🆕 時間外解除が有効な場合は営業中として扱う
+
       const isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
-      
+
       if (isClosed) {
         console.log('営業時間外');
-        
-        // 保存された注文がある場合は、それを表示（営業時間外でも）
-        if (hasStoredOrder) {
-          console.log('⚠️ 営業時間外ですが、保存された注文を表示します');
-          // 初期化を実行してから注文を復元
-          try {
-            await loadAllData();
-            await updateTopWaitingCount();
-            watchSoldOutItems();
-            const restored = restoreOrderFromStorage();
-            if (restored) {
-              console.log('✅ 保存された注文を復元しました（営業時間外）');
-              return;
-            }
-          } catch (e) {
-            console.error('注文復元エラー:', e);
-          }
-        }
-        
-        // 保存された注文もない場合は営業時間外画面を表示
-        // すべてのページを非表示
         document.getElementById('page-menu').style.display = 'none';
         document.getElementById('page-topping').style.display = 'none';
         document.getElementById('page-cart').style.display = 'none';
         document.getElementById('page-complete').style.display = 'none';
-        
-        // 営業時間外メッセージを表示
-        document.body.innerHTML = `
-          <div style="
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            text-align: center;
-            padding: 20px;
-            font-family: sans-serif;
-          ">
-            <div style="
-              background: rgba(255, 255, 255, 0.1);
-              padding: 40px;
-              border-radius: 20px;
-              backdrop-filter: blur(10px);
-              box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-              max-width: 400px;
-            ">
-              <h1 style="font-size: 48px; margin: 0 0 20px 0;">🕐</h1>
-              <p style="font-size: 24px; font-weight: bold; margin: 10px 0;">注文可能時間外です</p>
-              <p style="font-size: 20px; line-height: 1.8; margin: 20px 0;">注文可能時間<br>${operatingHours}</p>
-              <p style="font-size: 18px; margin: 10px 0;">現在はご注文を<br>承っておりません</p>
+        document.body.innerHTML = \`
+          <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;text-align:center;padding:20px;font-family:sans-serif;">
+            <div style="background:rgba(255,255,255,0.1);padding:40px;border-radius:20px;backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(0,0,0,0.3);max-width:400px;">
+              <h1 style="font-size:48px;margin:0 0 20px 0;">🕐</h1>
+              <p style="font-size:24px;font-weight:bold;margin:10px 0;">注文可能時間外です</p>
+              <p style="font-size:20px;line-height:1.8;margin:20px 0;">注文可能時間<br>\${operatingHours}</p>
+              <p style="font-size:18px;margin:10px 0;">現在はご注文を<br>承っておりません</p>
             </div>
           </div>
-        `;
+        \`;
         return;
       }
-      
+
+      // 通常の初期化
       try {
-        await loadAllData();
-        await loadMenuSettings(); // メニュー設定を読み込み
-        await loadAlertSettings(); // アラート設定を読み込み
-        await loadStatusDisplaySettings(); // ステータス表示設定を読み込み
-        await updateTopWaitingCount();
-        setInterval(updateTopWaitingCount, 20000); // 🚀 10秒→20秒に軽量化
+        // ✅ 修正: 並列実行できるものは同時に実行する
+        await Promise.all([
+          loadAllData(),
+          loadMenuSettings(),
+          loadAlertSettings(),
+          loadStatusDisplaySettings(),
+          updateTopWaitingCount()
+        ]);
+
+        setInterval(updateTopWaitingCount, 20000);
         watchSoldOutItems();
-        
-        // settingsの変更を監視（手動カウントの変更を反映）
+
         onSnapshot(window.getStoreCollection('settings'), () => {
           updateTopWaitingCount().catch(e => console.error('待ち人数更新エラー:', e));
         });
-        
-        // 休業日設定の変更をリアルタイムで監視
+
         onSnapshot(window.getStoreDoc('closed_days_settings', 'default'), async () => {
           console.log('休業日設定が更新されました');
           await checkClosedDay();
         });
-        
-        // 🆕 定期的に営業時間をチェック（1分ごと）
+
+        // 1分ごとの営業時間チェック
         setInterval(async () => {
           try {
-            // 休業日チェック
             await checkClosedDay();
-            
-            const now = new Date();
-            const hours = now.getHours();
-            const minutes = now.getMinutes();
-            const currentTime = hours * 60 + minutes;
-            
-            const urlParams = new URLSearchParams(window.location.search);
-            const hasTableParam = urlParams.get('table');
-            
-            // テーブル別の時間外解除設定を確認
-            let timeOverrideEnabled = false;
-            let customBusinessHoursEnabled = false;
-            let customOpenTime = null;
-            let customCloseTime = null;
-            
+            const n = new Date();
+            const ct = n.getHours() * 60 + n.getMinutes();
+            const urlP = new URLSearchParams(window.location.search);
+            const hasTP = urlP.get('table');
+            let tOE = false, cBHE = false, cOT = null, cCT = null;
             if (tableNumber && tableSettings) {
-              // テーブル設定から時間外解除を確認
-              if (tableSettings.timeOverride && tableSettings.timeOverride.enabled) {
-                timeOverrideEnabled = true;
-              }
-              // カスタム営業時間を確認
+              if (tableSettings.timeOverride && tableSettings.timeOverride.enabled) { tOE = true; }
               else if (tableSettings.businessHours && tableSettings.businessHours.enabled) {
-                customBusinessHoursEnabled = true;
-                customOpenTime = tableSettings.businessHours.openTime || '11:00';
-                customCloseTime = tableSettings.businessHours.closeTime || '22:00';
+                cBHE = true; cOT = tableSettings.businessHours.openTime || '11:00'; cCT = tableSettings.businessHours.closeTime || '22:00';
               }
             }
-            
-            // グローバル時間外解除設定も確認（キャッシュ使用）
-            if (!timeOverrideEnabled) {
-              if (_cachedGlobalTimeOverride !== null) {
-                timeOverrideEnabled = _cachedGlobalTimeOverride;
-              } else {
+            if (!tOE) {
+              if (_cachedGlobalTimeOverride !== null) { tOE = _cachedGlobalTimeOverride; }
+              else {
                 try {
-                  const settingsRef = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
-                  _cachedGlobalTimeOverride = settingsRef.exists() ? settingsRef.data().enabled : false;
-                  if (_cachedGlobalTimeOverride) timeOverrideEnabled = true;
-                } catch (e) {
-                  console.error('時間外解除設定の読み込みエラー:', e);
-                }
+                  const sR = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
+                  _cachedGlobalTimeOverride = sR.exists() ? sR.data().enabled : false;
+                  if (_cachedGlobalTimeOverride) tOE = true;
+                } catch(e) {}
               }
             }
-            
-            let closedStartTime, closedEndTime, operatingHours;
-            if (customBusinessHoursEnabled) {
-              // カスタム営業時間を使用
-              const [openHour, openMin] = customOpenTime.split(':').map(Number);
-              const [closeHour, closeMin] = customCloseTime.split(':').map(Number);
-              closedEndTime = openHour * 60 + openMin;
-              closedStartTime = closeHour * 60 + closeMin;
-              operatingHours = `${customOpenTime} - ${customCloseTime}`;
-            } else if (hasTableParam) {
-              closedStartTime = 22 * 60;
-              closedEndTime = 11 * 60;
-              operatingHours = '11:00 - 22:00';
-            } else {
-              closedStartTime = 22 * 60 + 30;
-              closedEndTime = 11 * 60;
-              operatingHours = '11:00 - 22:30';
-            }
-            
-            const isClosed = timeOverrideEnabled ? false : (currentTime >= closedStartTime || currentTime < closedEndTime);
-            
-            if (isClosed) {
-              // 注文中の画面でなければリロード
-              const currentPage = document.querySelector('#page-menu:not([style*="display: none"])') ||
-                                document.querySelector('#page-cart:not([style*="display: none"])') ||
-                                document.querySelector('#page-topping:not([style*="display: none"])');
-              
-              if (currentPage) {
-                console.log('営業時間外になったためページをリロードします');
-                showCustomAlert(`注文可能時間外になりました。\n\n注文可能時間: ${operatingHours}`, () => {
-                  window.location.reload();
-                });
+            let cST, cET, oH;
+            if (cBHE) {
+              const [oHr, oMn] = cOT.split(':').map(Number);
+              const [cHr, cMn] = cCT.split(':').map(Number);
+              cET = oHr * 60 + oMn; cST = cHr * 60 + cMn; oH = \`\${cOT} - \${cCT}\`;
+            } else if (hasTP) { cST = 22*60; cET = 11*60; oH = '11:00 - 22:00'; }
+            else { cST = 22*60+30; cET = 11*60; oH = '11:00 - 22:30'; }
+            const closed = tOE ? false : (ct >= cST || ct < cET);
+            if (closed) {
+              const curPage = document.querySelector('#page-menu:not([style*="display: none"])') ||
+                              document.querySelector('#page-cart:not([style*="display: none"])') ||
+                              document.querySelector('#page-topping:not([style*="display: none"])');
+              if (curPage) {
+                showCustomAlert(\`注文可能時間外になりました。\n\n注文可能時間: \${oH}\`, () => { window.location.reload(); });
               }
             }
-          } catch (e) {
-            console.error('定期営業時間チェックエラー:', e);
-          }
-        }, 60000); // 1分ごとにチェック
-        
+          } catch(e) { console.error('定期営業時間チェックエラー:', e); }
+        }, 60000);
+
         console.log('初期化完了');
-        
-        // ページ読み込み時に注文情報を復元（初期化後に実行）
+
         const restored = restoreOrderFromStorage();
         if (restored) {
           console.log('✅ 保存された注文を復元しました');
