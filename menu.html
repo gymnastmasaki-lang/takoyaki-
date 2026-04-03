@@ -1449,6 +1449,13 @@
       if (savedOrder) {
         try {
           const orderData = JSON.parse(savedOrder);
+          // ✅ 8時間以上前の注文は自動期限切れ
+          const TTL_MS = 8 * 60 * 60 * 1000;
+          if (orderData.savedAt && Date.now() - orderData.savedAt > TTL_MS) {
+            console.log('⏱️ 注文情報が期限切れのためクリアします（8時間超過）');
+            localStorage.removeItem('currentOrder_' + tableNumber);
+            return false;
+          }
           console.log('📦 注文情報を復元:', orderData);
           
           // 注文情報を画面に表示
@@ -2340,12 +2347,10 @@
       
       orderStatusUnsubscribe = onSnapshot(orderRef, async (docSnap) => {
         if (!docSnap.exists()) {
-          console.log('⚠️ 注文が削除されました（物理削除）');
-          // 🔧 BUG FIX: 物理削除時はlocalStorageをクリアして注文番号画面をそのまま維持
-          // リロードすると index.html にリダイレクトされてしまうため、リロードしない
-          clearOrderFromStorage();
+          console.log('⚠️ 注文ドキュメントが存在しません（TTL期限切れまたは削除）');
+          // ✅ 修正: LocalStorageはクリアしない（次のページ更新でも注文番号画面を維持）
+          // Firestoreの10分TTLで消えても、LocalStorageの8時間TTLまでは画面を維持する
           currentOrderId = null;
-          // ステータス表示を「完了」に更新して画面を維持（リロードしない）
           const statusBox = document.getElementById('order-status');
           if (statusBox) {
             statusBox.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
@@ -2361,10 +2366,8 @@
         // deletedフラグが立っている場合も削除として扱う
         if (data.deleted) {
           console.log('⚠️ 注文が削除されました（論理削除）');
-          // 🔧 BUG FIX: 論理削除時もlocalStorageをクリアして画面を維持（リロードしない）
-          clearOrderFromStorage();
+          // ✅ 修正: LocalStorageはクリアしない（画面を維持、8時間TTLで自動期限切れ）
           currentOrderId = null;
-          // ステータス表示を更新して画面を維持（リロードしない）
           const statusBox = document.getElementById('order-status');
           if (statusBox) {
             statusBox.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
@@ -2475,8 +2478,7 @@
       const waitingElement = document.getElementById('waiting');
       
       if (orderData.deleted) {
-        // 削除済みの場合はLocalStorageをクリア
-        clearOrderFromStorage();
+        // ✅ 修正: 削除済みでもLocalStorageはクリアしない（画面を維持、8時間TTLで自動期限切れ）
       } else if (orderData.completedAt && orderData.paidAt) {
         // 完了かつ会計済み
         statusBox.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
@@ -4503,7 +4505,8 @@
           bagQuantity: bagQuantity,
           bagPrice: bagTotal,
           tax8Total: tax8Total,
-          tax10Total: tax10Total
+          tax10Total: tax10Total,
+          savedAt: Date.now() // ✅ 保存時刻（8時間TTLチェック用）
         };
         saveOrderToStorage(savedOrderData);
         
