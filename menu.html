@@ -1495,11 +1495,8 @@
           }
           
           currentOrderId = orderData.orderId;
-          
-          // 注文ステータスの監視を再開
-          if (currentOrderId) {
-            watchOrderStatus(currentOrderId);
-          }
+          // ✅ 修正: watchOrderStatusはバックグラウンド初期化側で設定読み込み後に呼ぶ
+          // ここでは呼ばない（alertSettings/statusDisplaySettingsが未ロードのため）
           
           // 完了ページを表示
           document.getElementById('page-menu').classList.add('hidden');
@@ -2078,11 +2075,21 @@
           // バックグラウンドで残りの初期化を実行
           (async () => {
             try {
+              // ✅ 修正: watchOrderStatusが依存する設定を最優先で読み込む
+              // これにより、スナップショット到着時に正しいストアの設定でステータスが表示される
+              await Promise.all([
+                loadAlertSettings(),
+                loadStatusDisplaySettings()
+              ]);
+
+              // 設定読み込み完了後にFirestore監視を開始（正しい設定でステータス表示）
+              if (currentOrderId) {
+                watchOrderStatus(currentOrderId);
+              }
               if (tableNumber) await loadTableSettings(tableNumber);
               await loadPickupSlotConfig();
               await checkClosedDay();
               if (!window.isPOSMode && !window.isHandyMode) {
-                // キャッシュ済みのtimeOverrideを読み込んでおく
                 if (_cachedGlobalTimeOverride === null) {
                   try {
                     const s = await getDoc(window.getStoreDoc('settings', 'timeOverride'));
@@ -2102,8 +2109,6 @@
               // メニューデータも読み込んでおく（「買い物を続ける」ボタン用）
               await loadAllData();
               await loadMenuSettings();
-              await loadAlertSettings();
-              await loadStatusDisplaySettings();
               console.log('✅ バックグラウンド初期化完了');
             } catch(e) {
               console.error('バックグラウンド初期化エラー:', e);
