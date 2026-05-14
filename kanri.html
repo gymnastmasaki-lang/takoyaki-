@@ -2420,8 +2420,9 @@ const AdminSystem = () => {
                         id: itemId,
                         docId: doc.id, // Firestoreのドキュメントid（更新時に必要）
                         name: data.name,
+                        price: data.price || 0,
                         category: data.category || '未分類',
-                        order: data.order || 999999 // orderフィールドを追加
+                        order: data.order !== undefined ? data.order : 999999 // orderフィールドを追加
                     });
                 }
             });
@@ -2702,16 +2703,33 @@ const AdminSystem = () => {
             await setDoc(settingsRef, Object.assign(Object.assign({}, globalMenuSettings), { updatedAt: Timestamp.now() }));
             // menuOrderが設定されている場合、各商品のorderフィールドを実際に更新する
             if (globalMenuSettings.menuOrder && globalMenuSettings.menuOrder.length > 0) {
-                const updatePromises = globalMenuSettings.menuOrder.map((itemId, index) => {
+                // menuOrderに含まれるアイテムのカテゴリを取得（どのカテゴリを編集中か判定）
+                const orderedItems = globalMenuSettings.menuOrder.map((itemId, index) => {
                     const menuItem = availableMenuItems.find(m => m.id === itemId);
-                    if (menuItem && menuItem.docId) {
-                        return updateDoc(window.getStoreDoc('menus', menuItem.docId), { order: index + 1 });
-                    }
-                    return Promise.resolve();
-                });
-                await Promise.all(updatePromises);
+                    return menuItem ? { ...menuItem, newOrder: index } : null;
+                }).filter(Boolean);
+                if (orderedItems.length > 0) {
+                    // 編集中のカテゴリ群を取得
+                    const editedCategories = new Set(orderedItems.map(item => item.category));
+                    // 編集していないカテゴリの現在最大orderを取得
+                    const otherItems = availableMenuItems.filter(m => !editedCategories.has(m.category));
+                    const otherMaxOrder = otherItems.length > 0 ? Math.max(...otherItems.map(m => m.order || 0)) : 0;
+                    // 編集中カテゴリの商品に対して、他カテゴリの後に来るように大きなオフセットを使わず
+                    // 全体を再採番: 編集外カテゴリ商品を先に並べ、編集カテゴリを後に付ける方式ではなく
+                    // シンプルに: menuOrder内の商品のorderを 1,2,3... で更新
+                    // （同カテゴリ内での並び順のみ管理するため、カテゴリ内相対順序で十分）
+                    const updatePromises = orderedItems.map((item, index) => {
+                        if (item.docId) {
+                            return updateDoc(window.getStoreDoc('menus', item.docId), { order: index + 1 });
+                        }
+                        return Promise.resolve();
+                    });
+                    await Promise.all(updatePromises);
+                }
                 // ローカルのavailableMenuItemsも更新
                 await loadMenuItems();
+                // menuOrderをリセット（保存後は空にして再読み込みを促す）
+                setGlobalMenuSettings(prev => (Object.assign(Object.assign({}, prev), { menuOrder: [] })));
             }
             showCustomAlertFunc('✅ メニュー設定を保存しました', '保存完了', '✅');
             console.log('✅ グローバルメニュー設定を保存しました');
