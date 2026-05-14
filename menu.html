@@ -2719,6 +2719,7 @@
           if (data.hidden) return;
           // 🔧 修正: idフィールドがない場合はドキュメントIDを使用
           const itemId = data.id || doc.id;
+          const itemOrder = (data.order !== undefined && data.order !== null) ? data.order : 999999;
           const category = data.category;
           
           if (!category) return;  // カテゴリがない場合のみスキップ
@@ -2729,11 +2730,13 @@
           if (!categoryInfo.has(category)) {
             categoryInfo.set(category, {
               minId: itemId,
+              minOrder: itemOrder,
               hasTakeoutVisibleItem: showThisItemInThisMode
             });
           } else {
             const info = categoryInfo.get(category);
             if (itemId < info.minId) info.minId = itemId;
+            if (itemOrder < info.minOrder) info.minOrder = itemOrder;
             if (showThisItemInThisMode) info.hasTakeoutVisibleItem = true;
           }
         });
@@ -2751,7 +2754,11 @@
             // 既存のフィルタリング: テイクアウト時は表示可能なアイテムがあるカテゴリのみ
             return isEatIn || info.hasTakeoutVisibleItem;
           })
-          .sort((a, b) => a[1].minId.localeCompare(b[1].minId))
+          .sort((a, b) => {
+            // カテゴリ内の最小orderで並び替え（orderがあればorder優先、なければminIdのアルファベット順）
+            if (a[1].minOrder !== b[1].minOrder) return a[1].minOrder - b[1].minOrder;
+            return a[1].minId.localeCompare(b[1].minId);
+          })
           .map(entry => entry[0]);
 
         const sel = document.getElementById('category-select');
@@ -2816,6 +2823,7 @@
             toppingSets: data.toppingSets || [], // 追加
             image: data.image || '',
             note: note,
+            order: (data.order !== undefined && data.order !== null) ? data.order : 999999,
             taxRate: data.taxRate,  // 商品個別の税率（未設定の場合はundefined）
             taxType: data.taxType || 'inclusive',  // 税込/税抜タイプ（デフォルトは内税）
             foodType: data.foodType  // 🆕 食材/食材以外の区分を保持
@@ -2893,6 +2901,10 @@
         });
         
         items.sort((a, b) => {
+          // orderフィールドを優先、なければIDでフォールバック
+          const orderA = (a.order !== undefined && a.order !== null) ? a.order : 999999;
+          const orderB = (b.order !== undefined && b.order !== null) ? b.order : 999999;
+          if (orderA !== orderB) return orderA - orderB;
           if (a.id < b.id) return -1;
           if (a.id > b.id) return 1;
           return 0;

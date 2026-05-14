@@ -3229,6 +3229,7 @@
             name: data.name || '',
             price: data.price || 0,
             category: data.category || 'その他',
+            order: (data.order !== undefined && data.order !== null) ? data.order : 999999,
             taxRate: data.taxRate || 10,
             taxType: data.taxType || 'inclusive',  // 🆕 外税/内税タイプを追加
             foodType: data.foodType || 'food',  // 🆕 食材区分を追加
@@ -3240,9 +3241,12 @@
           });
         });
         
-        // menu.htmlと同じソート方法：IDでソート
+        // orderフィールド優先、なければIDでフォールバック
         console.log('ソート前のメニューID:', menuData.map(m => m.id).join(', '));
         menuData.sort((a, b) => {
+          const orderA = (a.order !== undefined && a.order !== null) ? a.order : 999999;
+          const orderB = (b.order !== undefined && b.order !== null) ? b.order : 999999;
+          if (orderA !== orderB) return orderA - orderB;
           if (a.id < b.id) return -1;
           if (a.id > b.id) return 1;
           return 0;
@@ -3397,24 +3401,27 @@
         return;
       }
       
-      // カテゴリごとの最小IDを計算
+      // カテゴリごとの最小orderと最小IDを計算
       const categoryInfo = new Map();
       menuData.forEach(item => {
         if (!item.category) return;
         const cat = item.category;
+        const itemOrder = (item.order !== undefined && item.order !== null) ? item.order : 999999;
         if (!categoryInfo.has(cat)) {
-          categoryInfo.set(cat, { minId: item.id });
+          categoryInfo.set(cat, { minId: item.id, minOrder: itemOrder });
         } else {
           const info = categoryInfo.get(cat);
-          if (item.id < info.minId) {
-            info.minId = item.id;
-          }
+          if (item.id < info.minId) info.minId = item.id;
+          if (itemOrder < info.minOrder) info.minOrder = itemOrder;
         }
       });
       
-      // 最小IDでソート
+      // orderフィールド優先でソート（なければminIdのアルファベット順）
       const sortedCategories = Array.from(categoryInfo.entries())
-        .sort((a, b) => a[1].minId.localeCompare(b[1].minId))
+        .sort((a, b) => {
+          if (a[1].minOrder !== b[1].minOrder) return a[1].minOrder - b[1].minOrder;
+          return a[1].minId.localeCompare(b[1].minId);
+        })
         .map(entry => entry[0]);
       
       // 既存のオプションをクリア（「全ての商品」以外）
@@ -16013,17 +16020,17 @@ ${redSlipCount > 0 ? `
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
-          if (data.category && data.id) {
+          if (data.category && (data.id || doc.id)) {
             const cat = data.category;
-            const itemId = data.id;
+            const itemId = data.id || doc.id;
+            const itemOrder = (data.order !== undefined && data.order !== null) ? data.order : 999999;
             
             if (!categoryInfo.has(cat)) {
-              categoryInfo.set(cat, { minId: itemId });
+              categoryInfo.set(cat, { minId: itemId, minOrder: itemOrder });
             } else {
               const info = categoryInfo.get(cat);
-              if (itemId < info.minId) {
-                info.minId = itemId;
-              }
+              if (itemId < info.minId) info.minId = itemId;
+              if (itemOrder < info.minOrder) info.minOrder = itemOrder;
             }
           }
         });
@@ -16031,9 +16038,12 @@ ${redSlipCount > 0 ? `
         const select = document.getElementById('sortCategorySelect');
         select.innerHTML = '<option value="">カテゴリを選択...</option>';
         
-        // menu.htmlと同じソート方法：各カテゴリの最小IDでソート
+        // orderフィールド優先でソート
         const sortedCategories = Array.from(categoryInfo.entries())
-          .sort((a, b) => a[1].minId.localeCompare(b[1].minId))
+          .sort((a, b) => {
+            if (a[1].minOrder !== b[1].minOrder) return a[1].minOrder - b[1].minOrder;
+            return a[1].minId.localeCompare(b[1].minId);
+          })
           .map(entry => entry[0]);
         
         sortedCategories.forEach(category => {
