@@ -3286,6 +3286,26 @@
       // 既存のテーブル（即会計、テイクアウト）を自動登録
       await ensureDefaultTables();
       
+      // グローバルメニュー設定（カテゴリ順序）を読み込み
+      try {
+        if (window.currentStoreId) {
+          const gmRef = window.doc(window.db, 'stores', window.currentStoreId, 'global_menu_settings', 'default');
+          const gmDoc = await window.getDoc(gmRef);
+          if (gmDoc.exists()) {
+            const gmData = gmDoc.data();
+            window.globalMenuSettings = {
+              categoryOrder: gmData.categoryOrder || [],
+              hiddenCategories: gmData.hiddenCategories || [],
+              menuOrder: gmData.menuOrder || []
+            };
+            console.log('✅ グローバルメニュー設定読み込み完了。カテゴリ順:', window.globalMenuSettings.categoryOrder);
+          }
+        }
+      } catch (e) {
+        console.error('❌ グローバルメニュー設定読み込みエラー:', e);
+        window.globalMenuSettings = { categoryOrder: [], hiddenCategories: [], menuOrder: [] };
+      }
+      
       // テーブルボタンを生成
       await loadTableButtons();
       
@@ -3416,9 +3436,17 @@
         }
       });
       
-      // orderフィールド優先でソート（なければminIdのアルファベット順）
+      // orderフィールド優先でソート、categoryOrderが設定されていればそれに従う
       const sortedCategories = Array.from(categoryInfo.entries())
         .sort((a, b) => {
+          const catOrder = (window.globalMenuSettings && window.globalMenuSettings.categoryOrder) || [];
+          if (catOrder.length > 0) {
+            const ia = catOrder.indexOf(a[0]);
+            const ib = catOrder.indexOf(b[0]);
+            if (ia !== -1 && ib !== -1) return ia - ib;
+            if (ia !== -1) return -1;
+            if (ib !== -1) return 1;
+          }
           if (a[1].minOrder !== b[1].minOrder) return a[1].minOrder - b[1].minOrder;
           return a[1].minId.localeCompare(b[1].minId);
         })
@@ -16038,9 +16066,17 @@ ${redSlipCount > 0 ? `
         const select = document.getElementById('sortCategorySelect');
         select.innerHTML = '<option value="">カテゴリを選択...</option>';
         
-        // orderフィールド優先でソート
+        // orderフィールド優先でソート、categoryOrderが設定されていればそれに従う
         const sortedCategories = Array.from(categoryInfo.entries())
           .sort((a, b) => {
+            const catOrder = (window.globalMenuSettings && window.globalMenuSettings.categoryOrder) || [];
+            if (catOrder.length > 0) {
+              const ia = catOrder.indexOf(a[0]);
+              const ib = catOrder.indexOf(b[0]);
+              if (ia !== -1 && ib !== -1) return ia - ib;
+              if (ia !== -1) return -1;
+              if (ib !== -1) return 1;
+            }
             if (a[1].minOrder !== b[1].minOrder) return a[1].minOrder - b[1].minOrder;
             return a[1].minId.localeCompare(b[1].minId);
           })

@@ -1827,6 +1827,27 @@
         };
       }
     }
+
+    // グローバルメニュー設定（カテゴリ順序など）
+    let globalMenuSettings = { categoryOrder: [], hiddenCategories: [], menuOrder: [] };
+    async function loadGlobalMenuSettings() {
+      try {
+        if (!currentStoreId) return;
+        const settingsRef = doc(db, 'stores', currentStoreId, 'global_menu_settings', 'default');
+        const settingsDoc = await getDoc(settingsRef);
+        if (settingsDoc.exists()) {
+          const data = settingsDoc.data();
+          globalMenuSettings = {
+            categoryOrder: data.categoryOrder || [],
+            hiddenCategories: data.hiddenCategories || [],
+            menuOrder: data.menuOrder || []
+          };
+          console.log('✅ グローバルメニュー設定を読み込みました。カテゴリ順:', globalMenuSettings.categoryOrder);
+        }
+      } catch (e) {
+        console.error('❌ グローバルメニュー設定読み込みエラー:', e);
+      }
+    }
     
     // 🆕 引取スロット設定（Firestoreから読み込み）
     let pickupSlotConfig = { enabled: false, intervalMinutes: 30, maxPerSlot: 3 };
@@ -2125,7 +2146,8 @@
       // テーブル設定・スロット設定を並列で読み込む
       await Promise.all([
         tableNumber ? loadTableSettings(tableNumber) : Promise.resolve(),
-        loadPickupSlotConfig()
+        loadPickupSlotConfig(),
+        loadGlobalMenuSettings()
       ]);
 
       // テーブルの存在確認（テイクアウト・即会計は除く）
@@ -2168,6 +2190,7 @@
       if (window.isPOSMode || window.isHandyMode) {
         console.log('✅ POSモードのため営業時間チェックをスキップします');
         try {
+          await loadGlobalMenuSettings();
           await loadAllData();
           await loadMenuSettings();
           await loadAlertSettings();
@@ -2755,7 +2778,18 @@
             return isEatIn || info.hasTakeoutVisibleItem;
           })
           .sort((a, b) => {
-            // カテゴリ内の最小orderで並び替え（orderがあればorder優先、なければminIdのアルファベット順）
+            // categoryOrderが設定されている場合はそれに従う
+            const catOrder = globalMenuSettings.categoryOrder;
+            if (catOrder && catOrder.length > 0) {
+              const ia = catOrder.indexOf(a[0]);
+              const ib = catOrder.indexOf(b[0]);
+              // 両方設定あり → 順序通り
+              if (ia !== -1 && ib !== -1) return ia - ib;
+              // 片方だけ設定あり → 設定ありが先
+              if (ia !== -1) return -1;
+              if (ib !== -1) return 1;
+            }
+            // categoryOrderがない場合はorderフィールド、なければminIdのアルファベット順
             if (a[1].minOrder !== b[1].minOrder) return a[1].minOrder - b[1].minOrder;
             return a[1].minId.localeCompare(b[1].minId);
           })
