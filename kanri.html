@@ -7656,6 +7656,26 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 console.warn('テーブルデータの取得に失敗:', e.message);
                 backupData.data.tables = [];
             }
+            // 🆕 経費レシート（receipts）※画像実体は含まずメタデータのみ
+            try {
+                let receiptsRef;
+                if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                    receiptsRef = collection(window.db, 'stores', currentStoreId, 'receipts');
+                }
+                else {
+                    receiptsRef = collection(window.db, 'receipts');
+                }
+                const receiptsSnapshot = await getDocs(receiptsRef);
+                backupData.data.receipts = [];
+                receiptsSnapshot.forEach(docSnap => {
+                    backupData.data.receipts.push(Object.assign({ id: docSnap.id }, docSnap.data()));
+                });
+                console.log('✅ 経費レシート取得:', backupData.data.receipts.length, '件');
+            }
+            catch (e) {
+                console.warn('経費レシートの取得に失敗:', e.message);
+                backupData.data.receipts = [];
+            }
             // 保存
             const backupId = `manual_${dateTimeStr}`;
             let backupRef;
@@ -7738,6 +7758,16 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     await setDoc(attRef, attData);
                 }
                 console.log(`✅ 勤怠復元: ${data.attendance.length}件`);
+            }
+            // 経費レシートを復元
+            if (data.receipts) {
+                for (const receipt of data.receipts) {
+                    const receiptRef = window.getStoreDoc('receipts', receipt.id);
+                    const receiptData = Object.assign({}, receipt);
+                    delete receiptData.id;
+                    await setDoc(receiptRef, receiptData);
+                }
+                console.log(`✅ 経費レシート復元: ${data.receipts.length}件`);
             }
             // 🆕 設定を復元
             let settingsRestoredCount = 0;
