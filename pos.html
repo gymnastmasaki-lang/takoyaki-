@@ -8183,7 +8183,34 @@
           console.warn('テーブルデータの取得に失敗:', e.message);
           backupData.data.tables = [];
         }
-        
+
+        // 🆕 経費レシート（receipts）※画像実体は含まずメタデータのみ、直近300件
+        try {
+          const receiptsSnapshot = await getDocs(window.getStoreCollection('receipts'));
+          const receiptsList = [];
+          receiptsSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            receiptsList.push({
+              id: docSnap.id,
+              ...data,
+              _timestamp: data.createdAt || data.date || new Date(0)
+            });
+          });
+          receiptsList.sort((a, b) => {
+            const timeA = a._timestamp?.toDate ? a._timestamp.toDate() : new Date(a._timestamp);
+            const timeB = b._timestamp?.toDate ? b._timestamp.toDate() : new Date(b._timestamp);
+            return timeB - timeA;
+          });
+          backupData.data.receipts = receiptsList.slice(0, 300).map(item => {
+            const { _timestamp, ...rest } = item;
+            return rest;
+          });
+          console.log(`🧾 経費レシート: ${backupData.data.receipts.length}件`);
+        } catch (e) {
+          console.warn('経費レシートの取得に失敗:', e.message);
+          backupData.data.receipts = [];
+        }
+
         const settingsCount = [
           backupData.data.menu_settings,
           backupData.data.receipt_settings,
@@ -8198,14 +8225,44 @@
         const dayOfWeek = today.getDay(); // 0=日曜, 1=月曜, ..., 6=土曜
         const backupId = `auto_day${dayOfWeek}`; // day0〜day6で7日ローテーション
         
-        let backupRef;
-        if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
-          backupRef = doc(window.db, 'stores', window.currentStoreId, 'backups', backupId);
-        } else {
-          backupRef = doc(window.db, 'backups', backupId);
-        }
-        
-        await setDoc(backupRef, backupData);
+        const makeBackupRef = (suffix) => {
+          const idWithSuffix = suffix ? backupId + suffix : backupId;
+          if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+            return doc(window.db, 'stores', window.currentStoreId, 'backups', idWithSuffix);
+          }
+          return doc(window.db, 'backups', idWithSuffix);
+        };
+
+        // 🆕 1MB上限対策: メタデータとコレクション毎のチャンクに分割保存
+        const collectionCounts = {
+          menus: backupData.data.menus.length,
+          employees: backupData.data.employees.length,
+          orders: backupData.data.orders.length,
+          attendance: backupData.data.attendance.length,
+          receipts: backupData.data.receipts.length,
+          tables: (backupData.data.tables || []).length
+        };
+        const metaData = {
+          timestamp: backupData.timestamp,
+          date: backupData.date,
+          type: backupData.type,
+          collectionCounts: collectionCounts
+        };
+        await setDoc(makeBackupRef(null), metaData);
+        await setDoc(makeBackupRef('_menus'), { items: backupData.data.menus });
+        await setDoc(makeBackupRef('_employees'), { items: backupData.data.employees });
+        await setDoc(makeBackupRef('_orders'), { items: backupData.data.orders });
+        await setDoc(makeBackupRef('_attendance'), { items: backupData.data.attendance });
+        await setDoc(makeBackupRef('_receipts'), { items: backupData.data.receipts });
+        await setDoc(makeBackupRef('_tables'), { items: backupData.data.tables || [] });
+        await setDoc(makeBackupRef('_settings'), {
+          menu_settings: backupData.data.menu_settings,
+          receipt_settings: backupData.data.receipt_settings,
+          inventory_settings: backupData.data.inventory_settings,
+          alert_settings: backupData.data.alert_settings,
+          business_hours: backupData.data.business_hours,
+          table_settings: backupData.data.table_settings
+        });
         
         console.log(`✅ 自動バックアップ完了: ${backupId} (${dateStr})`);
         return true;
@@ -8396,7 +8453,34 @@
           const tableDoc = await getDoc(tableRef);
           backupData.data.table_settings = tableDoc.exists() ? tableDoc.data() : null;
         } catch (e) { backupData.data.table_settings = null; }
-        
+
+        // 🆕 経費レシート（receipts）※画像実体は含まずメタデータのみ、直近300件
+        try {
+          const receiptsSnapshot = await getDocs(window.getStoreCollection('receipts'));
+          const receiptsList = [];
+          receiptsSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            receiptsList.push({
+              id: docSnap.id,
+              ...data,
+              _timestamp: data.createdAt || data.date || new Date(0)
+            });
+          });
+          receiptsList.sort((a, b) => {
+            const timeA = a._timestamp?.toDate ? a._timestamp.toDate() : new Date(a._timestamp);
+            const timeB = b._timestamp?.toDate ? b._timestamp.toDate() : new Date(b._timestamp);
+            return timeB - timeA;
+          });
+          backupData.data.receipts = receiptsList.slice(0, 300).map(item => {
+            const { _timestamp, ...rest } = item;
+            return rest;
+          });
+          console.log(`🧾 経費レシート: ${backupData.data.receipts.length}件`);
+        } catch (e) {
+          console.warn('経費レシートの取得に失敗:', e.message);
+          backupData.data.receipts = [];
+        }
+
         const settingsCount = [
           backupData.data.menu_settings,
           backupData.data.receipt_settings,
@@ -8409,14 +8493,44 @@
         // 手動バックアップを保存
         const backupId = `manual_${dateTimeStr}`;
         
-        let backupRef;
-        if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
-          backupRef = doc(window.db, 'stores', window.currentStoreId, 'backups', backupId);
-        } else {
-          backupRef = doc(window.db, 'backups', backupId);
-        }
-        
-        await setDoc(backupRef, backupData);
+        const makeBackupRef = (suffix) => {
+          const idWithSuffix = suffix ? backupId + suffix : backupId;
+          if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+            return doc(window.db, 'stores', window.currentStoreId, 'backups', idWithSuffix);
+          }
+          return doc(window.db, 'backups', idWithSuffix);
+        };
+
+        // 🆕 1MB上限対策: メタデータとコレクション毎のチャンクに分割保存
+        const collectionCounts = {
+          menus: backupData.data.menus.length,
+          employees: backupData.data.employees.length,
+          orders: backupData.data.orders.length,
+          attendance: backupData.data.attendance.length,
+          receipts: backupData.data.receipts.length,
+          tables: (backupData.data.tables || []).length
+        };
+        const metaData = {
+          timestamp: backupData.timestamp,
+          date: backupData.date,
+          type: backupData.type,
+          collectionCounts: collectionCounts
+        };
+        await setDoc(makeBackupRef(null), metaData);
+        await setDoc(makeBackupRef('_menus'), { items: backupData.data.menus });
+        await setDoc(makeBackupRef('_employees'), { items: backupData.data.employees });
+        await setDoc(makeBackupRef('_orders'), { items: backupData.data.orders });
+        await setDoc(makeBackupRef('_attendance'), { items: backupData.data.attendance });
+        await setDoc(makeBackupRef('_receipts'), { items: backupData.data.receipts });
+        await setDoc(makeBackupRef('_tables'), { items: backupData.data.tables || [] });
+        await setDoc(makeBackupRef('_settings'), {
+          menu_settings: backupData.data.menu_settings,
+          receipt_settings: backupData.data.receipt_settings,
+          inventory_settings: backupData.data.inventory_settings,
+          alert_settings: backupData.data.alert_settings,
+          business_hours: backupData.data.business_hours,
+          table_settings: backupData.data.table_settings
+        });
         
         console.log(`✅ 手動バックアップ完了: ${backupId}`);
         alert(`バックアップを作成しました\n\n商品: ${backupData.data.menus.length}件\n従業員: ${backupData.data.employees.length}名\n注文: ${backupData.data.orders.length}件\n勤怠: ${backupData.data.attendance.length}件\n設定: ${settingsCount}種類`);
