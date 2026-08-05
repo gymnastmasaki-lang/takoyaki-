@@ -826,8 +826,10 @@
     
     async function updateTotalWaitingCount() {
       try {
-        const ordersSnapshot = await getDocs(window.getStoreCollection('orders'));
+        // 🔧 修正: 全注文履歴を毎回読みに行っていたのを、status=pendingのみに絞る
+        const ordersSnapshot = await getDocs(query(window.getStoreCollection('orders'), where('status', '==', 'pending')));
         const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         const validOrders = new Set();
         
         ordersSnapshot.forEach(doc => {
@@ -836,11 +838,11 @@
           // 削除済みの注文は除外
           if (data.deleted) return;
           
-          // 完了済み・キャンセル済みは除外
+          // 完了済み・キャンセル済みは除外（statusで絞り込み済みだが念のため）
           if (data.completedAt || data.cancelledAt) return;
           
-          // deleteAtがある場合、削除予定時刻を過ぎていたら除外
-          if (data.deleteAt && data.deleteAt.toDate() <= now) return;
+          // 🆕 引取日が「今日」ではない予約注文は、今日の待ち人数には含めない
+          if (data.pickupDate && data.pickupDate !== todayStr) return;
           
           // 有効な注文としてカウント
           validOrders.add(data.orderNumber);
@@ -965,6 +967,8 @@
     async function loadOrders() {
       const orders = [];
       const storeId = window.currentStoreId || currentStoreId;
+      const _nowOrders = new Date();
+      const _todayStrOrders = `${_nowOrders.getFullYear()}-${String(_nowOrders.getMonth()+1).padStart(2,'0')}-${String(_nowOrders.getDate()).padStart(2,'0')}`;
       console.log('🔄 注文データ読み込み開始 - 店舗ID:', storeId);
       
       const ordersCollection = storeId 
@@ -986,6 +990,10 @@
         
         // deletedフラグが立っている注文はスキップ
         if (d.deleted) return;
+        
+        // 🆕 引取日が「今日」ではない予約注文（モバイルオーダーの後日予約）は
+        // 今日の注文一覧には表示しない。当日になったら自動的に表示される。
+        if (d.pickupDate && d.pickupDate !== _todayStrOrders) return;
         
         orders.push({
           id: doc.id,
