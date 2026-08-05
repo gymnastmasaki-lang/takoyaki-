@@ -2457,27 +2457,27 @@
       
       try {
         const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         
         // snapshotが渡されていない場合は取得（🔧 修正: pending注文だけに絞る）
         if (!ordersSnapshot) {
           ordersSnapshot = await getDocs(query(window.getStoreCollection('orders'), where('status', '==', 'pending')));
         }
         
-        // 有効な注文（未削除・未キャンセル・未完了・削除予定時刻前）を抽出
+        // 有効な注文を抽出
+        // 🔧 修正: 注文作成から10分で無条件に外れる deleteAt を「まだ有効か」の判定に
+        // 使っていたのをやめる（完了していなくても10分後にカウントから消えてしまうバグだった）。
+        // 未完了かどうかはstatus（サーバー側で絞り込み済み）だけで判定する。
+        // 🆕 引取日が「今日」ではない予約注文（明日以降の予約）は、今日の待ち行列には含めない。
         const validOrders = [];
         ordersSnapshot.forEach(doc => {
           const data = doc.data();
-          if (data.deleteAt && 
-              data.deleteAt.toDate && 
-              data.deleteAt.toDate() > now && 
-              !data.deleted && 
-              !data.cancelledAt &&
-              !data.completedAt) {  // ✅ 完了済みも除外
-            validOrders.push({
-              orderNumber: data.orderNumber,
-              timestamp: data.timestamp
-            });
-          }
+          if (data.deleted || data.cancelledAt || data.completedAt) return;
+          if (data.pickupDate && data.pickupDate !== todayStr) return;
+          validOrders.push({
+            orderNumber: data.orderNumber,
+            timestamp: data.timestamp
+          });
         });
         
         // 注文番号でソート
@@ -2674,6 +2674,7 @@
         const ordersQuery = query(window.getStoreCollection('orders'), where('status', '==', 'pending'));
         const ordersSnapshot = await getDocs(ordersQuery);
         const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         const validOrders = new Set();
         
         ordersSnapshot.forEach(doc => {
@@ -2682,11 +2683,11 @@
           // 削除済みの注文は除外
           if (data.deleted) return;
           
-          // 完了済み・キャンセル済みは除外
+          // 完了済み・キャンセル済みは除外（statusで既に絞り込み済みだが念のため）
           if (data.completedAt || data.cancelledAt) return;
           
-          // deleteAtがある場合、削除予定時刻を過ぎていたら除外
-          if (data.deleteAt && data.deleteAt.toDate && data.deleteAt.toDate() <= now) return;
+          // 🆕 引取日が「今日」ではない予約注文は、今日の待ち人数には含めない
+          if (data.pickupDate && data.pickupDate !== todayStr) return;
           
           // 有効な注文としてカウント
           validOrders.add(data.orderNumber);
@@ -4358,10 +4359,13 @@
         
         // 🆕 引取時間を取得（スロット方式 or 旧方式）
         let pickupTime = '';
+        let pickupDate = null; // YYYY-MM-DD形式（スロット方式のみ。日付ごとの絞り込みに使う）
         if (pickupSlotConfig.enabled) {
           // スロット方式: hiddenフィールドから取得
           const hiddenTime = document.getElementById('customer-pickup-time');
           if (hiddenTime) pickupTime = hiddenTime.value || '';
+          const hiddenDate = document.getElementById('customer-pickup-date');
+          if (hiddenDate && hiddenDate.value) pickupDate = hiddenDate.value;
         } else {
           // 旧方式: selectから取得
           const pickupTimeSelect = document.getElementById('customer-pickup-time');
@@ -4389,6 +4393,7 @@
           customerEmail: customerEmail,
           customerPhone: customerPhone,
           pickupTime: pickupTime,  // 🆕 引取時間
+          pickupDate: pickupDate,  // 🆕 引取日（YYYY-MM-DD）。日付フィルタ・待ち人数の絞り込みに使用
           serviceNoticeSelection: selectedServiceNoticeOption || null, // サービス告知の選択値
           status: 'pending',
           deleteAt: Timestamp.fromDate(deleteAt),
@@ -4438,18 +4443,16 @@
             }
             
             // 待ち順番を計算してバックグラウンドで更新
-            const freshSnapshot = await getDocs(window.getStoreCollection('orders'));
+            // 🔧 修正: 全注文履歴の読み込み→10分のdeleteAtで判定、をやめて
+            // status=pendingのみをサーバー側で絞り込み、今日の引取分だけを対象にする
+            const _todayStrBg = `${_nowBg.getFullYear()}-${String(_nowBg.getMonth()+1).padStart(2,'0')}-${String(_nowBg.getDate()).padStart(2,'0')}`;
+            const freshSnapshot = await getDocs(query(window.getStoreCollection('orders'), where('status', '==', 'pending')));
             const validOrders = [];
             freshSnapshot.forEach(d => {
               const data = d.data();
-              if (data.deleteAt &&
-                  data.deleteAt.toDate &&
-                  data.deleteAt.toDate() > _nowBg &&
-                  !data.deleted &&
-                  !data.cancelledAt &&
-                  !data.completedAt) {
-                validOrders.push(data.orderNumber);
-              }
+              if (data.deleted || data.cancelledAt || data.completedAt) return;
+              if (data.pickupDate && data.pickupDate !== _todayStrBg) return;
+              validOrders.push(data.orderNumber);
             });
             if (!validOrders.includes(_orderNumberBg)) validOrders.push(_orderNumberBg);
             validOrders.sort((a, b) => a - b);
