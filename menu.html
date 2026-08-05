@@ -2430,12 +2430,12 @@
         }
       });
       
-      // 全ての注文を監視して順番を更新
+      // 全ての注文を監視して順番を更新（🔧 修正: 未完了(pending)の注文だけに絞る）
       if (allOrdersUnsubscribe) {
         allOrdersUnsubscribe();
       }
       
-      const ordersRef = window.getStoreCollection('orders');
+      const ordersRef = query(window.getStoreCollection('orders'), where('status', '==', 'pending'));
       allOrdersUnsubscribe = onSnapshot(ordersRef, async (snapshot) => {
         // 待ち人数を更新
         await updateTopWaitingCount();
@@ -2458,9 +2458,9 @@
       try {
         const now = new Date();
         
-        // snapshotが渡されていない場合は取得
+        // snapshotが渡されていない場合は取得（🔧 修正: pending注文だけに絞る）
         if (!ordersSnapshot) {
-          ordersSnapshot = await getDocs(window.getStoreCollection('orders'));
+          ordersSnapshot = await getDocs(query(window.getStoreCollection('orders'), where('status', '==', 'pending')));
         }
         
         // 有効な注文（未削除・未キャンセル・未完了・削除予定時刻前）を抽出
@@ -2669,7 +2669,10 @@
 
     async function updateTopWaitingCount() {
       try {
-        const ordersSnapshot = await getDocs(window.getStoreCollection('orders'));
+        // 🔧 修正: 完了・キャンセル済みも含む全注文履歴を毎回丸ごと読みに行っていたのを、
+        // 未完了(pending)の注文だけに絞る。店舗の営業履歴が長いほど効果が大きい。
+        const ordersQuery = query(window.getStoreCollection('orders'), where('status', '==', 'pending'));
+        const ordersSnapshot = await getDocs(ordersQuery);
         const now = new Date();
         const validOrders = new Set();
         
@@ -3728,19 +3731,15 @@
           pickupTimeSection.style.display = 'block';
           // スロット設定が有効ならスロットUI、無効なら従来のドロップダウン
           if (pickupSlotConfig.enabled) {
-            // 営業時間設定を読み込んでスロットUI構築
-            let openTime = '09:00';
+            // 🔧 修正: 存在しない(または未設定の)business_hours_settingsコレクションを見に行って
+            // 09:00という誤ったデフォルトにフォールバックしていた。
+            // 実際の営業時間は他の箇所と同じtableSettings.businessHoursを使う。
+            let openTime = '11:00';
             let closeTime = '22:00';
-            try {
-              const bhRef = currentStoreId ?
-                doc(db, 'stores', currentStoreId, 'business_hours_settings', 'default') :
-                doc(db, 'business_hours_settings', 'default');
-              const bhSnap = await getDoc(bhRef);
-              if (bhSnap.exists() && bhSnap.data().enabled) {
-                openTime = bhSnap.data().openTime || '09:00';
-                closeTime = bhSnap.data().closeTime || '22:00';
-              }
-            } catch (e) { console.error('営業時間読み込みエラー:', e); }
+            if (tableSettings && tableSettings.businessHours && tableSettings.businessHours.enabled) {
+              openTime = tableSettings.businessHours.openTime || '11:00';
+              closeTime = tableSettings.businessHours.closeTime || '22:00';
+            }
             await buildPickupSlotUI(openTime, closeTime);
             // 必須マークを設定
             const mark = document.getElementById('pickup-time-required-mark');
