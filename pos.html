@@ -11178,6 +11178,9 @@ ${redSlipCount > 0 ? `
         });
         
         // 削除されていない注文のみ表示
+        // 🆕 引取日が「今日」ではない予約注文は今日の一覧に含めない（当日になれば自動的に表示される）
+        const _nowLoadOrders = new Date();
+        const _todayStrLoadOrders = `${_nowLoadOrders.getFullYear()}-${String(_nowLoadOrders.getMonth()+1).padStart(2,'0')}-${String(_nowLoadOrders.getDate()).padStart(2,'0')}`;
         console.log('全注文数:', orders.length);
         orders.forEach(order => {
           console.log(`注文#${order.orderNumber}: deleted=${order.deleted}, paidAt=${order.paidAt}, cancelledAt=${order.cancelledAt}`);
@@ -11185,6 +11188,12 @@ ${redSlipCount > 0 ? `
           // deletedフラグが立っている注文はスキップ（履歴では表示）
           if (order.deleted) {
             console.log(`  → スキップ（削除済み）`);
+            return;
+          }
+          
+          // 🆕 引取日が「今日」ではない予約注文はスキップ
+          if (order.pickupDate && order.pickupDate !== _todayStrLoadOrders) {
+            console.log(`  → スキップ（後日予約: ${order.pickupDate}）`);
             return;
           }
           
@@ -18759,11 +18768,16 @@ ${redSlipCount > 0 ? `
         const unpaidTables = new Set();  // 注文あり（未会計）
         const hasIncompleteOrders = new Set();  // 未完了の注文があるテーブル
         const tableOrderCounts = {};  // テーブルごとの注文数
+        // 🆕 引取日が「今日」ではない予約注文（モバイルオーダーの後日予約）は
+        // 今日のテーブル状況表示には含めない
+        const _now = new Date();
+        const _todayStr = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
         
         console.log('🔄 テーブルステータス更新開始');
         
         ordersSnapshot.forEach(doc => {
           const order = doc.data();
+          if (order.pickupDate && order.pickupDate !== _todayStr) return;
           console.log('📋 注文チェック:', {
             id: doc.id,
             tableId: order.tableId,
@@ -18920,12 +18934,15 @@ ${redSlipCount > 0 ? `
         const snapshot = await window.getDocs(ordersRef);
         
         const orders = [];
+        // 🆕 引取日が「今日」ではない予約注文は今日の一覧に含めない
+        const _nowTableOrders = new Date();
+        const _todayStrTableOrders = `${_nowTableOrders.getFullYear()}-${String(_nowTableOrders.getMonth()+1).padStart(2,'0')}-${String(_nowTableOrders.getDate()).padStart(2,'0')}`;
         snapshot.forEach(doc => {
           const order = doc.data();
           // 🔥 修正: tableId または tableNumber でマッチ（menu.htmlからの注文に対応）
           const matchesTable = (order.tableId === tableId) || (order.tableNumber === currentSelectedTableName);
           // 🔥 修正: 削除済みのみ除外、会計済みは表示する
-          if (matchesTable && !order.deleted) {
+          if (matchesTable && !order.deleted && !(order.pickupDate && order.pickupDate !== _todayStrTableOrders)) {
             orders.push({
               id: doc.id,
               ...order

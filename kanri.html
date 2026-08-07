@@ -7202,6 +7202,24 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     const [loading, setLoading] = useState(true);
     const [restoring, setRestoring] = useState(false);
     const [creating, setCreating] = useState(false);
+    // 🆕 ファイル書き出し・ファイルからの復元用
+    const [exportingId, setExportingId] = useState(null);
+    const [importPreview, setImportPreview] = useState(null);
+    const [importFileError, setImportFileError] = useState('');
+    const [importing, setImporting] = useState(false);
+    // 🆕 バックアップオブジェクトをJSONファイルとしてダウンロードする
+    const downloadBackupFile = (payload, filenameBase) => {
+        const json = JSON.stringify(payload, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${filenameBase}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
     // バックアップ一覧を読み込む
     useEffect(() => {
         loadBackups();
@@ -7240,8 +7258,9 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         }
     };
     // 手動バックアップを作成
-    const createManualBackup = async () => {
+    const createManualBackup = async (options = {}) => {
         var _a;
+        const { download = false } = options;
         try {
             // カスタム確認ダイアログを表示
             const confirmResult = await showCustomConfirm('現在のデータをバックアップしますか？\n\n以下がバックアップされます：\n• 商品\n• 従業員\n• 注文履歴\n• 勤怠データ\n• テーブル\n• 商品カテゴリ設定\n• レシート設定\n• 在庫設定\n• アラート設定\n• 営業時間設定\n• テーブル設定', 'バックアップ作成', '作成する', 'キャンセル');
@@ -7419,12 +7438,11 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             const { getDocs, setDoc, doc, Timestamp, query, orderBy, limit, collection } = window.firebaseModules;
             const now = new Date();
             const dateTimeStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-            const backupData = {
-                timestamp: Timestamp.now(),
-                date: dateTimeStr,
-                type: 'manual',
-                memo: memo || '',
-                data: {}
+            // 🆕 1ドキュメント1MiB上限を回避するため、コレクションごとに分割して保存する
+            const chunks = {
+                menus: [], employees: [], orders: [], attendance: [], receipts: [], tables: [],
+                menu_settings: null, receipt_settings: null, inventory_settings: null,
+                alert_settings: null, business_hours: null, table_settings: null
             };
             // 商品データ
             let menusRef;
@@ -7435,9 +7453,9 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 menusRef = collection(window.db, 'menu');
             }
             const menusSnapshot = await getDocs(menusRef);
-            backupData.data.menus = [];
+            chunks.menus = [];
             menusSnapshot.forEach(docSnap => {
-                backupData.data.menus.push(Object.assign({ id: docSnap.id }, docSnap.data()));
+                chunks.menus.push(Object.assign({ id: docSnap.id }, docSnap.data()));
             });
             // 従業員データ
             let employeesRef;
@@ -7448,9 +7466,9 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 employeesRef = collection(window.db, 'kintai_employees');
             }
             const employeesSnapshot = await getDocs(employeesRef);
-            backupData.data.employees = [];
+            chunks.employees = [];
             employeesSnapshot.forEach(docSnap => {
-                backupData.data.employees.push(Object.assign({ id: docSnap.id }, docSnap.data()));
+                chunks.employees.push(Object.assign({ id: docSnap.id }, docSnap.data()));
             });
             // 注文履歴（最近1000件）
             let ordersRef;
@@ -7462,7 +7480,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             }
             // シンプルに全件取得（手動で1000件に制限）
             const ordersSnapshot = await getDocs(ordersRef);
-            backupData.data.orders = [];
+            chunks.orders = [];
             let orderCount = 0;
             const ordersList = [];
             ordersSnapshot.forEach(docSnap => {
@@ -7477,11 +7495,11 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 return timeB - timeA;
             });
             // 最新1000件のみ保存
-            backupData.data.orders = ordersList.slice(0, 1000).map(item => {
+            chunks.orders = ordersList.slice(0, 1000).map(item => {
                 const { _timestamp } = item, rest = __rest(item, ["_timestamp"]);
                 return rest;
             });
-            console.log('✅ 注文履歴取得:', backupData.data.orders.length, '件');
+            console.log('✅ 注文履歴取得:', chunks.orders.length, '件');
             // 勤怠データ（最近1000件）
             let attendanceRef;
             if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
@@ -7492,7 +7510,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             }
             // シンプルに全件取得（手動で1000件に制限）
             const attendanceSnapshot = await getDocs(attendanceRef);
-            backupData.data.attendance = [];
+            chunks.attendance = [];
             const attendanceList = [];
             attendanceSnapshot.forEach(docSnap => {
                 const data = docSnap.data();
@@ -7506,11 +7524,11 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 return timeB - timeA;
             });
             // 最新1000件のみ保存
-            backupData.data.attendance = attendanceList.slice(0, 1000).map(item => {
+            chunks.attendance = attendanceList.slice(0, 1000).map(item => {
                 const { _timestamp } = item, rest = __rest(item, ["_timestamp"]);
                 return rest;
             });
-            console.log('✅ 勤怠データ取得:', backupData.data.attendance.length, '件');
+            console.log('✅ 勤怠データ取得:', chunks.attendance.length, '件');
             // 🆕 設定データをバックアップ
             const { getDoc } = window.firebaseModules;
             // レシート設定
@@ -7523,12 +7541,12 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     receiptSettingsRef = doc(window.db, 'receipt_settings', 'default');
                 }
                 const receiptDoc = await getDoc(receiptSettingsRef);
-                backupData.data.receipt_settings = receiptDoc.exists() ? receiptDoc.data() : null;
-                console.log('✅ レシート設定:', backupData.data.receipt_settings ? '取得' : 'なし');
+                chunks.receipt_settings = receiptDoc.exists() ? receiptDoc.data() : null;
+                console.log('✅ レシート設定:', chunks.receipt_settings ? '取得' : 'なし');
             }
             catch (e) {
                 console.warn('レシート設定の取得に失敗:', e.message);
-                backupData.data.receipt_settings = null;
+                chunks.receipt_settings = null;
             }
             // 商品カテゴリ設定（menu_settings）とトッピング
             try {
@@ -7565,12 +7583,12 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                         menuSettingsData.toppings = [];
                     }
                 }
-                backupData.data.menu_settings = menuSettingsData;
-                console.log('✅ 商品カテゴリ設定:', backupData.data.menu_settings ? '取得' : 'なし');
+                chunks.menu_settings = menuSettingsData;
+                console.log('✅ 商品カテゴリ設定:', chunks.menu_settings ? '取得' : 'なし');
             }
             catch (e) {
                 console.warn('商品カテゴリ設定の取得に失敗:', e.message);
-                backupData.data.menu_settings = null;
+                chunks.menu_settings = null;
             }
             // 在庫設定
             try {
@@ -7582,12 +7600,12 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     inventorySettingsRef = doc(window.db, 'inventory_settings', 'default');
                 }
                 const inventoryDoc = await getDoc(inventorySettingsRef);
-                backupData.data.inventory_settings = inventoryDoc.exists() ? inventoryDoc.data() : null;
-                console.log('✅ 在庫設定:', backupData.data.inventory_settings ? '取得' : 'なし');
+                chunks.inventory_settings = inventoryDoc.exists() ? inventoryDoc.data() : null;
+                console.log('✅ 在庫設定:', chunks.inventory_settings ? '取得' : 'なし');
             }
             catch (e) {
                 console.warn('在庫設定の取得に失敗:', e.message);
-                backupData.data.inventory_settings = null;
+                chunks.inventory_settings = null;
             }
             // アラート設定
             try {
@@ -7599,12 +7617,12 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     alertSettingsRef = doc(window.db, 'alert_settings', 'default');
                 }
                 const alertDoc = await getDoc(alertSettingsRef);
-                backupData.data.alert_settings = alertDoc.exists() ? alertDoc.data() : null;
-                console.log('✅ アラート設定:', backupData.data.alert_settings ? '取得' : 'なし');
+                chunks.alert_settings = alertDoc.exists() ? alertDoc.data() : null;
+                console.log('✅ アラート設定:', chunks.alert_settings ? '取得' : 'なし');
             }
             catch (e) {
                 console.warn('アラート設定の取得に失敗:', e.message);
-                backupData.data.alert_settings = null;
+                chunks.alert_settings = null;
             }
             // 営業時間設定
             try {
@@ -7616,12 +7634,12 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     businessHoursRef = doc(window.db, 'business_hours', 'default');
                 }
                 const businessDoc = await getDoc(businessHoursRef);
-                backupData.data.business_hours = businessDoc.exists() ? businessDoc.data() : null;
-                console.log('✅ 営業時間設定:', backupData.data.business_hours ? '取得' : 'なし');
+                chunks.business_hours = businessDoc.exists() ? businessDoc.data() : null;
+                console.log('✅ 営業時間設定:', chunks.business_hours ? '取得' : 'なし');
             }
             catch (e) {
                 console.warn('営業時間設定の取得に失敗:', e.message);
-                backupData.data.business_hours = null;
+                chunks.business_hours = null;
             }
             // テーブル設定
             try {
@@ -7633,12 +7651,12 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     tableSettingsRef = doc(window.db, 'table_settings', 'default');
                 }
                 const tableDoc = await getDoc(tableSettingsRef);
-                backupData.data.table_settings = tableDoc.exists() ? tableDoc.data() : null;
-                console.log('✅ テーブル設定:', backupData.data.table_settings ? '取得' : 'なし');
+                chunks.table_settings = tableDoc.exists() ? tableDoc.data() : null;
+                console.log('✅ テーブル設定:', chunks.table_settings ? '取得' : 'なし');
             }
             catch (e) {
                 console.warn('テーブル設定の取得に失敗:', e.message);
-                backupData.data.table_settings = null;
+                chunks.table_settings = null;
             }
             // テーブルデータ（各テーブルのドキュメント）
             try {
@@ -7650,15 +7668,15 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     tablesRef = collection(window.db, 'tables');
                 }
                 const tablesSnapshot = await getDocs(tablesRef);
-                backupData.data.tables = [];
+                chunks.tables = [];
                 tablesSnapshot.forEach(docSnap => {
-                    backupData.data.tables.push(Object.assign({ id: docSnap.id }, docSnap.data()));
+                    chunks.tables.push(Object.assign({ id: docSnap.id }, docSnap.data()));
                 });
-                console.log('✅ テーブルデータ取得:', backupData.data.tables.length, '件');
+                console.log('✅ テーブルデータ取得:', chunks.tables.length, '件');
             }
             catch (e) {
                 console.warn('テーブルデータの取得に失敗:', e.message);
-                backupData.data.tables = [];
+                chunks.tables = [];
             }
             // 🆕 経費レシート（receipts）※画像実体は含まずメタデータのみ
             try {
@@ -7670,38 +7688,99 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     receiptsRef = collection(window.db, 'receipts');
                 }
                 const receiptsSnapshot = await getDocs(receiptsRef);
-                backupData.data.receipts = [];
+                const receiptsList = [];
                 receiptsSnapshot.forEach(docSnap => {
-                    backupData.data.receipts.push(Object.assign({ id: docSnap.id }, docSnap.data()));
+                    const data = docSnap.data();
+                    receiptsList.push(Object.assign(Object.assign({ id: docSnap.id }, data), { _timestamp: data.createdAt || data.timestamp || data.date || new Date(0) }));
                 });
-                console.log('✅ 経費レシート取得:', backupData.data.receipts.length, '件');
+                // 日付でソート（新しい順）※フィールド名は要確認、実データに合わせて調整してください
+                receiptsList.sort((a, b) => {
+                    var _a, _b;
+                    const timeA = ((_a = a._timestamp) === null || _a === void 0 ? void 0 : _a.toDate) ? a._timestamp.toDate() : new Date(a._timestamp);
+                    const timeB = ((_b = b._timestamp) === null || _b === void 0 ? void 0 : _b.toDate) ? b._timestamp.toDate() : new Date(b._timestamp);
+                    return timeB - timeA;
+                });
+                // 🆕 最新300件のみ保存（1MiB上限対策、orders/attendanceの1000件上限と同じ考え方）
+                chunks.receipts = receiptsList.slice(0, 300).map(item => {
+                    const { _timestamp } = item, rest = __rest(item, ["_timestamp"]);
+                    return rest;
+                });
+                console.log('✅ 経費レシート取得:', chunks.receipts.length, '件');
             }
             catch (e) {
                 console.warn('経費レシートの取得に失敗:', e.message);
-                backupData.data.receipts = [];
+                chunks.receipts = [];
             }
-            // 保存
+            // 🆕 保存: メタデータ+コレクション別チャンクドキュメントに分割（1MiB上限対策）
             const backupId = `manual_${dateTimeStr}`;
-            let backupRef;
-            if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
-                backupRef = doc(window.db, 'stores', currentStoreId, 'backups', backupId);
+            const makeBackupRef = (suffix) => {
+                const idWithSuffix = suffix ? backupId + suffix : backupId;
+                if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                    return doc(window.db, 'stores', currentStoreId, 'backups', idWithSuffix);
+                }
+                return doc(window.db, 'backups', idWithSuffix);
+            };
+            const backupMeta = {
+                timestamp: Timestamp.now(),
+                date: dateTimeStr,
+                type: 'manual',
+                memo: memo || '',
+                collectionCounts: {
+                    menus: chunks.menus.length,
+                    employees: chunks.employees.length,
+                    orders: chunks.orders.length,
+                    attendance: chunks.attendance.length,
+                    receipts: chunks.receipts.length,
+                    tables: chunks.tables.length
+                }
+            };
+            await Promise.all([
+                setDoc(makeBackupRef(null), backupMeta),
+                setDoc(makeBackupRef('_menus'), { items: chunks.menus }),
+                setDoc(makeBackupRef('_employees'), { items: chunks.employees }),
+                setDoc(makeBackupRef('_orders'), { items: chunks.orders }),
+                setDoc(makeBackupRef('_attendance'), { items: chunks.attendance }),
+                setDoc(makeBackupRef('_receipts'), { items: chunks.receipts }),
+                setDoc(makeBackupRef('_tables'), { items: chunks.tables }),
+                setDoc(makeBackupRef('_settings'), {
+                    menu_settings: chunks.menu_settings,
+                    receipt_settings: chunks.receipt_settings,
+                    inventory_settings: chunks.inventory_settings,
+                    alert_settings: chunks.alert_settings,
+                    business_hours: chunks.business_hours,
+                    table_settings: chunks.table_settings
+                })
+            ]);
+            console.log('✅ 手動バックアップ完了（分割保存）:', backupId);
+            // 🆕 「作成してダウンロード」の場合、書き込んだデータをそのままファイルにも書き出す
+            if (download) {
+                downloadBackupFile({
+                    formatVersion: 1,
+                    storeId: currentStoreId || '',
+                    timestamp: new Date().toISOString(),
+                    type: 'manual',
+                    memo: memo || '',
+                    collectionCounts: backupMeta.collectionCounts,
+                    data: {
+                        menus: chunks.menus, employees: chunks.employees, orders: chunks.orders,
+                        attendance: chunks.attendance, receipts: chunks.receipts, tables: chunks.tables,
+                        menu_settings: chunks.menu_settings, receipt_settings: chunks.receipt_settings,
+                        inventory_settings: chunks.inventory_settings, alert_settings: chunks.alert_settings,
+                        business_hours: chunks.business_hours, table_settings: chunks.table_settings
+                    }
+                }, `backup_${currentStoreId || 'store'}_${dateTimeStr}`);
             }
-            else {
-                backupRef = doc(window.db, 'backups', backupId);
-            }
-            await setDoc(backupRef, backupData);
-            console.log('✅ 手動バックアップ完了:', backupId);
             const settingsCount = [
-                backupData.data.menu_settings,
-                backupData.data.receipt_settings,
-                backupData.data.inventory_settings,
-                backupData.data.alert_settings,
-                backupData.data.business_hours,
-                backupData.data.table_settings
+                chunks.menu_settings,
+                chunks.receipt_settings,
+                chunks.inventory_settings,
+                chunks.alert_settings,
+                chunks.business_hours,
+                chunks.table_settings
             ].filter(s => s !== null).length;
             setCreating(false);
             const memoText = memo ? `\nメモ: ${memo}` : '';
-            showCustomAlert(`バックアップを作成しました\n\n商品: ${backupData.data.menus.length}件\n従業員: ${backupData.data.employees.length}名\n注文: ${backupData.data.orders.length}件\n勤怠: ${backupData.data.attendance.length}件\nテーブル: ${((_a = backupData.data.tables) === null || _a === void 0 ? void 0 : _a.length) || 0}件\n設定: ${settingsCount}種類${memoText}`, 'バックアップ完了');
+            showCustomAlert(`バックアップを作成しました\n\n商品: ${chunks.menus.length}件\n従業員: ${chunks.employees.length}名\n注文: ${chunks.orders.length}件\n勤怠: ${chunks.attendance.length}件\nテーブル: ${((_a = chunks.tables) === null || _a === void 0 ? void 0 : _a.length) || 0}件\n設定: ${settingsCount}種類${memoText}`, 'バックアップ完了');
             // 一覧を再読み込み
             await loadBackups();
         }
@@ -7712,55 +7791,55 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         }
     };
     // バックアップから復元
-    const restoreBackup = async (backup) => {
-        try {
-            // カスタム確認ダイアログを表示
-            const memoInfo = backup.memo ? `\nメモ: ${backup.memo}` : '';
-            const confirmResult = await showCustomConfirm(`このバックアップから復元しますか？\n\n作成日時: ${backup.timestamp.toLocaleString('ja-JP')}\nタイプ: ${backup.type === 'auto' ? '自動' : '手動'}${memoInfo}\n\n警告: 現在のデータは上書きされます！`, 'バックアップ復元', '復元する', 'キャンセル');
-            if (!confirmResult)
-                return;
-            setRestoring(true);
-            console.log('🔄 バックアップ復元開始:', backup.id);
-            const { setDoc, doc, getDoc, Timestamp } = window.firebaseModules;
-            let data;
-            if (backup.collectionCounts) {
-                // 🆕 分割保存形式: 各チャンクドキュメントを読み込んで組み立て
-                console.log('📦 分割バックアップを読み込み中...');
-                const loadChunk = async (suffix) => {
-                    const chunkRef = window.getStoreDoc('backups', backup.id + suffix);
-                    const chunkSnap = await getDoc(chunkRef);
-                    return chunkSnap.exists() ? chunkSnap.data() : null;
-                };
-                const [menusChunk, employeesChunk, ordersChunk, attendanceChunk, receiptsChunk, tablesChunk, settingsChunk] = await Promise.all([
-                    loadChunk('_menus'),
-                    loadChunk('_employees'),
-                    loadChunk('_orders'),
-                    loadChunk('_attendance'),
-                    loadChunk('_receipts'),
-                    loadChunk('_tables'),
-                    loadChunk('_settings')
-                ]);
-                data = {
-                    menus: (menusChunk && menusChunk.items) || [],
-                    employees: (employeesChunk && employeesChunk.items) || [],
-                    orders: (ordersChunk && ordersChunk.items) || [],
-                    attendance: (attendanceChunk && attendanceChunk.items) || [],
-                    receipts: (receiptsChunk && receiptsChunk.items) || [],
-                    tables: (tablesChunk && tablesChunk.items) || [],
-                    menu_settings: settingsChunk ? settingsChunk.menu_settings : null,
-                    receipt_settings: settingsChunk ? settingsChunk.receipt_settings : null,
-                    inventory_settings: settingsChunk ? settingsChunk.inventory_settings : null,
-                    alert_settings: settingsChunk ? settingsChunk.alert_settings : null,
-                    business_hours: settingsChunk ? settingsChunk.business_hours : null,
-                    table_settings: settingsChunk ? settingsChunk.table_settings : null
-                };
-            }
-            else {
-                // 旧形式（1ドキュメントに全部入り、分割前の古いバックアップ）
-                data = backup.data;
-            }
-            // 商品を復元
-            if (data.menus) {
+    // 🆕 バックアップ本体（Firestoreのチャンク or 旧形式）を読み込んで、復元処理が使える形に組み立てる
+    // ファイルからの復元（アップロード）とファイルへの書き出し（ダウンロード）でも再利用する
+    const loadBackupData = async (backup) => {
+        const { getDoc } = window.firebaseModules;
+        if (backup.collectionCounts) {
+            // 🆕 分割保存形式: 各チャンクドキュメントを読み込んで組み立て
+            console.log('📦 分割バックアップを読み込み中...');
+            const loadChunk = async (suffix) => {
+                const chunkRef = window.getStoreDoc('backups', backup.id + suffix);
+                const chunkSnap = await getDoc(chunkRef);
+                return chunkSnap.exists() ? chunkSnap.data() : null;
+            };
+            const [menusChunk, employeesChunk, ordersChunk, attendanceChunk, receiptsChunk, tablesChunk, settingsChunk] = await Promise.all([
+                loadChunk('_menus'),
+                loadChunk('_employees'),
+                loadChunk('_orders'),
+                loadChunk('_attendance'),
+                loadChunk('_receipts'),
+                loadChunk('_tables'),
+                loadChunk('_settings')
+            ]);
+            // 🆕 チャンクの欠損チェック（書き込み失敗などで一部が存在しない場合に検知する）
+            const chunkMap = { _menus: menusChunk, _employees: employeesChunk, _orders: ordersChunk, _attendance: attendanceChunk, _receipts: receiptsChunk, _tables: tablesChunk, _settings: settingsChunk };
+            const missingChunks = Object.keys(chunkMap).filter(key => chunkMap[key] === null);
+            return {
+                menus: (menusChunk && menusChunk.items) || [],
+                employees: (employeesChunk && employeesChunk.items) || [],
+                orders: (ordersChunk && ordersChunk.items) || [],
+                attendance: (attendanceChunk && attendanceChunk.items) || [],
+                receipts: (receiptsChunk && receiptsChunk.items) || [],
+                tables: (tablesChunk && tablesChunk.items) || [],
+                menu_settings: settingsChunk ? settingsChunk.menu_settings : null,
+                receipt_settings: settingsChunk ? settingsChunk.receipt_settings : null,
+                inventory_settings: settingsChunk ? settingsChunk.inventory_settings : null,
+                alert_settings: settingsChunk ? settingsChunk.alert_settings : null,
+                business_hours: settingsChunk ? settingsChunk.business_hours : null,
+                table_settings: settingsChunk ? settingsChunk.table_settings : null,
+                _missingChunks: missingChunks
+            };
+        }
+        // 旧形式（1ドキュメントに全部入り、分割前の古いバックアップ）
+        return Object.assign(Object.assign({}, backup.data), { _missingChunks: [] });
+    };
+    // 🆕 組み立て済みのdataオブジェクトを実際にFirestoreへ書き込む（復元本体）
+    // Firestoreのチャンクから来たデータでも、アップロードされたファイルから来たデータでも共通で使う
+    const applyRestoreData = async (data) => {
+        const { setDoc, doc } = window.firebaseModules;
+        // 商品を復元
+        if (data.menus) {
                 for (const menu of data.menus) {
                     const menuRef = window.getStoreDoc('menus', menu.id);
                     const menuData = Object.assign({}, menu);
@@ -7921,6 +8000,27 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 console.log(`✅ テーブル復元: ${data.tables.length}件`);
             }
             console.log(`✅ 設定復元: ${settingsRestoredCount}種類`);
+    };
+    // バックアップ一覧からの復元（Firestore上のバックアップを直接復元）
+    const restoreBackup = async (backup) => {
+        try {
+            // カスタム確認ダイアログを表示
+            const memoInfo = backup.memo ? `\nメモ: ${backup.memo}` : '';
+            const confirmResult = await showCustomConfirm(`このバックアップから復元しますか？\n\n作成日時: ${backup.timestamp.toLocaleString('ja-JP')}\nタイプ: ${backup.type === 'auto' ? '自動' : '手動'}${memoInfo}\n\n警告: 現在のデータは上書きされます！`, 'バックアップ復元', '復元する', 'キャンセル');
+            if (!confirmResult)
+                return;
+            setRestoring(true);
+            console.log('🔄 バックアップ復元開始:', backup.id);
+            const data = await loadBackupData(backup);
+            // 🆕 チャンクの一部が見つからなかった場合は続行するか確認する
+            if (data._missingChunks && data._missingChunks.length > 0) {
+                const proceedAnyway = await showCustomConfirm(`このバックアップの一部データが見つかりませんでした（${data._missingChunks.join(', ')}）。\n\n見つからなかった項目は復元されません。このまま続けますか？`, 'データ欠損の警告', '続行する', '中止');
+                if (!proceedAnyway) {
+                    setRestoring(false);
+                    return;
+                }
+            }
+            await applyRestoreData(data);
             setRestoring(false);
             showCustomAlert('バックアップからの復元が完了しました\n\nページを再読み込みしてください。', '復元完了');
             // ページをリロード
@@ -7932,6 +8032,94 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             console.error('復元エラー:', error);
             setRestoring(false);
             showCustomAlert('復元に失敗しました: ' + error.message, 'エラー');
+        }
+    };
+    // 🆕 バックアップをJSONファイルとして書き出す
+    const exportBackupToFile = async (backup) => {
+        try {
+            setExportingId(backup.id);
+            const data = await loadBackupData(backup);
+            const missingChunks = data._missingChunks || [];
+            const cleanData = Object.assign({}, data);
+            delete cleanData._missingChunks;
+            const payload = {
+                formatVersion: 1,
+                storeId: currentStoreId || '',
+                timestamp: backup.timestamp.toISOString(),
+                type: backup.type,
+                memo: backup.memo || '',
+                collectionCounts: backup.collectionCounts || {
+                    menus: cleanData.menus.length,
+                    employees: cleanData.employees.length,
+                    orders: cleanData.orders.length,
+                    attendance: cleanData.attendance.length,
+                    receipts: cleanData.receipts.length,
+                    tables: cleanData.tables.length
+                },
+                data: cleanData
+            };
+            downloadBackupFile(payload, `backup_${currentStoreId || 'store'}_${backup.date || backup.id}`);
+            if (missingChunks.length > 0) {
+                showCustomAlert(`一部のデータが見つかりませんでした（${missingChunks.join(', ')}）。\n\n書き出したファイルにはその項目が含まれていません。`, '注意', '⚠️');
+            }
+        }
+        catch (error) {
+            console.error('バックアップ書き出しエラー:', error);
+            showCustomAlert('ファイルへの書き出しに失敗しました: ' + error.message, 'エラー', '❌');
+        }
+        finally {
+            setExportingId(null);
+        }
+    };
+    // 🆕 アップロードされたバックアップファイルを選択したときの処理（プレビューのみ、まだ書き込まない）
+    const handleImportFileSelect = async (e) => {
+        var _a;
+        const file = (_a = e.target.files) === null || _a === void 0 ? void 0 : _a[0];
+        e.target.value = ''; // 同じファイルを選び直せるようにリセット
+        if (!file)
+            return;
+        setImportFileError('');
+        setImportPreview(null);
+        try {
+            const text = await file.text();
+            const parsed = JSON.parse(text);
+            if (!parsed || typeof parsed !== 'object' || !parsed.data) {
+                throw new Error('バックアップファイルの形式が正しくありません');
+            }
+            setImportPreview(parsed);
+        }
+        catch (error) {
+            console.error('バックアップファイル読み込みエラー:', error);
+            setImportFileError('ファイルの読み込みに失敗しました: ' + error.message);
+        }
+    };
+    const cancelImportPreview = () => {
+        setImportPreview(null);
+        setImportFileError('');
+    };
+    // 🆕 プレビュー確認後、実際にファイルの内容で復元を実行する
+    const runImportedRestore = async () => {
+        if (!importPreview)
+            return;
+        try {
+            const tsText = importPreview.timestamp ? new Date(importPreview.timestamp).toLocaleString('ja-JP') : '不明';
+            const memoInfo = importPreview.memo ? `\nメモ: ${importPreview.memo}` : '';
+            const confirmResult = await showCustomConfirm(`このファイルから復元しますか？\n\n作成日時: ${tsText}\n店舗ID: ${importPreview.storeId || '不明'}${memoInfo}\n\n警告: 現在のデータは上書きされます！`, 'ファイルから復元', '復元する', 'キャンセル');
+            if (!confirmResult)
+                return;
+            setImporting(true);
+            await applyRestoreData(importPreview.data);
+            setImporting(false);
+            setImportPreview(null);
+            showCustomAlert('ファイルからの復元が完了しました\n\nページを再読み込みしてください。', '復元完了', '✅');
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        }
+        catch (error) {
+            console.error('ファイル復元エラー:', error);
+            setImporting(false);
+            showCustomAlert('復元に失敗しました: ' + error.message, 'エラー', '❌');
         }
     };
     // バックアップを削除
@@ -7986,7 +8174,9 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         React.createElement("div", { className: "bg-gradient-to-r from-blue-500 to-blue-700 rounded-lg shadow-lg p-6 text-white" },
             React.createElement("h3", { className: "text-xl font-bold mb-3" }, "\u4ECA\u3059\u3050\u30D0\u30C3\u30AF\u30A2\u30C3\u30D7"),
             React.createElement("p", { className: "text-sm mb-4 opacity-90" }, "\u73FE\u5728\u306E\u30C7\u30FC\u30BF\u3092\u30D0\u30C3\u30AF\u30A2\u30C3\u30D7\u3057\u307E\u3059\u3002\u5927\u304D\u306A\u5909\u66F4\u3092\u884C\u3046\u524D\u306B\u63A8\u5968\u3057\u307E\u3059\u3002"),
-            React.createElement("button", { onClick: createManualBackup, disabled: creating || restoring, className: "w-full px-6 py-3 bg-white text-blue-700 rounded-lg hover:bg-gray-100 font-bold shadow-lg transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100" }, creating ? 'バックアップ作成中...' : '手動バックアップを作成')),
+            React.createElement("div", { className: "flex flex-col sm:flex-row gap-3" },
+                React.createElement("button", { onClick: () => createManualBackup(), disabled: creating || restoring, className: "flex-1 px-6 py-3 bg-white text-blue-700 rounded-lg hover:bg-gray-100 font-bold shadow-lg transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100" }, creating ? 'バックアップ作成中...' : '手動バックアップを作成'),
+                React.createElement("button", { onClick: () => createManualBackup({ download: true }), disabled: creating || restoring, className: "flex-1 px-6 py-3 bg-blue-900 bg-opacity-40 text-white border-2 border-white rounded-lg hover:bg-opacity-60 font-bold shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed" }, creating ? 'バックアップ作成中...' : '作成してファイルにダウンロード'))),
         React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6" },
             React.createElement("h3", { className: "text-lg font-bold mb-4" }, "\u30D0\u30C3\u30AF\u30A2\u30C3\u30D7\u4E00\u89A7"),
             loading ? (React.createElement("div", { className: "text-center py-8" },
@@ -8027,8 +8217,32 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                                     "\u4EF6"))),
                         React.createElement("div", { className: "flex gap-2" },
                             React.createElement("button", { onClick: () => restoreBackup(backup), disabled: restoring || creating, className: "px-3 py-1 bg-green-500 text-white text-sm rounded hover:bg-green-600 disabled:bg-gray-300" }, restoring ? '復元中...' : '復元'),
+                            React.createElement("button", { onClick: () => exportBackupToFile(backup), disabled: restoring || creating || exportingId === backup.id, className: "px-3 py-1 bg-gray-500 text-white text-sm rounded hover:bg-gray-600 disabled:bg-gray-300" }, exportingId === backup.id ? '書き出し中...' : 'ファイルに保存'),
                             backup.type === 'manual' && (React.createElement("button", { onClick: () => deleteBackup(backup.id), disabled: restoring || creating, className: "px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600 disabled:bg-gray-300" }, "\u524A\u9664"))))));
-            }))))));
+            })))),
+        React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 border-2 border-dashed border-gray-300" },
+            React.createElement("h3", { className: "text-lg font-bold mb-2" }, "\u30D5\u30A1\u30A4\u30EB\u304B\u3089\u5FA9\u5143"),
+            React.createElement("p", { className: "text-sm text-gray-500 mb-4" }, "Firebase\u7248\u30FBPi\u7248\u9593\u3067\u66F8\u304D\u51FA\u3057\u305F\u30D0\u30C3\u30AF\u30A2\u30C3\u30D7\u30D5\u30A1\u30A4\u30EB\u3092\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u3057\u3066\u5FA9\u5143\u3067\u304D\u307E\u3059\u3002\u5185\u5BB9\u3092\u78BA\u8A8D\u3057\u3066\u304B\u3089\u5B9F\u884C\u3057\u307E\u3059\u3002"),
+            !importPreview && (React.createElement("label", { className: "inline-block px-4 py-2 bg-gray-700 text-white text-sm rounded cursor-pointer hover:bg-gray-800" },
+                "\u30D5\u30A1\u30A4\u30EB\u3092\u9078\u629E",
+                React.createElement("input", { type: "file", accept: "application/json,.json", onChange: handleImportFileSelect, className: "hidden" }))),
+            importFileError && (React.createElement("p", { className: "text-sm text-red-600 mt-2" }, importFileError)),
+            importPreview && (React.createElement("div", { className: "mt-3 border rounded-lg p-4 bg-yellow-50 border-yellow-300" },
+                React.createElement("h4", { className: "font-bold text-yellow-800 mb-2" }, "\u5FA9\u5143\u5185\u5BB9\u306E\u30D7\u30EC\u30D3\u30E5\u30FC"),
+                importPreview.storeId && currentStoreId && importPreview.storeId !== currentStoreId && (React.createElement("p", { className: "text-sm font-bold text-red-600 mb-2" }, `\u26A0\uFE0F \u5E97\u8217ID\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093\uFF08\u30D5\u30A1\u30A4\u30EB: ${importPreview.storeId} / \u73FE\u5728: ${currentStoreId}\uFF09\u3002\u672C\u5F53\u306B\u3053\u306E\u30D5\u30A1\u30A4\u30EB\u3067\u5FA9\u5143\u3057\u3066\u3088\u3044\u304B\u3054\u78BA\u8A8D\u304F\u3060\u3055\u3044`)),
+                React.createElement("div", { className: "text-sm text-gray-700 space-y-1" },
+                    React.createElement("div", null, `\u4F5C\u6210\u65E5\u6642: ${importPreview.timestamp ? new Date(importPreview.timestamp).toLocaleString('ja-JP') : '\u4E0D\u660E'}`),
+                    importPreview.memo && React.createElement("div", null, `\u30E1\u30E2: ${importPreview.memo}`),
+                    React.createElement("div", { className: "grid grid-cols-2 gap-x-4" },
+                        React.createElement("span", null, `\u5546\u54C1: ${(importPreview.data.menus || []).length}\u4EF6`),
+                        React.createElement("span", null, `\u5F93\u696D\u54E1: ${(importPreview.data.employees || []).length}\u540D`),
+                        React.createElement("span", null, `\u6CE8\u6587: ${(importPreview.data.orders || []).length}\u4EF6`),
+                        React.createElement("span", null, `\u52E4\u6020: ${(importPreview.data.attendance || []).length}\u4EF6`),
+                        React.createElement("span", null, `\u7D4C\u8CBB\u30EC\u30B7\u30FC\u30C8: ${(importPreview.data.receipts || []).length}\u4EF6`),
+                        React.createElement("span", null, `\u30C6\u30FC\u30D6\u30EB: ${(importPreview.data.tables || []).length}\u4EF6`))),
+                React.createElement("div", { className: "flex gap-2 mt-4" },
+                    React.createElement("button", { onClick: runImportedRestore, disabled: importing, className: "px-4 py-2 bg-green-600 text-white text-sm font-bold rounded hover:bg-green-700 disabled:bg-gray-300" }, importing ? '復元中...' : 'この内容で復元を実行'),
+                    React.createElement("button", { onClick: cancelImportPreview, disabled: importing, className: "px-4 py-2 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 disabled:opacity-50" }, "\u30AD\u30E3\u30F3\u30BB\u30EB")))))));
 };
 // ========== 削除設定コンポーネント ==========
 const DeleteSettings = ({ currentStoreId, showCustomConfirm, showCustomAlert }) => {
