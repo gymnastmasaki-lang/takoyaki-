@@ -4182,19 +4182,50 @@
         }
         
         // バックアップを保存（7日ローテーション）
+        // 🔧 修正: 1ドキュメントに全部詰め込むと1MiB上限で失敗するため、
+        // メタデータ+コレクション別チャンクドキュメントに分割する（kanri.html/pos.htmlと同じ形式）
         const dayOfWeek = today.getDay(); // 0=日曜, 1=月曜, ..., 6=土曜
         const backupId = `auto_day${dayOfWeek}`; // day0〜day6で7日ローテーション
         
-        let backupRef;
-        if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
-          backupRef = doc(window.db, 'stores', window.currentStoreId, 'backups', backupId);
-        } else {
-          backupRef = doc(window.db, 'backups', backupId);
-        }
+        const makeBackupRef = (suffix) => {
+          const idWithSuffix = suffix ? backupId + suffix : backupId;
+          if (window.currentStoreId && window.currentStoreId !== '' && window.currentStoreId !== null) {
+            return doc(window.db, 'stores', window.currentStoreId, 'backups', idWithSuffix);
+          }
+          return doc(window.db, 'backups', idWithSuffix);
+        };
         
-        await setDoc(backupRef, backupData);
+        const backupMeta = {
+          timestamp: backupData.timestamp,
+          date: backupData.date,
+          type: backupData.type,
+          collectionCounts: {
+            menus: backupData.data.menus.length,
+            employees: backupData.data.employees.length,
+            orders: backupData.data.orders.length,
+            attendance: backupData.data.attendance.length,
+            tables: backupData.data.tables.length
+          }
+        };
         
-        console.log(`✅ 自動バックアップ完了: ${backupId} (${dateStr})`);
+        await Promise.all([
+          setDoc(makeBackupRef(null), backupMeta),
+          setDoc(makeBackupRef('_menus'), { items: backupData.data.menus }),
+          setDoc(makeBackupRef('_employees'), { items: backupData.data.employees }),
+          setDoc(makeBackupRef('_orders'), { items: backupData.data.orders }),
+          setDoc(makeBackupRef('_attendance'), { items: backupData.data.attendance }),
+          setDoc(makeBackupRef('_tables'), { items: backupData.data.tables }),
+          setDoc(makeBackupRef('_settings'), {
+            menu_settings: backupData.data.menu_settings,
+            receipt_settings: backupData.data.receipt_settings,
+            inventory_settings: backupData.data.inventory_settings,
+            alert_settings: backupData.data.alert_settings,
+            business_hours: backupData.data.business_hours,
+            table_settings: backupData.data.table_settings
+          })
+        ]);
+        
+        console.log(`✅ 自動バックアップ完了（分割保存）: ${backupId} (${dateStr})`);
         return true;
       } catch (error) {
         console.error('❌ 自動バックアップエラー:', error);
