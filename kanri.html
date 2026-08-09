@@ -7842,13 +7842,33 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     // 🆕 組み立て済みのdataオブジェクトを実際にFirestoreへ書き込む（復元本体）
     // Firestoreのチャンクから来たデータでも、アップロードされたファイルから来たデータでも共通で使う
     const applyRestoreData = async (data) => {
-        const { setDoc, doc } = window.firebaseModules;
+        const { setDoc, doc, getDocs } = window.firebaseModules;
+        // 🆕 名前が一致する既存データがあれば「新規追加」ではなく「上書き」にする
+        // （店舗をまたいだ復元で同じ商品・従業員が重複登録されるのを防ぐ）
+        const buildNameMap = async (collectionName) => {
+            const map = {};
+            try {
+                const snap = await getDocs(window.getStoreCollection(collectionName));
+                snap.forEach(d => {
+                    const name = (d.data().name || '').trim();
+                    if (name && !map[name]) map[name] = d.id; // 既に重複がある場合は最初に見つかったものを使う
+                });
+            }
+            catch (e) {
+                console.warn(`${collectionName}の既存データ取得に失敗（新規追加にフォールバック）:`, e.message);
+            }
+            return map;
+        };
+        const existingMenuIds = data.menus ? await buildNameMap('menus') : {};
+        const existingEmployeeIds = data.employees ? await buildNameMap('employees') : {};
         // 商品を復元
         if (data.menus) {
                 for (const menu of data.menus) {
-                    const menuRef = window.getStoreDoc('menus', menu.id);
                     const menuData = Object.assign({}, menu);
                     delete menuData.id;
+                    // 🆕 同じ名前の商品が既にあれば、そのドキュメントを上書きする
+                    const targetId = existingMenuIds[(menu.name || '').trim()] || menu.id;
+                    const menuRef = window.getStoreDoc('menus', targetId);
                     await setDoc(menuRef, menuData);
                 }
                 console.log(`✅ 商品復元: ${data.menus.length}件`);
@@ -7856,9 +7876,11 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             // 従業員を復元
             if (data.employees) {
                 for (const employee of data.employees) {
-                    const empRef = window.getStoreDoc('employees', employee.id);
                     const empData = Object.assign({}, employee);
                     delete empData.id;
+                    // 🆕 同じ名前の従業員が既にいれば、そのドキュメントを上書きする
+                    const targetId = existingEmployeeIds[(employee.name || '').trim()] || employee.id;
+                    const empRef = window.getStoreDoc('employees', targetId);
                     await setDoc(empRef, empData);
                 }
                 console.log(`✅ 従業員復元: ${data.employees.length}名`);
@@ -8134,25 +8156,18 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         setScanningDup(true);
         try {
             const { getDocs } = window.firebaseModules;
-            const toMillis = (v) => {
-                if (!v) return 0;
-                if (v.toDate) return v.toDate().getTime();
-                const d = new Date(v);
-                return isNaN(d.getTime()) ? 0 : d.getTime();
-            };
             const menusSnap = await getDocs(window.getStoreCollection('menus'));
             const menuGroups = {};
             menusSnap.forEach(d => {
                 const data = d.data();
                 const key = (data.name || '(名称なし)').trim();
-                (menuGroups[key] = menuGroups[key] || []).push({ id: d.id, price: data.price, category: data.category, createdAt: data.createdAt, _t: toMillis(data.createdAt) });
+                (menuGroups[key] = menuGroups[key] || []).push({ id: d.id, price: data.price, category: data.category });
             });
+            // 🔧 修正: 作成日時での自動判定は実データと合わないケースがあったため廃止。
+            // 商品・従業員とも、内容を見て手動でチェックしてもらう方式に統一。
             const menuDupes = Object.entries(menuGroups)
                 .filter(([, items]) => items.length > 1)
-                .map(([name, items]) => {
-                    const sorted = [...items].sort((a, b) => b._t - a._t); // 新しい順（createdAtが無いものは最古扱い）
-                    return { name, collection: 'menus', items: sorted, keepId: sorted[0].id };
-                });
+                .map(([name, items]) => ({ name, collection: 'menus', items, keepId: null }));
             const empSnap = await getDocs(window.getStoreCollection('employees'));
             const empGroups = {};
             empSnap.forEach(d => {
@@ -8163,10 +8178,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             const empDupes = Object.entries(empGroups)
                 .filter(([, items]) => items.length > 1)
                 .map(([name, items]) => ({ name, collection: 'employees', items, keepId: null }));
-            // デフォルトのチェック状態: 商品は自動選択した削除候補、従業員は何も選択しない
-            const initialSelections = {};
-            menuDupes.forEach(g => g.items.forEach(it => { if (it.id !== g.keepId) initialSelections[it.id] = true; }));
-            setDupSelections(initialSelections);
+            // デフォルトのチェック状態: どちらも何も選択しない（内容を見て手動で選ぶ）
+            setDupSelections({});
             setDupScan({ menus: menuDupes, employees: empDupes });
             if (menuDupes.length === 0 && empDupes.length === 0) {
                 showCustomAlert('同名の重複データは見つかりませんでした', 'チェック完了', '✅');
@@ -8351,7 +8364,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                             React.createElement("label", { key: item.id, className: "flex items-center gap-2 text-sm py-1" },
                                 React.createElement("input", { type: "checkbox", checked: !!dupSelections[item.id], onChange: () => toggleDupSelection(item.id) }),
                                 group.collection === 'menus'
-                                    ? React.createElement("span", null, `ID: ${item.id.slice(0, 8)}... / \u4FA1\u683C: \uFFE5${item.price || 0} / \u30AB\u30C6\u30B4\u30EA: ${item.category || '-'}${item.id === group.keepId ? '\uFF08\u65B0\u3057\u3044\u65B9\uFF09' : ''}`)
+                                    ? React.createElement("span", null, `ID: ${item.id.slice(0, 8)}... / \u4FA1\u683C: \uFFE5${item.price || 0} / \u30AB\u30C6\u30B4\u30EA: ${item.category || '-'}`)
                                     : React.createElement("span", null, `ID: ${item.id.slice(0, 8)}... / \u6642\u7D66: \uFFE5${item.hourlyRate || 0} / \u7D66\u4E0E\u5F62\u614B: ${item.salaryType || '-'}`))))))),
                 [...dupScan.menus, ...dupScan.employees].length > 0 && (React.createElement("button", { onClick: executeCleanup, disabled: cleaningDup, className: "px-4 py-2 bg-red-600 text-white text-sm font-bold rounded hover:bg-red-700 disabled:bg-gray-300" }, cleaningDup ? '削除中...' : 'チェックした項目を削除')))))));
 };
