@@ -7445,7 +7445,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             const dateTimeStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
             // 🆕 1ドキュメント1MiB上限を回避するため、コレクションごとに分割して保存する
             const chunks = {
-                menus: [], employees: [], orders: [], attendance: [], receipts: [], tables: [],
+                menus: [], employees: [], orders: [], attendance: [], receipts: [], tables: [], expenses: [],
                 menu_settings: null, receipt_settings: null, inventory_settings: null,
                 alert_settings: null, business_hours: null, table_settings: null
             };
@@ -7716,6 +7716,19 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 console.warn('経費レシートの取得に失敗:', e.message);
                 chunks.receipts = [];
             }
+            // 🆕 支出（expenses）※日付ごとに1ドキュメント、経費出力画面のデータ
+            try {
+                const expensesSnapshot = await getDocs(window.getStoreCollection('expenses'));
+                chunks.expenses = [];
+                expensesSnapshot.forEach(docSnap => {
+                    chunks.expenses.push(Object.assign({ id: docSnap.id }, docSnap.data()));
+                });
+                console.log('✅ 支出データ取得:', chunks.expenses.length, '件');
+            }
+            catch (e) {
+                console.warn('支出データの取得に失敗:', e.message);
+                chunks.expenses = [];
+            }
             // 🆕 保存: メタデータ+コレクション別チャンクドキュメントに分割（1MiB上限対策）
             const backupId = `manual_${dateTimeStr}`;
             const makeBackupRef = (suffix) => {
@@ -7736,7 +7749,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     orders: chunks.orders.length,
                     attendance: chunks.attendance.length,
                     receipts: chunks.receipts.length,
-                    tables: chunks.tables.length
+                    tables: chunks.tables.length,
+                    expenses: chunks.expenses.length
                 }
             };
             await Promise.all([
@@ -7747,6 +7761,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 setDoc(makeBackupRef('_attendance'), { items: chunks.attendance }),
                 setDoc(makeBackupRef('_receipts'), { items: chunks.receipts }),
                 setDoc(makeBackupRef('_tables'), { items: chunks.tables }),
+                setDoc(makeBackupRef('_expenses'), { items: chunks.expenses }),
                 setDoc(makeBackupRef('_settings'), {
                     menu_settings: chunks.menu_settings,
                     receipt_settings: chunks.receipt_settings,
@@ -7769,6 +7784,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     data: {
                         menus: chunks.menus, employees: chunks.employees, orders: chunks.orders,
                         attendance: chunks.attendance, receipts: chunks.receipts, tables: chunks.tables,
+                        expenses: chunks.expenses,
                         menu_settings: chunks.menu_settings, receipt_settings: chunks.receipt_settings,
                         inventory_settings: chunks.inventory_settings, alert_settings: chunks.alert_settings,
                         business_hours: chunks.business_hours, table_settings: chunks.table_settings
@@ -7808,16 +7824,18 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 const chunkSnap = await getDoc(chunkRef);
                 return chunkSnap.exists() ? chunkSnap.data() : null;
             };
-            const [menusChunk, employeesChunk, ordersChunk, attendanceChunk, receiptsChunk, tablesChunk, settingsChunk] = await Promise.all([
+            const [menusChunk, employeesChunk, ordersChunk, attendanceChunk, receiptsChunk, tablesChunk, settingsChunk, expensesChunk] = await Promise.all([
                 loadChunk('_menus'),
                 loadChunk('_employees'),
                 loadChunk('_orders'),
                 loadChunk('_attendance'),
                 loadChunk('_receipts'),
                 loadChunk('_tables'),
-                loadChunk('_settings')
+                loadChunk('_settings'),
+                loadChunk('_expenses')
             ]);
             // 🆕 チャンクの欠損チェック（書き込み失敗などで一部が存在しない場合に検知する）
+            // ※ _expensesは対応前の古いバックアップに無いのが正常なので、欠損チェックの対象外にする
             const chunkMap = { _menus: menusChunk, _employees: employeesChunk, _orders: ordersChunk, _attendance: attendanceChunk, _receipts: receiptsChunk, _tables: tablesChunk, _settings: settingsChunk };
             const missingChunks = Object.keys(chunkMap).filter(key => chunkMap[key] === null);
             return {
@@ -7827,6 +7845,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 attendance: (attendanceChunk && attendanceChunk.items) || [],
                 receipts: (receiptsChunk && receiptsChunk.items) || [],
                 tables: (tablesChunk && tablesChunk.items) || [],
+                expenses: (expensesChunk && expensesChunk.items) || [],
                 menu_settings: settingsChunk ? settingsChunk.menu_settings : null,
                 receipt_settings: settingsChunk ? settingsChunk.receipt_settings : null,
                 inventory_settings: settingsChunk ? settingsChunk.inventory_settings : null,
@@ -7845,13 +7864,20 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         const { setDoc, doc, getDocs } = window.firebaseModules;
         // 🆕 名前が一致する既存データがあれば「新規追加」ではなく「上書き」にする
         // （店舗をまたいだ復元で同じ商品・従業員が重複登録されるのを防ぐ）
-        const buildNameMap = async (collectionName) => {
+        // 🆕 商品の画像URLは、Firebase版とPi版で参照先が違う（Pi版はネット未接続だと
+        // Firebase Storageの画像を表示できない）ため、既存側の画像を優先して保持する。
+        const buildNameMap = async (collectionName, preserveFields = []) => {
             const map = {};
             try {
                 const snap = await getDocs(window.getStoreCollection(collectionName));
                 snap.forEach(d => {
-                    const name = (d.data().name || '').trim();
-                    if (name && !map[name]) map[name] = d.id; // 既に重複がある場合は最初に見つかったものを使う
+                    const docData = d.data();
+                    const name = (docData.name || '').trim();
+                    if (name && !map[name]) {
+                        const entry = { id: d.id };
+                        preserveFields.forEach(f => { entry[f] = docData[f]; });
+                        map[name] = entry; // 既に重複がある場合は最初に見つかったものを使う
+                    }
                 });
             }
             catch (e) {
@@ -7859,15 +7885,20 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             }
             return map;
         };
-        const existingMenuIds = data.menus ? await buildNameMap('menus') : {};
-        const existingEmployeeIds = data.employees ? await buildNameMap('employees') : {};
+        const existingMenus = data.menus ? await buildNameMap('menus', ['image']) : {};
+        const existingEmployees = data.employees ? await buildNameMap('employees') : {};
         // 商品を復元
         if (data.menus) {
                 for (const menu of data.menus) {
                     const menuData = Object.assign({}, menu);
                     delete menuData.id;
+                    const existing = existingMenus[(menu.name || '').trim()];
                     // 🆕 同じ名前の商品が既にあれば、そのドキュメントを上書きする
-                    const targetId = existingMenuIds[(menu.name || '').trim()] || menu.id;
+                    const targetId = existing ? existing.id : menu.id;
+                    // 🆕 既存側に画像があれば、バックアップ側の画像URLで上書きしない（環境をまたぐと表示できないため）
+                    if (existing && existing.image) {
+                        menuData.image = existing.image;
+                    }
                     const menuRef = window.getStoreDoc('menus', targetId);
                     await setDoc(menuRef, menuData);
                 }
@@ -7879,7 +7910,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     const empData = Object.assign({}, employee);
                     delete empData.id;
                     // 🆕 同じ名前の従業員が既にいれば、そのドキュメントを上書きする
-                    const targetId = existingEmployeeIds[(employee.name || '').trim()] || employee.id;
+                    const existing = existingEmployees[(employee.name || '').trim()];
+                    const targetId = existing ? existing.id : employee.id;
                     const empRef = window.getStoreDoc('employees', targetId);
                     await setDoc(empRef, empData);
                 }
@@ -7914,6 +7946,17 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     await setDoc(receiptRef, receiptData);
                 }
                 console.log(`✅ 経費レシート復元: ${data.receipts.length}件`);
+            }
+            // 🆕 支出（expenses）を復元 ※ドキュメントIDが日付そのものなので、
+            // 商品・従業員のような名前マッチは不要（同じ日付なら自動的に上書きになる）
+            if (data.expenses) {
+                for (const expense of data.expenses) {
+                    const expenseRef = window.getStoreDoc('expenses', expense.id);
+                    const expenseData = Object.assign({}, expense);
+                    delete expenseData.id;
+                    await setDoc(expenseRef, expenseData);
+                }
+                console.log(`✅ 支出データ復元: ${data.expenses.length}件`);
             }
             // 🆕 設定を復元
             let settingsRestoredCount = 0;
@@ -8081,7 +8124,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     orders: cleanData.orders.length,
                     attendance: cleanData.attendance.length,
                     receipts: cleanData.receipts.length,
-                    tables: cleanData.tables.length
+                    tables: cleanData.tables.length,
+                    expenses: (cleanData.expenses || []).length
                 },
                 data: cleanData
             };
@@ -8346,6 +8390,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                         React.createElement("span", null, `\u6CE8\u6587: ${(importPreview.data.orders || []).length}\u4EF6`),
                         React.createElement("span", null, `\u52E4\u6020: ${(importPreview.data.attendance || []).length}\u4EF6`),
                         React.createElement("span", null, `\u7D4C\u8CBB\u30EC\u30B7\u30FC\u30C8: ${(importPreview.data.receipts || []).length}\u4EF6`),
+                        React.createElement("span", null, `\u652F\u51FA: ${(importPreview.data.expenses || []).length}\u4EF6`),
                         React.createElement("span", null, `\u30C6\u30FC\u30D6\u30EB: ${(importPreview.data.tables || []).length}\u4EF6`))),
                 React.createElement("div", { className: "flex gap-2 mt-4" },
                     React.createElement("button", { onClick: runImportedRestore, disabled: importing, className: "px-4 py-2 bg-green-600 text-white text-sm font-bold rounded hover:bg-green-700 disabled:bg-gray-300" }, importing ? '復元中...' : 'この内容で復元を実行'),
