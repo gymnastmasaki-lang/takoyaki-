@@ -7232,7 +7232,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     const loadBackups = async () => {
         try {
             setLoading(true);
-            const { getDocs, collection } = window.firebaseModules;
+            const { getDocs, collection, query, where } = window.firebaseModules;
             let backupsRef;
             if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
                 backupsRef = collection(window.db, 'stores', currentStoreId, 'backups');
@@ -7240,17 +7240,24 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             else {
                 backupsRef = collection(window.db, 'backups');
             }
-            const snapshot = await getDocs(backupsRef);
+            // 🔧 修正: コレクション全体（各バックアップのmenus/orders/attendance等の
+            // チャンクドキュメントも含む）を丸ごと読みに行っていたため、バックアップが
+            // 増えるほど一覧の表示が遅くなっていた（数分かかることも）。
+            // メタデータドキュメント（type='manual'/'auto'）だけをサーバー側で絞り込む。
+            const [manualSnap, autoSnap] = await Promise.all([
+                getDocs(query(backupsRef, where('type', '==', 'manual'))),
+                getDocs(query(backupsRef, where('type', '==', 'auto')))
+            ]);
             const backupsList = [];
-            snapshot.forEach(doc => {
-                var _a;
-                const data = doc.data();
-                // 🆕 分割保存のチャンクドキュメント（_menus等）はtypeフィールドを持たないため除外
-                if (!data.type) {
-                    return;
-                }
-                backupsList.push(Object.assign(Object.assign({ id: doc.id }, data), { timestamp: ((_a = data.timestamp) === null || _a === void 0 ? void 0 : _a.toDate()) || new Date() }));
-            });
+            const addDocs = (snapshot) => {
+                snapshot.forEach(doc => {
+                    var _a;
+                    const data = doc.data();
+                    backupsList.push(Object.assign(Object.assign({ id: doc.id }, data), { timestamp: ((_a = data.timestamp) === null || _a === void 0 ? void 0 : _a.toDate()) || new Date() }));
+                });
+            };
+            addDocs(manualSnap);
+            addDocs(autoSnap);
             // 日付順にソート（新しい順）
             backupsList.sort((a, b) => b.timestamp - a.timestamp);
             setBackups(backupsList);
