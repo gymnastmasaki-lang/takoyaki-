@@ -785,6 +785,11 @@
           
           // 🔧 デバウンスで重複呼び出しを防止
           debouncedLoadOrders();
+          // ★修正: 以前はwatchTotalWaitingCount()がordersに対して
+          // 別のonSnapshotをもう1本張っていた（Firestore読み取り回数が
+          // 無駄に倍になり、loadOrders()の多重発火のきっかけも増えていた）。
+          // ここから直接呼ぶことで監視を1本に統合する。
+          updateTotalWaitingCount();
         }
       );
       
@@ -799,6 +804,8 @@
             const count = doc.data().manualCount || 0;
             document.getElementById('manual-count').textContent = count;
           }
+          // ★修正: watchTotalWaitingCount()側の重複onSnapshotを統合（上と同じ理由）
+          updateTotalWaitingCount();
         }
       );
       
@@ -808,20 +815,11 @@
     // 待ち人数をリアルタイムで更新する関数
     // 🔧 注文重複防止: ordersの監視はwatchOrders()に一本化
     //    ここではsettingsのみ監視し、orders変更はwatchOrdersのSnapshotから待ち人数を計算する
+    // ★修正: この関数自体はもう独自のonSnapshotを張らない。
+    // updateTotalWaitingCount()の呼び出しはwatchOrders()/watchWaiting()の
+    // コールバックに統合済み。関数名は呼び出し元との互換のため残す。
     function watchTotalWaitingCount() {
-      // ordersコレクションを監視（待ち人数更新のみ・loadOrdersは呼ばない）
-      const _storeId = window.currentStoreId || currentStoreId;
-      const _ordersCol = _storeId
-        ? collection(db, 'stores', _storeId, 'orders')
-        : window.getStoreCollection('orders');
-      onSnapshot(_ordersCol, async () => {
-        await updateTotalWaitingCount(); // 🔧 loadOrders()は呼ばない
-      });
-      
-      // settingsコレクションも監視
-      onSnapshot(window.getStoreDoc('settings', 'waiting'), async () => {
-        await updateTotalWaitingCount();
-      });
+      // 何もしない（互換のため関数だけ残す）
     }
     
     async function updateTotalWaitingCount() {
@@ -964,7 +962,32 @@
       }
     }
 
+    // ★修正: loadOrders()は多重実行に対する保護が無く、onSnapshotが短い間隔で
+    // 2回発火すると（例えば注文の完了と同期処理が近いタイミングで重なるなど）、
+    // 前回の実行がまだgetDocs/Promise.allの途中なのに次の実行が始まり、
+    // 同じcontainerに対して非同期処理が交錯して注文が重複表示されることがあった。
+    // 実行中に新しい呼び出しが来たら「今回はスキップし、完了後にもう一度だけ実行する」
+    // ようにして、常に最新の状態で描画されることを保証する。
+    let _isLoadingOrders = false;
+    let _loadOrdersRerunQueued = false;
     async function loadOrders() {
+      if (_isLoadingOrders) {
+        _loadOrdersRerunQueued = true;
+        return;
+      }
+      _isLoadingOrders = true;
+      try {
+        await _loadOrdersImpl();
+      } finally {
+        _isLoadingOrders = false;
+        if (_loadOrdersRerunQueued) {
+          _loadOrdersRerunQueued = false;
+          loadOrders();
+        }
+      }
+    }
+
+    async function _loadOrdersImpl() {
       const orders = [];
       const storeId = window.currentStoreId || currentStoreId;
       const _nowOrders = new Date();
