@@ -541,7 +541,6 @@
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
     import { getFirestore, collection, getDocs, getDoc, doc, deleteDoc, setDoc, updateDoc, Timestamp, onSnapshot, query, where } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-    import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
     const app = initializeApp({
       apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -553,9 +552,6 @@
     });
     
     const db = getFirestore(app);
-    const auth = getAuth(app);
-
-    signInAnonymously(auth).catch(e => console.error('❌ 匿名認証に失敗しました:', e));
 
     // 店舗ID管理
     let currentStoreId = null;
@@ -592,7 +588,6 @@
     };
     
     window.db = db;
-    window.auth = auth;
     
     // Firebaseモジュールをグローバルにエクスポート（ログイン処理で使用）
     window.collection = collection;
@@ -776,8 +771,13 @@
       const ordersCol = storeId
         ? collection(db, 'stores', storeId, 'orders')
         : window.getStoreCollection('orders');
+      // 🆕 修正: こちらも全件監視だと接続のたびに全履歴を同期してしまうため、
+      // _loadOrdersImplと同じ直近20日の絞り込みを適用する。
+      const _watchCutoff = new Date();
+      _watchCutoff.setDate(_watchCutoff.getDate() - 20);
+      const ordersColFiltered = query(ordersCol, where('timestamp', '>=', Timestamp.fromDate(_watchCutoff)));
       const unsubscribe = onSnapshot(
-        ordersCol, 
+        ordersColFiltered, 
         (snapshot) => {
           const currentCount = snapshot.size;
           
@@ -1002,8 +1002,17 @@
       const ordersCollection = storeId 
         ? collection(db, 'stores', storeId, 'orders')
         : window.getStoreCollection('orders');
+
+      // 🆕 修正: 絞り込みなしで全件ダウンロードしていたため、
+      // 営業を続けるほど読み込みが遅くなっていた。
+      // 引取日（予約）は最大14日先まで設定可能な仕様なので、
+      // 作成日時が直近20日以内（安全マージン込み）の注文だけに絞る。
+      // これにより「今日が引取日の予約注文」は必ず対象に残る。
+      const _ordersLookbackCutoff = new Date();
+      _ordersLookbackCutoff.setDate(_ordersLookbackCutoff.getDate() - 20);
+      const _ordersQuery = query(ordersCollection, where('timestamp', '>=', Timestamp.fromDate(_ordersLookbackCutoff)));
       
-      (await getDocs(ordersCollection)).forEach(doc => {
+      (await getDocs(_ordersQuery)).forEach(doc => {
         const d = doc.data();
         
         console.log('📋 注文データ:', {
