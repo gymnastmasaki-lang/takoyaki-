@@ -44,7 +44,7 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, updateDoc, deleteDoc, doc, setDoc, query, where, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
         import { getStorage, ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
-        import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        import { getAuth, signInAnonymously, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
         const firebaseConfig = {
             apiKey: "AIzaSyBoSdfEkez-b3P0BUHtowxCrTw-yEBdHSg",
@@ -66,20 +66,14 @@
         window.firebaseModules = { 
             collection, getDocs, getDoc, addDoc, onSnapshot, 
             updateDoc, deleteDoc, doc, setDoc, query, where, Timestamp,
-            ref, uploadBytes, getDownloadURL, signInAnonymously
+            ref, uploadBytes, getDownloadURL, signInAnonymously,
+            signInWithEmailAndPassword, signOut, sendPasswordResetEmail,
+            updatePassword, EmailAuthProvider, reauthenticateWithCredential
         };
 
-        // ★追加: 応急処置としてFirebase Authの匿名認証を実際に確立する。
-        // これまでauthはimportされているだけで一度も呼ばれておらず、
-        // Firestoreへのアクセスがセキュリティルール「if true」だけに
-        // 依存していた。ここでログインを確立してから画面を表示することで、
-        // ルールを「request.auth != null」に強化しても壊れないようにする。
-        try {
-            await signInAnonymously(auth);
-        } catch (e) {
-            console.error('❌ 匿名認証に失敗しました:', e);
-            window.FirebaseAuthError = e;
-        }
+        // 🆕 変更: kanripos.htmlは正式にメールアドレス+パスワードのログインに
+        // 切り替えたため、これまでの応急処置(自動匿名認証)は不要になった。
+        // ログイン処理自体はhandleLogin側でsignInWithEmailAndPasswordを呼ぶ。
 
         window.FirebaseReady = true;
     </script>
@@ -165,7 +159,9 @@
 
         const SuperAdminSystem = () => {
             const [isAuthenticated, setIsAuthenticated] = useState(false);
+            const [emailInput, setEmailInput] = useState('');
             const [passwordInput, setPasswordInput] = useState('');
+            const [myClaims, setMyClaims] = useState(null); // { customerId } または { role: 'superadmin' }
             const [stores, setStores] = useState([]);
             const [showAddStore, setShowAddStore] = useState(false);
             const [editingStore, setEditingStore] = useState(null);
@@ -204,15 +200,18 @@
                 setConfirmModal({ isOpen: true, title, message, onConfirm });
             };
 
-            // 店舗一覧を読み込み
+            // 店舗一覧を読み込み（customerIdでスコープ。スーパー管理者は全件）
             useEffect(() => {
-                if (!isAuthenticated) return;
+                if (!isAuthenticated || !myClaims) return;
 
                 const loadStores = async () => {
-                    const { collection, onSnapshot } = window.firebaseModules;
+                    const { collection, query, where, onSnapshot } = window.firebaseModules;
                     const storesRef = collection(window.db, 'stores');
+                    const storesQuery = myClaims.role === 'superadmin'
+                        ? storesRef
+                        : query(storesRef, where('customerId', '==', myClaims.customerId));
                     
-                    onSnapshot(storesRef, (snapshot) => {
+                    onSnapshot(storesQuery, (snapshot) => {
                         const storesList = [];
                         snapshot.forEach((doc) => {
                             storesList.push({ id: doc.id, ...doc.data() });
@@ -222,32 +221,56 @@
                 };
 
                 loadStores();
-            }, [isAuthenticated]);
+            }, [isAuthenticated, myClaims]);
 
-            // ログイン処理（Firebaseでパスワード照合）
+            // ログイン処理（Firebase Authでメールアドレス+パスワード照合）
             const handleLogin = async (e) => {
                 e.preventDefault();
                 try {
-                    const { doc, getDoc } = window.firebaseModules;
-                    const configRef = doc(window.db, 'system_config', 'super_admin');
-                    const snap = await getDoc(configRef);
-                    let correctPassword = 'Kfrp8358@'; // 初期パスワード
-                    if (snap.exists() && snap.data().password) {
-                        correctPassword = snap.data().password;
+                    const { signInWithEmailAndPassword } = window.firebaseModules;
+                    const cred = await signInWithEmailAndPassword(window.auth, emailInput, passwordInput);
+                    const tokenResult = await cred.user.getIdTokenResult();
+                    const claims = tokenResult.claims;
+                    if (!claims.role && !claims.customerId) {
+                        showAlert('error', 'エラー', 'このアカウントには権限が設定されていません。運営者にご連絡ください。');
+                        const { signOut } = window.firebaseModules;
+                        await signOut(window.auth);
+                        return;
                     }
-                    if (passwordInput === correctPassword) {
-                        setIsAuthenticated(true);
-                        sessionStorage.setItem('superAdminAuth', 'true');
-                    } else {
-                        showAlert('error', 'エラー', 'パスワードが正しくありません');
-                        setPasswordInput('');
-                    }
+                    setMyClaims(claims);
+                    setIsAuthenticated(true);
+                    setPasswordInput('');
                 } catch(err) {
-                    showAlert('error', 'エラー', 'ログインに失敗しました: ' + err.message);
+                    showAlert('error', 'エラー', 'ログインに失敗しました。メールアドレスまたはパスワードをご確認ください。');
+                    setPasswordInput('');
                 }
             };
 
-            // スーパー管理者パスワード変更
+            // パスワードをお忘れの方（Firebaseの再設定メールを送信）
+            const handleForgotPassword = async () => {
+                if (!emailInput) {
+                    showAlert('warning', '入力エラー', 'まずメールアドレスを入力してください');
+                    return;
+                }
+                try {
+                    const { sendPasswordResetEmail } = window.firebaseModules;
+                    await sendPasswordResetEmail(window.auth, emailInput);
+                    showAlert('success', '送信しました', `${emailInput} 宛にパスワード再設定メールを送信しました。メールをご確認ください。`);
+                } catch(err) {
+                    showAlert('error', 'エラー', 'メール送信に失敗しました: ' + err.message);
+                }
+            };
+
+            // ログアウト
+            const handleLogout = async () => {
+                const { signOut } = window.firebaseModules;
+                await signOut(window.auth);
+                setIsAuthenticated(false);
+                setMyClaims(null);
+                setStores([]);
+            };
+
+            // 管理者パスワード変更（Firebase Auth）
             const handleChangeSuperPassword = async () => {
                 if (!currentPasswordInput || !newSuperPassword || !confirmSuperPassword) {
                     showAlert('warning', '入力エラー', 'すべての項目を入力してください');
@@ -262,25 +285,18 @@
                     return;
                 }
                 try {
-                    const { doc, getDoc, setDoc } = window.firebaseModules;
-                    const configRef = doc(window.db, 'system_config', 'super_admin');
-                    const snap = await getDoc(configRef);
-                    let correctPassword = 'Kfrp8358@';
-                    if (snap.exists() && snap.data().password) {
-                        correctPassword = snap.data().password;
-                    }
-                    if (currentPasswordInput !== correctPassword) {
-                        showAlert('error', 'エラー', '現在のパスワードが正しくありません');
-                        return;
-                    }
-                    await setDoc(configRef, { password: newSuperPassword, updatedAt: new Date().toISOString() }, { merge: true });
+                    const { EmailAuthProvider, reauthenticateWithCredential, updatePassword } = window.firebaseModules;
+                    const user = window.auth.currentUser;
+                    const credential = EmailAuthProvider.credential(user.email, currentPasswordInput);
+                    await reauthenticateWithCredential(user, credential);
+                    await updatePassword(user, newSuperPassword);
                     setShowPasswordModal(false);
                     setCurrentPasswordInput('');
                     setNewSuperPassword('');
                     setConfirmSuperPassword('');
-                    showAlert('success', '変更完了', 'パスワードを変更しました。次回ログインから新しいパスワードが必要です。');
+                    showAlert('success', '変更完了', 'パスワードを変更しました。');
                 } catch(err) {
-                    showAlert('error', 'エラー', 'パスワード変更に失敗しました: ' + err.message);
+                    showAlert('error', 'エラー', '現在のパスワードが正しくないか、パスワード変更に失敗しました。');
                 }
             };
 
@@ -308,6 +324,9 @@
                         storeName: formData.storeName,
                         storePassword: formData.storePassword,
                         isActive: formData.isActive,
+                        // 🆕 顧客スコープ: スーパー管理者以外が作成した店舗には
+                        // 自分のcustomerIdを付与する（自分の顧客範囲にのみ表示される）
+                        ...(myClaims && myClaims.customerId ? { customerId: myClaims.customerId } : {}),
                         createdAt: Timestamp.now(),
                         updatedAt: Timestamp.now()
                     };
@@ -867,9 +886,22 @@
                             </div>
                             
                             <form onSubmit={handleLogin}>
-                                <div className="mb-6">
+                                <div className="mb-4">
                                     <label className="block text-gray-700 text-sm font-bold mb-2">
-                                        管理者パスワード
+                                        メールアドレス
+                                    </label>
+                                    <input
+                                        type="email"
+                                        value={emailInput}
+                                        onChange={(e) => setEmailInput(e.target.value)}
+                                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
+                                        placeholder="メールアドレスを入力"
+                                        autoFocus
+                                    />
+                                </div>
+                                <div className="mb-2">
+                                    <label className="block text-gray-700 text-sm font-bold mb-2">
+                                        パスワード
                                     </label>
                                     <input
                                         type="password"
@@ -877,8 +909,16 @@
                                         onChange={(e) => setPasswordInput(e.target.value)}
                                         className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
                                         placeholder="パスワードを入力"
-                                        autoFocus
                                     />
+                                </div>
+                                <div className="mb-6 text-right">
+                                    <button
+                                        type="button"
+                                        onClick={handleForgotPassword}
+                                        className="text-sm text-purple-600 hover:underline"
+                                    >
+                                        パスワードをお忘れですか？
+                                    </button>
                                 </div>
                                 
                                 <button
@@ -905,6 +945,12 @@
                                     <p className="text-gray-500 mt-1">登録店舗数: {stores.length}</p>
                                 </div>
                                 <div className="flex gap-3">
+                                    <button
+                                        onClick={handleLogout}
+                                        className="bg-gray-400 text-white px-4 py-3 rounded-lg font-bold hover:opacity-90 transition-all flex items-center gap-2"
+                                    >
+                                        🚪 ログアウト
+                                    </button>
                                     <button
                                         onClick={() => setShowPasswordModal(true)}
                                         className="bg-gray-600 text-white px-4 py-3 rounded-lg font-bold hover:opacity-90 transition-all flex items-center gap-2"
