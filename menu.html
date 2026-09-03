@@ -2091,8 +2091,33 @@
       return `${hours}:${minutes}`;
     }
 
+    // 🆕 読み込みが極端に遅い場合の案内表示
+    function showMenuLoadTimeoutMessage() {
+      const menuList = document.getElementById('menu-list');
+      if (!menuList) return;
+      // 既に商品が表示されている場合は何もしない（念のための二重チェック）
+      if (menuList.children.length > 0) return;
+      menuList.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px;">
+          <p style="font-size: 16px; color: #555; margin-bottom: 16px;">
+            読み込みに時間がかかっています。<br>
+            電波の良い場所でもう一度お試しください。
+          </p>
+          <button onclick="location.reload()" style="padding: 12px 32px; background: #667eea; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
+            再読み込み
+          </button>
+        </div>
+      `;
+    }
+
     window.onload = async function() {
       console.log('🚀 ページ読み込み開始');
+
+      // 🆕 修正: 電波状況等で読み込みが極端に遅い/失敗した場合、
+      // 「読み込み中」のまま何も表示されずお客様が困ってしまうため、
+      // 15秒たっても商品が表示されない場合は案内メッセージを出す。
+      // loadAllData()が成功した時点でこのタイマーは解除される。
+      window._menuLoadTimeoutId = setTimeout(showMenuLoadTimeoutMessage, 15000);
 
       // ✅ 修正: LocalStorageに保存済みの注文があれば即座に注文番号画面を表示し、
       //         残りのFirestore処理はバックグラウンドで実行する
@@ -2744,6 +2769,12 @@
         console.log('🔍 getStoreCollection("menus")を呼び出します...');
         const menuSnapshot = await getDocs(window.getStoreCollection('menus'));
         console.log('✅ メニューデータ取得完了。アイテム数:', menuSnapshot.size);
+
+        // 🆕 データ取得に成功したので、読み込みタイムアウトの案内は不要
+        if (window._menuLoadTimeoutId) {
+          clearTimeout(window._menuLoadTimeoutId);
+          window._menuLoadTimeoutId = null;
+        }
         
         // POSモードの時は常に店内として扱う
         const isEatIn = window.isPOSMode ? true : (tableNumber !== 'テイクアウト');
