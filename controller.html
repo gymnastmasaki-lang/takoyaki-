@@ -776,8 +776,12 @@
       const ordersCol = storeId
         ? collection(db, 'stores', storeId, 'orders')
         : window.getStoreCollection('orders');
+      // 🆕 原因調査: 前回フリーズした絞り込みを、エラーが必ず見える状態で再テストする
+      const _watchCutoff = new Date();
+      _watchCutoff.setDate(_watchCutoff.getDate() - 20);
+      const ordersColFiltered = query(ordersCol, where('timestamp', '>=', Timestamp.fromDate(_watchCutoff)));
       const unsubscribe = onSnapshot(
-        ordersCol, 
+        ordersColFiltered, 
         (snapshot) => {
           const currentCount = snapshot.size;
           
@@ -795,6 +799,11 @@
           // 無駄に倍になり、loadOrders()の多重発火のきっかけも増えていた）。
           // ここから直接呼ぶことで監視を1本に統合する。
           updateTotalWaitingCount();
+        },
+        (error) => {
+          // 🆕 修正: これまでエラーが起きても一切コンソールに出ず、
+          // 原因調査ができなかったため、必ず表示するようにする。
+          console.error('❌ watchOrders onSnapshotエラー:', error.code, error.message, error);
         }
       );
       
