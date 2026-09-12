@@ -7897,7 +7897,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     // 🆕 組み立て済みのdataオブジェクトを実際にFirestoreへ書き込む（復元本体）
     // Firestoreのチャンクから来たデータでも、アップロードされたファイルから来たデータでも共通で使う
     const applyRestoreData = async (data) => {
-        const { setDoc, doc, getDocs } = window.firebaseModules;
+        const { setDoc, doc, getDocs, deleteDoc } = window.firebaseModules;
         // 🆕 名前が一致する既存データがあれば「新規追加」ではなく「上書き」にする
         // （店舗をまたいだ復元で同じ商品・従業員が重複登録されるのを防ぐ）
         // 🆕 商品の画像URLは、Firebase版とPi版で参照先が違う（Pi版はネット未接続だと
@@ -7921,25 +7921,51 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             }
             return map;
         };
-        const existingMenus = data.menus ? await buildNameMap('menus', ['image']) : {};
-        const existingEmployees = data.employees ? await buildNameMap('employees') : {};
-        // 商品を復元
-        if (data.menus) {
-                for (const menu of data.menus) {
-                    const menuData = Object.assign({}, menu);
-                    delete menuData.id;
-                    const existing = existingMenus[(menu.name || '').trim()];
-                    // 🆕 同じ名前の商品が既にあれば、そのドキュメントを上書きする
-                    const targetId = existing ? existing.id : menu.id;
-                    // 🆕 既存側に画像があれば、バックアップ側の画像URLで上書きしない（環境をまたぐと表示できないため）
-                    if (existing && existing.image) {
-                        menuData.image = existing.image;
-                    }
-                    const menuRef = window.getStoreDoc('menus', targetId);
-                    await setDoc(menuRef, menuData);
-                }
-                console.log(`✅ 商品復元: ${data.menus.length}件`);
+        // 🔧 商品・トッピング・テーブルはID基準の完全ミラー方式に変更した。
+        // backupに含まれるドキュメントIDでそのまま書き込み、backupに存在しない現行データは削除する。
+        // 名前一致でのマッチングは、削除→同名で再登録した際に別ドキュメントとして扱われず
+        // 上書き漏れ・見えない重複が起きる原因だったため、これらのコレクションでは廃止した
+        // （従業員・注文履歴・勤怠・経費レシート・支出は実績記録のため、今まで通り上書き・追加のみ）。
+        // 安全のため、backup側がそのコレクションについて0件の場合は削除処理そのものをスキップする
+        // （空データの復元で現在使っているテーブル・商品が全部消える事故を防ぐため）。
+        const mirrorCollection = async (collectionName, backupDocs, preserveImageField) => {
+            if (!backupDocs) return;
+            const backupIds = new Set(backupDocs.map(d => d.id));
+            let existingById = {};
+            if (preserveImageField) {
+                try {
+                    const snap = await getDocs(window.getStoreCollection(collectionName));
+                    snap.forEach(d => { existingById[d.id] = d.data(); });
+                } catch (e) {}
             }
+            for (const item of backupDocs) {
+                const itemData = Object.assign({}, item);
+                delete itemData.id;
+                if (preserveImageField) {
+                    const existing = existingById[item.id];
+                    if (existing && existing.image) itemData.image = existing.image;
+                }
+                const ref = window.getStoreDoc(collectionName, item.id);
+                await setDoc(ref, itemData);
+            }
+            if (backupDocs.length > 0) {
+                try {
+                    const snap = await getDocs(window.getStoreCollection(collectionName));
+                    let deleted = 0;
+                    for (const d of snap.docs) {
+                        if (!backupIds.has(d.id)) {
+                            await deleteDoc(window.getStoreDoc(collectionName, d.id));
+                            deleted++;
+                        }
+                    }
+                    if (deleted) console.log(`🗑️ ${collectionName}: backupにない${deleted}件を削除`);
+                } catch (e) {}
+            }
+            console.log(`✅ ${collectionName}復元: ${backupDocs.length}件`);
+        };
+        const existingEmployees = data.employees ? await buildNameMap('employees') : {};
+        // 商品を復元（ID基準の完全ミラー）
+        await mirrorCollection('menus', data.menus, true);
             // 従業員を復元
             if (data.employees) {
                 for (const employee of data.employees) {
@@ -8024,22 +8050,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 delete menuSettingsData.toppings;
                 // menu_settingsを復元
                 await setDoc(menuSettingsRef, menuSettingsData);
-                // トッピングを復元
-                if (toppings.length > 0) {
-                    for (const topping of toppings) {
-                        let toppingRef;
-                        if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
-                            toppingRef = doc(window.db, 'stores', currentStoreId, 'toppings', topping.id);
-                        }
-                        else {
-                            toppingRef = doc(window.db, 'toppings', topping.id);
-                        }
-                        const toppingData = Object.assign({}, topping);
-                        delete toppingData.id;
-                        await setDoc(toppingRef, toppingData);
-                    }
-                    console.log(`✅ トッピング復元: ${toppings.length}件`);
-                }
+                // トッピングを復元（ID基準の完全ミラー）
+                await mirrorCollection('toppings', toppings, false);
                 settingsRestoredCount++;
                 console.log('✅ 商品カテゴリ設定復元');
             }
@@ -8095,16 +8107,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 settingsRestoredCount++;
                 console.log('✅ テーブル設定復元');
             }
-            // テーブルデータを復元
-            if (data.tables) {
-                for (const table of data.tables) {
-                    const tableRef = window.getStoreDoc('tables', table.id);
-                    const tableData = Object.assign({}, table);
-                    delete tableData.id;
-                    await setDoc(tableRef, tableData);
-                }
-                console.log(`✅ テーブル復元: ${data.tables.length}件`);
-            }
+            // テーブルデータを復元（ID基準の完全ミラー）
+            await mirrorCollection('tables', data.tables, false);
             console.log(`✅ 設定復元: ${settingsRestoredCount}種類`);
     };
     // バックアップ一覧からの復元（Firestore上のバックアップを直接復元）
