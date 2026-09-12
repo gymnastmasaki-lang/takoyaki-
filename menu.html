@@ -2595,14 +2595,26 @@
       }
     }
 
+    // 🆕 本日品切れ機能用: 実際の暦日（JST）を返す。「翌日には自動で解除」をリセット処理なしで実現するために使う。
+    function getTodayCalendarDateStrJst() {
+      const now = new Date();
+      const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      return jst.toISOString().slice(0, 10);
+    }
+    function addSoldOutIfActive(soldOutIds, docData, todayStr) {
+      // dateStrが今日の日付と一致するものだけ有効扱いにする。記録が無い古いデータは今まで通り無期限で有効。
+      if (!docData.dateStr || docData.dateStr === todayStr) soldOutIds.add(docData.menuId);
+    }
+
     function watchSoldOutItems() {
       // 🔧 修正: 全店舗共通ではなく、この店舗のsold_outだけを監視する
       const soldOutRef = window.getStoreCollection('sold_out');
       
       onSnapshot(soldOutRef, async (snapshot) => {
         soldOutIds.clear();
+        const todayStr = getTodayCalendarDateStrJst();
         snapshot.forEach(doc => {
-          soldOutIds.add(doc.data().menuId);
+          addSoldOutIfActive(soldOutIds, doc.data(), todayStr);
         });
         
         // 在庫データも確認
@@ -2639,8 +2651,9 @@
         // sold_outデータも再取得
         const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
         soldOutIds.clear();
+        const todayStr2 = getTodayCalendarDateStrJst();
         soldOutSnapshot.forEach(doc => {
-          soldOutIds.add(doc.data().menuId);
+          addSoldOutIfActive(soldOutIds, doc.data(), todayStr2);
         });
         
         // 在庫データを確認
@@ -3020,9 +3033,10 @@
         // sold_outコレクションから品切れ情報を取得（🔧 修正: この店舗のものだけ）
         const soldOutSnapshot = await getDocs(window.getStoreCollection('sold_out'));
         soldOutIds.clear();
+        const todayStr3 = getTodayCalendarDateStrJst();
 
         soldOutSnapshot.forEach(doc => {
-          soldOutIds.add(doc.data().menuId);
+          addSoldOutIfActive(soldOutIds, doc.data(), todayStr3);
         });
 
         // 在庫データを確認して在庫0のアイテムを品切れに追加
@@ -3136,8 +3150,9 @@
       items.forEach(item => {
         console.log('  商品ID:', item.id, '名前:', item.name);
         
+        const isSoldOut = soldOutIds.has(item.id);
         const div = document.createElement('div');
-        div.className = 'menu-item';
+        div.className = 'menu-item' + (isSoldOut ? ' sold-out' : '');
         div.dataset.menuId = item.id;
         
         let imageHtml = '';
