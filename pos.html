@@ -357,6 +357,14 @@
     };
     
     // ========== ⏰ JST3時基準ヘルパー ==========
+    // 🆕 本日品切れ機能用: 実際の暦日（JST、午前3時基準ではなく単純な日付）を返す
+    // 「翌日には自動で解除」を、リセット処理なしで実現するために使う
+    function getTodayCalendarDateStrJst() {
+      const now = new Date();
+      const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      return jst.toISOString().slice(0, 10); // 'YYYY-MM-DD'
+    }
+
     // 任意のDateから「JST午前3時基準の営業日Date」を返す
     // getHours()はローカルタイム依存のため使用しない。エポックミリ秒で計算。
     window.getBusinessDay = function(date) {
@@ -1671,6 +1679,14 @@
       background: #f0f0f0;
     }
     
+    .menu-item-checkbox.menu-item-soldout {
+      opacity: 0.5;
+      background: #f5f5f5;
+    }
+    .menu-item-checkbox.menu-item-soldout:hover {
+      background: #f5f5f5;
+    }
+    
     .menu-item-checkbox input[type="checkbox"] {
       width: 20px;
       height: 20px;
@@ -2537,6 +2553,7 @@
         <div style="display: flex; gap: 10px; align-items: stretch;">
           <button onclick="setAllInventoryToZero()" style="padding: 8px 15px; font-size: 13px; background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; display: flex; align-items: center;">全商品品切</button>
           <button onclick="clearAllInventoryZero()" style="padding: 8px 15px; font-size: 13px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; display: flex; align-items: center;">全商品復活</button>
+          <button onclick="showSoldOutPage()" style="padding: 8px 15px; font-size: 13px; background: linear-gradient(135deg, #607D8B 0%, #455A64 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; display: flex; align-items: center;">🆕 本日品切れ設定</button>
           <button id="time-override-btn-new" onclick="toggleTimeOverride()" style="padding: 8px 15px; font-size: 13px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; display: flex; align-items: center;">時間外営業解除</button>
           <div style="background: linear-gradient(135deg, #FFB74D 0%, #FFA726 100%); padding: 8px 15px; border-radius: 8px; display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 13px; font-weight: bold; color: white;">待ち</span>
@@ -3220,7 +3237,13 @@
         // controller.htmlと同じ形式でsold_outを取得
         const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
         const soldOutIds = new Set();
-        soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
+        // 🆕 dateStrが今日の日付と一致するものだけ有効扱いにする（本日品切れ→翌日自動解除）。
+        // dateStrが記録されていない古いデータは、今まで通り無期限で有効なものとして扱う。
+        const todayStrForSoldOut = getTodayCalendarDateStrJst();
+        soldOutSnapshot.forEach(doc => {
+          const d = doc.data();
+          if (!d.dateStr || d.dateStr === todayStrForSoldOut) soldOutIds.add(d.menuId);
+        });
         
         menuData = [];
         menuSnapshot.forEach(doc => {
@@ -3502,19 +3525,24 @@
           displayPrice = Math.floor(item.price * (1 + taxRate / 100));
         }
         
+        // 🔧 BUG FIX: 品切れ状態(item.outOfStock)が一度も表示に反映されていなかった。
+        // 品切れの商品はグレーアウト＋「品切れ」バッジを表示し、クリックしても選択できないようにする。
+        const isSoldOut = !!item.outOfStock;
         const div = document.createElement('div');
-        div.className = 'menu-item-checkbox';
-        div.style.cursor = 'pointer';
+        div.className = 'menu-item-checkbox' + (isSoldOut ? ' menu-item-soldout' : '');
+        div.style.cursor = isSoldOut ? 'not-allowed' : 'pointer';
         div.innerHTML = `
-          <input type="checkbox" id="menu-${item.id}" value="${item.id}" style="pointer-events: none;">
+          <input type="checkbox" id="menu-${item.id}" value="${item.id}" style="pointer-events: none;" ${isSoldOut ? 'disabled' : ''}>
           <div class="menu-item-info">
             <div class="menu-item-name-small">${item.name}</div>
             <div class="menu-item-price-small">¥${displayPrice.toLocaleString()}</div>
+            ${isSoldOut ? '<div style="color:#f44336; font-weight:bold; font-size:12px;">品切れ</div>' : ''}
           </div>
         `;
         
-        // div全体をクリック可能に
+        // div全体をクリック可能に（品切れの場合は何もしない）
         div.onclick = () => {
+          if (isSoldOut) return;
           const checkbox = document.getElementById(`menu-${item.id}`);
           checkbox.checked = !checkbox.checked;
           toggleMenuItem(item.id);
@@ -13737,8 +13765,10 @@ ${redSlipCount > 0 ? `
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
+          // 🔧 BUG FIX: data.idが無い商品だとidがundefinedのまま品切れ登録され、
+          // 実際の商品と紐付かなくなっていた。doc.idをフォールバックにする。
           allMenuItems.push({
-            id: data.id,
+            id: data.id || doc.id,
             name: data.name,
             price: data.price,
             category: data.category
@@ -13789,7 +13819,23 @@ ${redSlipCount > 0 ? `
       // controller.htmlと同じ形式でsold_outを取得
       const soldOutSnapshot = await window.getDocs(window.collection(window.db, 'sold_out'));
       const soldOutIds = new Set();
-      soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
+      // 🆕 dateStrが今日の日付と一致するものだけ有効扱いにする（本日品切れ→翌日自動解除）。
+      // ついでに期限切れ（別日付）の分はここで実際に削除してデータを整理しておく。
+      const todayStrForSoldOut = getTodayCalendarDateStrJst();
+      const expiredDeletes = [];
+      soldOutSnapshot.forEach(doc => {
+        const d = doc.data();
+        if (!d.dateStr || d.dateStr === todayStrForSoldOut) {
+          soldOutIds.add(d.menuId);
+        } else {
+          expiredDeletes.push(window.deleteDoc(doc.ref));
+        }
+      });
+      if (expiredDeletes.length > 0) {
+        Promise.all(expiredDeletes).then(() => {
+          console.log(`🧹 期限切れの本日品切れを${expiredDeletes.length}件削除`);
+        }).catch(() => {});
+      }
       
       items.sort((a, b) => {
         const numA = a.id ? parseInt(a.id.replace(/\D/g, '') || '0') : 0;
@@ -13838,10 +13884,13 @@ ${redSlipCount > 0 ? `
         
         if (setSoldOut) {
           // 品切れに設定（controller.htmlと同じ形式）
+          // 🆕 dateStrを記録しておき、表示側で「今日の日付と一致する分だけ有効」として扱う。
+          // これにより翌日には自動的に無視される（＝品切れ解除）ようになり、リセット処理が不要になる。
           console.log('   → 品切れに設定');
           await window.setDoc(window.doc(window.db, 'sold_out', menuId), {
             menuId: menuId,
-            timestamp: window.Timestamp.now()
+            timestamp: window.Timestamp.now(),
+            dateStr: getTodayCalendarDateStrJst()
           });
           showToast('品切れに設定');
           console.log('   ✅ 品切れ設定完了');
