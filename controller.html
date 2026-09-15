@@ -2110,8 +2110,10 @@
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
+          // 🔧 BUG FIX: data.idが無い商品だとidがundefinedのまま品切れ登録され、
+          // 実際の商品と紐付かなくなっていた。doc.idをフォールバックにする。
           allMenuItems.push({
-            id: data.id,
+            id: data.id || doc.id,
             name: data.name,
             price: data.price,
             category: data.category
@@ -2147,6 +2149,15 @@
       document.getElementById('page-orders').style.display = 'block';
     };
 
+    // 🆕 本日品切れ機能用: 実際の暦日（JST）を返す。「翌日には自動で解除」をリセット処理なしで実現するために使う。
+    // window直付けにしているのは、このファイル冒頭のtype="module"スクリプトから独立させ、
+    // どの<script>ブロックからも確実に呼べるようにするため。
+    window.getTodayCalendarDateStrJst = function() {
+      const now = new Date();
+      const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      return jst.toISOString().slice(0, 10);
+    };
+
     async function displaySoldOutItems(items) {
       const list = document.getElementById('soldout-menu-list');
       list.innerHTML = '';
@@ -2154,7 +2165,13 @@
       // 店舗別パスでsold_outを取得
       const soldOutSnapshot = await getDocs(window.getStoreCollection('sold_out'));
       const soldOutIds = new Set();
-      soldOutSnapshot.forEach(doc => soldOutIds.add(doc.data().menuId));
+      // 🆕 dateStrが今日の日付と一致するものだけ有効扱いにする（本日品切れ→翌日自動解除）。
+      // dateStrが記録されていない古いデータ（一括品切れ含む）は、今まで通り無期限で有効なものとして扱う。
+      const todayStrForSoldOut = getTodayCalendarDateStrJst();
+      soldOutSnapshot.forEach(doc => {
+        const d = doc.data();
+        if (!d.dateStr || d.dateStr === todayStrForSoldOut) soldOutIds.add(d.menuId);
+      });
       
       items.sort((a, b) => {
         const numA = a.id ? parseInt(a.id.replace(/\D/g, '') || '0') : 0;
@@ -2189,9 +2206,11 @@
         
         if (setSoldOut) {
           // 品切れに設定（店舗別パス）
+          // 🆕 dateStrを記録し、翌日には自動的に無視される（＝品切れ解除）ようにする
           await setDoc(window.getStoreDoc('sold_out', menuId), {
             menuId: menuId,
-            timestamp: Timestamp.now()
+            timestamp: Timestamp.now(),
+            dateStr: getTodayCalendarDateStrJst()
           });
           showToast('✓ 品切れに設定');
         } else {
