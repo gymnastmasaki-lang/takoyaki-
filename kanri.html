@@ -7315,7 +7315,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         const { download = false } = options;
         try {
             // カスタム確認ダイアログを表示
-            const confirmResult = await showCustomConfirm('現在のデータをバックアップしますか？\n\n以下がバックアップされます：\n• 商品\n• 従業員\n• 注文履歴\n• 勤怠データ\n• テーブル\n• 商品カテゴリ設定\n• レシート設定\n• 在庫設定\n• アラート設定\n• 営業時間設定\n• テーブル設定', 'バックアップ作成', '作成する', 'キャンセル');
+            const confirmResult = await showCustomConfirm('現在のデータをバックアップしますか？\n\n以下がバックアップされます：\n• 商品\n• 従業員\n• 注文履歴\n• 勤怠データ\n• テーブル\n• 商品カテゴリ設定\n• レシート設定\n• 在庫設定\n• アラート設定\n• 営業時間設定\n• テーブル設定\n• ステータス表示設定', 'バックアップ作成', '作成する', 'キャンセル');
             if (!confirmResult)
                 return;
             // カスタムアラートでメモ入力を受け付ける
@@ -7494,7 +7494,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             const chunks = {
                 menus: [], employees: [], orders: [], attendance: [], receipts: [], tables: [], expenses: [],
                 menu_settings: null, receipt_settings: null, inventory_settings: null,
-                alert_settings: null, business_hours: null, table_settings: null
+                alert_settings: null, business_hours: null, table_settings: null, status_display_settings: null
             };
             // 商品データ
             let menusRef;
@@ -7710,6 +7710,23 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 console.warn('テーブル設定の取得に失敗:', e.message);
                 chunks.table_settings = null;
             }
+            // 🆕 ステータス表示設定（お客様画面の「準備中/完了/会計済/キャンセル」文言）
+            try {
+                let statusDisplayRef;
+                if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                    statusDisplayRef = doc(window.db, 'stores', currentStoreId, 'status_display_settings', 'default');
+                }
+                else {
+                    statusDisplayRef = doc(window.db, 'status_display_settings', 'default');
+                }
+                const statusDisplayDoc = await getDoc(statusDisplayRef);
+                chunks.status_display_settings = statusDisplayDoc.exists() ? statusDisplayDoc.data() : null;
+                console.log('✅ ステータス表示設定:', chunks.status_display_settings ? '取得' : 'なし');
+            }
+            catch (e) {
+                console.warn('ステータス表示設定の取得に失敗:', e.message);
+                chunks.status_display_settings = null;
+            }
             // テーブルデータ（各テーブルのドキュメント）
             try {
                 let tablesRef;
@@ -7815,7 +7832,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     inventory_settings: chunks.inventory_settings,
                     alert_settings: chunks.alert_settings,
                     business_hours: chunks.business_hours,
-                    table_settings: chunks.table_settings
+                    table_settings: chunks.table_settings,
+                    status_display_settings: chunks.status_display_settings
                 })
             ]);
             console.log('✅ 手動バックアップ完了（分割保存）:', backupId);
@@ -7834,7 +7852,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                         expenses: chunks.expenses,
                         menu_settings: chunks.menu_settings, receipt_settings: chunks.receipt_settings,
                         inventory_settings: chunks.inventory_settings, alert_settings: chunks.alert_settings,
-                        business_hours: chunks.business_hours, table_settings: chunks.table_settings
+                        business_hours: chunks.business_hours, table_settings: chunks.table_settings,
+                        status_display_settings: chunks.status_display_settings
                     }
                 }, `backup_${currentStoreId || 'store'}_${dateTimeStr}`);
             }
@@ -7844,7 +7863,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 chunks.inventory_settings,
                 chunks.alert_settings,
                 chunks.business_hours,
-                chunks.table_settings
+                chunks.table_settings,
+                chunks.status_display_settings
             ].filter(s => s !== null).length;
             setCreating(false);
             const memoText = memo ? `\nメモ: ${memo}` : '';
@@ -7899,6 +7919,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 alert_settings: settingsChunk ? settingsChunk.alert_settings : null,
                 business_hours: settingsChunk ? settingsChunk.business_hours : null,
                 table_settings: settingsChunk ? settingsChunk.table_settings : null,
+                status_display_settings: settingsChunk ? settingsChunk.status_display_settings : null,
                 _missingChunks: missingChunks
             };
         }
@@ -8117,6 +8138,19 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 await setDoc(tableRef, data.table_settings);
                 settingsRestoredCount++;
                 console.log('✅ テーブル設定復元');
+            }
+            // 🆕 ステータス表示設定
+            if (data.status_display_settings) {
+                let statusDisplayRef;
+                if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                    statusDisplayRef = doc(window.db, 'stores', currentStoreId, 'status_display_settings', 'default');
+                }
+                else {
+                    statusDisplayRef = doc(window.db, 'status_display_settings', 'default');
+                }
+                await setDoc(statusDisplayRef, data.status_display_settings);
+                settingsRestoredCount++;
+                console.log('✅ ステータス表示設定復元');
             }
             // テーブルデータを復元（ID基準の完全ミラー）
             await mirrorCollection('tables', data.tables, false);
