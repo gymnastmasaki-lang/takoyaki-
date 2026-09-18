@@ -8789,6 +8789,32 @@
     }
     
     // 精算を実行（CSVダウンロード）
+    // 🆕 精算処理の進捗オーバーレイ
+    function _showSettlementProgress(percent, label) {
+      let overlay = document.getElementById('settlementProgressOverlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'settlementProgressOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999999;';
+        overlay.innerHTML = `
+          <div style="background:white;border-radius:16px;padding:32px 40px;min-width:320px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,0.4);">
+            <div style="font-size:18px;font-weight:bold;color:#333;margin-bottom:16px;" id="settlementProgressLabel"></div>
+            <div style="width:100%;background:#eee;border-radius:999px;height:14px;overflow:hidden;">
+              <div id="settlementProgressBar" style="height:14px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);width:0%;transition:width 0.3s;"></div>
+            </div>
+            <div style="margin-top:8px;font-size:14px;color:#888;" id="settlementProgressPercent"></div>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+      }
+      document.getElementById('settlementProgressLabel').textContent = label;
+      document.getElementById('settlementProgressBar').style.width = percent + '%';
+      document.getElementById('settlementProgressPercent').textContent = percent + '%';
+    }
+    function _hideSettlementProgress() {
+      const overlay = document.getElementById('settlementProgressOverlay');
+      if (overlay) overlay.remove();
+    }
     window.confirmSettlement = async function() {
       // Firebase初期化を待つ
       if (!window.firebaseReady) {
@@ -8883,8 +8909,10 @@
       
       if (shouldBackup) {
         console.log(' バックアップを作成します');
+        _showSettlementProgress(10, 'バックアップを作成中...');
         const backupSuccess = await window.createAutoBackup();
         if (!backupSuccess) {
+          _hideSettlementProgress();
           const continueAnyway = confirm('バックアップの作成に失敗しました。\n\nそれでも精算を続けますか？');
           if (!continueAnyway) {
             return;
@@ -8896,11 +8924,13 @@
         console.log('⚠️ バックアップをスキップして精算を実行します');
       }
       
+      _showSettlementProgress(30, '精算データを集計中...');
       try {
         const settlementData = window.currentSettlementData;
         const dateStr = window.currentSettlementDate;
         
         if (!settlementData) {
+          _hideSettlementProgress();
           alert('精算データが見つかりません');
           return;
         }
@@ -9282,6 +9312,7 @@ ${redSlipCount > 0 ? `
         document.body.appendChild(journalDiv);
         
         // html2canvasで画像化
+        _showSettlementProgress(65, 'ジャーナル画像を生成中...');
         const canvas = await html2canvas(journalDiv, {
           scale: 2,
           backgroundColor: '#ffffff',
@@ -9315,6 +9346,7 @@ ${redSlipCount > 0 ? `
         });
         
         // ===== 精算記録をFirebaseに保存 =====
+        _showSettlementProgress(90, 'データを保存中...');
         await window.addDoc(window.getStoreCollection('settlements'), {
           date: dateStr,
           outputTime: outputTime,
@@ -9346,10 +9378,13 @@ ${redSlipCount > 0 ? `
         });
         
         console.log('✅ 精算ジャーナル生成完了');
+        _showSettlementProgress(100, '完了！');
+        setTimeout(() => _hideSettlementProgress(), 500);
         closeSettlementModal();
         
       } catch (e) {
         console.error('❌ 精算エラー:', e);
+        _hideSettlementProgress();
         alert('精算に失敗しました: ' + e.message);
       }
     };

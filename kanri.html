@@ -7241,6 +7241,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     const [backups, setBackups] = useState([]);
     const [loading, setLoading] = useState(true);
     const [restoring, setRestoring] = useState(false);
+    const [restoreProgress, setRestoreProgress] = useState(null); // 🆕 復元進捗 {percent, label} | null
     const [creating, setCreating] = useState(false);
     // 🆕 ファイル書き出し・ファイルからの復元用
     const [exportingId, setExportingId] = useState(null);
@@ -7928,8 +7929,28 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     };
     // 🆕 組み立て済みのdataオブジェクトを実際にFirestoreへ書き込む（復元本体）
     // Firestoreのチャンクから来たデータでも、アップロードされたファイルから来たデータでも共通で使う
-    const applyRestoreData = async (data) => {
+    const applyRestoreData = async (data, onProgress) => {
         const { setDoc, doc, getDocs, deleteDoc } = window.firebaseModules;
+        // 🆕 進捗計算用: 全体の作業量（件数ベース）を先に見積もっておく
+        const settingsKeys = ['receipt_settings', 'menu_settings', 'inventory_settings', 'alert_settings', 'business_hours', 'table_settings', 'status_display_settings'];
+        const settingsUnitCount = settingsKeys.filter(k => data[k]).length;
+        const toppingsUnitCount = (data.menu_settings && data.menu_settings.toppings) ? data.menu_settings.toppings.length : 0;
+        const totalUnits = (data.menus ? data.menus.length : 0)
+            + (data.employees ? data.employees.length : 0)
+            + (data.orders ? data.orders.length : 0)
+            + (data.attendance ? data.attendance.length : 0)
+            + (data.receipts ? data.receipts.length : 0)
+            + (data.expenses ? data.expenses.length : 0)
+            + (data.tables ? data.tables.length : 0)
+            + toppingsUnitCount
+            + settingsUnitCount || 1;
+        let doneUnits = 0;
+        const reportProgress = (label) => {
+            doneUnits++;
+            if (onProgress && (doneUnits % 5 === 0 || doneUnits === totalUnits)) {
+                onProgress(Math.min(100, Math.round(doneUnits / totalUnits * 100)), label);
+            }
+        };
         // 🆕 名前が一致する既存データがあれば「新規追加」ではなく「上書き」にする
         // （店舗をまたいだ復元で同じ商品・従業員が重複登録されるのを防ぐ）
         // 🆕 商品の画像URLは、Firebase版とPi版で参照先が違う（Pi版はネット未接続だと
@@ -7960,7 +7981,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         // （従業員・注文履歴・勤怠・経費レシート・支出は実績記録のため、今まで通り上書き・追加のみ）。
         // 安全のため、backup側がそのコレクションについて0件の場合は削除処理そのものをスキップする
         // （空データの復元で現在使っているテーブル・商品が全部消える事故を防ぐため）。
-        const mirrorCollection = async (collectionName, backupDocs, preserveImageField) => {
+        const mirrorCollection = async (collectionName, backupDocs, preserveImageField, onItemDone) => {
             if (!backupDocs) return;
             const backupIds = new Set(backupDocs.map(d => d.id));
             let existingById = {};
@@ -7979,6 +8000,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 }
                 const ref = window.getStoreDoc(collectionName, item.id);
                 await setDoc(ref, itemData);
+                if (onItemDone) onItemDone();
             }
             if (backupDocs.length > 0) {
                 try {
@@ -7997,7 +8019,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         };
         const existingEmployees = data.employees ? await buildNameMap('employees') : {};
         // 商品を復元（ID基準の完全ミラー）
-        await mirrorCollection('menus', data.menus, true);
+        await mirrorCollection('menus', data.menus, true, () => reportProgress('商品'));
             // 従業員を復元
             if (data.employees) {
                 for (const employee of data.employees) {
@@ -8008,6 +8030,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     const targetId = existing ? existing.id : employee.id;
                     const empRef = window.getStoreDoc('employees', targetId);
                     await setDoc(empRef, empData);
+                    reportProgress('従業員');
                 }
                 console.log(`✅ 従業員復元: ${data.employees.length}名`);
             }
@@ -8018,6 +8041,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     const orderData = Object.assign({}, order);
                     delete orderData.id;
                     await setDoc(orderRef, orderData);
+                    reportProgress('注文履歴');
                 }
                 console.log(`✅ 注文復元: ${data.orders.length}件`);
             }
@@ -8028,6 +8052,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     const attData = Object.assign({}, att);
                     delete attData.id;
                     await setDoc(attRef, attData);
+                    reportProgress('勤怠データ');
                 }
                 console.log(`✅ 勤怠復元: ${data.attendance.length}件`);
             }
@@ -8038,6 +8063,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     const receiptData = Object.assign({}, receipt);
                     delete receiptData.id;
                     await setDoc(receiptRef, receiptData);
+                    reportProgress('経費レシート');
                 }
                 console.log(`✅ 経費レシート復元: ${data.receipts.length}件`);
             }
@@ -8049,6 +8075,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     const expenseData = Object.assign({}, expense);
                     delete expenseData.id;
                     await setDoc(expenseRef, expenseData);
+                    reportProgress('支出データ');
                 }
                 console.log(`✅ 支出データ復元: ${data.expenses.length}件`);
             }
@@ -8065,6 +8092,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 }
                 await setDoc(receiptRef, data.receipt_settings);
                 settingsRestoredCount++;
+                reportProgress('レシート設定');
                 console.log('✅ レシート設定復元');
             }
             // 商品カテゴリ設定とトッピング
@@ -8083,8 +8111,9 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 // menu_settingsを復元
                 await setDoc(menuSettingsRef, menuSettingsData);
                 // トッピングを復元（ID基準の完全ミラー）
-                await mirrorCollection('toppings', toppings, false);
+                await mirrorCollection('toppings', toppings, false, () => reportProgress('トッピング'));
                 settingsRestoredCount++;
+                reportProgress('商品カテゴリ設定');
                 console.log('✅ 商品カテゴリ設定復元');
             }
             // 在庫設定
@@ -8098,6 +8127,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 }
                 await setDoc(inventoryRef, data.inventory_settings);
                 settingsRestoredCount++;
+                reportProgress('在庫設定');
                 console.log('✅ 在庫設定復元');
             }
             // アラート設定
@@ -8111,6 +8141,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 }
                 await setDoc(alertRef, data.alert_settings);
                 settingsRestoredCount++;
+                reportProgress('アラート設定');
                 console.log('✅ アラート設定復元');
             }
             // 営業時間設定
@@ -8124,6 +8155,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 }
                 await setDoc(businessRef, data.business_hours);
                 settingsRestoredCount++;
+                reportProgress('営業時間設定');
                 console.log('✅ 営業時間設定復元');
             }
             // テーブル設定
@@ -8137,6 +8169,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 }
                 await setDoc(tableRef, data.table_settings);
                 settingsRestoredCount++;
+                reportProgress('テーブル設定');
                 console.log('✅ テーブル設定復元');
             }
             // 🆕 ステータス表示設定
@@ -8150,13 +8183,16 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 }
                 await setDoc(statusDisplayRef, data.status_display_settings);
                 settingsRestoredCount++;
+                reportProgress('ステータス表示設定');
                 console.log('✅ ステータス表示設定復元');
             }
             // テーブルデータを復元（ID基準の完全ミラー）
-            await mirrorCollection('tables', data.tables, false);
+            await mirrorCollection('tables', data.tables, false, () => reportProgress('テーブル'));
+            if (onProgress) onProgress(100, '完了');
             console.log(`✅ 設定復元: ${settingsRestoredCount}種類`);
     };
-    // バックアップ一覧からの復元（Firestore上のバックアップを直接復元）
+    
+// バックアップ一覧からの復元（Firestore上のバックアップを直接復元）
     const restoreBackup = async (backup) => {
         try {
             // カスタム確認ダイアログを表示
@@ -8165,6 +8201,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             if (!confirmResult)
                 return;
             setRestoring(true);
+            setRestoreProgress({ percent: 0, label: '準備中' });
             console.log('🔄 バックアップ復元開始:', backup.id);
             const data = await loadBackupData(backup);
             // 🆕 チャンクの一部が見つからなかった場合は続行するか確認する
@@ -8172,11 +8209,13 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 const proceedAnyway = await showCustomConfirm(`このバックアップの一部データが見つかりませんでした（${data._missingChunks.join(', ')}）。\n\n見つからなかった項目は復元されません。このまま続けますか？`, 'データ欠損の警告', '続行する', '中止');
                 if (!proceedAnyway) {
                     setRestoring(false);
+                    setRestoreProgress(null);
                     return;
                 }
             }
-            await applyRestoreData(data);
+            await applyRestoreData(data, (percent, label) => setRestoreProgress({ percent, label }));
             setRestoring(false);
+            setRestoreProgress(null);
             showCustomAlert('バックアップからの復元が完了しました\n\nページを再読み込みしてください。', '復元完了');
             // ページをリロード
             setTimeout(() => {
@@ -8186,6 +8225,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         catch (error) {
             console.error('復元エラー:', error);
             setRestoring(false);
+            setRestoreProgress(null);
             showCustomAlert('復元に失敗しました: ' + error.message, 'エラー');
         }
     };
@@ -8264,8 +8304,10 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             if (!confirmResult)
                 return;
             setImporting(true);
-            await applyRestoreData(importPreview.data);
+            setRestoreProgress({ percent: 0, label: '準備中' });
+            await applyRestoreData(importPreview.data, (percent, label) => setRestoreProgress({ percent, label }));
             setImporting(false);
+            setRestoreProgress(null);
             setImportPreview(null);
             showCustomAlert('ファイルからの復元が完了しました\n\nページを再読み込みしてください。', '復元完了', '✅');
             setTimeout(() => {
@@ -8275,6 +8317,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         catch (error) {
             console.error('ファイル復元エラー:', error);
             setImporting(false);
+            setRestoreProgress(null);
             showCustomAlert('復元に失敗しました: ' + error.message, 'エラー', '❌');
         }
     };
@@ -8415,6 +8458,12 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 React.createElement("button", { onClick: () => createManualBackup({ download: true }), disabled: creating || restoring, className: "flex-1 px-6 py-3 bg-blue-900 bg-opacity-40 text-white border-2 border-white rounded-lg hover:bg-opacity-60 font-bold shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed" }, creating ? 'バックアップ作成中...' : '作成してファイルにダウンロード'))),
         React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6" },
             React.createElement("h3", { className: "text-lg font-bold mb-4" }, "\u30D0\u30C3\u30AF\u30A2\u30C3\u30D7\u4E00\u89A7"),
+            restoreProgress && (React.createElement("div", { className: "mb-4 p-3 bg-green-50 border border-green-300 rounded-lg" },
+                React.createElement("div", { className: "flex justify-between text-sm text-green-800 mb-1" },
+                    React.createElement("span", null, "\u5FA9\u5143\u4E2D: ", restoreProgress.label || ''),
+                    React.createElement("span", { className: "font-bold" }, restoreProgress.percent, "%")),
+                React.createElement("div", { className: "w-full bg-green-100 rounded-full h-3 overflow-hidden" },
+                    React.createElement("div", { className: "bg-green-500 h-3 transition-all duration-300", style: { width: restoreProgress.percent + '%' } })))),
             loading ? (React.createElement("div", { className: "text-center py-8" },
                 React.createElement("p", { className: "text-gray-600" }, "\u8AAD\u307F\u8FBC\u307F\u4E2D..."))) : backups.length === 0 ? (React.createElement("div", { className: "text-center py-8" },
                 React.createElement("p", { className: "text-gray-500" }, "\u30D0\u30C3\u30AF\u30A2\u30C3\u30D7\u304C\u3042\u308A\u307E\u305B\u3093"))) : (React.createElement("div", { className: "space-y-3" }, backups.map(backup => {
