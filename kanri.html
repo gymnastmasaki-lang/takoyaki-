@@ -269,8 +269,8 @@ const INSURANCE_DATA = {
     nursingCareRate: 0.0182,
     // 厚生年金保険料率
     pensionRate: 0.183,
-    // 雇用保険料率
-    employmentInsuranceRate: 0.006,
+    // 雇用保険料率（労働者負担分）※令和8年度(2026年4月〜)は0.5%。変更があった場合はこの1箇所だけ直せばよい
+    employmentInsuranceRate: 0.005,
     // 標準報酬月額表（健康保険・厚生年金）
     standardMonthlyRemuneration: [
         { min: 0, max: 63000, standard: 58000 },
@@ -397,6 +397,11 @@ const AdminSystem = () => {
         cancelled: ''
     });
     const [showStatusDisplaySettings, setShowStatusDisplaySettings] = useState(false);
+    // 🆕 給与計算設定用のstate（雇用保険料率など、法改正で変わる可能性のある値）
+    const [payrollSettings, setPayrollSettings] = useState({
+        employmentInsuranceRatePercent: 0.5
+    });
+    const [showPayrollSettings, setShowPayrollSettings] = useState(false);
     // 営業時間外設定用のstate
     const [businessHoursSettings, setBusinessHoursSettings] = useState({
         enabled: false, // 営業時間外設定を有効にするか
@@ -947,6 +952,7 @@ const AdminSystem = () => {
                 loadMenuSettings();
                 loadAlertSettings();
                 loadStatusDisplaySettings(); // ステータス表示設定を読み込み
+                loadPayrollSettings(); // 🆕 給与計算設定（雇用保険料率）を読み込み
                 loadBusinessHoursSettings(); // 営業時間設定を読み込み
                 loadClosedDaysSettings(); // 🆕 休業日設定を読み込み
                 loadPickupSlotSettings(); // 🆕 引取スロット設定を読み込み
@@ -1872,6 +1878,46 @@ const AdminSystem = () => {
         catch (error) {
             console.error('❌ リセットエラー:', error);
             showCustomAlertFunc('リセットに失敗しました: ' + error.message, 'エラー');
+        }
+    };
+    // 🆕 給与計算設定を読み込み（雇用保険料率など）
+    const loadPayrollSettings = async () => {
+        try {
+            const { getDoc } = window.firebaseModules;
+            const docId = 'default';
+            const payrollSettingsRef = window.getStoreDoc('payroll_settings', docId);
+            const payrollSettingsDoc = await getDoc(payrollSettingsRef);
+            if (payrollSettingsDoc.exists() && payrollSettingsDoc.data().employmentInsuranceRatePercent !== undefined) {
+                setPayrollSettings(payrollSettingsDoc.data());
+                INSURANCE_DATA.employmentInsuranceRate = payrollSettingsDoc.data().employmentInsuranceRatePercent / 100;
+                console.log('✅ 給与計算設定を読み込みました:', payrollSettingsDoc.data());
+            }
+            else {
+                console.log('⚠️ 給与計算設定が存在しないため、デフォルト値（0.5%）を使用');
+            }
+        }
+        catch (error) {
+            console.error('❌ 給与計算設定読み込みエラー:', error);
+        }
+    };
+    // 🆕 給与計算設定を保存
+    const savePayrollSettings = async (newSettings) => {
+        try {
+            while (!window.FirebaseReady || !window.db) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            const { setDoc } = window.firebaseModules;
+            const docId = 'default';
+            const payrollSettingsRef = window.getStoreDoc('payroll_settings', docId);
+            await setDoc(payrollSettingsRef, newSettings);
+            setPayrollSettings(newSettings);
+            INSURANCE_DATA.employmentInsuranceRate = newSettings.employmentInsuranceRatePercent / 100;
+            console.log('✅ 給与計算設定を保存しました');
+            showCustomAlertFunc('✅ 雇用保険料率を保存しました\n\n次回の給与計算から反映されます', '保存完了', '✅');
+        }
+        catch (error) {
+            console.error('❌ 給与計算設定保存エラー:', error);
+            showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
         }
     };
     // アラート設定をデフォルトに戻す
@@ -3902,10 +3948,10 @@ const AdminSystem = () => {
                 pension = Math.floor(standardRemuneration * INSURANCE_DATA.pensionRate / 2);
             }
         }
-        // 雇用保険料計算（総支給額の0.55%）（スイッチONの場合のみ）
+        // 雇用保険料計算（総支給額 × 雇用保険料率）（スイッチONの場合のみ）
         let employmentInsurance = 0;
         if (insuranceSwitches.employmentInsurance) {
-            employmentInsurance = Math.floor(grossPay * 0.0055);
+            employmentInsurance = Math.floor(grossPay * INSURANCE_DATA.employmentInsuranceRate);
         }
         // 所得税計算（国税庁・給与所得の源泉徴収税額表 月額表 甲欄 扶養0人）
         const socialInsuranceTotal = healthInsurance + pension + employmentInsurance;
@@ -4563,7 +4609,7 @@ const AdminSystem = () => {
                             <div style="font-size: 10px; line-height: 1.6;">
                                 • <strong>健康保険</strong>: 標準報酬月額 × 保険料率 ÷ 2（40歳以上は介護保険料を含む）<br/>
                                 • <strong>厚生年金</strong>: 標準報酬月額 × 18.3% ÷ 2<br/>
-                                • <strong>雇用保険</strong>: 総支給額（経費除く） × 0.55%<br/>
+                                • <strong>雇用保険</strong>: 総支給額（経費除く） × ${(INSURANCE_DATA.employmentInsuranceRate * 100).toFixed(2)}%<br/>
                                 • <strong>所得税</strong>: 国税庁「給与所得の源泉徴収税額表（月額表・甲欄）」に基づく計算<br/>
                                 • <strong>住民税</strong>: 課税所得 × 10%（概算）<br/>
                                 ※時間給の場合、88,000円未満は健康保険・厚生年金が免除されます
@@ -5980,6 +6026,21 @@ const AdminSystem = () => {
             React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
                 React.createElement("div", { className: "flex justify-between items-center mb-4" },
                     React.createElement("div", null,
+                        React.createElement("h2", { className: "text-2xl font-bold text-gray-800 flex items-center gap-2" }, "\u7D66\u4E0E\u8A08\u7B97\u8A2D\u5B9A"),
+                        React.createElement("p", { className: "text-sm text-gray-600 mt-1" }, "\u96C7\u7528\u4FDD\u967A\u6599\u7387\u306A\u3069\u3001\u6CD5\u6539\u6B63\u3067\u5909\u308F\u308B\u53EF\u80FD\u6027\u306E\u3042\u308B\u5024\u3092\u3053\u3053\u304B\u3089\u5909\u66F4\u3067\u304D\u307E\u3059")),
+                    React.createElement("button", { onClick: () => setShowPayrollSettings(!showPayrollSettings), className: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600" }, showPayrollSettings ? '閉じる' : '設定を開く')),
+                showPayrollSettings && (React.createElement("div", { className: "space-y-6 border-t pt-4" },
+                    React.createElement("div", { className: "border-l-4 border-blue-500 pl-4" },
+                        React.createElement("label", { className: "block text-md font-bold mb-2 text-blue-700" }, "\uD83D\uDCC4 \u96C7\u7528\u4FDD\u967A\u6599\u7387\uFF08\u5F93\u696D\u54E1\u8CA0\u62C5\u5206\uFF09"),
+                        React.createElement("p", { className: "text-xs text-gray-500 mb-2" }, "\u73FE\u5728: 0.5%\uFF08\u4EE4\u548C8\u5E74\u5EA6\u30FB2026\u5E744\u6708\uFF5E\uFF09\u3002\u56FD\u304C\u767A\u8868\u3059\u308B\u6599\u7387\u304C\u5909\u308F\u3063\u305F\u3089\u3001\u3053\u3053\u3092\u5909\u66F4\u3057\u3066\u4FDD\u5B58\u3057\u3066\u304F\u3060\u3055\u3044\uFF08\u30D5\u30A1\u30A4\u30EB\u306E\u7DE8\u96C6\u306F\u4E0D\u8981\u3067\u3059\uFF09\u3002"),
+                        React.createElement("div", { className: "flex items-center gap-2" },
+                            React.createElement("input", { type: "number", step: "0.01", min: "0", max: "10", value: payrollSettings.employmentInsuranceRatePercent, onChange: (e) => setPayrollSettings(Object.assign(Object.assign({}, payrollSettings), { employmentInsuranceRatePercent: parseFloat(e.target.value) || 0 })), className: "w-32 p-3 border rounded-lg text-lg font-bold" }),
+                            React.createElement("span", { className: "text-lg font-bold" }, "%"))),
+                    React.createElement("div", { className: "flex gap-2" },
+                        React.createElement("button", { onClick: () => savePayrollSettings(payrollSettings), className: "px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold" }, "\u4FDD\u5B58"))))),
+            React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
+                React.createElement("div", { className: "flex justify-between items-center mb-4" },
+                    React.createElement("div", null,
                         React.createElement("h2", { className: "text-2xl font-bold text-gray-800 flex items-center gap-2" }, "\u55B6\u696D\u6642\u9593\u5916\u8A2D\u5B9A"),
                         React.createElement("p", { className: "text-sm text-gray-600 mt-1" }, "\u55B6\u696D\u6642\u9593\u5916\u306B\u30E1\u30CB\u30E5\u30FC\u753B\u9762\u3092\u975E\u8868\u793A\u306B\u3059\u308B\u8A2D\u5B9A")),
                     React.createElement("button", { onClick: () => setShowBusinessHoursSettings(!showBusinessHoursSettings), className: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600" }, showBusinessHoursSettings ? '閉じる' : '設定を開く')),
@@ -6612,7 +6673,7 @@ const AdminSystem = () => {
                                         React.createElement("div", null,
                                             "\u2022 ",
                                             React.createElement("strong", null, "\u96C7\u7528\u4FDD\u967A"),
-                                            ": \u7DCF\u652F\u7D66\u984D\uFF08\u7D4C\u8CBB\u9664\u304F\uFF09 \u00D7 0.55%"),
+                                            `: \u7DCF\u652F\u7D66\u984D\uFF08\u7D4C\u8CBB\u9664\u304F\uFF09 \u00D7 ${(INSURANCE_DATA.employmentInsuranceRate * 100).toFixed(2)}%`),
                                         React.createElement("div", null,
                                             "\u2022 ",
                                             React.createElement("strong", null, "\u6240\u5F97\u7A0E"),
@@ -7316,7 +7377,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         const { download = false } = options;
         try {
             // カスタム確認ダイアログを表示
-            const confirmResult = await showCustomConfirm('現在のデータをバックアップしますか？\n\n以下がバックアップされます：\n• 商品\n• 従業員\n• 注文履歴\n• 勤怠データ\n• テーブル\n• 商品カテゴリ設定\n• レシート設定\n• 在庫設定\n• アラート設定\n• 営業時間設定\n• テーブル設定\n• ステータス表示設定', 'バックアップ作成', '作成する', 'キャンセル');
+            const confirmResult = await showCustomConfirm('現在のデータをバックアップしますか？\n\n以下がバックアップされます：\n• 商品\n• 従業員\n• 注文履歴\n• 勤怠データ\n• テーブル\n• 商品カテゴリ設定\n• レシート設定\n• 在庫設定\n• アラート設定\n• 営業時間設定\n• テーブル設定\n• ステータス表示設定\n• 給与計算設定', 'バックアップ作成', '作成する', 'キャンセル');
             if (!confirmResult)
                 return;
             // カスタムアラートでメモ入力を受け付ける
@@ -7495,7 +7556,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             const chunks = {
                 menus: [], employees: [], orders: [], attendance: [], receipts: [], tables: [], expenses: [],
                 menu_settings: null, receipt_settings: null, inventory_settings: null,
-                alert_settings: null, business_hours: null, table_settings: null, status_display_settings: null
+                alert_settings: null, business_hours: null, table_settings: null, status_display_settings: null, payroll_settings: null
             };
             // 商品データ
             let menusRef;
@@ -7728,6 +7789,23 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 console.warn('ステータス表示設定の取得に失敗:', e.message);
                 chunks.status_display_settings = null;
             }
+            // 🆕 給与計算設定（雇用保険料率など）
+            try {
+                let payrollRef;
+                if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                    payrollRef = doc(window.db, 'stores', currentStoreId, 'payroll_settings', 'default');
+                }
+                else {
+                    payrollRef = doc(window.db, 'payroll_settings', 'default');
+                }
+                const payrollDoc = await getDoc(payrollRef);
+                chunks.payroll_settings = payrollDoc.exists() ? payrollDoc.data() : null;
+                console.log('✅ 給与計算設定:', chunks.payroll_settings ? '取得' : 'なし');
+            }
+            catch (e) {
+                console.warn('給与計算設定の取得に失敗:', e.message);
+                chunks.payroll_settings = null;
+            }
             // テーブルデータ（各テーブルのドキュメント）
             try {
                 let tablesRef;
@@ -7834,7 +7912,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     alert_settings: chunks.alert_settings,
                     business_hours: chunks.business_hours,
                     table_settings: chunks.table_settings,
-                    status_display_settings: chunks.status_display_settings
+                    status_display_settings: chunks.status_display_settings,
+                    payroll_settings: chunks.payroll_settings
                 })
             ]);
             console.log('✅ 手動バックアップ完了（分割保存）:', backupId);
@@ -7854,7 +7933,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                         menu_settings: chunks.menu_settings, receipt_settings: chunks.receipt_settings,
                         inventory_settings: chunks.inventory_settings, alert_settings: chunks.alert_settings,
                         business_hours: chunks.business_hours, table_settings: chunks.table_settings,
-                        status_display_settings: chunks.status_display_settings
+                        status_display_settings: chunks.status_display_settings,
+                    payroll_settings: chunks.payroll_settings
                     }
                 }, `backup_${currentStoreId || 'store'}_${dateTimeStr}`);
             }
@@ -7865,7 +7945,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 chunks.alert_settings,
                 chunks.business_hours,
                 chunks.table_settings,
-                chunks.status_display_settings
+                chunks.status_display_settings,
+                chunks.payroll_settings
             ].filter(s => s !== null).length;
             setCreating(false);
             const memoText = memo ? `\nメモ: ${memo}` : '';
@@ -7921,6 +8002,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 business_hours: settingsChunk ? settingsChunk.business_hours : null,
                 table_settings: settingsChunk ? settingsChunk.table_settings : null,
                 status_display_settings: settingsChunk ? settingsChunk.status_display_settings : null,
+                payroll_settings: settingsChunk ? settingsChunk.payroll_settings : null,
                 _missingChunks: missingChunks
             };
         }
@@ -7932,7 +8014,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     const applyRestoreData = async (data, onProgress) => {
         const { setDoc, doc, getDocs, deleteDoc } = window.firebaseModules;
         // 🆕 進捗計算用: 全体の作業量（件数ベース）を先に見積もっておく
-        const settingsKeys = ['receipt_settings', 'menu_settings', 'inventory_settings', 'alert_settings', 'business_hours', 'table_settings', 'status_display_settings'];
+        const settingsKeys = ['receipt_settings', 'menu_settings', 'inventory_settings', 'alert_settings', 'business_hours', 'table_settings', 'status_display_settings', 'payroll_settings'];
         const settingsUnitCount = settingsKeys.filter(k => data[k]).length;
         const toppingsUnitCount = (data.menu_settings && data.menu_settings.toppings) ? data.menu_settings.toppings.length : 0;
         const totalUnits = (data.menus ? data.menus.length : 0)
@@ -8185,6 +8267,20 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 settingsRestoredCount++;
                 reportProgress('ステータス表示設定');
                 console.log('✅ ステータス表示設定復元');
+            }
+            // 🆕 給与計算設定
+            if (data.payroll_settings) {
+                let payrollRef;
+                if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                    payrollRef = doc(window.db, 'stores', currentStoreId, 'payroll_settings', 'default');
+                }
+                else {
+                    payrollRef = doc(window.db, 'payroll_settings', 'default');
+                }
+                await setDoc(payrollRef, data.payroll_settings);
+                settingsRestoredCount++;
+                reportProgress('給与計算設定');
+                console.log('✅ 給与計算設定復元');
             }
             // テーブルデータを復元（ID基準の完全ミラー）
             await mirrorCollection('tables', data.tables, false, () => reportProgress('テーブル'));
