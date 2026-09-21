@@ -404,12 +404,12 @@ const AdminSystem = () => {
         ]
     });
     const [showPayrollSettings, setShowPayrollSettings] = useState(false);
-    // 🆕 軽減税率一括変更用のstate
-    const [showTaxRateBulk, setShowTaxRateBulk] = useState(false);
-    const [taxBulkFromRate, setTaxBulkFromRate] = useState(8);
-    const [taxBulkToRate, setTaxBulkToRate] = useState('');
-    const [taxBulkPreview, setTaxBulkPreview] = useState(null); // 対象商品リスト（確認用）
-    const [taxBulkRunning, setTaxBulkRunning] = useState(false);
+    // 🆕 消費税率設定用のstate（軽減税率・標準税率の「実際の％」。商品側のtaxRate(8/10)は区分のまま変更しない）
+    const [showTaxRateSettings, setShowTaxRateSettings] = useState(false);
+    const [taxRateSettings, setTaxRateSettings] = useState({
+        reducedRatePercent: 8,
+        standardRatePercent: 10
+    });
     // 営業時間外設定用のstate
     const [businessHoursSettings, setBusinessHoursSettings] = useState({
         enabled: false, // 営業時間外設定を有効にするか
@@ -961,6 +961,7 @@ const AdminSystem = () => {
                 loadAlertSettings();
                 loadStatusDisplaySettings(); // ステータス表示設定を読み込み
                 loadPayrollSettings(); // 🆕 給与計算設定（雇用保険料率）を読み込み
+                loadTaxRateSettings(); // 🆕 消費税率設定を読み込み
                 loadBusinessHoursSettings(); // 営業時間設定を読み込み
                 loadClosedDaysSettings(); // 🆕 休業日設定を読み込み
                 loadPickupSlotSettings(); // 🆕 引取スロット設定を読み込み
@@ -1943,60 +1944,47 @@ const AdminSystem = () => {
             showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
         }
     };
-    // 🆕 軽減税率一括変更：対象商品をプレビュー
-    const previewTaxRateBulkChange = async () => {
+    // 🆕 消費税率設定を読み込み
+    const loadTaxRateSettings = async () => {
         try {
-            const { getDocs } = window.firebaseModules;
-            const snapshot = await getDocs(window.getStoreCollection('menus'));
-            const targets = [];
-            snapshot.forEach(docSnap => {
-                const data = docSnap.data();
-                const currentRate = data.taxRate !== undefined && data.taxRate !== null ? data.taxRate : 10;
-                if (currentRate === taxBulkFromRate) {
-                    targets.push({ id: docSnap.id, name: data.name || '(名称未設定)', price: data.price || 0 });
-                }
-            });
-            setTaxBulkPreview(targets);
-            if (targets.length === 0) {
-                showCustomAlertFunc(`現在${taxBulkFromRate}%の商品は見つかりませんでした`, '対象なし', 'ℹ️');
+            const { getDoc } = window.firebaseModules;
+            const ref = window.getStoreDoc('tax_rate_settings', 'default');
+            const snap = await getDoc(ref);
+            if (snap.exists()) {
+                setTaxRateSettings(Object.assign({ reducedRatePercent: 8, standardRatePercent: 10 }, snap.data()));
+                console.log('✅ 消費税率設定を読み込みました:', snap.data());
+            }
+            else {
+                console.log('⚠️ 消費税率設定が存在しないため、デフォルト値（軽減8% / 標準10%）を使用');
             }
         }
         catch (error) {
-            console.error('❌ 対象商品の取得に失敗:', error);
-            showCustomAlertFunc('❌ 対象商品の取得に失敗しました: ' + error.message, 'エラー', '❌');
+            console.error('❌ 消費税率設定読み込みエラー:', error);
         }
     };
-    // 🆕 軽減税率一括変更：実行
-    const executeTaxRateBulkChange = async () => {
-        const newRate = parseFloat(taxBulkToRate);
-        if (isNaN(newRate) || newRate < 0 || newRate > 100) {
-            showCustomAlertFunc('変更後の税率を正しく入力してください', '入力エラー', '❌');
+    // 🆕 消費税率設定を保存
+    const saveTaxRateSettings = async (newSettings) => {
+        const reduced = parseFloat(newSettings.reducedRatePercent);
+        const standard = parseFloat(newSettings.standardRatePercent);
+        if (isNaN(reduced) || isNaN(standard) || reduced < 0 || standard < 0 || reduced > 100 || standard > 100) {
+            showCustomAlertFunc('税率を正しく入力してください', '入力エラー', '❌');
             return;
         }
-        if (!taxBulkPreview || taxBulkPreview.length === 0) {
-            showCustomAlertFunc('先に「対象商品を確認」を押してください', '確認が必要です', '❌');
-            return;
-        }
-        const confirmed = await showCustomConfirmFunc(`${taxBulkFromRate}%の商品 ${taxBulkPreview.length}件 の税率を ${newRate}% に一括変更します。\n\nこの操作は元に戻せません（もう一度この画面で逆方向に変更することは可能です）。\n\n実行しますか？`, '税率一括変更の確認', '実行する', 'キャンセル');
+        const confirmed = await showCustomConfirmFunc(`軽減税率を${reduced}%、標準税率を${standard}%に変更します。\n\nこれ以降に確定する新しい注文から、この税率が使われます。\nすでに確定済みの過去の注文には影響しません。\n\n実行しますか？`, '消費税率設定の変更確認', '変更する', 'キャンセル');
         if (!confirmed)
             return;
-        setTaxBulkRunning(true);
         try {
-            const { updateDoc } = window.firebaseModules;
-            let successCount = 0;
-            for (const item of taxBulkPreview) {
-                await updateDoc(window.getStoreDoc('menus', item.id), { taxRate: newRate });
-                successCount++;
-            }
-            setTaxBulkRunning(false);
-            setTaxBulkPreview(null);
-            setTaxBulkToRate('');
-            showCustomAlertFunc(`✅ ${successCount}件の商品の税率を${newRate}%に変更しました\n\n※これから確定する新しい注文から反映されます。すでに確定済みの過去の注文の税率は変わりません。`, '変更完了', '✅');
+            const { setDoc } = window.firebaseModules;
+            const ref = window.getStoreDoc('tax_rate_settings', 'default');
+            const toSave = { reducedRatePercent: reduced, standardRatePercent: standard };
+            await setDoc(ref, toSave);
+            setTaxRateSettings(toSave);
+            console.log('✅ 消費税率設定を保存しました');
+            showCustomAlertFunc('✅ 消費税率設定を保存しました', '保存完了', '✅');
         }
         catch (error) {
-            setTaxBulkRunning(false);
-            console.error('❌ 税率一括変更エラー:', error);
-            showCustomAlertFunc('❌ 一括変更に失敗しました: ' + error.message, 'エラー', '❌');
+            console.error('❌ 消費税率設定保存エラー:', error);
+            showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
         }
     };
     // アラート設定をデフォルトに戻す
@@ -6162,23 +6150,19 @@ const AdminSystem = () => {
             React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
                 React.createElement("div", { className: "flex justify-between items-center mb-4" },
                     React.createElement("div", null,
-                        React.createElement("h2", { className: "text-2xl font-bold text-gray-800 flex items-center gap-2" }, "\u8EFD\u6E1B\u7A0E\u7387\u4E00\u62EC\u5909\u66F4"),
-                        React.createElement("p", { className: "text-sm text-gray-600 mt-1" }, "\u6D88\u8CBB\u7A0E\u7387\u304C\u6539\u6B63\u3055\u308C\u305F\u65E5\u306B\u3001\u5BFE\u8C61\u5546\u54C1\u306E\u7A0E\u7387\u3092\u307E\u3068\u3081\u3066\u66F8\u304D\u63DB\u3048\u307E\u3059\u3002\u78BA\u5B9A\u6E08\u307F\u306E\u904E\u53BB\u306E\u6CE8\u6587\u306B\u306F\u5F71\u97FF\u3057\u307E\u305B\u3093\u3002")),
-                    React.createElement("button", { onClick: () => setShowTaxRateBulk(!showTaxRateBulk), className: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600" }, showTaxRateBulk ? '閉じる' : '設定を開く')),
-                showTaxRateBulk && (React.createElement("div", { className: "space-y-4 border-t pt-4" },
+                        React.createElement("h2", { className: "text-2xl font-bold text-gray-800 flex items-center gap-2" }, "\u6D88\u8CBB\u7A0E\u7387\u8A2D\u5B9A"),
+                        React.createElement("p", { className: "text-sm text-gray-600 mt-1" }, "\u8EFD\u6E1B\u7A0E\u7387\u30FB\u6A19\u6E96\u7A0E\u7387\u306E\u300C\u5B9F\u969B\u306E\uFF05\u300D\u3002\u5546\u54C1\u5074\u306E\u533A\u5206(\u98DF\u6750/\u98DF\u6750\u4EE5\u5916)\u306F\u5909\u3048\u305A\u3001\u3053\u3053\u3067\u8A2D\u5B9A\u3057\u305F\uFF05\u304C\u65B0\u3057\u3044\u6CE8\u6587\u304B\u3089\u9069\u7528\u3055\u308C\u307E\u3059\u3002")),
+                    React.createElement("button", { onClick: () => setShowTaxRateSettings(!showTaxRateSettings), className: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600" }, showTaxRateSettings ? '閉じる' : '設定を開く')),
+                showTaxRateSettings && (React.createElement("div", { className: "space-y-4 border-t pt-4" },
                     React.createElement("div", { className: "flex items-center gap-3 flex-wrap" },
-                        React.createElement("label", { className: "text-sm font-bold" }, "\u73FE\u5728\u306E\u7A0E\u7387"),
-                        React.createElement("input", { type: "number", step: "0.1", min: "0", max: "100", value: taxBulkFromRate, onChange: (e) => { setTaxBulkFromRate(parseFloat(e.target.value) || 0); setTaxBulkPreview(null); }, className: "w-24 p-2 border rounded text-lg font-bold" }),
-                        React.createElement("span", { className: "text-lg font-bold" }, "%"),
-                        React.createElement("span", { className: "text-lg" }, "\u2192"),
-                        React.createElement("label", { className: "text-sm font-bold" }, "\u5909\u66F4\u5F8C\u306E\u7A0E\u7387"),
-                        React.createElement("input", { type: "number", step: "0.1", min: "0", max: "100", value: taxBulkToRate, onChange: (e) => { setTaxBulkToRate(e.target.value); setTaxBulkPreview(null); }, placeholder: "\u4F8B: 1", className: "w-24 p-2 border rounded text-lg font-bold" }),
+                        React.createElement("label", { className: "text-sm font-bold w-32" }, "\u8EFD\u6E1B\u7A0E\u7387\uFF08\u98DF\u6750\u7B49\uFF09"),
+                        React.createElement("input", { type: "number", step: "0.1", min: "0", max: "100", value: taxRateSettings.reducedRatePercent, onChange: (e) => setTaxRateSettings(Object.assign(Object.assign({}, taxRateSettings), { reducedRatePercent: e.target.value })), className: "w-24 p-2 border rounded text-lg font-bold" }),
                         React.createElement("span", { className: "text-lg font-bold" }, "%")),
-                    React.createElement("button", { onClick: previewTaxRateBulkChange, className: "px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm" }, "\u5BFE\u8C61\u5546\u54C1\u3092\u78BA\u8A8D"),
-                    taxBulkPreview && (React.createElement("div", { className: "bg-yellow-50 border border-yellow-300 rounded-lg p-3" },
-                        React.createElement("p", { className: "text-sm font-bold mb-2" }, `対象商品 ${taxBulkPreview.length}件`),
-                        React.createElement("div", { className: "max-h-40 overflow-y-auto text-sm text-gray-700" }, taxBulkPreview.map(item => (React.createElement("div", { key: item.id }, `・${item.name}（¥${item.price}）`)))))),
-                    React.createElement("button", { onClick: executeTaxRateBulkChange, disabled: taxBulkRunning || !taxBulkPreview || taxBulkPreview.length === 0, className: "px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold disabled:bg-gray-300" }, taxBulkRunning ? '変更中...' : '一括変更を実行')))),
+                    React.createElement("div", { className: "flex items-center gap-3 flex-wrap" },
+                        React.createElement("label", { className: "text-sm font-bold w-32" }, "\u6A19\u6E96\u7A0E\u7387\uFF08\u98DF\u6750\u4EE5\u5916\uFF09"),
+                        React.createElement("input", { type: "number", step: "0.1", min: "0", max: "100", value: taxRateSettings.standardRatePercent, onChange: (e) => setTaxRateSettings(Object.assign(Object.assign({}, taxRateSettings), { standardRatePercent: e.target.value })), className: "w-24 p-2 border rounded text-lg font-bold" }),
+                        React.createElement("span", { className: "text-lg font-bold" }, "%")),
+                    React.createElement("button", { onClick: () => saveTaxRateSettings(taxRateSettings), className: "px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold" }, "\u4FDD\u5B58")))),
             React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
                 React.createElement("div", { className: "flex justify-between items-center mb-4" },
                     React.createElement("div", null,
@@ -7518,7 +7502,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         const { download = false } = options;
         try {
             // カスタム確認ダイアログを表示
-            const confirmResult = await showCustomConfirm('現在のデータをバックアップしますか？\n\n以下がバックアップされます：\n• 商品\n• 従業員\n• 注文履歴\n• 勤怠データ\n• テーブル\n• 商品カテゴリ設定\n• レシート設定\n• 在庫設定\n• アラート設定\n• 営業時間設定\n• テーブル設定\n• ステータス表示設定\n• 給与計算設定', 'バックアップ作成', '作成する', 'キャンセル');
+            const confirmResult = await showCustomConfirm('現在のデータをバックアップしますか？\n\n以下がバックアップされます：\n• 商品\n• 従業員\n• 注文履歴\n• 勤怠データ\n• テーブル\n• 商品カテゴリ設定\n• レシート設定\n• 在庫設定\n• アラート設定\n• 営業時間設定\n• テーブル設定\n• ステータス表示設定\n• 給与計算設定\n• 消費税率設定', 'バックアップ作成', '作成する', 'キャンセル');
             if (!confirmResult)
                 return;
             // カスタムアラートでメモ入力を受け付ける
@@ -7697,7 +7681,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
             const chunks = {
                 menus: [], employees: [], orders: [], attendance: [], receipts: [], tables: [], expenses: [],
                 menu_settings: null, receipt_settings: null, inventory_settings: null,
-                alert_settings: null, business_hours: null, table_settings: null, status_display_settings: null, payroll_settings: null
+                alert_settings: null, business_hours: null, table_settings: null, status_display_settings: null, payroll_settings: null, tax_rate_settings: null
             };
             // 商品データ
             let menusRef;
@@ -7947,6 +7931,23 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 console.warn('給与計算設定の取得に失敗:', e.message);
                 chunks.payroll_settings = null;
             }
+            // 🆕 消費税率設定
+            try {
+                let taxRef;
+                if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                    taxRef = doc(window.db, 'stores', currentStoreId, 'tax_rate_settings', 'default');
+                }
+                else {
+                    taxRef = doc(window.db, 'tax_rate_settings', 'default');
+                }
+                const taxDoc = await getDoc(taxRef);
+                chunks.tax_rate_settings = taxDoc.exists() ? taxDoc.data() : null;
+                console.log('✅ 消費税率設定:', chunks.tax_rate_settings ? '取得' : 'なし');
+            }
+            catch (e) {
+                console.warn('消費税率設定の取得に失敗:', e.message);
+                chunks.tax_rate_settings = null;
+            }
             // テーブルデータ（各テーブルのドキュメント）
             try {
                 let tablesRef;
@@ -8054,7 +8055,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                     business_hours: chunks.business_hours,
                     table_settings: chunks.table_settings,
                     status_display_settings: chunks.status_display_settings,
-                    payroll_settings: chunks.payroll_settings
+                    payroll_settings: chunks.payroll_settings,
+                    tax_rate_settings: chunks.tax_rate_settings
                 })
             ]);
             console.log('✅ 手動バックアップ完了（分割保存）:', backupId);
@@ -8075,7 +8077,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                         inventory_settings: chunks.inventory_settings, alert_settings: chunks.alert_settings,
                         business_hours: chunks.business_hours, table_settings: chunks.table_settings,
                         status_display_settings: chunks.status_display_settings,
-                    payroll_settings: chunks.payroll_settings
+                    payroll_settings: chunks.payroll_settings,
+                    tax_rate_settings: chunks.tax_rate_settings
                     }
                 }, `backup_${currentStoreId || 'store'}_${dateTimeStr}`);
             }
@@ -8087,7 +8090,8 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 chunks.business_hours,
                 chunks.table_settings,
                 chunks.status_display_settings,
-                chunks.payroll_settings
+                chunks.payroll_settings,
+                chunks.tax_rate_settings
             ].filter(s => s !== null).length;
             setCreating(false);
             const memoText = memo ? `\nメモ: ${memo}` : '';
@@ -8144,6 +8148,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 table_settings: settingsChunk ? settingsChunk.table_settings : null,
                 status_display_settings: settingsChunk ? settingsChunk.status_display_settings : null,
                 payroll_settings: settingsChunk ? settingsChunk.payroll_settings : null,
+                tax_rate_settings: settingsChunk ? settingsChunk.tax_rate_settings : null,
                 _missingChunks: missingChunks
             };
         }
@@ -8155,7 +8160,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     const applyRestoreData = async (data, onProgress) => {
         const { setDoc, doc, getDocs, deleteDoc } = window.firebaseModules;
         // 🆕 進捗計算用: 全体の作業量（件数ベース）を先に見積もっておく
-        const settingsKeys = ['receipt_settings', 'menu_settings', 'inventory_settings', 'alert_settings', 'business_hours', 'table_settings', 'status_display_settings', 'payroll_settings'];
+        const settingsKeys = ['receipt_settings', 'menu_settings', 'inventory_settings', 'alert_settings', 'business_hours', 'table_settings', 'status_display_settings', 'payroll_settings', 'tax_rate_settings'];
         const settingsUnitCount = settingsKeys.filter(k => data[k]).length;
         const toppingsUnitCount = (data.menu_settings && data.menu_settings.toppings) ? data.menu_settings.toppings.length : 0;
         const totalUnits = (data.menus ? data.menus.length : 0)
@@ -8422,6 +8427,20 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 settingsRestoredCount++;
                 reportProgress('給与計算設定');
                 console.log('✅ 給与計算設定復元');
+            }
+            // 🆕 消費税率設定
+            if (data.tax_rate_settings) {
+                let taxRef;
+                if (currentStoreId && currentStoreId !== '' && currentStoreId !== null) {
+                    taxRef = doc(window.db, 'stores', currentStoreId, 'tax_rate_settings', 'default');
+                }
+                else {
+                    taxRef = doc(window.db, 'tax_rate_settings', 'default');
+                }
+                await setDoc(taxRef, data.tax_rate_settings);
+                settingsRestoredCount++;
+                reportProgress('消費税率設定');
+                console.log('✅ 消費税率設定復元');
             }
             // テーブルデータを復元（ID基準の完全ミラー）
             await mirrorCollection('tables', data.tables, false, () => reportProgress('テーブル'));

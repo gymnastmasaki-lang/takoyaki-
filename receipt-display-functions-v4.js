@@ -232,19 +232,19 @@ async function showReceiptDisplay(receiptData) {
   let totalTax = 0;
   
   if (tax8Total === 0 && tax10Total === 0 && receiptData.total > 0) {
-    const totalExcludingTax = Math.floor(receiptData.total / 1.10);
+    const totalExcludingTax = Math.floor(receiptData.total / (1 + window.getActualTaxPercent(10) / 100));
     totalTax = receiptData.total - totalExcludingTax;
     tax10Total = receiptData.total;
   } else {
-    const tax8Excluded = Math.floor(tax8Total / 1.08);
-    const tax10Excluded = Math.floor(tax10Total / 1.10);
+    const tax8Excluded = Math.floor(tax8Total / (1 + window.getActualTaxPercent(8) / 100));
+    const tax10Excluded = Math.floor(tax10Total / (1 + window.getActualTaxPercent(10) / 100));
     const tax8Amount = tax8Total - tax8Excluded;
     const tax10Amount = tax10Total - tax10Excluded;
     totalTax = tax8Amount + tax10Amount;
   }
   
-  const tax8Excluded = Math.floor(tax8Total / 1.08);
-  const tax10Excluded = Math.floor(tax10Total / 1.10);
+  const tax8Excluded = Math.floor(tax8Total / (1 + window.getActualTaxPercent(8) / 100));
+  const tax10Excluded = Math.floor(tax10Total / (1 + window.getActualTaxPercent(10) / 100));
   const tax8Amount = tax8Total - tax8Excluded;
   const tax10Amount = tax10Total - tax10Excluded;
   
@@ -269,14 +269,14 @@ async function showReceiptDisplay(receiptData) {
       
       <div style="border-top: 2px solid #000; padding-top: 15px; margin-top: 20px; font-size: 13px;">
         ${tax8Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>8%対象額:</span>
+          <span>${window.getActualTaxPercent(8)}%対象額:</span>
           <span>¥${tax8Excluded.toLocaleString()}</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin: 5px 0;">
           <span>内税: ¥${tax8Amount.toLocaleString()}</span>
         </div>` : ''}
         ${tax10Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>10%対象額:</span>
+          <span>${window.getActualTaxPercent(10)}%対象額:</span>
           <span>¥${tax10Excluded.toLocaleString()}</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin: 5px 0;">
@@ -519,11 +519,11 @@ async function showInvoiceDisplay(invoiceData) {
   let totalTax = 0;
   
   if (tax8Total === 0 && tax10Total === 0 && invoiceData.total > 0) {
-    const totalExcludingTax = Math.floor(invoiceData.total / 1.10);
+    const totalExcludingTax = Math.floor(invoiceData.total / (1 + window.getActualTaxPercent(10) / 100));
     totalTax = invoiceData.total - totalExcludingTax;
   } else {
-    const tax8Excluded = Math.floor(tax8Total / 1.08);
-    const tax10Excluded = Math.floor(tax10Total / 1.10);
+    const tax8Excluded = Math.floor(tax8Total / (1 + window.getActualTaxPercent(8) / 100));
+    const tax10Excluded = Math.floor(tax10Total / (1 + window.getActualTaxPercent(10) / 100));
     const tax8Amount = tax8Total - tax8Excluded;
     const tax10Amount = tax10Total - tax10Excluded;
     totalTax = tax8Amount + tax10Amount;

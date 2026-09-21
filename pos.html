@@ -539,7 +539,7 @@
     function getDisplayPrice(item) {
       const taxType = item.taxType || 'inclusive';
       if (taxType === 'exclusive') {
-        return Math.floor(item.price * (1 + (item.taxRate || 10) / 100));
+        return Math.floor(item.price * (1 + window.getActualTaxPercent(item.taxRate || 10) / 100));
       }
       return item.price;
     }
@@ -552,7 +552,7 @@
       if (taxType === 'exclusive') {
         return item.price;
       }
-      return Math.floor(item.price / (1 + (item.taxRate || 10) / 100));
+      return Math.floor(item.price / (1 + window.getActualTaxPercent(item.taxRate || 10) / 100));
     }
     
     /**
@@ -562,8 +562,9 @@
       const taxType = item.taxType || 'inclusive';
       const basePrice = item.price + (item.toppingPrice || 0);
       
-      // 🆕 テーブル設定に基づいて適用税率を決定
-      const taxRate = getApplicableTaxRate(item, currentTableSettings);
+      // 🆕 テーブル設定に基づいて適用税率(区分)を決定 → 実際の％に変換
+      const taxRateCategory = getApplicableTaxRate(item, currentTableSettings);
+      const taxRate = window.getActualTaxPercent(taxRateCategory);
       
       if (taxType === 'exclusive') {
         return Math.floor(basePrice * quantity * taxRate / 100);
@@ -581,8 +582,9 @@
       const taxType = item.taxType || 'inclusive';
       const basePrice = item.price + (item.toppingPrice || 0);
       
-      // 🆕 テーブル設定に基づいて適用税率を決定
-      const taxRate = getApplicableTaxRate(item, currentTableSettings);
+      // 🆕 テーブル設定に基づいて適用税率(区分)を決定 → 実際の％に変換
+      const taxRateCategory = getApplicableTaxRate(item, currentTableSettings);
+      const taxRate = window.getActualTaxPercent(taxRateCategory);
       
       if (taxType === 'exclusive') {
         return Math.floor(basePrice * quantity * (1 + taxRate / 100));
@@ -746,6 +748,29 @@
         globalDefaultTaxRate = 10;
       }
     }
+    
+    // 🆕 消費税率設定（軽減税率・標準税率の「実際の％」。kanriの「消費税率設定」で編集される）
+    window.taxRateSettings = { reducedRatePercent: 8, standardRatePercent: 10 };
+    async function loadTaxRateSettings() {
+      try {
+        const ref = window.getStoreDoc('tax_rate_settings', 'default');
+        const snap = await window.getDoc(ref);
+        if (snap.exists()) {
+          window.taxRateSettings = Object.assign({ reducedRatePercent: 8, standardRatePercent: 10 }, snap.data());
+          console.log('✅ 消費税率設定を読み込みました:', window.taxRateSettings);
+        } else {
+          console.log('⚠️ 消費税率設定が見つかりません。軽減8% / 標準10%を使用します。');
+        }
+      } catch (error) {
+        console.error('❌ 消費税率設定の読み込みエラー:', error);
+      }
+    }
+    // 🆕 商品の区分(8=軽減税率対象/10=標準税率対象)から、実際に適用する％へ変換する。
+    // item.taxRate自体は「区分」として日計表等の集計に使われ続けるため、値そのものは変更しない。
+    window.getActualTaxPercent = function(categoryRate) {
+      if (categoryRate === 8) return window.taxRateSettings.reducedRatePercent;
+      return window.taxRateSettings.standardRatePercent;
+    };
     
     function getApplicableTaxRate(item, tableSettings) {
       // 🔥 特別処理: レジ袋は常に10%（最優先）
@@ -2774,11 +2799,11 @@
         <div id="taxRateItemsList"></div>
         <div style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #4CAF50; font-weight: bold; font-size: 14px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-            <span>8%対象:</span>
+            <span id="tax8Label">8%対象:</span>
             <span id="tax8Summary" style="color: #FF9800;">¥0</span>
           </div>
           <div style="display: flex; justify-content: space-between;">
-            <span>10%対象:</span>
+            <span id="tax10Label">10%対象:</span>
             <span id="tax10Summary" style="color: #2196F3;">¥0</span>
           </div>
         </div>
@@ -3204,6 +3229,8 @@
       }
       // デフォルト税率設定を読み込み
       await loadDefaultTaxRateSettings();
+      // 🆕 消費税率設定（実際の％）を読み込み
+      await loadTaxRateSettings();
       
       // Firebaseからメニューを取得
       try {
@@ -6587,8 +6614,8 @@
         }
         
         // 旧計算（互換性のため残す）
-        const tax8Excluded = Math.floor(totalTax8 / 1.08);
-        const tax10Excluded = Math.floor(totalTax10 / 1.10);
+        const tax8Excluded = Math.floor(totalTax8 / (1 + window.getActualTaxPercent(8) / 100));
+        const tax10Excluded = Math.floor(totalTax10 / (1 + window.getActualTaxPercent(10) / 100));
         const tax8Amount = totalTax8 - tax8Excluded;
         const tax10Amount = totalTax10 - tax10Excluded;
         const totalTax = tax8Amount + tax10Amount;
@@ -6622,15 +6649,15 @@
 -------------------------------------
 税金内訳
 -------------------------------------
-【8%軽減税率】
+【${window.getActualTaxPercent(8)}%軽減税率】
 内税の消費税: ¥${tax8InclusiveTotal.toLocaleString()}
 外税の消費税: ¥${tax8ExclusiveTotal.toLocaleString()}
-8%合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal).toLocaleString()}
+${window.getActualTaxPercent(8)}%合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal).toLocaleString()}
 
-【10%標準税率】
+【${window.getActualTaxPercent(10)}%標準税率】
 内税の消費税: ¥${tax10InclusiveTotal.toLocaleString()}
 外税の消費税: ¥${tax10ExclusiveTotal.toLocaleString()}
-10%合計: ¥${(tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
+${window.getActualTaxPercent(10)}%合計: ¥${(tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
 
 消費税の合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal + tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
 税抜合計: ¥${taxExcludedTotal.toLocaleString()}
@@ -6642,20 +6669,20 @@
 -------------------------------------
 赤伝票の税金内訳
 -------------------------------------
-8%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax8 / 1.08).toLocaleString()}
-8%の赤伝票（税込）: -¥${totalRedSlipTax8.toLocaleString()}
-8%の赤伝票の消費税: -¥${(totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / 1.08)).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100)).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税込）: -¥${totalRedSlipTax8.toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${(totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100))).toLocaleString()}
   内税: -¥${totalRedSlipTax8Inclusive.toLocaleString()}
   外税: -¥${totalRedSlipTax8Exclusive.toLocaleString()}
 
-10%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax10 / 1.10).toLocaleString()}
-10%の赤伝票（税込）: -¥${totalRedSlipTax10.toLocaleString()}
-10%の赤伝票の消費税: -¥${(totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / 1.10)).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100)).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税込）: -¥${totalRedSlipTax10.toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
   内税: -¥${totalRedSlipTax10Inclusive.toLocaleString()}
   外税: -¥${totalRedSlipTax10Exclusive.toLocaleString()}
 
-赤伝票消費税の合計: -¥${((totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / 1.08)) + (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / 1.10))).toLocaleString()}
-赤伝票税抜合計: -¥${(Math.floor(totalRedSlipTax8 / 1.08) + Math.floor(totalRedSlipTax10 / 1.10)).toLocaleString()}
+赤伝票消費税の合計: -¥${((totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100))) + (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100)))).toLocaleString()}
+赤伝票税抜合計: -¥${(Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100)) + Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
 赤伝票税込合計: -¥${(totalRedSlipTax8 + totalRedSlipTax10).toLocaleString()}
 
 -------------------------------------
@@ -8934,8 +8961,8 @@
         const tax10TotalWithTax = settlementData.tax10Total || 0; // 10%商品合計（税込）
         
         // 税抜価格を計算（内税なので税込価格から逆算）
-        const tax8Excluded = Math.floor(tax8TotalWithTax / 1.08);  // 8%商品合計（税抜）
-        const tax10Excluded = Math.floor(tax10TotalWithTax / 1.10); // 10%商品合計（税抜）
+        const tax8Excluded = Math.floor(tax8TotalWithTax / (1 + window.getActualTaxPercent(8) / 100));  // 8%商品合計（税抜）
+        const tax10Excluded = Math.floor(tax10TotalWithTax / (1 + window.getActualTaxPercent(10) / 100)); // 10%商品合計（税抜）
         
         // 消費税額を計算
         const tax8Amount = tax8TotalWithTax - tax8Excluded;  // 8%の消費税
@@ -9209,15 +9236,15 @@
 -------------------------------------
 税金内訳
 -------------------------------------
-8%の商品合計（税抜）: ¥${tax8Excluded.toLocaleString()}
-8%の商品合計（税込）: ¥${tax8TotalWithTax.toLocaleString()}
-8%の消費税: ¥${tax8Amount.toLocaleString()}
+${window.getActualTaxPercent(8)}%の商品合計（税抜）: ¥${tax8Excluded.toLocaleString()}
+${window.getActualTaxPercent(8)}%の商品合計（税込）: ¥${tax8TotalWithTax.toLocaleString()}
+${window.getActualTaxPercent(8)}%の消費税: ¥${tax8Amount.toLocaleString()}
   内税: ¥${tax8InclusiveTotal.toLocaleString()}
   外税: ¥${tax8ExclusiveTotal.toLocaleString()}
 
-10%の商品合計（税抜）: ¥${tax10Excluded.toLocaleString()}
-10%の商品合計（税込）: ¥${tax10TotalWithTax.toLocaleString()}
-10%の消費税: ¥${tax10Amount.toLocaleString()}
+${window.getActualTaxPercent(10)}%の商品合計（税抜）: ¥${tax10Excluded.toLocaleString()}
+${window.getActualTaxPercent(10)}%の商品合計（税込）: ¥${tax10TotalWithTax.toLocaleString()}
+${window.getActualTaxPercent(10)}%の消費税: ¥${tax10Amount.toLocaleString()}
   内税: ¥${tax10InclusiveTotal.toLocaleString()}
   外税: ¥${tax10ExclusiveTotal.toLocaleString()}
 
@@ -12359,9 +12386,10 @@ ${redSlipCount > 0 ? `
       // 🆕 外税の場合は税込価格を計算（itemTotalは本体価格）
       let displayTotal = itemTotal;
       if (taxType === 'exclusive') {
-        // 外税の場合、itemTotalは本体価格なので税を加算
-        displayTotal = itemTotal + Math.floor(itemTotal * (defaultTaxRate / 100));
-        console.log(`  🆕 外税計算: 本体${itemTotal}円 + 税${Math.floor(itemTotal * (defaultTaxRate / 100))}円 → ${displayTotal}円（税率${defaultTaxRate}%）`);
+        // 外税の場合、itemTotalは本体価格なので税を加算（defaultTaxRateは区分8/10。実際の％に変換して計算）
+        const actualPercent = window.getActualTaxPercent(defaultTaxRate);
+        displayTotal = itemTotal + Math.floor(itemTotal * (actualPercent / 100));
+        console.log(`  🆕 外税計算: 本体${itemTotal}円 + 税${Math.floor(itemTotal * (actualPercent / 100))}円 → ${displayTotal}円（税率${actualPercent}%）`);
       }
       
       const itemDiv = document.createElement('div');
@@ -12411,18 +12439,19 @@ ${redSlipCount > 0 ? `
       radio8.dataset.index = index;
       radio8.style.cssText = 'margin-right: 5px; width: 18px; height: 18px;';
       radio8.onchange = function() {
-        // 🆕 外税の場合は税率変更時に金額を再計算
+        // 🆕 外税の場合は税率変更時に金額を再計算（実際の％を使用）
         if (taxType === 'exclusive') {
-          const newAmount = parseInt(radio8.dataset.baseAmount) + Math.floor(parseInt(radio8.dataset.baseAmount) * 0.08);
+          const actualPercent8 = window.getActualTaxPercent(8);
+          const newAmount = parseInt(radio8.dataset.baseAmount) + Math.floor(parseInt(radio8.dataset.baseAmount) * actualPercent8 / 100);
           radio8.dataset.amount = newAmount;
           radio10.dataset.amount = newAmount;  // 両方のラジオボタンのamountを更新
           document.getElementById('itemPrice' + index).textContent = '¥' + newAmount.toLocaleString();
-          console.log(`  🔄 外税8%に変更: ${radio8.dataset.baseAmount}円 → ${newAmount}円`);
+          console.log(`  🔄 外税${actualPercent8}%に変更: ${radio8.dataset.baseAmount}円 → ${newAmount}円`);
         }
         calculateTaxSummary();
       };
       label8.appendChild(radio8);
-      label8.appendChild(document.createTextNode('8%持ち帰り'));
+      label8.appendChild(document.createTextNode(`${window.getActualTaxPercent(8)}%持ち帰り`));
       
       // 10%ラジオボタン
       const label10 = document.createElement('label');
@@ -12438,18 +12467,19 @@ ${redSlipCount > 0 ? `
       radio10.dataset.index = index;
       radio10.style.cssText = 'margin-right: 5px; width: 18px; height: 18px;';
       radio10.onchange = function() {
-        // 🆕 外税の場合は税率変更時に金額を再計算
+        // 🆕 外税の場合は税率変更時に金額を再計算（実際の％を使用）
         if (taxType === 'exclusive') {
-          const newAmount = parseInt(radio10.dataset.baseAmount) + Math.floor(parseInt(radio10.dataset.baseAmount) * 0.10);
+          const actualPercent10 = window.getActualTaxPercent(10);
+          const newAmount = parseInt(radio10.dataset.baseAmount) + Math.floor(parseInt(radio10.dataset.baseAmount) * actualPercent10 / 100);
           radio10.dataset.amount = newAmount;
           radio8.dataset.amount = newAmount;  // 両方のラジオボタンのamountを更新
           document.getElementById('itemPrice' + index).textContent = '¥' + newAmount.toLocaleString();
-          console.log(`  🔄 外税10%に変更: ${radio10.dataset.baseAmount}円 → ${newAmount}円`);
+          console.log(`  🔄 外税${actualPercent10}%に変更: ${radio10.dataset.baseAmount}円 → ${newAmount}円`);
         }
         calculateTaxSummary();
       };
       label10.appendChild(radio10);
-      label10.appendChild(document.createTextNode('10%店内'));
+      label10.appendChild(document.createTextNode(`${window.getActualTaxPercent(10)}%店内`));
       
       console.log(`    ラジオボタン生成: taxRate${index}, 8%=${radio8.checked}, 10%=${radio10.checked}, amount=${displayTotal}`);
       
@@ -12477,6 +12507,11 @@ ${redSlipCount > 0 ? `
       
       document.getElementById('tax8Summary').textContent = '¥' + tax8Total.toLocaleString();
       document.getElementById('tax10Summary').textContent = '¥' + tax10Total.toLocaleString();
+      // 🆕 ラベルの％表示も実際の設定値に合わせる
+      const tax8LabelEl = document.getElementById('tax8Label');
+      const tax10LabelEl = document.getElementById('tax10Label');
+      if (tax8LabelEl) tax8LabelEl.textContent = `${window.getActualTaxPercent(8)}%対象:`;
+      if (tax10LabelEl) tax10LabelEl.textContent = `${window.getActualTaxPercent(10)}%対象:`;
       
       // 請求額も更新
       updatePaymentTotal();
@@ -17523,6 +17558,7 @@ ${redSlipCount > 0 ? `
                 // iframe以外の初期化処理
                 loadStaffList();
                 loadReceiptSettings();
+                loadTaxRateSettings(); // 🆕 消費税率設定
                 updateInventoryPanel();
                 watchInventoryChanges();
                 
@@ -17615,6 +17651,9 @@ ${redSlipCount > 0 ? `
       
       // 🆕 レシート設定を読み込む
       loadReceiptSettings();
+      
+      // 🆕 消費税率設定を読み込む
+      loadTaxRateSettings();
       
       // 🆕 menu.htmlのiframeに店舗IDを設定
       updateMenuIframe();
