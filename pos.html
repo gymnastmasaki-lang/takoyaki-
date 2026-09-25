@@ -754,7 +754,9 @@
     async function loadTaxRateSettings() {
       try {
         const ref = window.getStoreDoc('tax_rate_settings', 'default');
-        const snap = await window.getDoc(ref);
+        // 🆕 応答が遅い場合でも初期化全体をブロックしないよう、3秒でタイムアウトする
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
+        const snap = await Promise.race([window.getDoc(ref), timeout]);
         if (snap.exists()) {
           window.taxRateSettings = Object.assign({ reducedRatePercent: 8, standardRatePercent: 10 }, snap.data());
           console.log('✅ 消費税率設定を読み込みました:', window.taxRateSettings);
@@ -762,7 +764,7 @@
           console.log('⚠️ 消費税率設定が見つかりません。軽減8% / 標準10%を使用します。');
         }
       } catch (error) {
-        console.error('❌ 消費税率設定の読み込みエラー:', error);
+        console.error('❌ 消費税率設定の読み込みエラー（デフォルト値を使用します）:', error);
       }
     }
     // 🆕 商品の区分(8=軽減税率対象/10=標準税率対象)から、実際に適用する％へ変換する。
@@ -3519,11 +3521,11 @@
         : menuData.filter(item => item.category === categoryFilter);
       
       filteredMenu.forEach(item => {
-        // 🆕 外税の場合は税込価格を計算して表示
+        // 🆕 外税の場合は税込価格を計算して表示（実際の％を使用）
         let displayPrice = item.price;
         if (item.taxType === 'exclusive') {
-          const taxRate = item.taxRate || 10;
-          displayPrice = Math.floor(item.price * (1 + taxRate / 100));
+          const taxRateCategory = item.taxRate || 10;
+          displayPrice = Math.floor(item.price * (1 + window.getActualTaxPercent(taxRateCategory) / 100));
         }
         
         // 🔧 BUG FIX: 品切れ状態(item.outOfStock)が一度も表示に反映されていなかった。
@@ -7506,12 +7508,14 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTa
           if (data.items && Array.isArray(data.items)) {
             data.items.forEach(item => {
               const itemTotal = (item.price || 0) * (item.quantity || 1);
-              const taxRate = item.taxRate || 10;
+              const taxRateCategory = item.taxRate || 10;
               
-              if (taxRate === 8) {
-                receivedTax8 += itemTotal * (8 / 108);
+              if (taxRateCategory === 8) {
+                const p = window.getActualTaxPercent(8);
+                receivedTax8 += itemTotal * (p / (100 + p));
               } else {
-                receivedTax10 += itemTotal * (10 / 110);
+                const p = window.getActualTaxPercent(10);
+                receivedTax10 += itemTotal * (p / (100 + p));
               }
             });
           }
@@ -7540,12 +7544,14 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTa
                 // カテゴリーごとの税率判定
                 if (category === '材料費' || category === '食費' || 
                     category === '接待交際費' || category === '交通費') {
-                  // 8%対象
-                  paidTax8 += amount * (8 / 108);
+                  // 軽減税率対象
+                  const p8 = window.getActualTaxPercent(8);
+                  paidTax8 += amount * (p8 / (100 + p8));
                 } else if (category === '日用品' || category === '雑費・雑品' || 
                            category === '水光熱費' || category === 'その他') {
-                  // 10%対象
-                  paidTax10 += amount * (10 / 110);
+                  // 標準税率対象
+                  const p10 = window.getActualTaxPercent(10);
+                  paidTax10 += amount * (p10 / (100 + p10));
                 }
                 // その他のカテゴリーは消費税対象外
               });
@@ -9258,20 +9264,20 @@ ${redSlipCount > 0 ? `
 -------------------------------------
 赤伝票の税金内訳
 -------------------------------------
-8%の赤伝票（税抜）: -¥${Math.floor(redSlipTax8Total / 1.08).toLocaleString()}
-8%の赤伝票（税込）: -¥${redSlipTax8Total.toLocaleString()}
-8%の赤伝票の消費税: -¥${(redSlipTax8Total - Math.floor(redSlipTax8Total / 1.08)).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100)).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税込）: -¥${redSlipTax8Total.toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${(redSlipTax8Total - Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100))).toLocaleString()}
   内税: -¥${redSlipTax8Inclusive.toLocaleString()}
   外税: -¥${redSlipTax8Exclusive.toLocaleString()}
 
-10%の赤伝票（税抜）: -¥${Math.floor(redSlipTax10Total / 1.10).toLocaleString()}
-10%の赤伝票（税込）: -¥${redSlipTax10Total.toLocaleString()}
-10%の赤伝票の消費税: -¥${(redSlipTax10Total - Math.floor(redSlipTax10Total / 1.10)).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100)).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税込）: -¥${redSlipTax10Total.toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10Total - Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
   内税: -¥${redSlipTax10Inclusive.toLocaleString()}
   外税: -¥${redSlipTax10Exclusive.toLocaleString()}
 
-赤伝票消費税の合計: -¥${((redSlipTax8Total - Math.floor(redSlipTax8Total / 1.08)) + (redSlipTax10Total - Math.floor(redSlipTax10Total / 1.10))).toLocaleString()}
-赤伝票税抜合計: -¥${(Math.floor(redSlipTax8Total / 1.08) + Math.floor(redSlipTax10Total / 1.10)).toLocaleString()}
+赤伝票消費税の合計: -¥${((redSlipTax8Total - Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100))) + (redSlipTax10Total - Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100)))).toLocaleString()}
+赤伝票税抜合計: -¥${(Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100)) + Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
 赤伝票税込合計: -¥${(redSlipTax8Total + redSlipTax10Total).toLocaleString()}
 ` : ''}
 
@@ -10672,8 +10678,8 @@ ${redSlipCount > 0 ? `
         // 🆕 外税の場合は税込価格を計算
         let itemBasePrice = item.price;
         if (item.taxType === 'exclusive') {
-          const taxRate = item.taxRate || 10;
-          itemBasePrice = Math.floor(item.price * (1 + taxRate / 100));
+          const taxRateCategory = item.taxRate || 10;
+          itemBasePrice = Math.floor(item.price * (1 + window.getActualTaxPercent(taxRateCategory) / 100));
         }
         
         const itemWithTopping = itemBasePrice + (item.toppingPrice || 0);
@@ -10904,8 +10910,8 @@ ${redSlipCount > 0 ? `
           let itemPrice = item.price;
           // 🆕 外税の場合は税込価格を計算
           if (item.taxType === 'exclusive') {
-            const taxRate = item.taxRate || 10;
-            itemPrice = Math.floor(item.price * (1 + taxRate / 100));
+            const taxRateCategory = item.taxRate || 10;
+            itemPrice = Math.floor(item.price * (1 + window.getActualTaxPercent(taxRateCategory) / 100));
             console.log(`  外税商品: ${item.name}, 本体${item.price}円 → 税込${itemPrice}円`);
           }
           const itemTotal = (itemPrice + (item.toppingPrice || 0)) * item.quantity;
@@ -11007,8 +11013,8 @@ ${redSlipCount > 0 ? `
           // 🆕 外税の場合は税込価格を計算
           let itemPrice = item.price;
           if (item.taxType === 'exclusive') {
-            const taxRate = item.taxRate || 10;
-            itemPrice = Math.floor(item.price * (1 + taxRate / 100));
+            const taxRateCategory = item.taxRate || 10;
+            itemPrice = Math.floor(item.price * (1 + window.getActualTaxPercent(taxRateCategory) / 100));
           }
           totalAmount += (itemPrice + (item.toppingPrice || 0)) * item.quantity;
         });
@@ -13063,8 +13069,8 @@ ${redSlipCount > 0 ? `
             // 外税対応
             let displayPrice = item.price;
             if (item.taxType === 'exclusive') {
-              const taxRate = item.taxRate || 10;
-              displayPrice = Math.floor(item.price * (1 + taxRate / 100));
+              const taxRateCategory = item.taxRate || 10;
+              displayPrice = Math.floor(item.price * (1 + window.getActualTaxPercent(taxRateCategory) / 100));
             }
             
             const priceInfo = `@${displayPrice} x${item.quantity}`;
@@ -19509,8 +19515,8 @@ ${redSlipCount > 0 ? `
           let itemPrice = item.price || 0;
           // 外税の場合は税込価格を計算
           if (item.taxType === 'exclusive') {
-            const taxRate = item.taxRate || 10;
-            itemPrice = Math.floor(itemPrice * (1 + taxRate / 100));
+            const taxRateCategory = item.taxRate || 10;
+            itemPrice = Math.floor(itemPrice * (1 + window.getActualTaxPercent(taxRateCategory) / 100));
           }
           totalAmount += (itemPrice + (item.toppingPrice || 0)) * (item.quantity || 1);
         });
