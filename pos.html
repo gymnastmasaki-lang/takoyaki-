@@ -752,19 +752,26 @@
     // 🆕 消費税率設定（軽減税率・標準税率の「実際の％」。kanriの「消費税率設定」で編集される）
     window.taxRateSettings = { reducedRatePercent: 8, standardRatePercent: 10 };
     async function loadTaxRateSettings() {
-      try {
-        const ref = window.getStoreDoc('tax_rate_settings', 'default');
-        // 🆕 応答が遅い場合でも初期化全体をブロックしないよう、3秒でタイムアウトする
-        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
-        const snap = await Promise.race([window.getDoc(ref), timeout]);
+      const ref = window.getStoreDoc('tax_rate_settings', 'default');
+      // 🆕 実際の取得は諦めず継続させ、届き次第反映＆再描画する（タイムアウトは初期表示をブロックしないためだけ）
+      const fetchPromise = window.getDoc(ref).then(snap => {
         if (snap.exists()) {
           window.taxRateSettings = Object.assign({ reducedRatePercent: 8, standardRatePercent: 10 }, snap.data());
           console.log('✅ 消費税率設定を読み込みました:', window.taxRateSettings);
+          // 表示済みのメニューがあれば、遅れて届いた場合でも金額表示に反映する
+          if (typeof displayMenuItems === 'function') {
+            try { displayMenuItems(); } catch (e) {}
+          }
         } else {
           console.log('⚠️ 消費税率設定が見つかりません。軽減8% / 標準10%を使用します。');
         }
-      } catch (error) {
+      }).catch(error => {
         console.error('❌ 消費税率設定の読み込みエラー（デフォルト値を使用します）:', error);
+      });
+      const timeout = new Promise((resolve) => setTimeout(() => resolve('timeout'), 3000));
+      const result = await Promise.race([fetchPromise, timeout]);
+      if (result === 'timeout') {
+        console.log('⚠️ 消費税率設定の読み込みが3秒以上かかっています。デフォルト値で初期化を続行し、届き次第反映します。');
       }
     }
     // 🆕 商品の区分(8=軽減税率対象/10=標準税率対象)から、実際に適用する％へ変換する。
@@ -3523,9 +3530,15 @@
       filteredMenu.forEach(item => {
         // 🆕 外税の場合は税込価格を計算して表示（実際の％を使用）
         let displayPrice = item.price;
+        let priceHtml = `<div class="menu-item-price-small">¥${item.price.toLocaleString()}</div>`;
         if (item.taxType === 'exclusive') {
           const taxRateCategory = item.taxRate || 10;
           displayPrice = Math.floor(item.price * (1 + window.getActualTaxPercent(taxRateCategory) / 100));
+          // 🆕 スーパー方式：上に税抜価格、下に税込価格（外税の場合のみ2段表示）
+          priceHtml = `
+            <div style="font-size: 11px; color: #888;">¥${item.price.toLocaleString()}（税抜）</div>
+            <div class="menu-item-price-small">¥${displayPrice.toLocaleString()}（税込）</div>
+          `;
         }
         
         // 🔧 BUG FIX: 品切れ状態(item.outOfStock)が一度も表示に反映されていなかった。
@@ -3538,7 +3551,7 @@
           <input type="checkbox" id="menu-${item.id}" value="${item.id}" style="pointer-events: none;" ${isSoldOut ? 'disabled' : ''}>
           <div class="menu-item-info">
             <div class="menu-item-name-small">${item.name}</div>
-            <div class="menu-item-price-small">¥${displayPrice.toLocaleString()}</div>
+            ${priceHtml}
             ${isSoldOut ? '<div style="color:#f44336; font-weight:bold; font-size:12px;">品切れ</div>' : ''}
           </div>
         `;
