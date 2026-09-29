@@ -1293,24 +1293,70 @@
     console.log('   テーブル:', urlParams.get('table'));
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
+    // ========== 消費税率設定（区分8/10 → 実際の％へ変換） ==========
+    // item.taxRate は「区分」(8=軽減/10=標準)として集計に使われ続けるため値は変更せず、
+    // 計算時のみ getActualTaxPercent() で実際の％へ変換する（pos.htmlと同じ方式）
+    window.taxRateSettings = { reducedRatePercent: 8, standardRatePercent: 10 };
+    window._lastDisplayedMenuItems = null;
+    async function loadTaxRateSettings() {
+      const fetchPromise = (async () => {
+        try {
+          if (window.authReadyPromise) { await window.authReadyPromise; }
+          const snap = await getDoc(window.getStoreDoc('tax_rate_settings', 'default'));
+          if (snap.exists()) {
+            window.taxRateSettings = Object.assign({ reducedRatePercent: 8, standardRatePercent: 10 }, snap.data());
+            console.log('✅ 消費税率設定を読み込みました:', window.taxRateSettings);
+            // 遅れて届いた場合でも表示中のメニューに反映する
+            if (window._lastDisplayedMenuItems && typeof displayMenuItems === 'function') {
+              try { displayMenuItems(window._lastDisplayedMenuItems); } catch (e) {}
+            }
+          } else {
+            console.log('⚠️ 消費税率設定が見つかりません。軽減8% / 標準10%を使用します。');
+          }
+        } catch (error) {
+          console.error('❌ 消費税率設定の読み込みエラー（デフォルト値を使用します）:', error);
+        }
+      })();
+      const timeout = new Promise((resolve) => setTimeout(() => resolve('timeout'), 3000));
+      const result = await Promise.race([fetchPromise, timeout]);
+      if (result === 'timeout') {
+        console.log('⚠️ 消費税率設定の読み込みが3秒以上かかっています。デフォルト値で続行し、届き次第反映します。');
+      }
+    }
+    window.getActualTaxPercent = function(categoryRate) {
+      if (categoryRate === 8) return window.taxRateSettings.reducedRatePercent;
+      return window.taxRateSettings.standardRatePercent;
+    };
+    // ========== 消費税率設定 ここまで ==========
+
     // 外税対応：表示価格を計算（お客様に見せる価格）
     function getDisplayPrice(item) {
       const taxType = item.taxType || 'inclusive';
       if (taxType === 'exclusive') {
-        // 外税の場合：税込価格を計算
-        return Math.floor(item.price * (1 + (item.taxRate || 10) / 100));
+        // 外税の場合：税込価格を計算（実際の％を使用）
+        return Math.floor(item.price * (1 + window.getActualTaxPercent(item.taxRate || 10) / 100));
       }
       return item.price;
+    }
+
+    // 外税の商品のみ「上段:税抜／下段:税込」の2段表示用HTMLを返す（pos.htmlと同仕様）
+    function buildPriceHtml(item, bigStyle) {
+      const st = bigStyle || '';
+      if ((item.taxType || 'inclusive') === 'exclusive') {
+        return `<div style="font-size: 11px; color: #888;">¥${item.price.toLocaleString()}（税抜）</div>` +
+               `<div class="menu-item-price" style="${st}">¥${getDisplayPrice(item).toLocaleString()}（税込）</div>`;
+      }
+      return `<div class="menu-item-price" style="${st}">¥${getDisplayPrice(item).toLocaleString()}</div>`;
     }
     
     // 外税対応：商品の合計金額を計算
     function getItemTotal(item, quantity = 1) {
       const taxType = item.taxType || 'inclusive';
       const basePrice = item.price + (item.toppingPrice || 0);
-      const taxRate = item.taxRate || 10;
+      const taxRate = window.getActualTaxPercent(item.taxRate || 10);
       
       if (taxType === 'exclusive') {
-        // 外税の場合：税込価格を計算
+        // 外税の場合：税込価格を計算（実際の％を使用）
         return Math.floor(basePrice * quantity * (1 + taxRate / 100));
       }
       return basePrice * quantity;
@@ -3049,6 +3095,7 @@
         console.log('   店舗ID:', window.currentStoreId);
         console.log('   テーブル設定:', tableSettings);
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        await loadTaxRateSettings();
         displayMenuItems(filteredItems);
         await loadSoldOutItems();
       } catch (e) {
@@ -3147,6 +3194,7 @@
     function displayMenuItems(items) {
       const list = document.getElementById('menu-list');
       if (!list) return;
+      window._lastDisplayedMenuItems = items;
       
       list.innerHTML = '';
       
@@ -3193,7 +3241,7 @@
           ${imageHtml}
           <div class="menu-item-content">
             <div class="menu-item-name">${item.name}</div>
-            <div class="menu-item-price">¥${getDisplayPrice(item).toLocaleString()}</div>
+            ${buildPriceHtml(item)}
             ${item.note ? `<div class="menu-item-note">${item.note}</div>` : ''}
           </div>
         `;
@@ -3221,7 +3269,7 @@
       
       document.getElementById('item-info').innerHTML = `
         <div class="menu-item-name" style="font-size: 20px;">${item.name}</div>
-        <div class="menu-item-price" style="font-size: 24px; margin-top: 6px;">¥${getDisplayPrice(item).toLocaleString()}</div>
+        ${buildPriceHtml(item, 'font-size: 24px; margin-top: 6px;')}
         <div class="selected-toppings-preview" id="toppings-preview" style="display:none;">
           <div class="selected-toppings-preview-label">✓ 選択中のトッピング</div>
         </div>
@@ -4893,8 +4941,10 @@
       }
       
       // 消費税計算（内税）
-      const tax8Excluded = Math.floor(tax8Total / 1.08);
-      const tax10Excluded = Math.floor(tax10Total / 1.10);
+      const reducedPct = window.getActualTaxPercent(8);
+      const standardPct = window.getActualTaxPercent(10);
+      const tax8Excluded = Math.floor(tax8Total / (1 + reducedPct / 100));
+      const tax10Excluded = Math.floor(tax10Total / (1 + standardPct / 100));
       const tax8Amount = tax8Total - tax8Excluded;
       const tax10Amount = tax10Total - tax10Excluded;
       const totalTax = tax8Amount + tax10Amount;
@@ -4930,11 +4980,11 @@
           
           <div style="text-align: left; font-size: 14px; margin: 15px 0; padding: 10px 0; border-bottom: 1px solid #ddd;">
             ${tax8Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
-              <span>8%対象: ¥${tax8Excluded.toLocaleString()}</span>
+              <span>${reducedPct}%対象: ¥${tax8Excluded.toLocaleString()}</span>
               <span>内税: ¥${tax8Amount.toLocaleString()}</span>
             </div>` : ''}
             ${tax10Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
-              <span>10%対象: ¥${tax10Excluded.toLocaleString()}</span>
+              <span>${standardPct}%対象: ¥${tax10Excluded.toLocaleString()}</span>
               <span>内税: ¥${tax10Amount.toLocaleString()}</span>
             </div>` : ''}
             <div style="display: flex; justify-content: space-between; margin: 5px 0; font-weight: bold;">
@@ -5070,8 +5120,10 @@
       }
       
       // 消費税計算（内税）
-      const tax8Excluded = Math.floor(tax8Total / 1.08);
-      const tax10Excluded = Math.floor(tax10Total / 1.10);
+      const reducedPct = window.getActualTaxPercent(8);
+      const standardPct = window.getActualTaxPercent(10);
+      const tax8Excluded = Math.floor(tax8Total / (1 + reducedPct / 100));
+      const tax10Excluded = Math.floor(tax10Total / (1 + standardPct / 100));
       const tax8Amount = tax8Total - tax8Excluded;
       const tax10Amount = tax10Total - tax10Excluded;
       const totalTax = tax8Amount + tax10Amount;
