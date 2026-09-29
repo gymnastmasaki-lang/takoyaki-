@@ -825,6 +825,10 @@
         <div class="top-waiting-label">ただ今のお待ち人数</div>
         <div class="top-waiting-count"><span id="top-waiting">-</span>組</div>
       </div>
+      <div id="eat-style-bar" style="display:none; text-align:center; font-size:14px; color:#555; margin:6px 0;">
+        <span id="eat-style-label"></span>
+        <a href="javascript:void(0)" onclick="changeEatStyle()" style="color:#2196F3; text-decoration:underline; margin-left:8px;">変更</a>
+      </div>
       <div class="category-filter">
         <label>カテゴリから選ぶ</label>
         <select id="category-select">
@@ -1490,6 +1494,87 @@
     let _cachedGlobalTimeOverride = null; // グローバル時間外解除設定キャッシュ
     
     const tableNumber = urlParams.get('table') || 'テイクアウト';
+
+    // ========== 店内／持ち帰り選択（お客様用・テーブル指定あり） ==========
+    // テーブルQRで開いた場合のみ、最初に「店内／持ち帰り」を選んでもらう。
+    // 選択は同じタブ(セッション)内で保持し、新しいQR読込(新しいタブ)では再度聞く。
+    // 店内=全商品を標準税率 / 持ち帰り=食材は軽減税率（食材以外は標準税率）
+    window.eatStyle = null;            // 'dinein' | 'takeout' | null(選択機能なし)
+    window.needEatStyleChoice = false;
+    window._eatStyleKey = 'eatStyle:' + (urlParams.get('store') || '') + ':' + tableNumber;
+    (function initEatStyle() {
+      if (window.isPOSMode) return;                       // POSモードは対象外
+      if (!urlParams.get('table')) return;                // テイクアウト用URLは従来どおり
+      if (tableNumber === 'テイクアウト' || tableNumber === '即会計') return;
+      let saved = null;
+      try { saved = sessionStorage.getItem(window._eatStyleKey); } catch (e) {}
+      if (saved === 'dinein' || saved === 'takeout') { window.eatStyle = saved; }
+      else { window.needEatStyleChoice = true; }
+    })();
+
+    window.showEatStyleChooser = function() {
+      if (document.getElementById('eat-style-chooser')) return;
+      const ov = document.createElement('div');
+      ov.id = 'eat-style-chooser';
+      ov.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:20000;';
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#fff;border-radius:16px;padding:28px 22px;width:86%;max-width:380px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,0.3);';
+      box.innerHTML = '<div style="font-size:20px;font-weight:bold;color:#333;margin-bottom:8px;">ご利用方法をお選びください</div>' +
+        '<div style="font-size:12px;color:#777;margin-bottom:18px;">ご利用方法により消費税率が異なる場合があります</div>';
+      const mk = (label, val, bg) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.style.cssText = 'display:block;width:100%;padding:18px;margin-bottom:12px;font-size:20px;font-weight:bold;color:#fff;border:none;border-radius:12px;cursor:pointer;background:' + bg + ';';
+        b.onclick = () => {
+          try { sessionStorage.setItem(window._eatStyleKey, val); } catch (e) {}
+          location.reload();
+        };
+        return b;
+      };
+      box.appendChild(mk('🍽️ 店内で食べる', 'dinein', 'linear-gradient(135deg,#4CAF50 0%,#45a049 100%)'));
+      box.appendChild(mk('🥡 持ち帰り', 'takeout', 'linear-gradient(135deg,#FF9800 0%,#F57C00 100%)'));
+      ov.appendChild(box);
+      document.body.appendChild(ov);
+    };
+
+    function updateEatStyleBar() {
+      const bar = document.getElementById('eat-style-bar');
+      const label = document.getElementById('eat-style-label');
+      if (!bar || !label || !window.eatStyle) return;
+      label.textContent = 'ご利用方法：' + (window.eatStyle === 'dinein' ? '🍽️ 店内' : '🥡 持ち帰り');
+      bar.style.display = 'block';
+    }
+
+    // 変更（カートが空のときのみ）。店内飲食のあとに持ち帰りを頼む場合などに使う
+    window.changeEatStyle = function() {
+      if (typeof cart !== 'undefined' && cart.length > 0) {
+        showCustomAlert('カートに商品が入っているため変更できません。\nカートを空にしてから変更してください。');
+        return;
+      }
+      try { sessionStorage.removeItem(window._eatStyleKey); } catch (e) {}
+      location.reload();
+    };
+
+    (function bootEatStyleUi() {
+      const run = () => {
+        updateEatStyleBar();
+        if (window.needEatStyleChoice) {
+          // すでに注文済みで注文番号画面を復元する場合は聞かない（「新しい注文」で聞く）
+          let hasValidStoredOrder = false;
+          try {
+            const raw = localStorage.getItem('currentOrder_' + tableNumber);
+            if (raw) {
+              const od = JSON.parse(raw);
+              hasValidStoredOrder = !(od.savedAt && Date.now() - od.savedAt > 8 * 60 * 60 * 1000);
+            }
+          } catch (e) {}
+          if (!hasValidStoredOrder) window.showEatStyleChooser();
+        }
+      };
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+      else run();
+    })();
+    // ========== 店内／持ち帰り選択 ここまで ==========
 
     // 休業日チェック関数
     async function checkClosedDay() {
@@ -2866,7 +2951,7 @@
         }
         
         // POSモードの時は常に店内として扱う
-        const isEatIn = window.isPOSMode ? true : (tableNumber !== 'テイクアウト');
+        const isEatIn = window.isPOSMode ? true : (window.eatStyle ? window.eatStyle === 'dinein' : (tableNumber !== 'テイクアウト'));
         
         console.log('メニューアイテム数:', menuSnapshot.size);
 
@@ -2962,7 +3047,7 @@
         const menuSnapshot = prefetchedSnapshot || await getDocs(window.getStoreCollection('menus'));
         const items = [];
         // POSモードの時は常に店内として扱う
-        const isEatIn = window.isPOSMode ? true : (tableNumber !== 'テイクアウト');
+        const isEatIn = window.isPOSMode ? true : (window.eatStyle ? window.eatStyle === 'dinein' : (tableNumber !== 'テイクアウト'));
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
@@ -3029,8 +3114,10 @@
             
             // 税率決定: pos.htmlと同じロジック
             // 🔥 改善: テーブル設定が有効（takeout/dine-in）な場合、foodTypeを優先
-            if (tableSettings && tableSettings.taxRule && tableSettings.taxRule !== 'none') {
-              const taxRule = tableSettings.taxRule;
+            // お客様が選んだ「店内／持ち帰り」があれば、テーブル設定より優先する
+            const _eatRule = window.eatStyle === 'dinein' ? 'dine-in' : (window.eatStyle === 'takeout' ? 'takeout' : null);
+            if (_eatRule || (tableSettings && tableSettings.taxRule && tableSettings.taxRule !== 'none')) {
+              const taxRule = _eatRule || tableSettings.taxRule;
               console.log(`  📊 [税率決定] 商品: ${item.name}, foodType: ${item.foodType}, taxRule: ${taxRule}`);
               
               switch(taxRule) {
@@ -4449,7 +4536,7 @@
         const ordersSnapshot = { forEach: () => {} }; // 後続コードとの互換用ダミー
         
         // テイクアウトかどうか判定
-        const isTakeout = (tableNumber === 'テイクアウト');
+        const isTakeout = window.eatStyle ? (window.eatStyle === 'takeout') : (tableNumber === 'テイクアウト');
         
         // 税率別の合計を計算
         let tax8Total = 0;  // 8%対象商品の税込合計
@@ -4520,6 +4607,7 @@
           orderNumber: orderNumber,
           timestamp: Timestamp.fromDate(now),
           tableNumber: tableNumber,
+          eatStyle: window.eatStyle || null,
           items: cart,
           totalAmount: totalAmount,
           bagNeeded: bagNeeded,
@@ -4844,6 +4932,7 @@
           document.getElementById('page-complete').classList.add('hidden');
           
           updateCartButton();
+          if (window.needEatStyleChoice) { window.showEatStyleChooser(); }
           showCustomAlert('新しい注文を開始します！');
         }
       );
