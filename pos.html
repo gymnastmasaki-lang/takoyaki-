@@ -12633,10 +12633,34 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
               
               // 単価を計算（編集された合計金額 / 数量）
               const editedUnitPrice = editedTotalPrice / item.quantity;
+
+              // 🆕 外税の商品は price を必ず「税抜」の単価で保存する。
+              // radio.dataset.amount は「税込」の行合計なので、これをそのまま price に入れると、税込額が
+              // 「税抜」として保存される（taxTypeは外税のまま）。その結果、精算ジャーナルの内税/外税の内訳が
+              // 「税込×税率」で計算されて狂う（例: 880円→1,144円で保存→1,144×30%＝343円。正しくは880×30%＝264円）。
+              // 内税の商品は従来どおり（priceは税込のまま）。
+              let storedBasePrice = editedUnitPrice - (item.toppingPrice || 0);
+              if ((item.taxType || 'inclusive') === 'exclusive') {
+                const pctForSave = window.getActualTaxPercent(taxRate);
+                const lineBase = (radio && radio.dataset.baseAmount !== undefined && radio.dataset.baseAmount !== '')
+                  ? parseFloat(radio.dataset.baseAmount)
+                  : (item.price + (item.toppingPrice || 0)) * item.quantity;
+                const grossFromBase = lineBase + Math.floor(lineBase * pctForSave / 100);
+                if (!radio || Math.abs(editedTotalPrice - grossFromBase) < 1) {
+                  storedBasePrice = item.price; // 金額を手入力で変えていない → 元の税抜単価のまま
+                } else {
+                  // レジで税込金額を手入力で変更した場合 → 税込の行合計から税抜の行合計を逆算する
+                  let b = Math.round(editedTotalPrice / (1 + pctForSave / 100));
+                  for (const c of [b - 1, b, b + 1]) {
+                    if (c + Math.floor(c * pctForSave / 100) === editedTotalPrice) { b = c; break; }
+                  }
+                  storedBasePrice = b / item.quantity - (item.toppingPrice || 0);
+                }
+              }
               
               updatedItems.push({
                 ...item,
-                price: editedUnitPrice - (item.toppingPrice || 0), // トッピング価格を引いた基本価格
+                price: storedBasePrice, // 内税=税込の基本価格 / 外税=税抜の基本価格（上で算出）
                 taxRate: taxRate,
                 takeout: taxRate === 8 // 8%なら持ち帰り、10%なら店内
               });
