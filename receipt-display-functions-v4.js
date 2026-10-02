@@ -232,19 +232,19 @@ async function showReceiptDisplay(receiptData) {
   let totalTax = 0;
   
   if (tax8Total === 0 && tax10Total === 0 && receiptData.total > 0) {
-    const totalExcludingTax = Math.floor(receiptData.total / (1 + window.getActualTaxPercent(10) / 100));
+    const totalExcludingTax = (receiptData.total - Math.floor(receiptData.total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))));
     totalTax = receiptData.total - totalExcludingTax;
     tax10Total = receiptData.total;
   } else {
-    const tax8Excluded = Math.floor(tax8Total / (1 + window.getActualTaxPercent(8) / 100));
-    const tax10Excluded = Math.floor(tax10Total / (1 + window.getActualTaxPercent(10) / 100));
+    const tax8Excluded = (tax8Total - Math.floor(tax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))));
+    const tax10Excluded = (tax10Total - Math.floor(tax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))));
     const tax8Amount = tax8Total - tax8Excluded;
     const tax10Amount = tax10Total - tax10Excluded;
     totalTax = tax8Amount + tax10Amount;
   }
   
-  const tax8Excluded = Math.floor(tax8Total / (1 + window.getActualTaxPercent(8) / 100));
-  const tax10Excluded = Math.floor(tax10Total / (1 + window.getActualTaxPercent(10) / 100));
+  const tax8Excluded = (tax8Total - Math.floor(tax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))));
+  const tax10Excluded = (tax10Total - Math.floor(tax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))));
   const tax8Amount = tax8Total - tax8Excluded;
   const tax10Amount = tax10Total - tax10Excluded;
   
@@ -519,11 +519,11 @@ async function showInvoiceDisplay(invoiceData) {
   let totalTax = 0;
   
   if (tax8Total === 0 && tax10Total === 0 && invoiceData.total > 0) {
-    const totalExcludingTax = Math.floor(invoiceData.total / (1 + window.getActualTaxPercent(10) / 100));
+    const totalExcludingTax = (invoiceData.total - Math.floor(invoiceData.total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))));
     totalTax = invoiceData.total - totalExcludingTax;
   } else {
-    const tax8Excluded = Math.floor(tax8Total / (1 + window.getActualTaxPercent(8) / 100));
-    const tax10Excluded = Math.floor(tax10Total / (1 + window.getActualTaxPercent(10) / 100));
+    const tax8Excluded = (tax8Total - Math.floor(tax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))));
+    const tax10Excluded = (tax10Total - Math.floor(tax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))));
     const tax8Amount = tax8Total - tax8Excluded;
     const tax10Amount = tax10Total - tax10Excluded;
     totalTax = tax8Amount + tax10Amount;

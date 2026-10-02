@@ -242,6 +242,18 @@
     window.deleteDoc = deleteDoc;
     
     // 店舗別コレクション参照を取得するヘルパー関数
+    // 日時を安全にDateへ変換するヘルパー（日時が空(null)の注文や、{seconds,nanoseconds}形式でも例外にしない）
+    window.safeToDate = function(value) {
+      if (!value) return null;
+      if (typeof value.toDate === 'function') return value.toDate();
+      // 古い注文などに残っている {seconds, nanoseconds} 形式の日時にも対応（以前は無効な日付になっていた）
+      if (typeof value === 'object' && typeof value.seconds === 'number') {
+        return new Date(value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1e6));
+      }
+      return new Date(value);
+    };
+    const safeToDate = window.safeToDate;
+
     window.getStoreCollection = function(collectionName) {
       console.log('🔍 POS getStoreCollection:', collectionName, 'currentStoreId:', window.currentStoreId, 'type:', typeof window.currentStoreId);
       if (!window.currentStoreId || window.currentStoreId === '' || window.currentStoreId === null) {
@@ -552,7 +564,7 @@
       if (taxType === 'exclusive') {
         return item.price;
       }
-      return Math.floor(item.price / (1 + window.getActualTaxPercent(item.taxRate || 10) / 100));
+      { const _p = window.getActualTaxPercent(item.taxRate || 10); return item.price - Math.floor(item.price * _p / (100 + _p)); }
     }
     
     /**
@@ -570,8 +582,8 @@
         return Math.floor(basePrice * quantity * taxRate / 100);
       } else {
         const totalWithTax = basePrice * quantity;
-        const totalWithoutTax = Math.floor(totalWithTax / (1 + taxRate / 100));
-        return totalWithTax - totalWithoutTax;
+        // 消費税額を切り捨て（外税の floor(税抜×税率) と同じ端数処理に統一）
+        return Math.floor(totalWithTax * taxRate / (100 + taxRate));
       }
     }
     
@@ -3930,7 +3942,7 @@
       
       let filtered = historyOrders.filter(order => {
         // 日付フィルタ
-        const orderDate = order.timestamp.toDate();
+        const orderDate = safeToDate(order.timestamp);
         
         let dateMatch = true;
         if (dateFilter === 'today') {
@@ -4014,8 +4026,8 @@
         if (order.completedAt) badges.push('<span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">完了</span>');
         if (order.cancelledAt) badges.push('<span style="background: #f44336; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; margin-right: 5px;">キャンセル</span>');
         
-        const orderDate = order.timestamp.toDate();
-        const dateStr = orderDate.toLocaleString('ja-JP');
+        const orderDate = safeToDate(order.timestamp);
+        const dateStr = orderDate ? orderDate.toLocaleString('ja-JP') : '日時不明';
         
         // 支払方法を日本語に変換
         const paymentMethodNames = {
@@ -6629,8 +6641,8 @@
         }
         
         // 旧計算（互換性のため残す）
-        const tax8Excluded = Math.floor(totalTax8 / (1 + window.getActualTaxPercent(8) / 100));
-        const tax10Excluded = Math.floor(totalTax10 / (1 + window.getActualTaxPercent(10) / 100));
+        const tax8Excluded = (totalTax8 - Math.floor(totalTax8 * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))));
+        const tax10Excluded = (totalTax10 - Math.floor(totalTax10 * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))));
         const tax8Amount = totalTax8 - tax8Excluded;
         const tax10Amount = totalTax10 - tax10Excluded;
         const totalTax = tax8Amount + tax10Amount;
@@ -6684,20 +6696,20 @@ ${window.getActualTaxPercent(10)}%合計: ¥${(tax10InclusiveTotal + tax10Exclus
 -------------------------------------
 赤伝票の税金内訳
 -------------------------------------
-${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100)).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${(totalRedSlipTax8 - Math.floor(totalRedSlipTax8 * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8)))).toLocaleString()}
 ${window.getActualTaxPercent(8)}%の赤伝票（税込）: -¥${totalRedSlipTax8.toLocaleString()}
-${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${(totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100))).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${(totalRedSlipTax8 - (totalRedSlipTax8 - Math.floor(totalRedSlipTax8 * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))))).toLocaleString()}
   内税: -¥${totalRedSlipTax8Inclusive.toLocaleString()}
   外税: -¥${totalRedSlipTax8Exclusive.toLocaleString()}
 
-${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100)).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${(totalRedSlipTax10 - Math.floor(totalRedSlipTax10 * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))).toLocaleString()}
 ${window.getActualTaxPercent(10)}%の赤伝票（税込）: -¥${totalRedSlipTax10.toLocaleString()}
-${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTax10 - (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))))).toLocaleString()}
   内税: -¥${totalRedSlipTax10Inclusive.toLocaleString()}
   外税: -¥${totalRedSlipTax10Exclusive.toLocaleString()}
 
-赤伝票消費税の合計: -¥${((totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100))) + (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100)))).toLocaleString()}
-赤伝票税抜合計: -¥${(Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100)) + Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
+赤伝票消費税の合計: -¥${((totalRedSlipTax8 - (totalRedSlipTax8 - Math.floor(totalRedSlipTax8 * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))))) + (totalRedSlipTax10 - (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))))).toLocaleString()}
+赤伝票税抜合計: -¥${((totalRedSlipTax8 - Math.floor(totalRedSlipTax8 * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8)))) + (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))))).toLocaleString()}
 赤伝票税込合計: -¥${(totalRedSlipTax8 + totalRedSlipTax10).toLocaleString()}
 
 -------------------------------------
@@ -8980,8 +8992,8 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTa
         const tax10TotalWithTax = settlementData.tax10Total || 0; // 10%商品合計（税込）
         
         // 税抜価格を計算（内税なので税込価格から逆算）
-        const tax8Excluded = Math.floor(tax8TotalWithTax / (1 + window.getActualTaxPercent(8) / 100));  // 8%商品合計（税抜）
-        const tax10Excluded = Math.floor(tax10TotalWithTax / (1 + window.getActualTaxPercent(10) / 100)); // 10%商品合計（税抜）
+        const tax8Excluded = (tax8TotalWithTax - Math.floor(tax8TotalWithTax * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))));  // 8%商品合計（税抜）
+        const tax10Excluded = (tax10TotalWithTax - Math.floor(tax10TotalWithTax * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))); // 10%商品合計（税抜）
         
         // 消費税額を計算
         const tax8Amount = tax8TotalWithTax - tax8Excluded;  // 8%の消費税
@@ -9277,20 +9289,20 @@ ${redSlipCount > 0 ? `
 -------------------------------------
 赤伝票の税金内訳
 -------------------------------------
-${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100)).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${(redSlipTax8Total - Math.floor(redSlipTax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8)))).toLocaleString()}
 ${window.getActualTaxPercent(8)}%の赤伝票（税込）: -¥${redSlipTax8Total.toLocaleString()}
-${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${(redSlipTax8Total - Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100))).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${(redSlipTax8Total - (redSlipTax8Total - Math.floor(redSlipTax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))))).toLocaleString()}
   内税: -¥${redSlipTax8Inclusive.toLocaleString()}
   外税: -¥${redSlipTax8Exclusive.toLocaleString()}
 
-${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100)).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${(redSlipTax10Total - Math.floor(redSlipTax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))).toLocaleString()}
 ${window.getActualTaxPercent(10)}%の赤伝票（税込）: -¥${redSlipTax10Total.toLocaleString()}
-${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10Total - Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10Total - (redSlipTax10Total - Math.floor(redSlipTax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))))).toLocaleString()}
   内税: -¥${redSlipTax10Inclusive.toLocaleString()}
   外税: -¥${redSlipTax10Exclusive.toLocaleString()}
 
-赤伝票消費税の合計: -¥${((redSlipTax8Total - Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100))) + (redSlipTax10Total - Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100)))).toLocaleString()}
-赤伝票税抜合計: -¥${(Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100)) + Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
+赤伝票消費税の合計: -¥${((redSlipTax8Total - (redSlipTax8Total - Math.floor(redSlipTax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))))) + (redSlipTax10Total - (redSlipTax10Total - Math.floor(redSlipTax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))))).toLocaleString()}
+赤伝票税抜合計: -¥${((redSlipTax8Total - Math.floor(redSlipTax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8)))) + (redSlipTax10Total - Math.floor(redSlipTax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))))).toLocaleString()}
 赤伝票税込合計: -¥${(redSlipTax8Total + redSlipTax10Total).toLocaleString()}
 ` : ''}
 
