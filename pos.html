@@ -564,7 +564,18 @@
       if (taxType === 'exclusive') {
         return item.price;
       }
-      { const _p = window.getActualTaxPercent(item.taxRate || 10); return item.price - Math.floor(item.price * _p / (100 + _p)); }
+      { const _p = (typeof item.taxPercent === 'number') ? item.taxPercent : window.getActualTaxPercent(item.taxRate || 10); return item.price - Math.floor(item.price * _p / (100 + _p)); }
+    }
+    
+    /**
+     * 会計済み注文の商品の「税込の行合計」（トッピング込）
+     * 会計時に確定した lineTotalWithTax があればそれを使う。無い場合は（修正前に会計された古い注文＝priceが
+     * 税込のまま保存されている）(price+トッピング)×数量 をそのまま税込として扱う。
+     * ※ 外税商品の price は会計後も「税抜」で保存されるため、price×数量を税込として使ってはいけない。
+     */
+    function getPaidLineGross(item) {
+      if (typeof item.lineTotalWithTax === 'number') return item.lineTotalWithTax;
+      return (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
     }
     
     /**
@@ -576,7 +587,7 @@
       
       // 🆕 テーブル設定に基づいて適用税率(区分)を決定 → 実際の％に変換
       const taxRateCategory = getApplicableTaxRate(item, currentTableSettings);
-      const taxRate = window.getActualTaxPercent(taxRateCategory);
+      const taxRate = (typeof item.taxPercent === 'number') ? item.taxPercent : window.getActualTaxPercent(taxRateCategory); // 会計済みなら会計時の税率
       
       if (taxType === 'exclusive') {
         return Math.floor(basePrice * quantity * taxRate / 100);
@@ -596,7 +607,7 @@
       
       // 🆕 テーブル設定に基づいて適用税率(区分)を決定 → 実際の％に変換
       const taxRateCategory = getApplicableTaxRate(item, currentTableSettings);
-      const taxRate = window.getActualTaxPercent(taxRateCategory);
+      const taxRate = (typeof item.taxPercent === 'number') ? item.taxPercent : window.getActualTaxPercent(taxRateCategory); // 会計済みなら会計時の税率
       
       if (taxType === 'exclusive') {
         return Math.floor(basePrice * quantity * (1 + taxRate / 100));
@@ -1826,6 +1837,24 @@
       text-align: center;
     }
     
+
+    /* 🆕 会計モーダル: 左=支払い操作 / 右=各商品の税率選択（大きく表示）の2列レイアウト */
+    #paymentModal .modal { max-width: 1040px; width: 94%; }
+    #paymentModal .payment-modal-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 24px; align-items: start; }
+    #paymentModal .payment-modal-left { order: 1; }
+    #paymentModal .payment-modal-right { order: 2; }
+    #paymentModal #taxRateSection { max-height: none !important; overflow-y: visible !important; margin-bottom: 0 !important; padding: 20px !important; }
+    #paymentModal #taxRateSection h4 { font-size: 20px !important; }
+    #taxRateItemsList > div { padding: 16px !important; margin-bottom: 12px !important; }
+    #taxRateItemsList > div > div:first-child { font-size: 18px !important; }
+    #taxRateItemsList label { font-size: 18px !important; padding: 14px 12px !important; }
+    #taxRateItemsList input[type="radio"] { width: 24px !important; height: 24px !important; }
+    #paymentModal #taxRateSection > div:last-child { font-size: 18px !important; }
+    @media (max-width: 760px) { /* 画面が狭い場合は従来どおり縦に並べる */
+      #paymentModal .payment-modal-body { grid-template-columns: 1fr; }
+      #paymentModal .payment-modal-right { order: 0; }
+      #paymentModal .modal { max-width: 500px; }
+    }
     .payment-methods {
       display: grid;
       gap: 15px;
@@ -2815,6 +2844,8 @@
   <div id="paymentModal" class="modal-overlay hidden">
     <div class="modal">
       <h3>支払い方法を選択</h3>
+      <div class="payment-modal-body">
+      <div class="payment-modal-right">
       <div id="taxRateSection" style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 10px; border-left: 4px solid #4CAF50; max-height: 200px; overflow-y: auto;">
         <h4 style="margin: 0 0 15px 0; color: #2e7d32; font-size: 16px;">各商品の税率を選択</h4>
         <div id="taxRateItemsList"></div>
@@ -2830,6 +2861,8 @@
         </div>
       </div>
       
+      </div><!-- /payment-modal-right -->
+      <div class="payment-modal-left">
       <!-- 🆕 サービス告知エリア -->
       <div id="serviceNoticeArea" style="display:none; margin-bottom:18px; padding:15px; background:linear-gradient(135deg,#fff8e1,#fff3cd); border-radius:12px; border-left:5px solid #FF9800; border:2px solid #FFB74D;">
         <div style="font-size:13px; font-weight:bold; color:#E65100; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
@@ -2867,6 +2900,8 @@
       
       <button class="btn btn-primary" onclick="completePayment()" id="completePaymentBtn" disabled>会計完了</button>
       <button class="btn btn-secondary" onclick="closePaymentModal()">キャンセル</button>
+      </div><!-- /payment-modal-left -->
+      </div><!-- /payment-modal-body -->
     </div>
   </div>
   <!-- 🚫 この静的モーダルは使用しない（動的モーダルを使用） -->
@@ -4040,7 +4075,7 @@
         let itemsHtml = '';
         order.items.forEach(item => {
           itemsHtml += `<div style="padding: 5px 0; border-bottom: 1px solid #eee;">
-            ${item.name} ×${item.quantity} - ¥${((item.price + (item.toppingPrice || 0)) * item.quantity).toLocaleString()}
+            ${item.name} ×${item.quantity} - ¥${getPaidLineGross(item).toLocaleString()}
           </div>`;
         });
         
@@ -4367,7 +4402,7 @@
         
         let total = 0;
         orderData.items.forEach(item => {
-          const subtotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+          const subtotal = getPaidLineGross(item);
           total += subtotal;
           
           const itemName = item.name.length > 16 ? item.name.substring(0, 15) + '…' : item.name;
@@ -4706,7 +4741,7 @@
           let tax10Total = 0;
           
           currentEditingOrder.items.forEach(item => {
-            const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+            const itemTotal = getPaidLineGross(item);
             total += itemTotal;
             
             // 税率別集計
@@ -5382,7 +5417,7 @@
         
         if (orderData.items && Array.isArray(orderData.items)) {
           orderData.items.forEach((item, index) => {
-            const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+            const itemTotal = getPaidLineGross(item);
             // 会計時に記録された税率を使用
             let itemTaxRate = item.taxRate;
             
@@ -5450,6 +5485,18 @@
         });
         
         // dailySalesから減算 + 赤伝票情報を記録
+        // 🆕 赤伝票の内税・外税の消費税額も記録（精算ジャーナルの「赤伝票の税金内訳」用。以前は保存されず常に0だった）
+        let rsInc8 = 0, rsInc10 = 0, rsExc8 = 0, rsExc10 = 0;
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            const t = getTaxAmount(item, item.quantity || 1);
+            const isEx = (item.taxType || 'inclusive') === 'exclusive';
+            const is8 = (item.taxRate || (item.takeout ? 8 : 10)) === 8;
+            if (is8) { if (isEx) rsExc8 += t; else rsInc8 += t; }
+            else { if (isEx) rsExc10 += t; else rsInc10 += t; }
+          });
+        }
+        
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
           customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
@@ -5462,7 +5509,11 @@
           redSlipCount: (dailyData.redSlipCount || 0) + 1,  // 🆕 赤伝票件数
           redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount,  // 🆕 赤伝票金額
           redSlipTax8Total: (dailyData.redSlipTax8Total || 0) + tax8Total,  // 🆕 赤伝票8%税金
-          redSlipTax10Total: (dailyData.redSlipTax10Total || 0) + tax10Total  // 🆕 赤伝票10%税金
+          redSlipTax10Total: (dailyData.redSlipTax10Total || 0) + tax10Total,  // 🆕 赤伝票10%税金
+          redSlipTax8Inclusive: (dailyData.redSlipTax8Inclusive || 0) + rsInc8,    // 🆕 赤伝票の内税(8%区分)の消費税額
+          redSlipTax10Inclusive: (dailyData.redSlipTax10Inclusive || 0) + rsInc10, // 🆕 赤伝票の内税(10%区分)の消費税額
+          redSlipTax8Exclusive: (dailyData.redSlipTax8Exclusive || 0) + rsExc8,    // 🆕 赤伝票の外税(8%区分)の消費税額
+          redSlipTax10Exclusive: (dailyData.redSlipTax10Exclusive || 0) + rsExc10  // 🆕 赤伝票の外税(10%区分)の消費税額
         };
         
         console.log('📊 dailySales更新:', {
@@ -5908,6 +5959,18 @@
         });
         
         // dailySalesから減算 + 赤伝票情報を記録
+        // 🆕 赤伝票の内税・外税の消費税額も記録（精算ジャーナルの「赤伝票の税金内訳」用。以前は保存されず常に0だった）
+        let rsInc8 = 0, rsInc10 = 0, rsExc8 = 0, rsExc10 = 0;
+        if (orderData.items && Array.isArray(orderData.items)) {
+          orderData.items.forEach(item => {
+            const t = getTaxAmount(item, item.quantity || 1);
+            const isEx = (item.taxType || 'inclusive') === 'exclusive';
+            const is8 = (item.taxRate || (item.takeout ? 8 : 10)) === 8;
+            if (is8) { if (isEx) rsExc8 += t; else rsInc8 += t; }
+            else { if (isEx) rsExc10 += t; else rsInc10 += t; }
+          });
+        }
+        
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
           customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
@@ -5920,7 +5983,11 @@
           redSlipCount: (dailyData.redSlipCount || 0) + 1,  // 🆕 赤伝票件数
           redSlipAmount: (dailyData.redSlipAmount || 0) + totalAmount,  // 🆕 赤伝票金額
           redSlipTax8Total: (dailyData.redSlipTax8Total || 0) + tax8Total,  // 🆕 赤伝票8%税金
-          redSlipTax10Total: (dailyData.redSlipTax10Total || 0) + tax10Total  // 🆕 赤伝票10%税金
+          redSlipTax10Total: (dailyData.redSlipTax10Total || 0) + tax10Total,  // 🆕 赤伝票10%税金
+          redSlipTax8Inclusive: (dailyData.redSlipTax8Inclusive || 0) + rsInc8,    // 🆕 赤伝票の内税(8%区分)の消費税額
+          redSlipTax10Inclusive: (dailyData.redSlipTax10Inclusive || 0) + rsInc10, // 🆕 赤伝票の内税(10%区分)の消費税額
+          redSlipTax8Exclusive: (dailyData.redSlipTax8Exclusive || 0) + rsExc8,    // 🆕 赤伝票の外税(8%区分)の消費税額
+          redSlipTax10Exclusive: (dailyData.redSlipTax10Exclusive || 0) + rsExc10  // 🆕 赤伝票の外税(10%区分)の消費税額
         };
         
         console.log('📊 dailySales更新:', {
@@ -12673,6 +12740,8 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
               updatedItems.push({
                 ...item,
                 price: storedBasePrice, // 内税=税込の基本価格 / 外税=税抜の基本価格（上で算出）
+                lineTotalWithTax: editedTotalPrice, // 会計時に確定した税込の行合計（トッピング込）。会計後の集計・赤伝票・履歴はこれを使う
+                taxPercent: window.getActualTaxPercent(taxRate), // 会計時に実際に適用した税率(%)。後で税率設定を変えても会計済み注文の税額が変わらないよう保存
                 taxRate: taxRate,
                 takeout: taxRate === 8 // 8%なら持ち帰り、10%なら店内
               });
