@@ -578,6 +578,56 @@
       return (item.price + (item.toppingPrice || 0)) * (item.quantity || 1);
     }
     
+    // ===== 🆕 案B: 会計（注文）ごとの消費税額 =====
+    // 税込の合計から日ごとに逆算するのをやめ、会計のたびに「注文ごとの消費税額」を確定して保存する。
+    //  - 外税: 会計時に加算した税額（税込−税抜）をそのまま使う
+    //  - 内税: 税率区分ごとの税込合計から、注文ごとに1回だけ切り捨てで逆算する
+    // 日次売上にはこの合計を持たせ、精算ジャーナルは保存値を読むだけにする（見出しと内訳が必ず一致する）。
+    function newTaxAccumulator() {
+      return { gross8: 0, gross10: 0, inc8Gross: 0, inc10Gross: 0, ex8Tax: 0, ex10Tax: 0 };
+    }
+    // category: 税率区分(8=軽減/10=標準), taxType: 'inclusive'|'exclusive', gross: 税込の行金額, lineNet: 外税のときの税抜の行合計
+    function addToTaxAccumulator(acc, category, taxType, gross, lineNet) {
+      const c = (category === 8) ? 8 : 10;
+      if (taxType === 'exclusive') acc['ex' + c + 'Tax'] += Math.max(0, gross - lineNet);
+      else acc['inc' + c + 'Gross'] += gross;
+      acc['gross' + c] += gross;
+    }
+    function finalizeTaxBreakdown(acc) {
+      const p8 = window.getActualTaxPercent(8), p10 = window.getActualTaxPercent(10);
+      return {
+        v: 2,
+        gross8: acc.gross8, gross10: acc.gross10,
+        tax8Inclusive: Math.floor(acc.inc8Gross * p8 / (100 + p8)), tax8Exclusive: acc.ex8Tax,
+        tax10Inclusive: Math.floor(acc.inc10Gross * p10 / (100 + p10)), tax10Exclusive: acc.ex10Tax
+      };
+    }
+    // 注文の税額内訳を取得。会計時に保存された taxBreakdown があればそれを使う。
+    // 無い古い注文は、全商品を内税として税込から逆算して推定する（古い外税注文はpriceが税込のため）。
+    function getOrderTaxBreakdown(order) {
+      if (order && order.taxBreakdown && order.taxBreakdown.v === 2) return order.taxBreakdown;
+      const acc = newTaxAccumulator();
+      const items = (order && Array.isArray(order.items)) ? order.items : [];
+      items.forEach(item => {
+        const cat = ((item.taxRate || (item.takeout ? 8 : 10)) === 8) ? 8 : 10;
+        addToTaxAccumulator(acc, cat, 'inclusive', getPaidLineGross(item), 0);
+      });
+      if (order && order.bagNeeded && order.bagQuantity > 0) {
+        addToTaxAccumulator(acc, 10, 'inclusive', order.bagPrice || (order.bagQuantity * 3), 0);
+      }
+      return finalizeTaxBreakdown(acc);
+    }
+    // 日次売上の税額フィールド（案B）を、内訳 b を sign=+1(加算)/-1(減算) して返す。0未満にはしない
+    function taxV2Fields(dailyData, b, sign) {
+      const f = (k, v) => Math.max(0, (dailyData[k] || 0) + sign * v);
+      return {
+        tax8TaxInclusive: f('tax8TaxInclusive', b.tax8Inclusive),
+        tax8TaxExclusive: f('tax8TaxExclusive', b.tax8Exclusive),
+        tax10TaxInclusive: f('tax10TaxInclusive', b.tax10Inclusive),
+        tax10TaxExclusive: f('tax10TaxExclusive', b.tax10Exclusive)
+      };
+    }
+    
     /**
      * 商品の税額を計算
      */
@@ -5174,8 +5224,9 @@
             
             // 注文金額と税金を取得
             const totalAmount = currentEditingOrder.totalAmount || 0;
-            const tax8Total = currentEditingOrder.tax8Total || 0;
-            const tax10Total = currentEditingOrder.tax10Total || 0;
+            const delTaxBreakdown = getOrderTaxBreakdown(currentEditingOrder); // 🆕 案B
+            const tax8Total = (currentEditingOrder.taxBreakdown && currentEditingOrder.taxBreakdown.v === 2) ? currentEditingOrder.taxBreakdown.gross8 : (currentEditingOrder.tax8Total || 0);
+            const tax10Total = (currentEditingOrder.taxBreakdown && currentEditingOrder.taxBreakdown.v === 2) ? currentEditingOrder.taxBreakdown.gross10 : (currentEditingOrder.tax10Total || 0);
             
             // 支払い方法別の金額
             let cashSales = 0, emoneSales = 0, creditSales = 0;
@@ -5200,7 +5251,8 @@
               emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
               creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
               tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
-              tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
+              tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total),
+              ...(dailyData.taxMethodVersion === 2 ? taxV2Fields(dailyData, delTaxBreakdown, -1) : {}) // 🆕 案B
             };
             
             console.log('📊 dailySales更新:', {
@@ -5486,16 +5538,9 @@
         
         // dailySalesから減算 + 赤伝票情報を記録
         // 🆕 赤伝票の内税・外税の消費税額も記録（精算ジャーナルの「赤伝票の税金内訳」用。以前は保存されず常に0だった）
-        let rsInc8 = 0, rsInc10 = 0, rsExc8 = 0, rsExc10 = 0;
-        if (orderData.items && Array.isArray(orderData.items)) {
-          orderData.items.forEach(item => {
-            const t = getTaxAmount(item, item.quantity || 1);
-            const isEx = (item.taxType || 'inclusive') === 'exclusive';
-            const is8 = (item.taxRate || (item.takeout ? 8 : 10)) === 8;
-            if (is8) { if (isEx) rsExc8 += t; else rsInc8 += t; }
-            else { if (isEx) rsExc10 += t; else rsInc10 += t; }
-          });
-        }
+        const rsBreakdown = getOrderTaxBreakdown(orderData); // 🆕 案B: 会計時に保存した内訳（無い古い注文は推定）
+        const rsInc8 = rsBreakdown.tax8Inclusive, rsInc10 = rsBreakdown.tax10Inclusive;
+        const rsExc8 = rsBreakdown.tax8Exclusive, rsExc10 = rsBreakdown.tax10Exclusive;
         
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
@@ -5513,7 +5558,8 @@
           redSlipTax8Inclusive: (dailyData.redSlipTax8Inclusive || 0) + rsInc8,    // 🆕 赤伝票の内税(8%区分)の消費税額
           redSlipTax10Inclusive: (dailyData.redSlipTax10Inclusive || 0) + rsInc10, // 🆕 赤伝票の内税(10%区分)の消費税額
           redSlipTax8Exclusive: (dailyData.redSlipTax8Exclusive || 0) + rsExc8,    // 🆕 赤伝票の外税(8%区分)の消費税額
-          redSlipTax10Exclusive: (dailyData.redSlipTax10Exclusive || 0) + rsExc10  // 🆕 赤伝票の外税(10%区分)の消費税額
+          redSlipTax10Exclusive: (dailyData.redSlipTax10Exclusive || 0) + rsExc10,  // 🆕 赤伝票の外税(10%区分)の消費税額
+          ...(dailyData.taxMethodVersion === 2 ? taxV2Fields(dailyData, rsBreakdown, -1) : {}) // 🆕 案B: 売上側の税額から同じ内訳を引く
         };
         
         console.log('📊 dailySales更新:', {
@@ -5706,8 +5752,9 @@
             
             // 注文金額と税金を取得
             const totalAmount = orderData.totalAmount || 0;
-            const tax8Total = orderData.tax8Total || 0;
-            const tax10Total = orderData.tax10Total || 0;
+            const delTaxBreakdown = getOrderTaxBreakdown(orderData); // 🆕 案B
+            const tax8Total = (orderData.taxBreakdown && orderData.taxBreakdown.v === 2) ? orderData.taxBreakdown.gross8 : (orderData.tax8Total || 0);
+            const tax10Total = (orderData.taxBreakdown && orderData.taxBreakdown.v === 2) ? orderData.taxBreakdown.gross10 : (orderData.tax10Total || 0);
             
             // 支払い方法別の金額（日本語と英語の両方に対応）
             let cashSales = 0, emoneSales = 0, creditSales = 0;
@@ -5738,7 +5785,8 @@
               emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
               creditSales: Math.max(0, (dailyData.creditSales || 0) - creditSales),
               tax8Total: Math.max(0, (dailyData.tax8Total || 0) - tax8Total),
-              tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total)
+              tax10Total: Math.max(0, (dailyData.tax10Total || 0) - tax10Total),
+              ...(dailyData.taxMethodVersion === 2 ? taxV2Fields(dailyData, delTaxBreakdown, -1) : {}) // 🆕 案B
             };
             
             console.log('📊 dailySales更新:', {
@@ -5960,16 +6008,9 @@
         
         // dailySalesから減算 + 赤伝票情報を記録
         // 🆕 赤伝票の内税・外税の消費税額も記録（精算ジャーナルの「赤伝票の税金内訳」用。以前は保存されず常に0だった）
-        let rsInc8 = 0, rsInc10 = 0, rsExc8 = 0, rsExc10 = 0;
-        if (orderData.items && Array.isArray(orderData.items)) {
-          orderData.items.forEach(item => {
-            const t = getTaxAmount(item, item.quantity || 1);
-            const isEx = (item.taxType || 'inclusive') === 'exclusive';
-            const is8 = (item.taxRate || (item.takeout ? 8 : 10)) === 8;
-            if (is8) { if (isEx) rsExc8 += t; else rsInc8 += t; }
-            else { if (isEx) rsExc10 += t; else rsInc10 += t; }
-          });
-        }
+        const rsBreakdown = getOrderTaxBreakdown(orderData); // 🆕 案B: 会計時に保存した内訳（無い古い注文は推定）
+        const rsInc8 = rsBreakdown.tax8Inclusive, rsInc10 = rsBreakdown.tax10Inclusive;
+        const rsExc8 = rsBreakdown.tax8Exclusive, rsExc10 = rsBreakdown.tax10Exclusive;
         
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
@@ -5987,7 +6028,8 @@
           redSlipTax8Inclusive: (dailyData.redSlipTax8Inclusive || 0) + rsInc8,    // 🆕 赤伝票の内税(8%区分)の消費税額
           redSlipTax10Inclusive: (dailyData.redSlipTax10Inclusive || 0) + rsInc10, // 🆕 赤伝票の内税(10%区分)の消費税額
           redSlipTax8Exclusive: (dailyData.redSlipTax8Exclusive || 0) + rsExc8,    // 🆕 赤伝票の外税(8%区分)の消費税額
-          redSlipTax10Exclusive: (dailyData.redSlipTax10Exclusive || 0) + rsExc10  // 🆕 赤伝票の外税(10%区分)の消費税額
+          redSlipTax10Exclusive: (dailyData.redSlipTax10Exclusive || 0) + rsExc10,  // 🆕 赤伝票の外税(10%区分)の消費税額
+          ...(dailyData.taxMethodVersion === 2 ? taxV2Fields(dailyData, rsBreakdown, -1) : {}) // 🆕 案B: 売上側の税額から同じ内訳を引く
         };
         
         console.log('📊 dailySales更新:', {
@@ -9053,22 +9095,23 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTa
         const emoneSales = settlementData.emoneSales || 0;
         const creditSales = settlementData.creditSales || 0;
         const discountTotal = settlementData.totalDiscount || 0;
+        const taxV2Day = settlementData.taxMethodVersion === 2; // 🆕 案B: 注文ごとの消費税額で集計された日
         
         // ===== 税金内訳（内税） =====
         const tax8TotalWithTax = settlementData.tax8Total || 0;  // 8%商品合計（税込）
         const tax10TotalWithTax = settlementData.tax10Total || 0; // 10%商品合計（税込）
         
         // 税抜価格を計算（内税なので税込価格から逆算）
-        const tax8Excluded = (tax8TotalWithTax - Math.floor(tax8TotalWithTax * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))));  // 8%商品合計（税抜）
-        const tax10Excluded = (tax10TotalWithTax - Math.floor(tax10TotalWithTax * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))); // 10%商品合計（税抜）
+        let tax8Excluded = (tax8TotalWithTax - Math.floor(tax8TotalWithTax * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))));  // 8%商品合計（税抜）
+        let tax10Excluded = (tax10TotalWithTax - Math.floor(tax10TotalWithTax * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))); // 10%商品合計（税抜）
         
         // 消費税額を計算
-        const tax8Amount = tax8TotalWithTax - tax8Excluded;  // 8%の消費税
-        const tax10Amount = tax10TotalWithTax - tax10Excluded; // 10%の消費税
+        let tax8Amount = tax8TotalWithTax - tax8Excluded;  // 8%の消費税
+        let tax10Amount = tax10TotalWithTax - tax10Excluded; // 10%の消費税
         
         // 合計
-        const totalTax = tax8Amount + tax10Amount;  // 消費税の合計
-        const taxExcludedTotal = tax8Excluded + tax10Excluded;  // 税抜合計
+        let totalTax = tax8Amount + tax10Amount;  // 消費税の合計
+        let taxExcludedTotal = tax8Excluded + tax10Excluded;  // 税抜合計
         const taxIncludedTotal = tax8TotalWithTax + tax10TotalWithTax;  // 税込合計（8%と10%の合計）
         
         // 🆕 内税・外税の内訳を注文データから集計
@@ -9092,7 +9135,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTa
             window.getStoreCollection('orders'),
             window.where('paidAt', '!=', null)
           );
-          const ordersSnapshot = await window.getDocs(ordersQuery);
+          const ordersSnapshot = taxV2Day ? { forEach: () => {} } : await window.getDocs(ordersQuery); // 🆕 案Bの日は不要
           
           ordersSnapshot.forEach(doc => {
             const data = doc.data();
@@ -9172,6 +9215,21 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTa
           console.error('内税・外税集計エラー:', e);
         }
         
+        // 🆕 案B: 会計（注文）ごとに保存した消費税額の合計を使う。見出しと内訳(内税+外税)が必ず一致し、
+        // あとから税率設定を変えても、赤伝票があっても動かない。
+        if (taxV2Day) {
+          tax8InclusiveTotal = settlementData.tax8TaxInclusive || 0;
+          tax8ExclusiveTotal = settlementData.tax8TaxExclusive || 0;
+          tax10InclusiveTotal = settlementData.tax10TaxInclusive || 0;
+          tax10ExclusiveTotal = settlementData.tax10TaxExclusive || 0;
+          tax8Amount = tax8InclusiveTotal + tax8ExclusiveTotal;
+          tax10Amount = tax10InclusiveTotal + tax10ExclusiveTotal;
+          tax8Excluded = tax8TotalWithTax - tax8Amount;
+          tax10Excluded = tax10TotalWithTax - tax10Amount;
+          totalTax = tax8Amount + tax10Amount;
+          taxExcludedTotal = tax8Excluded + tax10Excluded;
+        }
+        
         // ===== ドロアオープン数 =====
         const drawerOpenCount = settlementData.drawerOpenCount || 0;
         console.log('🔓 精算時のdrawerOpenCount:', drawerOpenCount);
@@ -9182,6 +9240,13 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTa
         const redSlipAmount = settlementData.redSlipAmount || 0;
         const redSlipTax8Total = settlementData.redSlipTax8Total || 0;
         const redSlipTax10Total = settlementData.redSlipTax10Total || 0;
+        // 🆕 案B: 赤伝票の消費税額。保存された内税・外税の合計を使う（内訳が未保存の古い赤伝票だけ、税込から逆算）
+        const rsStored = !needCalculateRedSlip;
+        const _rp8 = window.getActualTaxPercent(8), _rp10 = window.getActualTaxPercent(10);
+        const rsTax8Amount = rsStored ? (redSlipTax8Inclusive + redSlipTax8Exclusive) : Math.floor(redSlipTax8Total * _rp8 / (100 + _rp8));
+        const rsTax10Amount = rsStored ? (redSlipTax10Inclusive + redSlipTax10Exclusive) : Math.floor(redSlipTax10Total * _rp10 / (100 + _rp10));
+        const rsTax8Net = redSlipTax8Total - rsTax8Amount;
+        const rsTax10Net = redSlipTax10Total - rsTax10Amount;
         console.log('🔴 赤伝票件数:', redSlipCount);
         console.log('🔴 赤伝票金額:', redSlipAmount);
         console.log('🔴 赤伝票8%税金:', redSlipTax8Total);
@@ -9356,20 +9421,20 @@ ${redSlipCount > 0 ? `
 -------------------------------------
 赤伝票の税金内訳
 -------------------------------------
-${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${(redSlipTax8Total - Math.floor(redSlipTax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8)))).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${rsTax8Net.toLocaleString()}
 ${window.getActualTaxPercent(8)}%の赤伝票（税込）: -¥${redSlipTax8Total.toLocaleString()}
-${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${(redSlipTax8Total - (redSlipTax8Total - Math.floor(redSlipTax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))))).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${rsTax8Amount.toLocaleString()}
   内税: -¥${redSlipTax8Inclusive.toLocaleString()}
   外税: -¥${redSlipTax8Exclusive.toLocaleString()}
 
-${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${(redSlipTax10Total - Math.floor(redSlipTax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${rsTax10Net.toLocaleString()}
 ${window.getActualTaxPercent(10)}%の赤伝票（税込）: -¥${redSlipTax10Total.toLocaleString()}
-${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10Total - (redSlipTax10Total - Math.floor(redSlipTax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))))).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.toLocaleString()}
   内税: -¥${redSlipTax10Inclusive.toLocaleString()}
   外税: -¥${redSlipTax10Exclusive.toLocaleString()}
 
-赤伝票消費税の合計: -¥${((redSlipTax8Total - (redSlipTax8Total - Math.floor(redSlipTax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))))) + (redSlipTax10Total - (redSlipTax10Total - Math.floor(redSlipTax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))))).toLocaleString()}
-赤伝票税抜合計: -¥${((redSlipTax8Total - Math.floor(redSlipTax8Total * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8)))) + (redSlipTax10Total - Math.floor(redSlipTax10Total * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))))).toLocaleString()}
+赤伝票消費税の合計: -¥${(rsTax8Amount + rsTax10Amount).toLocaleString()}
+赤伝票税抜合計: -¥${(rsTax8Net + rsTax10Net).toLocaleString()}
 赤伝票税込合計: -¥${(redSlipTax8Total + redSlipTax10Total).toLocaleString()}
 ` : ''}
 
@@ -12698,10 +12763,15 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
         console.log('💳 即会計モード判定:', isDirectPayment);
         
         // 全ての注文に支払い済みフラグと担当者を設定
+        // 🆕 案B: ラジオの通し番号（モーダルは全注文の商品を通し番号で作るため、注文をまたいで引き継ぐ）と、会計全体の税額合計
+        let radioOffset = 0;
+        const paymentTaxSum = { tax8Inclusive: 0, tax8Exclusive: 0, tax10Inclusive: 0, tax10Exclusive: 0 };
         for (const order of currentOrders) {
           // 📝 編集された金額とtaxRateを注文データに反映
-          let orderItemIndex = 0;
+          const orderStartIndex = radioOffset;
+          let orderItemIndex = radioOffset;
           const updatedItems = [];
+          const taxAcc = newTaxAccumulator(); // 🆕 この注文の税込・税額の集計
           
           if (order.items && Array.isArray(order.items) && order.items.length > 0) {
             // 各商品の編集された金額とtaxRateを取得
@@ -12737,6 +12807,12 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
                 }
               }
               
+              // 🆕 案B: この商品の税込・税額を注文ごとの集計へ（外税=加算した税額 / 内税=税込）
+              
+              addToTaxAccumulator(taxAcc, taxRate, item.taxType || 'inclusive', editedTotalPrice,
+              
+                (storedBasePrice + (item.toppingPrice || 0)) * item.quantity);
+              
               updatedItems.push({
                 ...item,
                 price: storedBasePrice, // 内税=税込の基本価格 / 外税=税抜の基本価格（上で算出）
@@ -12754,7 +12830,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
           let editedTotalAmount = 0;
           if (order.items && Array.isArray(order.items) && order.items.length > 0) {
             updatedItems.forEach((item, idx) => {
-              const radio = document.querySelector(`input[name="taxRate${idx}"]:checked`);
+              const radio = document.querySelector(`input[name="taxRate${orderStartIndex + idx}"]:checked`);
               const editedPrice = radio ? parseFloat(radio.dataset.amount) : ((item.price + (item.toppingPrice || 0)) * item.quantity);
               editedTotalAmount += editedPrice;
             });
@@ -12764,12 +12840,25 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
               const bagRadio = document.querySelector(`input[name="taxRate${orderItemIndex}"]:checked`);
               const bagPrice = bagRadio ? parseFloat(bagRadio.dataset.amount) : (order.bagQuantity * 3);
               editedTotalAmount += bagPrice;
+              addToTaxAccumulator(taxAcc, (bagRadio && parseInt(bagRadio.value) === 8) ? 8 : 10, 'inclusive', bagPrice, 0); // 🆕 レジ袋は内税
             }
           } else {
             // itemsがない場合は注文全体の編集額を使用
-            const radio = document.querySelector(`input[name="taxRate0"]:checked`);
+            const radio = document.querySelector(`input[name="taxRate${orderStartIndex}"]:checked`);
             editedTotalAmount = radio ? parseFloat(radio.dataset.amount) : (order.totalAmount || 0);
+            addToTaxAccumulator(taxAcc, (radio && parseInt(radio.value) === 8) ? 8 : 10, 'inclusive', editedTotalAmount, 0); // 🆕
           }
+          
+          // 🆕 案B: この注文の消費税額を確定し、注文に保存する（赤伝票・削除で同じ値をそのまま引き算できる）
+          const taxBreakdown = finalizeTaxBreakdown(taxAcc);
+          paymentTaxSum.tax8Inclusive += taxBreakdown.tax8Inclusive;
+          paymentTaxSum.tax8Exclusive += taxBreakdown.tax8Exclusive;
+          paymentTaxSum.tax10Inclusive += taxBreakdown.tax10Inclusive;
+          paymentTaxSum.tax10Exclusive += taxBreakdown.tax10Exclusive;
+          // 次の注文のラジオ番号（モーダルは「商品→（あれば）レジ袋」の順、itemsなしの注文は1つ）
+          radioOffset = (order.items && Array.isArray(order.items) && order.items.length > 0)
+            ? orderItemIndex + ((order.bagNeeded && order.bagQuantity > 0) ? 1 : 0)
+            : orderStartIndex + 1;
           
           await window.updateDoc(window.getStoreDoc('orders', order.id), {
             paidAt: now,
@@ -12777,7 +12866,8 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
             paymentMethod: selectedPaymentMethod,
             staffName: staffName,  // 担当者名を追加
             items: updatedItems.length > 0 ? updatedItems : order.items, // 編集された商品情報を保存
-            totalAmount: editedTotalAmount // 編集された合計金額を保存
+            totalAmount: editedTotalAmount, // 編集された合計金額を保存
+            taxBreakdown: taxBreakdown // 🆕 案B: この注文の消費税額（税率区分別・内税/外税別）
           });
         }
         
@@ -12881,7 +12971,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
         // 🆕 修正: 即会計・通常会計に関わらず、会計時に商品点数もカウント
         const itemCountToRecord = itemCount;
         console.log(`売上記録する商品点数: ${itemCountToRecord}点 (即会計: ${isDirectPayment})`);
-        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCountToRecord, tax8Total, tax10Total, discountAmount, 1, allItems);
+        await updateDailySales(totalAmountToPay, selectedPaymentMethod, itemCountToRecord, tax8Total, tax10Total, discountAmount, 1, allItems, paymentTaxSum);
         
         // 商品リストを税率情報付きで作成
         const itemsWithTaxRate = [];
@@ -13587,7 +13677,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
     };
     
     // 日次売上更新関数
-    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0, customerCountIncrement = 0, items = []) {
+    window.updateDailySales = async function(totalAmount, paymentMethod, itemCount, tax8Total, tax10Total, discountAmount = 0, customerCountIncrement = 0, items = [], taxBreakdownSum = null) {
       try {
         // 🆕 選択された営業日を使用（選択されていない場合は本日）
         const dateStr = window.getBusinessDateString();
@@ -13651,6 +13741,19 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
             updates.creditSales += totalAmount;
           }
           
+          // 🆕 案B: 注文ごとの消費税額を加算。この日の売上がまだ無い（または既に案Bの日）ときだけ記録する。
+          // すでに従来方式で売上がある日に途中から混ぜると合計が半端になるため、その日は従来方式のままにする。
+          if (taxBreakdownSum) {
+            const noSalesYet = (data.totalSales || 0) === 0 && (data.tax8Total || 0) === 0 && (data.tax10Total || 0) === 0 && !(data.redSlipCount > 0);
+            if (data.taxMethodVersion === 2 || noSalesYet) {
+              updates.taxMethodVersion = 2;
+              Object.assign(updates, taxV2Fields(data, {
+                tax8Inclusive: taxBreakdownSum.tax8Inclusive, tax8Exclusive: taxBreakdownSum.tax8Exclusive,
+                tax10Inclusive: taxBreakdownSum.tax10Inclusive, tax10Exclusive: taxBreakdownSum.tax10Exclusive
+              }, 1));
+            }
+          }
+          
           await updateDoc(salesRef, updates);
           console.log('✅ 既存売上データ更新:', updates);
           
@@ -13679,6 +13782,13 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10To
             updatedAt: Timestamp.now()
           };
           
+          if (taxBreakdownSum) {
+            newData.taxMethodVersion = 2; // 🆕 案B: 注文ごとの消費税額で集計する日
+            newData.tax8TaxInclusive = taxBreakdownSum.tax8Inclusive;
+            newData.tax8TaxExclusive = taxBreakdownSum.tax8Exclusive;
+            newData.tax10TaxInclusive = taxBreakdownSum.tax10Inclusive;
+            newData.tax10TaxExclusive = taxBreakdownSum.tax10Exclusive;
+          }
           await setDoc(salesRef, newData);
           console.log('✅ 新規売上データ作成:', newData);
         }
