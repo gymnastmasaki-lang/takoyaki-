@@ -4767,7 +4767,7 @@
       
       const item = currentEditingOrder.items[index];
       const itemName = item.name || '商品';
-      const itemPrice = (item.price + (item.toppingPrice || 0)) * item.quantity;
+      const itemPrice = getPaidLineGross(item); // 🆕 会計済みは税込の行合計
       
       // 🎨 オシャレな確認ダイアログを表示
       const confirmed = await showCustomConfirm({
@@ -4834,12 +4834,24 @@
       if (!currentEditingOrder) return;
       
       const quantity = parseInt(newQuantity) || 1;
-      currentEditingOrder.items[index].quantity = quantity;
+      const editedItem = currentEditingOrder.items[index];
+      editedItem.quantity = quantity;
+      // 🆕 会計済みの商品は、税込の行合計(lineTotalWithTax)も数量に合わせて更新する
+      // （外税=税抜の行合計＋税額 / 内税=税込の行合計）。更新しないと古い数量の金額のままになる
+      if (typeof editedItem.lineTotalWithTax === 'number') {
+        const net = (editedItem.price + (editedItem.toppingPrice || 0)) * quantity;
+        if ((editedItem.taxType || 'inclusive') === 'exclusive') {
+          const pct = (typeof editedItem.taxPercent === 'number') ? editedItem.taxPercent : window.getActualTaxPercent(editedItem.taxRate || 10);
+          editedItem.lineTotalWithTax = net + Math.floor(net * pct / 100);
+        } else {
+          editedItem.lineTotalWithTax = net;
+        }
+      }
       
-      // 合計金額を再計算
+      // 合計金額を再計算（会計済みは税込の行合計、未会計は従来どおり price×数量）
       let total = 0;
       currentEditingOrder.items.forEach(item => {
-        total += (item.price + (item.toppingPrice || 0)) * item.quantity;
+        total += getPaidLineGross(item);
       });
       currentEditingOrder.totalAmount = total;
       
@@ -5513,6 +5525,12 @@
           });
         }
         
+        // 🆕 案B: 会計時に保存した税込（税率区分別）があれば最優先（会計時に区分を変えた場合も、外税の税込も正しい）
+        if (orderData.taxBreakdown && orderData.taxBreakdown.v === 2) {
+          tax8Total = orderData.taxBreakdown.gross8;
+          tax10Total = orderData.taxBreakdown.gross10;
+        }
+        
         // 支払い方法別の金額
         let cashSales = 0, emoneSales = 0, creditSales = 0;
         const paymentMethod = orderData.paymentMethod || '';
@@ -5956,7 +5974,7 @@
           console.log('⚠️ 税金情報がないため、itemsから再計算します');
           
           orderData.items.forEach(item => {
-            const itemTotal = (item.price + (item.toppingPrice || 0)) * item.quantity;
+            const itemTotal = getPaidLineGross(item); // 🆕 会計済みは税込の行合計（外税のpriceは税抜）
             const taxRate = item.taxRate || 10; // デフォルトは10%
             
             if (taxRate === 8) {
@@ -5978,6 +5996,12 @@
             '8%対象': tax8Total,
             '10%対象': tax10Total
           });
+        }
+        
+        // 🆕 案B: 会計時に保存した税込（税率区分別）があれば最優先（会計時に区分を変えた場合も、外税の税込も正しい）
+        if (orderData.taxBreakdown && orderData.taxBreakdown.v === 2) {
+          tax8Total = orderData.taxBreakdown.gross8;
+          tax10Total = orderData.taxBreakdown.gross10;
         }
         
         // 支払い方法別の金額
@@ -9414,6 +9438,7 @@ ${window.getActualTaxPercent(10)}%の消費税: ¥${tax10Amount.toLocaleString()
 消費税の合計: ¥${totalTax.toLocaleString()}
 税抜合計: ¥${taxExcludedTotal.toLocaleString()}
 税込合計: ¥${taxIncludedTotal.toLocaleString()}
+（税額の集計方式: ${taxV2Day ? '注文ごと' : '従来（日の合計から逆算）'}）
 
 支出: ¥${expenseTotal.toLocaleString()}
 合計売上: ¥${(taxIncludedTotal - expenseTotal).toLocaleString()}
