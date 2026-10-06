@@ -1888,11 +1888,14 @@
     }
     
 
+    /* 🆕 テーブル詳細の注文一覧は、右下に固定表示される在庫パネルの高さぶん余白を足し、最下段のボタン（編集など）を隠さない */
+    #detailOrdersList { padding-bottom: 260px; }
     /* 🆕 会計モーダル: 左=支払い操作 / 右=各商品の税率選択（大きく表示）の2列レイアウト */
     #paymentModal .modal { max-width: 1040px; width: 94%; }
-    #paymentModal .payment-modal-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 24px; align-items: start; }
-    #paymentModal .payment-modal-left { order: 1; }
-    #paymentModal .payment-modal-right { order: 2; }
+    #paymentModal .payment-modal-body { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+    /* 左=各商品の税率選択（right クラス） / 右=支払い操作（left クラス）。※クラス名は旧レイアウトのまま */
+    #paymentModal .payment-modal-right { order: 1; }
+    #paymentModal .payment-modal-left { order: 2; }
     #paymentModal #taxRateSection { max-height: none !important; overflow-y: visible !important; margin-bottom: 0 !important; padding: 20px !important; }
     #paymentModal #taxRateSection h4 { font-size: 20px !important; }
     #taxRateItemsList > div { padding: 16px !important; margin-bottom: 12px !important; }
@@ -1903,6 +1906,7 @@
     @media (max-width: 760px) { /* 画面が狭い場合は従来どおり縦に並べる */
       #paymentModal .payment-modal-body { grid-template-columns: 1fr; }
       #paymentModal .payment-modal-right { order: 0; }
+      #paymentModal .payment-modal-left { order: 1; }
       #paymentModal .modal { max-width: 500px; }
     }
     .payment-methods {
@@ -4759,6 +4763,25 @@
     window.closeEditOrderModal = function() {
       document.getElementById('editOrderModal').classList.add('hidden');
       currentEditingOrder = null;
+      // 🆕 テーブル詳細の「この注文を編集」から開いた場合は、閉じたとき（保存・取消・キャンセルのどれでも）に注文一覧を更新する
+      if (window._editReturnToTable) {
+        window._editReturnToTable = false;
+        if (typeof loadTableOrders === 'function' && typeof currentSelectedTableId !== 'undefined' && currentSelectedTableId) {
+          loadTableOrders(currentSelectedTableId);
+        }
+      }
+    };
+
+    // 🆕 テーブル詳細の注文カードから編集画面を開く（お客様が「やっぱり…」と言ったときの注文変更用）
+    window.editOrderFromTable = async function(orderId) {
+      window._editReturnToTable = true;
+      try {
+        await window.editOrder(orderId);
+      } finally {
+        // 編集画面が開かなかった（注文が見つからない等）場合は、フラグを戻す
+        const m = document.getElementById('editOrderModal');
+        if (!m || m.classList.contains('hidden')) window._editReturnToTable = false;
+      }
     };
     
     // 商品を注文から削除
@@ -19582,6 +19605,9 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
                 <button id="deleteBtn_${order.id}" onclick="deleteOrderFromNewUI('${order.id}')" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; ${order.status === 'completed' || order.status === 'cancelled' ? '' : 'display: none;'}">
                   削除
                 </button>
+                <button id="editBtn_${order.id}" onclick="editOrderFromTable('${order.id}')" style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer;">
+                  この注文を編集
+                </button>
               </div>
             </div>
           `;
@@ -20215,7 +20241,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
   </div>
   
   <!-- リアルタイム在庫パネル -->
-  <div id="inventoryPanel" style="position: fixed; bottom: 80px; right: 20px; width: 300px; max-height: 350px; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 9999; overflow: hidden; transition: all 0.3s ease;">
+  <div id="inventoryPanel" style="position: fixed; bottom: 80px; right: 20px; width: 300px; max-height: 350px; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 9000; overflow: hidden; transition: all 0.3s ease;">
     <div id="inventoryPanelBar" onclick="toggleInventoryPanel()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 12px 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background 0.3s ease;">
       <div style="font-weight: bold; color: white; font-size: 15px;">在庫状況</div>
       <div id="inventoryPanelArrow" style="color: white; font-size: 18px;">▼</div>
