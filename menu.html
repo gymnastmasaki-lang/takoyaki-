@@ -1365,7 +1365,7 @@
         // ※持ち帰り/店内は会計時に決まるため。％が同じ場合・食材以外・包材は従来の2段表示
         const reducedPct = window.getActualTaxPercent(8);
         const standardPct = window.getActualTaxPercent(10);
-        if (window.isPOSMode && item.foodType !== 'non-food' && item.category !== '包材' && reducedPct !== standardPct) {
+        if (window.isPOSMode && !window.eatStyle && item.foodType !== 'non-food' && item.category !== '包材' && reducedPct !== standardPct) {
           const takeoutPrice = Math.floor(item.price * (1 + reducedPct / 100));
           const dineInPrice = Math.floor(item.price * (1 + standardPct / 100));
           return `<div style="font-size: 11px; color: #888;">¥${item.price.toLocaleString()}（税抜）</div>` +
@@ -1517,7 +1517,15 @@
     window.needEatStyleChoice = false;
     window._eatStyleKey = 'eatStyle:' + (urlParams.get('store') || '') + ':' + tableNumber;
     (function initEatStyle() {
-      if (window.isPOSMode) return;                       // POSモードは対象外
+      if (window.isPOSMode) {
+        // 🆕 POSモード: 店内/持ち帰りを選ぶ。選択はこのタブ内で保持（メニューを開き直しても聞かない。「変更」で切替）
+        window._eatStyleKey = 'eatStyle:pos';
+        let savedPos = null;
+        try { savedPos = sessionStorage.getItem(window._eatStyleKey); } catch (e) {}
+        if (savedPos === 'dinein' || savedPos === 'takeout') { window.eatStyle = savedPos; }
+        else { window.needEatStyleChoice = true; }
+        return;
+      }
       if (!urlParams.get('table')) return;                // テイクアウト用URLは従来どおり
       if (tableNumber === 'テイクアウト' || tableNumber === '即会計') return;
       let saved = null;
@@ -1581,7 +1589,7 @@
               hasValidStoredOrder = !(od.savedAt && Date.now() - od.savedAt > 8 * 60 * 60 * 1000);
             }
           } catch (e) {}
-          if (!hasValidStoredOrder) window.showEatStyleChooser();
+          if (window.isPOSMode || !hasValidStoredOrder) window.showEatStyleChooser();
         }
       };
       if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
@@ -2964,7 +2972,7 @@
         }
         
         // POSモードの時は常に店内として扱う
-        const isEatIn = window.isPOSMode ? true : (window.eatStyle ? window.eatStyle === 'dinein' : (tableNumber !== 'テイクアウト'));
+        const isEatIn = window.isPOSMode ? (window.eatStyle ? window.eatStyle === 'dinein' : true) : (window.eatStyle ? window.eatStyle === 'dinein' : (tableNumber !== 'テイクアウト'));
         
         console.log('メニューアイテム数:', menuSnapshot.size);
 
@@ -3060,7 +3068,7 @@
         const menuSnapshot = prefetchedSnapshot || await getDocs(window.getStoreCollection('menus'));
         const items = [];
         // POSモードの時は常に店内として扱う
-        const isEatIn = window.isPOSMode ? true : (window.eatStyle ? window.eatStyle === 'dinein' : (tableNumber !== 'テイクアウト'));
+        const isEatIn = window.isPOSMode ? (window.eatStyle ? window.eatStyle === 'dinein' : true) : (window.eatStyle ? window.eatStyle === 'dinein' : (tableNumber !== 'テイクアウト'));
         
         menuSnapshot.forEach(doc => {
           const data = doc.data();
@@ -3800,6 +3808,7 @@
         toppings: toppingNames, // 表示用（後方互換性）
         toppingsData: toppingsData, // 🆕 構造化データ
         toppingPrice: toppingPrice,
+        eatStyle: window.eatStyle || null, // 🆕 店内/持ち帰り
         quantity: qty
       };
       

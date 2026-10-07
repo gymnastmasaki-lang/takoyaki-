@@ -287,6 +287,8 @@ async function showReceiptDisplay(receiptData) {
     const _row = (label, value, bold) => `<div style="display: flex; justify-content: space-between; margin: 5px 0;${bold ? ' font-weight: bold;' : ''}"><span>${label}</span><span>¥${value.toLocaleString()}</span></div>`;
     let _html = '';
     let _sumTax = 0;
+    let _nRows = 0; // 消費税の行数（1行だけなら「消費税合計」は重複するので出さない）
+    const _anyInc = _taxAcc[8].inc > 0 || _taxAcc[10].inc > 0;
     [[8, window.getActualTaxPercent(8)], [10, window.getActualTaxPercent(10)]].forEach(([c, p]) => {
       const a = _taxAcc[c];
       if (a.ex <= 0 && a.inc <= 0) return;
@@ -295,15 +297,17 @@ async function showReceiptDisplay(receiptData) {
       _html += `<div style="margin: 8px 0 2px 0; font-size: 12px; color: #666;">${p}%対象</div>`;
       if (a.ex > 0) {
         _html += _row('本体価格:', a.ex - taxEx);
-        _html += _row('消費税（外税）:', taxEx);
+        _html += _row(_anyInc ? '消費税（外税）:' : '消費税:', taxEx);
+        _nRows++;
       }
       if (a.inc > 0) {
         _html += _row('対象額（内税）:', a.inc - taxInc);
         _html += _row('消費税（内税）:', taxInc);
+        _nRows++;
       }
       _sumTax += taxEx + taxInc;
     });
-    _html += _row('消費税合計:', _sumTax, true);
+    if (_nRows > 1) _html += _row('消費税合計:', _sumTax, true);
     taxInnerHtml = _html;
   }
 
@@ -569,6 +573,11 @@ async function showInvoiceDisplay(invoiceData) {
     const tax8Amount = tax8Total - tax8Excluded;
     const tax10Amount = tax10Total - tax10Excluded;
     totalTax = tax8Amount + tax10Amount;
+  }
+  // 会計時に確定して保存した消費税額（案B）があればそれを使う（外税でも内税でも同じ値になる）
+  if (invoiceData.taxSum) {
+    const _t = invoiceData.taxSum;
+    totalTax = (_t.tax8Inclusive || 0) + (_t.tax8Exclusive || 0) + (_t.tax10Inclusive || 0) + (_t.tax10Exclusive || 0);
   }
   
   // 電子印鑑HTML（修正版：店舗名の横に配置、flexboxで確実に並べる）
