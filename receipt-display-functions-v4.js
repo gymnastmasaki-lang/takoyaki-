@@ -95,6 +95,8 @@ async function showReceiptDisplay(receiptData) {
   console.log('🔢 注文番号:', orderNum);
   
   // 商品リストHTML生成（基本価格とトッピングを縦に個別表示し、最後に合計を表示）
+  // 外税商品がある場合に「本体価格・消費税・合計」を出すための集計（税率区分ごと）
+  const _taxAcc = { 8: { ex: 0, exNet: 0, inc: 0 }, 10: { ex: 0, exNet: 0, inc: 0 } };
   let itemsHtml = '';
   if (receiptData.items && Array.isArray(receiptData.items) && receiptData.items.length > 0) {
     receiptData.items.forEach(item => {
@@ -126,6 +128,15 @@ async function showReceiptDisplay(receiptData) {
       
       // 合計金額を計算（基本価格 + トッピング価格）× 数量
       const itemTotal = (basePricePerUnit + toppingTotalPrice) * item.quantity;
+      {
+        const _c = ((item.taxRate || 10) === 8) ? 8 : 10;
+        if (item.taxType === 'exclusive' && typeof item.lineTotalWithTax === 'number') {
+          _taxAcc[_c].ex += item.lineTotalWithTax;   // 税込の行合計
+          _taxAcc[_c].exNet += itemTotal;            // 税抜の行合計
+        } else {
+          _taxAcc[_c].inc += (typeof item.lineTotalWithTax === 'number') ? item.lineTotalWithTax : itemTotal;
+        }
+      }
       
       itemsHtml += `
         <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
@@ -196,7 +207,7 @@ async function showReceiptDisplay(receiptData) {
       // 合計金額を表示
       itemsHtml += `
         <div style="font-size: 14px; font-weight: bold; margin-top: 8px; padding-top: 6px; border-top: 1px solid #eee; display: flex; justify-content: space-between;">
-          <span>合計</span>
+          <span>${item.taxType === 'exclusive' ? '小計（税抜）' : '合計'}</span>
           <span>¥${itemTotal.toLocaleString()}</span>
         </div>
       `;
@@ -213,6 +224,7 @@ async function showReceiptDisplay(receiptData) {
   
   if (receiptData.bagNeeded && receiptData.bagQuantity > 0) {
     const bagPrice = receiptData.bagPrice || 0;
+    _taxAcc[10].inc += bagPrice;
     console.log('✅ レジ袋を表示します - 枚数:', receiptData.bagQuantity, '価格:', bagPrice);
     itemsHtml += `
       <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
@@ -248,6 +260,53 @@ async function showReceiptDisplay(receiptData) {
   const tax8Amount = tax8Total - tax8Excluded;
   const tax10Amount = tax10Total - tax10Excluded;
   
+  // 外税商品を含む場合は「本体価格 / 消費税 / 合計」で表示（内税のみの会計は従来表示）
+  const legacyTaxInner = `
+        ${tax8Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
+          <span>${window.getActualTaxPercent(8)}%対象額:</span>
+          <span>¥${tax8Excluded.toLocaleString()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+          <span>内税: ¥${tax8Amount.toLocaleString()}</span>
+        </div>` : ''}
+        ${tax10Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
+          <span>${window.getActualTaxPercent(10)}%対象額:</span>
+          <span>¥${tax10Excluded.toLocaleString()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
+          <span>内税: ¥${tax10Amount.toLocaleString()}</span>
+        </div>` : ''}
+        <div style="display: flex; justify-content: space-between; margin: 5px 0; font-weight: bold;">
+          <span>消費税合計:</span>
+          <span>¥${totalTax.toLocaleString()}</span>
+        </div>
+`;
+  let taxInnerHtml = legacyTaxInner;
+  if (_taxAcc[8].ex > 0 || _taxAcc[10].ex > 0) {
+    const _ts = receiptData.taxSum || null; // 会計時に確定して保存した税額（案B）。無ければ商品から計算
+    const _row = (label, value, bold) => `<div style="display: flex; justify-content: space-between; margin: 5px 0;${bold ? ' font-weight: bold;' : ''}"><span>${label}</span><span>¥${value.toLocaleString()}</span></div>`;
+    let _html = '';
+    let _sumTax = 0;
+    [[8, window.getActualTaxPercent(8)], [10, window.getActualTaxPercent(10)]].forEach(([c, p]) => {
+      const a = _taxAcc[c];
+      if (a.ex <= 0 && a.inc <= 0) return;
+      const taxEx = _ts ? (_ts['tax' + c + 'Exclusive'] || 0) : Math.max(0, a.ex - a.exNet);
+      const taxInc = _ts ? (_ts['tax' + c + 'Inclusive'] || 0) : Math.floor(a.inc * p / (100 + p));
+      _html += `<div style="margin: 8px 0 2px 0; font-size: 12px; color: #666;">${p}%対象</div>`;
+      if (a.ex > 0) {
+        _html += _row('本体価格:', a.ex - taxEx);
+        _html += _row('消費税（外税）:', taxEx);
+      }
+      if (a.inc > 0) {
+        _html += _row('対象額（内税）:', a.inc - taxInc);
+        _html += _row('消費税（内税）:', taxInc);
+      }
+      _sumTax += taxEx + taxInc;
+    });
+    _html += _row('消費税合計:', _sumTax, true);
+    taxInnerHtml = _html;
+  }
+
   const receiptHtml = `
     <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 15px; max-width: 400px; margin: 0 auto; border: 2px solid #333; background: white;">
       <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px;">
@@ -268,24 +327,7 @@ async function showReceiptDisplay(receiptData) {
       </div>
       
       <div style="border-top: 2px solid #000; padding-top: 15px; margin-top: 20px; font-size: 13px;">
-        ${tax8Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>${window.getActualTaxPercent(8)}%対象額:</span>
-          <span>¥${tax8Excluded.toLocaleString()}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>内税: ¥${tax8Amount.toLocaleString()}</span>
-        </div>` : ''}
-        ${tax10Total > 0 ? `<div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>${window.getActualTaxPercent(10)}%対象額:</span>
-          <span>¥${tax10Excluded.toLocaleString()}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span>内税: ¥${tax10Amount.toLocaleString()}</span>
-        </div>` : ''}
-        <div style="display: flex; justify-content: space-between; margin: 5px 0; font-weight: bold;">
-          <span>消費税合計:</span>
-          <span>¥${totalTax.toLocaleString()}</span>
-        </div>
+        ${taxInnerHtml}
       </div>
       
       <div style="text-align: right; font-size: 24px; font-weight: bold; margin: 20px 0;">
