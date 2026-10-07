@@ -5582,6 +5582,7 @@
         const rsBreakdown = getOrderTaxBreakdown(orderData); // 🆕 案B: 会計時に保存した内訳（無い古い注文は推定）
         const rsInc8 = rsBreakdown.tax8Inclusive, rsInc10 = rsBreakdown.tax10Inclusive;
         const rsExc8 = rsBreakdown.tax8Exclusive, rsExc10 = rsBreakdown.tax10Exclusive;
+        console.log('🧾 赤伝票の税内訳を保存:', { inc8: rsInc8, exc8: rsExc8, inc10: rsInc10, exc10: rsExc10, 案Bの日: dailyData.taxMethodVersion === 2 });
         
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
@@ -6058,6 +6059,7 @@
         const rsBreakdown = getOrderTaxBreakdown(orderData); // 🆕 案B: 会計時に保存した内訳（無い古い注文は推定）
         const rsInc8 = rsBreakdown.tax8Inclusive, rsInc10 = rsBreakdown.tax10Inclusive;
         const rsExc8 = rsBreakdown.tax8Exclusive, rsExc10 = rsBreakdown.tax10Exclusive;
+        console.log('🧾 赤伝票の税内訳を保存:', { inc8: rsInc8, exc8: rsExc8, inc10: rsInc10, exc10: rsExc10, 案Bの日: dailyData.taxMethodVersion === 2 });
         
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
@@ -9292,6 +9294,9 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTa
         const _rp8 = window.getActualTaxPercent(8), _rp10 = window.getActualTaxPercent(10);
         const rsTax8Amount = rsStored ? (redSlipTax8Inclusive + redSlipTax8Exclusive) : Math.floor(redSlipTax8Total * _rp8 / (100 + _rp8));
         const rsTax10Amount = rsStored ? (redSlipTax10Inclusive + redSlipTax10Exclusive) : Math.floor(redSlipTax10Total * _rp10 / (100 + _rp10));
+        // 🆕 赤伝票の内訳(内税・外税)が保存されていない古いデータは、0円ではなく「内訳未保存」と表示する
+        const rsBreakdownUnknown = !rsStored && (redSlipTax8Inclusive + redSlipTax8Exclusive + redSlipTax10Inclusive + redSlipTax10Exclusive === 0) && (redSlipTax8Total + redSlipTax10Total > 0);
+        const rsTxt = (v) => rsBreakdownUnknown ? '（内訳未保存）' : '-¥' + v.toLocaleString();
         const rsTax8Net = redSlipTax8Total - rsTax8Amount;
         const rsTax10Net = redSlipTax10Total - rsTax10Amount;
         console.log('🔴 赤伝票件数:', redSlipCount);
@@ -9472,14 +9477,14 @@ ${redSlipCount > 0 ? `
 ${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${rsTax8Net.toLocaleString()}
 ${window.getActualTaxPercent(8)}%の赤伝票（税込）: -¥${redSlipTax8Total.toLocaleString()}
 ${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${rsTax8Amount.toLocaleString()}
-  内税: -¥${redSlipTax8Inclusive.toLocaleString()}
-  外税: -¥${redSlipTax8Exclusive.toLocaleString()}
+  内税: ${rsTxt(redSlipTax8Inclusive)}
+  外税: ${rsTxt(redSlipTax8Exclusive)}
 
 ${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${rsTax10Net.toLocaleString()}
 ${window.getActualTaxPercent(10)}%の赤伝票（税込）: -¥${redSlipTax10Total.toLocaleString()}
 ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.toLocaleString()}
-  内税: -¥${redSlipTax10Inclusive.toLocaleString()}
-  外税: -¥${redSlipTax10Exclusive.toLocaleString()}
+  内税: ${rsTxt(redSlipTax10Inclusive)}
+  外税: ${rsTxt(redSlipTax10Exclusive)}
 
 赤伝票消費税の合計: -¥${(rsTax8Amount + rsTax10Amount).toLocaleString()}
 赤伝票税抜合計: -¥${(rsTax8Net + rsTax10Net).toLocaleString()}
@@ -19605,7 +19610,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
                 <button id="deleteBtn_${order.id}" onclick="deleteOrderFromNewUI('${order.id}')" style="background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; ${order.status === 'completed' || order.status === 'cancelled' ? '' : 'display: none;'}">
                   削除
                 </button>
-                <button id="editBtn_${order.id}" onclick="editOrderFromTable('${order.id}')" style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer;">
+                <button id="editBtn_${order.id}" onclick="editOrderAsCart('${order.id}')" style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; padding: 16px; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer;">
                   この注文を編集
                 </button>
               </div>
@@ -19653,6 +19658,8 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
       
       // カートをクリア
       newUICart = [];
+      window._editingOrder = null; // 🆕 編集中フラグを初期化
+      setIframeEditUi(null);
       updateIframeCart();
       
       // コンテナを表示
@@ -19663,7 +19670,88 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
     function closeMenuIframe() {
       document.getElementById('menuIframeContainer').classList.remove('show');
       newUICart = [];
+      window._editingOrder = null; // 🆕 編集中を解除（元の注文は変更しない）
+      setIframeEditUi(null);
     }
+
+    // ===== 🆕 注文の編集（カートに戻す）: 「注文確定」を押す直前の状態にして、商品の追加・削除ができるようにする =====
+    // 新しい注文は作らず、確定すると元の注文(注文番号・時刻はそのまま)を上書き更新する。閉じる(✕)と元の注文は変更されない。
+    function cartItemGross(item) {
+      let p = item.price || 0;
+      if (item.taxType === 'exclusive') p = Math.floor(p * (1 + window.getActualTaxPercent(item.taxRate || 10) / 100));
+      return (p + (item.toppingPrice || 0)) * (item.quantity || 1);
+    }
+    function setIframeEditUi(order) {
+      const title = document.getElementById('iframeTableName');
+      const btn = document.getElementById('iframeSubmitBtn');
+      if (order) {
+        if (title) title.textContent = `${currentSelectedTableName} - 注文 #${order.orderNumber != null ? order.orderNumber : ''} を編集中`;
+        if (btn) btn.textContent = '注文を更新';
+      } else {
+        if (title && currentSelectedTableName) title.textContent = `${currentSelectedTableName} - メニュー選択`;
+        if (btn) btn.textContent = '注文確定';
+      }
+    }
+    window.editOrderAsCart = async function(orderId) {
+      try {
+        const snap = await window.getDoc(window.getStoreDoc('orders', orderId));
+        if (!snap.exists()) { alert('注文が見つかりません'); return; }
+        const order = snap.data();
+        if (order.paidAt) {
+          // 会計済みは従来の編集画面（赤伝票などはそちら）
+          if (typeof window.editOrderFromTable === 'function') return window.editOrderFromTable(orderId);
+          alert('会計済みの注文はここでは編集できません');
+          return;
+        }
+        if (!currentSelectedTableId) { alert('テーブルを選択してください'); return; }
+        showMenuIframe(); // カートを空にして画面を開く（編集中フラグも初期化される）
+        newUICart = JSON.parse(JSON.stringify(order.items || []));
+        window._editingOrder = { id: orderId, orderNumber: order.orderNumber };
+        setIframeEditUi(window._editingOrder);
+        updateIframeCart();
+      } catch (e) {
+        console.error('注文の編集を開始できません:', e);
+        alert('注文の編集を開始できませんでした: ' + e.message);
+      }
+    };
+    async function submitEditedOrder() {
+      const editing = window._editingOrder;
+      if (!editing) return;
+      if (newUICart.length === 0) { alert('商品がありません。注文ごと取り消す場合は「キャンセル」「削除」を使ってください'); return; }
+      const btn = document.getElementById('iframeSubmitBtn');
+      try {
+        btn.disabled = true; btn.textContent = '更新中...';
+        const ref = window.getStoreDoc('orders', editing.id);
+        const snap = await window.getDoc(ref);
+        if (!snap.exists()) { alert('注文が見つかりません（すでに削除された可能性があります）'); closeMenuIframe(); loadTableOrders(currentSelectedTableId); return; }
+        const cur = snap.data();
+        if (cur.paidAt) { alert('この注文はすでに会計済みのため、更新できません'); closeMenuIframe(); loadTableOrders(currentSelectedTableId); return; }
+        const oldItems = Array.isArray(cur.items) ? cur.items : [];
+        const newItems = JSON.parse(JSON.stringify(newUICart));
+        const sum = (items) => items.reduce((a, it) => a + cartItemGross(it), 0);
+        // 合計は「差額」で更新する（レジ袋や値引きなど、商品以外の金額はそのまま保つ）
+        const update = {
+          items: newItems,
+          totalAmount: Math.max(0, (cur.totalAmount || 0) - sum(oldItems) + sum(newItems)),
+          editedAt: window.Timestamp.now()
+        };
+        // お客様画面から入った注文は税率区分別の税込も持っているので、同じ差額で更新する
+        if (cur.tax8Total !== undefined || cur.tax10Total !== undefined) {
+          const sumCat = (items, cat) => sum(items.filter(it => (((it.taxRate || 10) === 8) ? 8 : 10) === cat));
+          update.tax8Total = Math.max(0, (cur.tax8Total || 0) - sumCat(oldItems, 8) + sumCat(newItems, 8));
+          update.tax10Total = Math.max(0, (cur.tax10Total || 0) - sumCat(oldItems, 10) + sumCat(newItems, 10));
+        }
+        await window.updateDoc(ref, update);
+        console.log('✅ 注文を更新しました:', { id: editing.id, orderNumber: editing.orderNumber, totalAmount: update.totalAmount });
+        closeMenuIframe(); // カートと編集中フラグを戻す
+        loadTableOrders(currentSelectedTableId);
+      } catch (e) {
+        console.error('注文の更新エラー:', e);
+        alert('注文の更新に失敗しました: ' + e.message);
+        btn.disabled = false; btn.textContent = '注文を更新';
+      }
+    }
+
     
     // iframe内のカート表示を更新
     function updateIframeCart() {
@@ -19762,6 +19850,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
     
     // iframe注文を送信
     async function submitIframeOrder() {
+      if (window._editingOrder) { return await submitEditedOrder(); } // 🆕 編集中は新規作成せず、元の注文を更新
       if (newUICart.length === 0) {
         alert('商品を選択してください');
         return;
