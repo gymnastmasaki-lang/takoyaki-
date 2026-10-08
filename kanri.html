@@ -527,13 +527,10 @@ const AdminSystem = () => {
     const [editingHourlyRate, setEditingHourlyRate] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
-    // 🆕 オープニングページ画像設定用のstate
+    // 🆕 menuページ画像設定用のstate
     const [showImageSettings, setShowImageSettings] = useState(false);
     const [currentStoreData, setCurrentStoreData] = useState(null);
     const [imageUploading, setImageUploading] = useState({
-        main: false,
-        welcome: false,
-        button: false,
         header: false,
         background: false
     });
@@ -573,7 +570,7 @@ const AdminSystem = () => {
             setShowCustomConfirm(true);
         });
     };
-    // 🆕 オープニングページ画像設定を開く
+    // 🆕 menuページ画像設定を開く
     const openImageSettings = async () => {
         setShowImageSettings(true);
         // 現在の店舗データを読み込む
@@ -618,9 +615,6 @@ const AdminSystem = () => {
             const imageUrl = await getDownloadURL(storageRef);
             // Firestoreに画像URLを保存
             const imageField = {
-                main: 'mainImageUrl',
-                button: 'buttonImageUrl',
-                welcome: 'welcomeImageUrl',
                 header: 'headerImageUrl',
                 background: 'backgroundImageUrl'
             }[imageType];
@@ -628,9 +622,6 @@ const AdminSystem = () => {
                 [imageField]: imageUrl
             });
             const imageNames = {
-                main: '看板画像',
-                button: 'ボタン画像',
-                welcome: 'ヘッダ下画像',
                 header: 'メニュー画面ヘッダ画像',
                 background: 'メニュー画面背景画像'
             };
@@ -644,6 +635,31 @@ const AdminSystem = () => {
         }
         finally {
             setImageUploading(prev => (Object.assign(Object.assign({}, prev), { [imageType]: false })));
+        }
+    };
+    // 🆕 メニュー画面のヘッダ画像/背景画像を「なし」または「デフォルト」にする
+    //   なし: フィールドに 'none' を保存（menuは画像を表示しない）／デフォルト: 空にする（menuは標準の見た目）
+    const handleImageMode = async (imageType, mode) => {
+        if (!window.currentStoreId)
+            return;
+        const imageField = { header: 'headerImageUrl', background: 'backgroundImageUrl' }[imageType];
+        const imageName = { header: 'メニュー画面ヘッダ画像', background: 'メニュー画面背景画像' }[imageType];
+        const message = mode === 'none'
+            ? `${imageName}を「なし」にしますか？（menuページに画像を表示しません）`
+            : `${imageName}をデフォルトに戻しますか？（アップロードした画像は使われなくなります）`;
+        const ok = await showCustomConfirmFunc(message, '確認', 'OK', 'キャンセル');
+        if (!ok)
+            return;
+        try {
+            const { updateDoc, doc } = window.firebaseModules;
+            const value = mode === 'none' ? 'none' : '';
+            await updateDoc(doc(window.db, 'stores', window.currentStoreId), { [imageField]: value });
+            setCurrentStoreData(prev => (Object.assign(Object.assign({}, prev), { [imageField]: value })));
+            showCustomAlertFunc(mode === 'none' ? `${imageName}を「なし」にしました` : `${imageName}をデフォルトに戻しました`, '完了', '✅');
+        }
+        catch (error) {
+            console.error('画像設定の変更エラー:', error);
+            showCustomAlertFunc('変更に失敗しました: ' + error.message, 'エラー', '❌');
         }
     };
     // 時刻を15分単位に丸める関数
@@ -5156,58 +5172,36 @@ const AdminSystem = () => {
     // 🆕 画像設定モーダル
     const ImageSettingsModal = () => showImageSettings && currentStoreData && (React.createElement("div", { className: "fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center p-4 z-50 overflow-y-auto pt-4 pb-20" },
         React.createElement("div", { className: "bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl" },
-            React.createElement("h2", { className: "text-2xl font-bold text-gray-800 mb-6" }, "\u30AA\u30FC\u30D7\u30CB\u30F3\u30B0\u30DA\u30FC\u30B8\u753B\u50CF\u8A2D\u5B9A"),
+            React.createElement("h2", { className: "text-2xl font-bold text-gray-800 mb-6" }, "menu\u30DA\u30FC\u30B8\u753B\u50CF\u8A2D\u5B9A"),
             React.createElement("div", { className: "space-y-6" },
-                React.createElement("div", { className: "border-2 border-gray-200 rounded-lg p-4" },
-                    React.createElement("h3", { className: "font-bold text-gray-700 mb-2" }, "\u770B\u677F\u753B\u50CF"),
-                    React.createElement("p", { className: "text-sm text-gray-500 mb-3" }, "\u63A8\u5968\u30B5\u30A4\u30BA: 600\u00D7300px\uFF08index.html\u4E0A\u90E8\uFF09"),
-                    currentStoreData.mainImageUrl && (React.createElement("img", { src: currentStoreData.mainImageUrl, alt: "\u770B\u677F\u753B\u50CF\u30D7\u30EC\u30D3\u30E5\u30FC", className: "w-full max-w-md mb-3 rounded-lg border" })),
-                    React.createElement("input", { type: "file", accept: "image/*", onChange: (e) => {
-                            const file = e.target.files[0];
-                            if (file)
-                                handleImageUpload('main', file);
-                        }, className: "block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100", disabled: imageUploading.main }),
-                    imageUploading.main && (React.createElement("p", { className: "text-blue-600 mt-2" }, "\u23F3 \u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u4E2D..."))),
-                React.createElement("div", { className: "border-2 border-gray-200 rounded-lg p-4" },
-                    React.createElement("h3", { className: "font-bold text-gray-700 mb-2" }, "\u30D8\u30C3\u30C0\u4E0B\u753B\u50CF"),
-                    React.createElement("p", { className: "text-sm text-gray-500 mb-3" }, "\u63A8\u5968\u30B5\u30A4\u30BA: 600\u00D7204px\uFF08index.html\uFF09"),
-                    currentStoreData.welcomeImageUrl && (React.createElement("img", { src: currentStoreData.welcomeImageUrl, alt: "\u30D8\u30C3\u30C0\u4E0B\u753B\u50CF\u30D7\u30EC\u30D3\u30E5\u30FC", className: "w-full max-w-md mb-3 rounded-lg border" })),
-                    React.createElement("input", { type: "file", accept: "image/*", onChange: (e) => {
-                            const file = e.target.files[0];
-                            if (file)
-                                handleImageUpload('welcome', file);
-                        }, className: "block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100", disabled: imageUploading.welcome }),
-                    imageUploading.welcome && (React.createElement("p", { className: "text-green-600 mt-2" }, "\u23F3 \u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u4E2D..."))),
-                React.createElement("div", { className: "border-2 border-gray-200 rounded-lg p-4" },
-                    React.createElement("h3", { className: "font-bold text-gray-700 mb-2" }, "\u6CE8\u6587\u958B\u59CB\u30DC\u30BF\u30F3\u753B\u50CF"),
-                    React.createElement("p", { className: "text-sm text-gray-500 mb-3" }, "\u63A8\u5968\u30B5\u30A4\u30BA: 250\u00D780px\uFF08index.html\uFF09"),
-                    currentStoreData.buttonImageUrl && (React.createElement("img", { src: currentStoreData.buttonImageUrl, alt: "\u30DC\u30BF\u30F3\u753B\u50CF\u30D7\u30EC\u30D3\u30E5\u30FC", className: "mb-3 rounded-lg border", style: { maxWidth: '250px' } })),
-                    React.createElement("input", { type: "file", accept: "image/*", onChange: (e) => {
-                            const file = e.target.files[0];
-                            if (file)
-                                handleImageUpload('button', file);
-                        }, className: "block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100", disabled: imageUploading.button }),
-                    imageUploading.button && (React.createElement("p", { className: "text-purple-600 mt-2" }, "\u23F3 \u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u4E2D..."))),
                 React.createElement("div", { className: "border-2 border-orange-200 rounded-lg p-4 bg-orange-50" },
                     React.createElement("h3", { className: "font-bold text-orange-700 mb-2" }, "\u30E1\u30CB\u30E5\u30FC\u753B\u9762\u30D8\u30C3\u30C0\u753B\u50CF"),
                     React.createElement("p", { className: "text-sm text-orange-600 mb-3" }, "\u63A8\u5968\u30B5\u30A4\u30BA: \u6A2A\u5E45100%\u5BFE\u5FDC\uFF08menu.html\u4E0A\u90E8\uFF09"),
-                    currentStoreData.headerImageUrl && (React.createElement("img", { src: currentStoreData.headerImageUrl, alt: "\u30D8\u30C3\u30C0\u753B\u50CF\u30D7\u30EC\u30D3\u30E5\u30FC", className: "w-full mb-3 rounded-lg border border-orange-300" })),
+                    currentStoreData.headerImageUrl && currentStoreData.headerImageUrl !== 'none' && (React.createElement("img", { src: currentStoreData.headerImageUrl, alt: "\u30D8\u30C3\u30C0\u753B\u50CF\u30D7\u30EC\u30D3\u30E5\u30FC", className: "w-full mb-3 rounded-lg border border-orange-300" })),
                     React.createElement("input", { type: "file", accept: "image/*", onChange: (e) => {
                             const file = e.target.files[0];
                             if (file)
                                 handleImageUpload('header', file);
                         }, className: "block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100", disabled: imageUploading.header }),
-                    imageUploading.header && (React.createElement("p", { className: "text-orange-600 mt-2" }, "\u23F3 \u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u4E2D..."))),
+                    imageUploading.header && (React.createElement("p", { className: "text-orange-600 mt-2" }, "\u23F3 \u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u4E2D...")),
+                    React.createElement("p", { className: "text-sm text-gray-600 mt-3" }, "\u73FE\u5728\u306E\u8A2D\u5B9A: " + (currentStoreData.headerImageUrl === 'none' ? "\u753B\u50CF\u306A\u3057" : (currentStoreData.headerImageUrl ? "\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u3057\u305F\u753B\u50CF" : "\u30C7\u30D5\u30A9\u30EB\u30C8"))),
+                    React.createElement("div", { className: "flex gap-2 mt-2" },
+                        React.createElement("button", { onClick: () => handleImageMode('header', 'none'), className: "px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300" }, "\u306A\u3057"),
+                        React.createElement("button", { onClick: () => handleImageMode('header', 'default'), className: "px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-100" }, "\u30C7\u30D5\u30A9\u30EB\u30C8\u306B\u623B\u3059"))),
                 React.createElement("div", { className: "border-2 border-pink-200 rounded-lg p-4 bg-pink-50" },
                     React.createElement("h3", { className: "font-bold text-pink-700 mb-2" }, "\u30E1\u30CB\u30E5\u30FC\u753B\u9762\u80CC\u666F\u753B\u50CF"),
                     React.createElement("p", { className: "text-sm text-pink-600 mb-3" }, "\u63A8\u5968\u30B5\u30A4\u30BA: 1920\u00D71080px\u4EE5\u4E0A\uFF08menu.html\u5168\u4F53\u80CC\u666F\uFF09"),
-                    currentStoreData.backgroundImageUrl && (React.createElement("img", { src: currentStoreData.backgroundImageUrl, alt: "\u80CC\u666F\u753B\u50CF\u30D7\u30EC\u30D3\u30E5\u30FC", className: "w-full mb-3 rounded-lg border border-pink-300" })),
+                    currentStoreData.backgroundImageUrl && currentStoreData.backgroundImageUrl !== 'none' && (React.createElement("img", { src: currentStoreData.backgroundImageUrl, alt: "\u80CC\u666F\u753B\u50CF\u30D7\u30EC\u30D3\u30E5\u30FC", className: "w-full mb-3 rounded-lg border border-pink-300" })),
                     React.createElement("input", { type: "file", accept: "image/*", onChange: (e) => {
                             const file = e.target.files[0];
                             if (file)
                                 handleImageUpload('background', file);
                         }, className: "block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100", disabled: imageUploading.background }),
-                    imageUploading.background && (React.createElement("p", { className: "text-pink-600 mt-2" }, "\u23F3 \u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u4E2D...")))),
+                    imageUploading.background && (React.createElement("p", { className: "text-pink-600 mt-2" }, "\u23F3 \u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u4E2D...")),
+                    React.createElement("p", { className: "text-sm text-gray-600 mt-3" }, "\u73FE\u5728\u306E\u8A2D\u5B9A: " + (currentStoreData.backgroundImageUrl === 'none' ? "\u753B\u50CF\u306A\u3057" : (currentStoreData.backgroundImageUrl ? "\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u3057\u305F\u753B\u50CF" : "\u30C7\u30D5\u30A9\u30EB\u30C8"))),
+                    React.createElement("div", { className: "flex gap-2 mt-2" },
+                        React.createElement("button", { onClick: () => handleImageMode('background', 'none'), className: "px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300" }, "\u306A\u3057"),
+                        React.createElement("button", { onClick: () => handleImageMode('background', 'default'), className: "px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-100" }, "\u30C7\u30D5\u30A9\u30EB\u30C8\u306B\u623B\u3059")))),
             React.createElement("div", { className: "mt-6 flex justify-end" },
                 React.createElement("button", { onClick: () => {
                         setShowImageSettings(false);
@@ -5264,7 +5258,7 @@ const AdminSystem = () => {
             window.currentStoreId && (React.createElement("div", { className: "bg-gradient-to-r from-pink-500 to-rose-500 rounded-lg shadow-lg p-6 mb-6 text-white" },
                 React.createElement("div", { className: "flex justify-between items-center" },
                     React.createElement("div", null,
-                        React.createElement("h2", { className: "text-2xl font-bold mb-2" }, "\u30AA\u30FC\u30D7\u30CB\u30F3\u30B0\u30DA\u30FC\u30B8\u753B\u50CF\u8A2D\u5B9A")),
+                        React.createElement("h2", { className: "text-2xl font-bold mb-2" }, "menu\u30DA\u30FC\u30B8\u753B\u50CF\u8A2D\u5B9A")),
                     React.createElement("button", { onClick: openImageSettings, className: "px-6 py-3 bg-white text-pink-600 rounded-lg hover:bg-gray-100 font-bold shadow-lg transition-all hover:scale-105" }, "\u753B\u50CF\u8A2D\u5B9A\u3092\u958B\u304F \u2192")))),
             React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
                 React.createElement("div", { className: "flex justify-between items-center mb-4" },

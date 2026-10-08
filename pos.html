@@ -14782,40 +14782,70 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
     
     function watchStaffCalls() {
       console.log('👀 スタッフコール監視開始');
-      let isFirstLoad = true;
-      let lastCallsSnapshot = [];
+      // 二重に監視しない（ログイン経路とセッション復元経路の両方から呼ばれても1本だけ）
+      if (typeof window._staffCallsUnsub === 'function') { try { window._staffCallsUnsub(); } catch (e) {} }
+      const seenIds = new Set();
+      
+      const tsMillis = (ts) => {
+        try {
+          if (typeof safeToDate === 'function') return safeToDate(ts)?.getTime() || 0;
+          if (ts && typeof ts.toMillis === 'function') return ts.toMillis();
+          if (ts && ts.seconds) return ts.seconds * 1000;
+        } catch (e) {}
+        return 0;
+      };
       
       const unsubscribe = window.onSnapshot(
         window.getStoreCollection('staff_calls'),
         (snapshot) => {
-          const calls = [];
-          snapshot.forEach(doc => calls.push({ id: doc.id, ...doc.data() }));
-          calls.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
-          
-          console.log('📞 スタッフコール変化:', {
-            コール数: calls.length,
-            初回: isFirstLoad
-          });
-          
-          // 新しい呼び出しがあるかチェック
-          if (!isFirstLoad && calls.length > 0) {
-            const isBill = calls[0].type === 'bill';
-            console.log('🆕 新しい呼び出し検出！', isBill ? 'お会計' : '呼び出し');
+          try {
+            const calls = [];
+            snapshot.forEach(doc => calls.push({ id: doc.id, ...doc.data() }));
+            calls.sort((a, b) => tsMillis(b.timestamp) - tsMillis(a.timestamp));
+            window._pendingStaffCalls = calls; // 未対応(=まだ削除されていない)の呼出
             
-            // ポップアップを表示
-            showStaffCallPopup(calls[0], isBill);
+            // まだ見ていない呼出（再読み込み時にすでに残っている未対応の呼出も含む）
+            const fresh = calls.filter(c => !seenIds.has(c.id));
+            calls.forEach(c => seenIds.add(c.id));
             
-            // 音声を再生
-            if (isBill) playBillSound();
-            else playCallSound();
+            console.log('📞 スタッフコール変化:', { 未対応: calls.length, 新着: fresh.length });
+            
+            if (fresh.length > 0) {
+              const newest = fresh[0];
+              const isBill = newest.type === 'bill';
+              showStaffCallPopup(newest, isBill);
+              if (isBill) playBillSound(); else playCallSound();
+            } else {
+              // 表示中の呼出がcontrollerなど他の端末で対応済みになっていたら、閉じて次の未対応を出す
+              const el = document.getElementById('staff-call-popup');
+              if (el && el.dataset.callId && !calls.some(c => c.id === el.dataset.callId)) {
+                el.remove();
+                if (calls.length > 0) showStaffCallPopup(calls[0], calls[0].type === 'bill');
+              }
+            }
+          } catch (e) {
+            console.error('❌ スタッフコール監視エラー:', e);
           }
-          isFirstLoad = false;
-          lastCallsSnapshot = calls;
         }
       );
       
+      window._staffCallsUnsub = unsubscribe;
       return unsubscribe;
     }
+    
+    // 音声: ブラウザは「ページ内で一度もクリックされていない」と音を鳴らせないため、最初のクリック/タッチで有効化する
+    (function setupAudioUnlock() {
+      const unlock = () => {
+        audioEnabled = true;
+        try {
+          const a = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGGi77eifTRAMUKjj8LZjHAY4ktfyzXksBS');
+          a.volume = 0.01;
+          a.play().catch(() => {});
+        } catch (e) {}
+      };
+      document.addEventListener('pointerdown', unlock, { once: true, capture: true });
+      document.addEventListener('keydown', unlock, { once: true, capture: true });
+    })();
     
     function showStaffCallPopup(call, isBill) {
       // 既存のポップアップがあれば削除
@@ -14824,6 +14854,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
       
       const overlay = document.createElement('div');
       overlay.id = 'staff-call-popup';
+      overlay.dataset.callId = call.id || '';
       overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:20000;display:flex;align-items:center;justify-content:center;animation:fadeIn 0.3s;';
       
       const popup = document.createElement('div');
@@ -14849,6 +14880,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
           ${call.tableNumber || 'テイクアウト'}
         </div>
         ${orderNumberHtml}
+        ${(window._pendingStaffCalls && window._pendingStaffCalls.length > 1) ? `<div style="font-size:22px;margin-top:16px;">ほかに未対応が ${window._pendingStaffCalls.length - 1} 件あります</div>` : ''}
         <button onclick="dismissStaffCallPopup('${call.id}')" style="
           margin-top:30px;
           padding:20px 60px;
@@ -14872,6 +14904,10 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
       const popup = document.getElementById('staff-call-popup');
       if (popup) popup.remove();
       showToast('対応完了');
+      // ほかに未対応の呼出が残っていれば続けて表示
+      const rest = (window._pendingStaffCalls || []).filter(c => c.id !== callId);
+      window._pendingStaffCalls = rest;
+      if (rest.length > 0) showStaffCallPopup(rest[0], rest[0].type === 'bill');
     };
     
   </script>
@@ -17869,6 +17905,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
                 watchInventoryChanges();
                 // 🆕 セッション復元ルートではinitializeSystem()が呼ばれず、呼出・お会計の監視(watchStaffCalls)も
                 // 始まらなかった（再読み込み後にposへ呼出・お会計が表示されない原因）。オフライン版と同じ修正。
+                showAudioEnablePopup();
                 watchOrders();
                 watchStaffCalls();
                 
