@@ -609,6 +609,45 @@
     window.currentStoreId = null;
     window.currentStoreName = null;
 
+    // ===== 🆕 消費税率設定（POSと同じ。kanriの「消費税率設定」の実際の％）と、外税の内訳表示 =====
+    window.taxRateSettings = { reducedRatePercent: 8, standardRatePercent: 10 };
+    window.getActualTaxPercent = function(categoryRate) {
+      return (categoryRate === 8) ? window.taxRateSettings.reducedRatePercent : window.taxRateSettings.standardRatePercent;
+    };
+    let _ctlTaxLoadedAt = 0;
+    async function ctlLoadTaxRates() {
+      if (Date.now() - _ctlTaxLoadedAt < 5 * 60 * 1000) return; // 5分に1回だけ取得
+      try {
+        const snap = await window.getDoc(window.getStoreDoc('tax_rate_settings', 'default'));
+        if (snap.exists()) window.taxRateSettings = Object.assign({ reducedRatePercent: 8, standardRatePercent: 10 }, snap.data());
+        _ctlTaxLoadedAt = Date.now();
+      } catch (e) { console.warn('消費税率設定の読み込みに失敗（8%/10%で表示します）:', e); }
+    }
+    // 外税の商品の「商品価格(税抜)・消費税・合計(税込)」。POSの会計と同じ計算（行ごとに切り捨て）
+    function ctlTaxBreakdown(items, bagTotal) {
+      let exNet = 0, exTax = 0, inc = 0;
+      (items || []).forEach(it => {
+        let tp = it.toppingPrice || 0;
+        if (it.toppingsData && Array.isArray(it.toppingsData) && it.toppingsData.length > 0) tp = it.toppingsData.reduce((s, t) => s + (t.price || 0), 0);
+        const net = ((it.price || 0) + tp) * (it.quantity || 1);
+        if (it.taxType === 'exclusive') {
+          const gross = Math.floor(net * (1 + window.getActualTaxPercent(it.taxRate || 10) / 100));
+          exNet += net; exTax += gross - net;
+        } else { inc += net; }
+      });
+      inc += (bagTotal || 0);
+      return { hasEx: exNet > 0, exNet: exNet, exTax: exTax, inc: inc, gross: exNet + exTax + inc };
+    }
+    function ctlTaxRowsHtml(bd) {
+      const row = (l, v) => `<div style="display:flex; justify-content:space-between; font-size:15px; color:#555; margin-bottom:3px;"><span>${l}</span><span>¥${v.toLocaleString()}</span></div>`;
+      return row('商品価格（税抜）', bd.exNet) + row('消費税', bd.exTax) + (bd.inc > 0 ? row('内税の商品（税込）', bd.inc) : '');
+    }
+    function ctlEatStyleBadge(eatStyle) {
+      if (eatStyle === 'dinein') return '<div style="display:inline-block;background:#4CAF50;color:white;padding:6px 15px;border-radius:15px;font-weight:bold;margin:0 8px 8px 8px;">🍽️ 店内飲食</div>';
+      if (eatStyle === 'takeout') return '<div style="display:inline-block;background:#FF9800;color:white;padding:6px 15px;border-radius:15px;font-weight:bold;margin:0 8px 8px 8px;">🥡 持ち帰り</div>';
+      return '';
+    }
+
     let audioEnabled = false;
     let isFirstOrderLoad = true;
     let lastOrderCount = 0;
@@ -1059,10 +1098,12 @@
           itemsChecked: d.itemsChecked || [],  // 🆕 チェック状態を追加
           completedAt: d.completedAt || null,
           cancelledAt: d.cancelledAt || null,
+          eatStyle: d.eatStyle || null, // 🆕 店内飲食/持ち帰り
           paidAt: d.paidAt || null
         });
       });
       
+      await ctlLoadTaxRates(); // 🆕 外税の内訳表示に使う税率
       const container = document.getElementById('orders-container');
       if (orders.length === 0) {
         container.innerHTML = '<div style="text-align:center;color:white;padding:40px;">現在注文はありません</div>';
@@ -1325,15 +1366,17 @@
         const allItemsChecked = order.items && order.items.length > 0 && 
           order.items.every((item, idx) => order.itemsChecked && order.itemsChecked[idx]);
         
+        const _bdCard = ctlTaxBreakdown(order.items, (order.bagNeeded && order.bagQuantity > 0) ? (order.bagPrice || (order.bagQuantity * 3)) : 0);
         card.innerHTML = `
           <div class="order-number">#${order.orderNumber}</div>
-          <div class="order-table">${order.tableNumber}</div>
+          <div class="order-table">${order.tableNumber}</div>${ctlEatStyleBadge(order.eatStyle)}
           ${statusBadge}${paidBadge}
           ${customerInfoHTML}
           ${itemsHTML}
           <div class="order-total">
-            <div class="order-total-label">全ての合計金額</div>
-            <div class="order-total-amount">¥${grandTotal.toLocaleString()}</div>
+            ${_bdCard.hasEx ? ctlTaxRowsHtml(_bdCard) : ''}
+            <div class="order-total-label">${_bdCard.hasEx ? '合計（税込）' : '全ての合計金額'}</div>
+            <div class="order-total-amount">¥${(_bdCard.hasEx ? _bdCard.gross : grandTotal).toLocaleString()}</div>
           </div>
           <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
             <button class="control-btn btn-complete" style="font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}">✓完了</button>
@@ -1341,7 +1384,7 @@
             <button class="control-btn" style="background:linear-gradient(135deg,#9C27B0 0%,#7B1FA2 100%);font-size:11px;" data-order-id="${order.id}">📋詳細</button>
           </div>
           <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-            <button class="control-btn" id="paid-btn-${order.id}" style="background:linear-gradient(135deg,${order.paidAt ? '#2196F3' : '#FFC107'} 0%,${order.paidAt ? '#1976D2' : '#FFA000'} 100%);font-size:11px;" data-order-id="${order.id}" data-table="${order.tableNumber}" data-paid="${order.paidAt ? 'true' : 'false'}">${order.paidAt ? '💳 済' : '💳 未'}</button>
+            <button class="control-btn" id="paid-btn-${order.id}" style="background:linear-gradient(135deg,${order.paidAt ? '#2196F3' : '#FFC107'} 0%,${order.paidAt ? '#1976D2' : '#FFA000'} 100%);font-size:11px;pointer-events:none;cursor:default;" disabled data-order-id="${order.id}" data-table="${order.tableNumber}" data-paid="${order.paidAt ? 'true' : 'false'}">${order.paidAt ? '💳 会計済' : '💳 未会計'}</button>
             <button class="control-btn" style="background:linear-gradient(135deg,#757575 0%,#616161 100%);font-size:11px;${!order.completedAt && !order.cancelledAt ? 'opacity:0.5;cursor:not-allowed;' : ''}" data-order-id="${order.id}" ${!order.completedAt && !order.cancelledAt ? 'disabled' : ''}>🗑️削除</button>
           </div>
         `;
@@ -1355,7 +1398,8 @@
         completeBtn.onclick = () => completeOrder(order.id, order.tableNumber, order.orderNumber);
         cancelBtn.onclick = () => cancelOrder(order.id, order.tableNumber, order.orderNumber);
         detailBtn.onclick = () => showOrderDetail(order);
-        paidBtn.onclick = () => togglePaidStatus(order);
+        // 🆕 会計はPOSで行う。controllerの会計ボタンは廃止（会計済/未会計の表示のみ。古い方式の売上更新で税額集計がずれるのを防ぐ）
+        paidBtn.onclick = null;
         
         if (order.completedAt || order.cancelledAt) {
           deleteBtn.onclick = () => deleteOrder(order.id);
@@ -1471,9 +1515,12 @@
           <span style="background:#2196F3;color:white;padding:5px 15px;border-radius:15px;">${order.tableNumber}</span>
         </div>
         ${itemsHtml}
-        <div style="font-size:18px;font-weight:bold;text-align:right;margin:15px 0;color:#4CAF50;">
-          合計: ¥${order.totalAmount.toLocaleString()}
-        </div>
+        ${(function () {
+          const bd = ctlTaxBreakdown(order.items, (order.bagNeeded && order.bagQuantity > 0) ? (order.bagPrice || (order.bagQuantity * 3)) : 0);
+          return bd.hasEx
+            ? `<div style="margin:15px 0;">${ctlTaxRowsHtml(bd)}<div style="font-size:18px;font-weight:bold;text-align:right;color:#4CAF50;margin-top:4px;">合計（税込）: ¥${bd.gross.toLocaleString()}</div></div>`
+            : `<div style="font-size:18px;font-weight:bold;text-align:right;margin:15px 0;color:#4CAF50;">合計: ¥${order.totalAmount.toLocaleString()}</div>`;
+        })()}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <button id="save-memo-btn" style="
             padding:15px;
@@ -1724,6 +1771,7 @@
     }
 
     async function togglePaidStatus(order) {
+      return; // 🆕 controllerからの会計は廃止（呼び出し元なし。万一呼ばれても何もしない）
       console.log('🔵 togglePaidStatus呼び出し');
       console.log('注文データ:', order);
       

@@ -101,17 +101,8 @@
       // POSモードまたはハンディモードの場合はリダイレクトしない
       // 🔧 BUG FIX: localStorageに保存済みの注文がある場合もリダイレクトしない（注文番号画面を維持）
       const hasStoredOrderForRedirect = tableNumber ? localStorage.getItem('currentOrder_' + tableNumber) : null;
-      if (tableNumber && !orderId && !cameFromIndex && !window.isHandyMode && !window.isPOSMode && !hasStoredOrderForRedirect) {
-        // 🔧 storeパラメータを保持してリダイレクト
-        let redirectUrl = 'index.html?table=' + tableNumber;
-        if (storeId) {
-          redirectUrl += '&store=' + storeId;
-        }
-        console.log('→ リダイレクト先:', redirectUrl);
-        if (window.self === window.top) { window.location.href = redirectUrl; } // iframeからは実行しない
-      } else {
-        console.log('→ リダイレクトしない(このページを表示)', hasStoredOrderForRedirect ? '※保存済み注文あり' : '');
-      }
+      // 🆕 index(オープニング)ページは廃止。QRからこのページへ直接入り、最初に店内飲食/持ち帰りを選ぶ（リダイレクトしない）
+      console.log('→ リダイレクトしない(このページを表示)', hasStoredOrderForRedirect ? '※保存済み注文あり' : '');
     })();
   </script>
   <style>
@@ -1519,7 +1510,7 @@
     (function initEatStyle() {
       if (window.isPOSMode) {
         // 🆕 POSモード: 店内/持ち帰りを選ぶ。選択はこのタブ内で保持（メニューを開き直しても聞かない。「変更」で切替）
-        window._eatStyleKey = 'eatStyle:pos';
+        window._eatStyleKey = 'eatStyle:pos:' + (urlParams.get('posTable') || ''); // 🆕 テーブルごとに覚える（複数のお客様に対応）
         let savedPos = null;
         try { savedPos = sessionStorage.getItem(window._eatStyleKey); } catch (e) {}
         if (savedPos === 'dinein' || savedPos === 'takeout') { window.eatStyle = savedPos; }
@@ -1554,6 +1545,21 @@
       };
       box.appendChild(mk('店内飲食', 'dinein', 'linear-gradient(135deg,#4CAF50 0%,#45a049 100%)'));
       box.appendChild(mk('持ち帰り', 'takeout', 'linear-gradient(135deg,#FF9800 0%,#F57C00 100%)'));
+      // 🆕 index(オープニング)ページにあった「呼出」「会計」ボタン（お客様用。POS/ハンディでは出さない）
+      if (!window.isPOSMode && !window.isHandyMode) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid #ddd;';
+        const mk2 = (label, fn, bg) => {
+          const b = document.createElement('button');
+          b.textContent = label;
+          b.style.cssText = 'padding:14px;font-size:18px;font-weight:bold;color:#fff;border:none;border-radius:12px;cursor:pointer;background:' + bg + ';';
+          b.onclick = () => { if (typeof window[fn] === 'function') window[fn](); };
+          return b;
+        };
+        row.appendChild(mk2('呼出', 'callStaff', 'linear-gradient(135deg,#FF9800 0%,#F57C00 100%)'));
+        row.appendChild(mk2('会計', 'requestBill', 'linear-gradient(135deg,#2196F3 0%,#1976D2 100%)'));
+        box.appendChild(row);
+      }
       ov.appendChild(box);
       document.body.appendChild(ov);
     };
@@ -4898,6 +4904,21 @@
       }
     };
     
+    window.requestBill = async function() {
+      try {
+        const billData = {
+          tableNumber: tableNumber,
+          timestamp: Timestamp.now(),
+          type: 'bill'
+        };
+        await addDoc(window.getStoreCollection('staff_calls'), billData);
+        showCustomAlert('お会計です。');
+      } catch (e) {
+        console.error('お会計エラー:', e);
+        showCustomAlert('お会計呼び出しに失敗しました');
+      }
+    };
+    
     window.callStaffFromComplete = async function() {
       try {
         const callData = {
@@ -5532,7 +5553,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 10000;
+        z-index: 30000;
       `;
       
       const dialog = document.createElement('div');
