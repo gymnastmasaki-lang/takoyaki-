@@ -1473,7 +1473,7 @@ const AdminSystem = () => {
         window.currentPayrollTargetDate = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-01`; // 🆕 対象月の雇用保険料率解決用
         const hourlyDeductions = calculateDeductions(employee, hourlyGrossBeforeExpense, 'hourly'); // 経費0で計算
         const hourlyNetPay = hourlyGrossBeforeExpense - hourlyDeductions.totalDeductions + expenseAmount; // 経費を加算
-        const hourlyTotalGross = hourlyGrossBeforeExpense + expenseAmount; // 最後に経費を加算（表示用）
+        const hourlyTotalGross = hourlyGrossBeforeExpense; // 総支給額 = 基本給 + 課税対象額（非課税対象額は含めない）
         // ========== 固定給ベースの計算（経費を除外して計算） ==========
         let fixedSalary = 0;
         let dailyFixedRate = 0;
@@ -1493,7 +1493,7 @@ const AdminSystem = () => {
             window.currentSalaryCalculationType = 'fixed'; // 🆕 固定給計算を明示
             fixedDeductions = calculateDeductions(employee, fixedGrossBeforeExpense, 'fixed'); // 経費0で計算
             fixedNetPay = fixedGrossBeforeExpense - fixedDeductions.totalDeductions + expenseAmount; // 経費を加算
-            fixedTotalGross = fixedGrossBeforeExpense + expenseAmount; // 最後に経費を加算（表示用）
+            fixedTotalGross = fixedGrossBeforeExpense; // 総支給額 = 基本給 + 課税対象額（非課税対象額は含めない）
             // 差額計算（内部計算は正確に）
             grossDifference = hourlyTotalGross - fixedTotalGross;
             netDifference = hourlyNetPay - fixedNetPay;
@@ -1517,6 +1517,7 @@ const AdminSystem = () => {
             // 時間給ベース
             hourlyBasePay,
             hourlyTotalGross,
+            nonTaxableTotal: expenseAmount,
             hourlyDeductions,
             hourlyNetPay,
             // 固定給ベース
@@ -1613,7 +1614,7 @@ const AdminSystem = () => {
                 window.currentPayrollTargetDate = `${yearMonth}-01`; // 🆕 対象月の雇用保険料率解決用（履歴表示は月ごとに異なる料率を使う）
                 const hourlyDeductions = calculateDeductions(employee, hourlyGrossBeforeExpense);
                 const hourlyNetPay = hourlyGrossBeforeExpense - hourlyDeductions.totalDeductions + expenseAmount; // 経費を加算
-                const hourlyTotalGross = hourlyGrossBeforeExpense + expenseAmount;
+                const hourlyTotalGross = hourlyGrossBeforeExpense; // 総支給額 = 基本給 + 課税対象額（非課税対象額は含めない）
                 // 固定給ベース（給与変更履歴を考慮して当該月の給与・都道府県を決定）
                 const salaryHistory = employee.salaryHistory || [];
                 let applicableSalary = employee.monthlySalary;
@@ -1638,7 +1639,7 @@ const AdminSystem = () => {
                 const fixedGrossBeforeExpense = fixedGrossPay + totalAllowancesWithoutExpense;
                 const fixedDeductions = calculateDeductions(employeeForMonth, fixedGrossBeforeExpense);
                 const fixedNetPay = fixedGrossBeforeExpense - fixedDeductions.totalDeductions + expenseAmount; // 経費を加算
-                const fixedTotalGross = fixedGrossBeforeExpense + expenseAmount;
+                const fixedTotalGross = fixedGrossBeforeExpense; // 総支給額 = 基本給 + 課税対象額（非課税対象額は含めない）
                 // 差額（控除前）
                 const grossDifference = hourlyTotalGross - fixedTotalGross;
                 // 差額（控除後）
@@ -1649,6 +1650,7 @@ const AdminSystem = () => {
                     month,
                     workDays,
                     hourlyTotalGross,
+                    nonTaxableTotal: expenseAmount,
                     fixedTotalGross,
                     grossDifference,
                     hourlyNetPay,
@@ -4649,7 +4651,7 @@ const AdminSystem = () => {
                                 </tr>`;
         }
         // 手当
-        if (totals.totalAllowances > 0 || totals.customNonTaxable > 0) {
+        if (totals.totalAllowances > 0) {
             if (totals.allowances.family > 0) {
                 tableHTML += `<tr><td style="border: 2px solid #000; padding: 6px;">家族手当</td><td style="border: 2px solid #000; padding: 6px; text-align: right;">¥${totals.allowances.family.toLocaleString()}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">¥' + totals.allowances.family.toLocaleString() + '</td>' : ''}</tr>`;
             }
@@ -4659,18 +4661,12 @@ const AdminSystem = () => {
             if (totals.allowances.position > 0) {
                 tableHTML += `<tr><td style="border: 2px solid #000; padding: 6px;">役職手当</td><td style="border: 2px solid #000; padding: 6px; text-align: right;">¥${totals.allowances.position.toLocaleString()}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">¥' + totals.allowances.position.toLocaleString() + '</td>' : ''}</tr>`;
             }
-            if (totals.allowances.commuting > 0) {
-                tableHTML += `<tr><td style="border: 2px solid #000; padding: 6px;">通勤手当</td><td style="border: 2px solid #000; padding: 6px; text-align: right;">¥${totals.allowances.commuting.toLocaleString()}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">¥' + totals.allowances.commuting.toLocaleString() + '</td>' : ''}</tr>`;
-            }
-            if (totals.allowances.expense > 0) {
-                tableHTML += `<tr><td style="border: 2px solid #000; padding: 6px;">経費</td><td style="border: 2px solid #000; padding: 6px; text-align: right;">¥${totals.allowances.expense.toLocaleString()}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">¥' + totals.allowances.expense.toLocaleString() + '</td>' : ''}</tr>`;
-            }
             if (totals.allowances.housing > 0) {
                 tableHTML += `<tr><td style="border: 2px solid #000; padding: 6px;">家賃補助</td><td style="border: 2px solid #000; padding: 6px; text-align: right;">¥${totals.allowances.housing.toLocaleString()}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">¥' + totals.allowances.housing.toLocaleString() + '</td>' : ''}</tr>`;
             }
             // 🆕 追加した手当（非課税は名称に「（非課税）」と表示）
             (totals.allowances.custom || []).forEach(c => {
-                if ((Number(c.amount) || 0) > 0) {
+                if ((Number(c.amount) || 0) > 0 && c.taxable !== false) {
                     const label = String(c.name || '手当').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch])) + (c.taxable === false ? '（非課税）' : '');
                     const amt = '¥' + Number(c.amount).toLocaleString();
                     tableHTML += `<tr><td style="border: 2px solid #000; padding: 6px;">${label}</td><td style="border: 2px solid #000; padding: 6px; text-align: right;">${amt}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">' + amt + '</td>' : ''}</tr>`;
@@ -4682,7 +4678,22 @@ const AdminSystem = () => {
                                     <td style="border: 2px solid #000; padding: 8px;">総支給額</td>
                                     <td style="border: 2px solid #000; padding: 8px; text-align: right; font-size: 15px;">¥${Math.round(totals.hourlyTotalGross).toLocaleString()}</td>
                                     ${isFixed ? '<td style="border: 2px solid #000; padding: 8px; text-align: right; font-size: 15px;">¥' + Math.round(totals.fixedTotalGross).toLocaleString() + '</td>' : ''}
-                                </tr>
+                                </tr>`;
+        // 🆕 非課税対象額（総支給額には含めない。差引（総振込金額）にだけ加算される）
+        if (totals.nonTaxableTotal > 0) {
+            const _cell = 'border: 2px solid #000; padding: 6px;';
+            const _row = (label, amt) => `<tr><td style="${_cell}">${label}</td><td style="${_cell} text-align: right;">¥${amt.toLocaleString()}</td>${isFixed ? '<td style="' + _cell + ' text-align: right;">¥' + amt.toLocaleString() + '</td>' : ''}</tr>`;
+            tableHTML += `<tr style="background: #e3f2fd;"><td colspan="${isFixed ? 3 : 2}" style="${_cell} font-weight: bold; color: #1565c0;">非課税対象（総支給額には含まれません）</td></tr>`;
+            if (totals.allowances.commuting > 0) tableHTML += _row('通勤手当', totals.allowances.commuting);
+            if (totals.allowances.expense > 0) tableHTML += _row('経費', totals.allowances.expense);
+            (totals.allowances.custom || []).forEach(c => {
+                if ((Number(c.amount) || 0) > 0 && c.taxable === false) {
+                    tableHTML += _row(String(c.name || '項目').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch])), Number(c.amount));
+                }
+            });
+            tableHTML += `<tr style="background: #bbdefb; font-weight: bold;"><td style="border: 2px solid #000; padding: 8px;">非課税対象額</td><td style="border: 2px solid #000; padding: 8px; text-align: right;">¥${Math.round(totals.nonTaxableTotal).toLocaleString()}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 8px; text-align: right;">¥' + Math.round(totals.nonTaxableTotal).toLocaleString() + '</td>' : ''}</tr>`;
+        }
+        tableHTML += `
                             </tbody>
                         </table>
                         
@@ -4791,7 +4802,7 @@ const AdminSystem = () => {
                         <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                             <tbody>
                                 <tr style="background: #cce5ff; font-weight: bold; font-size: 16px;">
-                                    <td style="border: 2px solid #000; padding: 10px;">差引支給額</td>
+                                    <td style="border: 2px solid #000; padding: 10px;">総振込金額</td>
                                     <td style="border: 2px solid #000; padding: 10px; text-align: right; width: 150px; color: #0066cc;">¥${Math.round(totals.hourlyNetPay).toLocaleString()}</td>
                                     ${isFixed ? '<td style="border: 2px solid #000; padding: 10px; text-align: right; width: 150px; color: #0066cc;">¥' + Math.round(totals.fixedNetPay).toLocaleString() + '</td>' : ''}
                                 </tr>
@@ -6702,7 +6713,7 @@ const AdminSystem = () => {
                                                 "\u00A5",
                                                 totals.transport.toLocaleString()),
                                             React.createElement("td", { className: "border p-2 text-right bg-gray-100" }, "-")),
-                                        (totals.totalAllowances > 0 || totals.customNonTaxable > 0) && (React.createElement(React.Fragment, null,
+                                        totals.totalAllowances > 0 && (React.createElement(React.Fragment, null,
                                             totals.allowances.family > 0 && React.createElement("tr", null,
                                                 React.createElement("td", { className: "border p-2" }, "\u5BB6\u65CF\u624B\u5F53"),
                                                 React.createElement("td", { className: "border p-2 text-right" },
@@ -6727,22 +6738,6 @@ const AdminSystem = () => {
                                                 React.createElement("td", { className: "border p-2 text-right" },
                                                     "\u00A5",
                                                     totals.allowances.position.toLocaleString())),
-                                            totals.allowances.commuting > 0 && React.createElement("tr", null,
-                                                React.createElement("td", { className: "border p-2" }, "\u901A\u52E4\u624B\u5F53"),
-                                                React.createElement("td", { className: "border p-2 text-right" },
-                                                    "\u00A5",
-                                                    totals.allowances.commuting.toLocaleString()),
-                                                React.createElement("td", { className: "border p-2 text-right" },
-                                                    "\u00A5",
-                                                    totals.allowances.commuting.toLocaleString())),
-                                            totals.allowances.expense > 0 && React.createElement("tr", null,
-                                                React.createElement("td", { className: "border p-2" }, "\u7D4C\u8CBB"),
-                                                React.createElement("td", { className: "border p-2 text-right" },
-                                                    "\u00A5",
-                                                    totals.allowances.expense.toLocaleString()),
-                                                React.createElement("td", { className: "border p-2 text-right" },
-                                                    "\u00A5",
-                                                    totals.allowances.expense.toLocaleString())),
                                             totals.allowances.housing > 0 && React.createElement("tr", null,
                                                 React.createElement("td", { className: "border p-2" }, "\u5BB6\u8CC3\u88DC\u52A9"),
                                                 React.createElement("td", { className: "border p-2 text-right" },
@@ -6751,7 +6746,7 @@ const AdminSystem = () => {
                                                 React.createElement("td", { className: "border p-2 text-right" },
                                                     "\u00A5",
                                                     totals.allowances.housing.toLocaleString())),
-                                        (totals.allowances.custom || []).filter(c => (Number(c.amount) || 0) > 0).map(c => React.createElement("tr", { key: "ca" + c.id },
+                                        (totals.allowances.custom || []).filter(c => (Number(c.amount) || 0) > 0 && c.taxable !== false).map(c => React.createElement("tr", { key: "ca" + c.id },
     React.createElement("td", { className: "border p-2" }, (c.name || "手当") + (c.taxable === false ? "（非課税）" : "")),
     React.createElement("td", { className: "border p-2 text-right" }, "¥", Number(c.amount).toLocaleString()),
     React.createElement("td", { className: "border p-2 text-right" }, "¥", Number(c.amount).toLocaleString()))))),
@@ -6762,7 +6757,18 @@ const AdminSystem = () => {
                                                 Math.round(totals.hourlyTotalGross).toLocaleString()),
                                             React.createElement("td", { className: "border p-2 text-right" },
                                                 "\u00A5",
-                                                Math.round(totals.fixedTotalGross).toLocaleString()))))),
+                                                Math.round(totals.fixedTotalGross).toLocaleString())),
+(totals.nonTaxableTotal > 0) && (() => {
+    const row = (k, label, amt) => React.createElement("tr", { key: k }, React.createElement("td", { className: "border p-2" }, label), React.createElement("td", { className: "border p-2 text-right" }, "¥", amt.toLocaleString()),
+                React.createElement("td", { className: "border p-2 text-right" }, "¥", amt.toLocaleString()));
+    return React.createElement(React.Fragment, null,
+        React.createElement("tr", { className: "bg-blue-50" }, React.createElement("td", { className: "border p-2 font-bold text-blue-700", colSpan: 3 }, "非課税対象（総支給額には含まれません）")),
+        totals.allowances.commuting > 0 && row("nt-c", "通勤手当", totals.allowances.commuting),
+        totals.allowances.expense > 0 && row("nt-e", "経費", totals.allowances.expense),
+        (totals.allowances.custom || []).filter(c => (Number(c.amount) || 0) > 0 && c.taxable === false).map(c => row("nt-" + c.id, c.name || "項目", Number(c.amount))),
+        React.createElement("tr", { className: "bg-blue-100 font-bold" }, React.createElement("td", { className: "border p-2" }, "非課税対象額"), React.createElement("td", { className: "border p-2 text-right" }, "¥", Math.round(totals.nonTaxableTotal).toLocaleString()),
+                React.createElement("td", { className: "border p-2 text-right" }, "¥", Math.round(totals.nonTaxableTotal).toLocaleString())));
+})()))),
                             React.createElement("div", { className: "mb-4" },
                                 React.createElement("h4", { className: "bg-red-500 text-white p-2 font-bold" }, "\u3010\u63A7\u9664\u3011"),
                                 React.createElement("table", { className: "w-full border-collapse border" },
@@ -6869,7 +6875,7 @@ const AdminSystem = () => {
                                 React.createElement("table", { className: "w-full border-collapse border" },
                                     React.createElement("tbody", null,
                                         React.createElement("tr", { className: "bg-blue-100 font-bold text-lg" },
-                                            React.createElement("td", { className: "border p-3" }, "\u5DEE\u5F15\u652F\u7D66\u984D"),
+                                            React.createElement("td", { className: "border p-3" }, "総振込金額"),
                                             React.createElement("td", { className: "border p-3 text-right w-32" },
                                                 "\u00A5",
                                                 Math.round(totals.hourlyNetPay).toLocaleString()),
@@ -6998,7 +7004,7 @@ const AdminSystem = () => {
                                         React.createElement("td", { className: "border p-3 text-right font-bold" },
                                             "\u00A5",
                                             totals.transport.toLocaleString())),
-                                    (totals.totalAllowances > 0 || totals.customNonTaxable > 0) && (React.createElement(React.Fragment, null,
+                                    totals.totalAllowances > 0 && (React.createElement(React.Fragment, null,
                                         totals.allowances.family > 0 && React.createElement("tr", null,
                                             React.createElement("td", { className: "border p-3" }, "\u5BB6\u65CF\u624B\u5F53"),
                                             React.createElement("td", { className: "border p-3 text-right" },
@@ -7014,29 +7020,28 @@ const AdminSystem = () => {
                                             React.createElement("td", { className: "border p-3 text-right" },
                                                 "\u00A5",
                                                 totals.allowances.position.toLocaleString())),
-                                        totals.allowances.commuting > 0 && React.createElement("tr", null,
-                                            React.createElement("td", { className: "border p-3" }, "\u901A\u52E4\u624B\u5F53"),
-                                            React.createElement("td", { className: "border p-3 text-right" },
-                                                "\u00A5",
-                                                totals.allowances.commuting.toLocaleString())),
-                                        totals.allowances.expense > 0 && React.createElement("tr", null,
-                                            React.createElement("td", { className: "border p-3" }, "\u7D4C\u8CBB"),
-                                            React.createElement("td", { className: "border p-3 text-right" },
-                                                "\u00A5",
-                                                totals.allowances.expense.toLocaleString())),
                                         totals.allowances.housing > 0 && React.createElement("tr", null,
                                             React.createElement("td", { className: "border p-3" }, "\u5BB6\u8CC3\u88DC\u52A9"),
                                             React.createElement("td", { className: "border p-3 text-right" },
                                                 "\u00A5",
                                                 totals.allowances.housing.toLocaleString())),
-                                    (totals.allowances.custom || []).filter(c => (Number(c.amount) || 0) > 0).map(c => React.createElement("tr", { key: "ca" + c.id },
+                                    (totals.allowances.custom || []).filter(c => (Number(c.amount) || 0) > 0 && c.taxable !== false).map(c => React.createElement("tr", { key: "ca" + c.id },
     React.createElement("td", { className: "border p-3" }, (c.name || "手当") + (c.taxable === false ? "（非課税）" : "")),
     React.createElement("td", { className: "border p-3 text-right" }, "¥", Number(c.amount).toLocaleString()))))),
                                     React.createElement("tr", { className: "bg-blue-50" },
                                         React.createElement("td", { className: "border p-3 font-bold text-lg" }, "\u7DCF\u652F\u7D66\u984D"),
                                         React.createElement("td", { className: "border p-3 text-right font-bold text-lg text-blue-600" },
                                             "\u00A5",
-                                            Math.round(totals.hourlyTotalGross).toLocaleString()))))))),
+                                            Math.round(totals.hourlyTotalGross).toLocaleString())),
+(totals.nonTaxableTotal > 0) && (() => {
+    const row = (k, label, amt) => React.createElement("tr", { key: k }, React.createElement("td", { className: "border p-3" }, label), React.createElement("td", { className: "border p-3 text-right" }, "¥", amt.toLocaleString()));
+    return React.createElement(React.Fragment, null,
+        React.createElement("tr", { className: "bg-blue-50" }, React.createElement("td", { className: "border p-3 font-bold text-blue-700", colSpan: 2 }, "非課税対象（総支給額には含まれません）")),
+        totals.allowances.commuting > 0 && row("nt-c", "通勤手当", totals.allowances.commuting),
+        totals.allowances.expense > 0 && row("nt-e", "経費", totals.allowances.expense),
+        (totals.allowances.custom || []).filter(c => (Number(c.amount) || 0) > 0 && c.taxable === false).map(c => row("nt-" + c.id, c.name || "項目", Number(c.amount))),
+        React.createElement("tr", { className: "bg-blue-100 font-bold" }, React.createElement("td", { className: "border p-3" }, "非課税対象額"), React.createElement("td", { className: "border p-3 text-right" }, "¥", Math.round(totals.nonTaxableTotal).toLocaleString())));
+})()))))),
                     React.createElement("div", { className: "mb-4" },
                         React.createElement("div", { className: "flex justify-between items-center mb-4" },
                             React.createElement("h3", { className: "text-xl font-bold" }, "\u52E4\u6020\u8A73\u7D30"),
