@@ -142,6 +142,11 @@ async function showReceiptDisplay(receiptData) {
         <div style="margin: 12px 0; padding-bottom: 8px; border-bottom: 1px dashed #ddd;">
       `;
       
+      // 🆕 店内飲食/持ち帰りのラベル（注文ごとに違う場合があるので商品ごとに表示）
+      if (item.eatStyle === 'dinein' || item.eatStyle === 'takeout') {
+        itemsHtml += `<div style="font-size: 11px; margin-bottom: 3px;"><span style="border: 1px solid #333; border-radius: 3px; padding: 0 5px;">${item.eatStyle === 'dinein' ? '店内飲食' : '持ち帰り'}</span></div>`;
+      }
+      
       // 基本価格を表示
       itemsHtml += `
         <div style="font-size: 13px; color: #333; margin-bottom: 2px; display: flex; justify-content: space-between;">
