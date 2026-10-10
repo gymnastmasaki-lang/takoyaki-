@@ -788,7 +788,8 @@ const AdminSystem = () => {
             const isFixed = employee.salaryType === '固定給' && employee.monthlySalary > 0;
             const allowances = employee.allowances || {};
             const extraAllowances = (allowances.family || 0) + (allowances.sales || 0)
-                + (allowances.position || 0) + (allowances.housing || 0);
+                + (allowances.position || 0) + (allowances.housing || 0)
+                + (window.sumCustomAllowances ? window.sumCustomAllowances(allowances).taxable : 0);
 
             // 給与所得控除の計算関数
             const calcEmpIncDed = (gross) => {
@@ -1388,6 +1389,29 @@ const AdminSystem = () => {
             lateNightHours
         };
     };
+    // 🆕 追加した手当・控除の集計（allowances.custom / deductions.custom に保存）
+    const sumCustomAllowances = (allowances) => {
+        const items = Array.isArray(allowances && allowances.custom) ? allowances.custom : [];
+        let taxable = 0, nonTaxable = 0;
+        items.forEach(it => {
+            const a = Number(it.amount) || 0;
+            if (a <= 0)
+                return;
+            if (it.taxable === false)
+                nonTaxable += a;
+            else
+                taxable += a;
+        });
+        return { taxable, nonTaxable, items };
+    };
+    const sumCustomDeductions = (deductions) => {
+        const items = Array.isArray(deductions && deductions.custom) ? deductions.custom : [];
+        let total = 0;
+        items.forEach(it => { total += Math.max(0, Number(it.amount) || 0); });
+        return { total, items };
+    };
+    window.sumCustomAllowances = sumCustomAllowances;
+    window.sumCustomDeductions = sumCustomDeductions;
     const calculateMonthlyTotals = (employeeId) => {
         var _a;
         const employee = employees.find(e => e.id === employeeId);
@@ -1437,10 +1461,11 @@ const AdminSystem = () => {
         // 各種手当
         const allowances = employee.allowances || {};
         // 経費（収入だが所得ではない）- 表示用のみ
-        const expenseAmount = (allowances.commuting || 0) + (allowances.expense || 0);
+        const customAllowanceSums = sumCustomAllowances(allowances); // 🆕 追加した手当
+        const expenseAmount = (allowances.commuting || 0) + (allowances.expense || 0) + customAllowanceSums.nonTaxable; // 非課税の追加手当は経費と同じ扱い
         // 経費以外の手当
         const totalAllowances = (allowances.family || 0) + (allowances.sales || 0) +
-            (allowances.position || 0) + (allowances.housing || 0);
+            (allowances.position || 0) + (allowances.housing || 0) + customAllowanceSums.taxable; // 課税の追加手当は総支給額に含める
         // ========== 時間給ベースの計算（経費を除外して計算） ==========
         const hourlyBasePay = totalBasePay + totalOvertimePay + totalHolidayPay + totalLateNightPay + transport;
         const hourlyGrossBeforeExpense = hourlyBasePay + totalAllowances; // 経費除外の総支給額
@@ -1488,6 +1513,7 @@ const AdminSystem = () => {
             minimumWage,
             allowances: employee.allowances || {},
             totalAllowances,
+            customNonTaxable: customAllowanceSums.nonTaxable,
             // 時間給ベース
             hourlyBasePay,
             hourlyTotalGross,
@@ -1577,10 +1603,10 @@ const AdminSystem = () => {
                 });
                 const transport = (employee.transportAllowance || 0) * workDays;
                 const allowances = employee.allowances || {};
-                const expenseAmount = allowances.expense || 0; // 経費
+                const expenseAmount = (allowances.expense || 0) + (window.sumCustomAllowances ? window.sumCustomAllowances(allowances).nonTaxable : 0); // 経費
                 const totalAllowancesWithoutExpense = (allowances.family || 0) + (allowances.sales || 0) +
                     (allowances.position || 0) + (allowances.commuting || 0) +
-                    (allowances.housing || 0);
+                    (allowances.housing || 0) + (window.sumCustomAllowances ? window.sumCustomAllowances(allowances).taxable : 0);
                 // 時間給ベース（経費除外で控除計算）
                 const hourlyBasePay = totalBasePay + totalOvertimePay + totalHolidayPay + transport;
                 const hourlyGrossBeforeExpense = hourlyBasePay + totalAllowancesWithoutExpense;
@@ -4296,7 +4322,8 @@ const AdminSystem = () => {
         }        // 家賃・光熱費（従業員データから取得）
         const rent = ((_a = employee.deductions) === null || _a === void 0 ? void 0 : _a.rent) || 0;
         const utilities = ((_b = employee.deductions) === null || _b === void 0 ? void 0 : _b.utilities) || 0;
-        const totalDeductions = healthInsurance + pension + employmentInsurance + incomeTax + residentTax + rent + utilities;
+        const customDed = sumCustomDeductions(employee.deductions); // 🆕 追加した控除（手入力）
+        const totalDeductions = healthInsurance + pension + employmentInsurance + incomeTax + residentTax + rent + utilities + customDed.total;
         return {
             healthInsurance,
             pension,
@@ -4305,6 +4332,7 @@ const AdminSystem = () => {
             residentTax,
             rent,
             utilities,
+            customDeductions: customDed.items,
             totalDeductions,
             socialInsuranceTotal
         };
@@ -4621,7 +4649,7 @@ const AdminSystem = () => {
                                 </tr>`;
         }
         // 手当
-        if (totals.totalAllowances > 0) {
+        if (totals.totalAllowances > 0 || totals.customNonTaxable > 0) {
             if (totals.allowances.family > 0) {
                 tableHTML += `<tr><td style="border: 2px solid #000; padding: 6px;">家族手当</td><td style="border: 2px solid #000; padding: 6px; text-align: right;">¥${totals.allowances.family.toLocaleString()}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">¥' + totals.allowances.family.toLocaleString() + '</td>' : ''}</tr>`;
             }
@@ -4640,6 +4668,14 @@ const AdminSystem = () => {
             if (totals.allowances.housing > 0) {
                 tableHTML += `<tr><td style="border: 2px solid #000; padding: 6px;">家賃補助</td><td style="border: 2px solid #000; padding: 6px; text-align: right;">¥${totals.allowances.housing.toLocaleString()}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">¥' + totals.allowances.housing.toLocaleString() + '</td>' : ''}</tr>`;
             }
+            // 🆕 追加した手当（非課税は名称に「（非課税）」と表示）
+            (totals.allowances.custom || []).forEach(c => {
+                if ((Number(c.amount) || 0) > 0) {
+                    const label = String(c.name || '手当').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch])) + (c.taxable === false ? '（非課税）' : '');
+                    const amt = '¥' + Number(c.amount).toLocaleString();
+                    tableHTML += `<tr><td style="border: 2px solid #000; padding: 6px;">${label}</td><td style="border: 2px solid #000; padding: 6px; text-align: right;">${amt}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">' + amt + '</td>' : ''}</tr>`;
+                }
+            });
         }
         tableHTML += `
                                 <tr style="background: #d4edda; font-weight: bold;">
@@ -4705,6 +4741,14 @@ const AdminSystem = () => {
                                     ${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">¥' + fixedDed.utilities.toLocaleString() + '</td>' : ''}
                                 </tr>`;
         }
+        // 🆕 追加した控除（手入力）
+        (hourlyDed.customDeductions || []).forEach(c => {
+            if ((Number(c.amount) || 0) > 0) {
+                const label = String(c.name || '控除').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+                const amt = '¥' + Number(c.amount).toLocaleString();
+                tableHTML += `<tr><td style="border: 2px solid #000; padding: 6px;">${label}</td><td style="border: 2px solid #000; padding: 6px; text-align: right;">${amt}</td>${isFixed ? '<td style="border: 2px solid #000; padding: 6px; text-align: right;">' + amt + '</td>' : ''}</tr>`;
+            }
+        });
         tableHTML += `
                                 <tr style="background: #f8d7da; font-weight: bold;">
                                     <td style="border: 2px solid #000; padding: 8px;">総控除額</td>
@@ -6658,7 +6702,7 @@ const AdminSystem = () => {
                                                 "\u00A5",
                                                 totals.transport.toLocaleString()),
                                             React.createElement("td", { className: "border p-2 text-right bg-gray-100" }, "-")),
-                                        totals.totalAllowances > 0 && (React.createElement(React.Fragment, null,
+                                        (totals.totalAllowances > 0 || totals.customNonTaxable > 0) && (React.createElement(React.Fragment, null,
                                             totals.allowances.family > 0 && React.createElement("tr", null,
                                                 React.createElement("td", { className: "border p-2" }, "\u5BB6\u65CF\u624B\u5F53"),
                                                 React.createElement("td", { className: "border p-2 text-right" },
@@ -6706,7 +6750,11 @@ const AdminSystem = () => {
                                                     totals.allowances.housing.toLocaleString()),
                                                 React.createElement("td", { className: "border p-2 text-right" },
                                                     "\u00A5",
-                                                    totals.allowances.housing.toLocaleString())))),
+                                                    totals.allowances.housing.toLocaleString())),
+                                        (totals.allowances.custom || []).filter(c => (Number(c.amount) || 0) > 0).map(c => React.createElement("tr", { key: "ca" + c.id },
+    React.createElement("td", { className: "border p-2" }, (c.name || "手当") + (c.taxable === false ? "（非課税）" : "")),
+    React.createElement("td", { className: "border p-2 text-right" }, "¥", Number(c.amount).toLocaleString()),
+    React.createElement("td", { className: "border p-2 text-right" }, "¥", Number(c.amount).toLocaleString()))))),
                                         React.createElement("tr", { className: "bg-green-100 font-bold" },
                                             React.createElement("td", { className: "border p-2" }, "\u7DCF\u652F\u7D66\u984D"),
                                             React.createElement("td", { className: "border p-2 text-right" },
@@ -6780,6 +6828,10 @@ const AdminSystem = () => {
                                             React.createElement("td", { className: "border p-2 text-right" },
                                                 "\u00A5",
                                                 totals.fixedDeductions.utilities.toLocaleString())),
+                                        (totals.hourlyDeductions.customDeductions || []).filter(c => (Number(c.amount) || 0) > 0).map(c => React.createElement("tr", { key: "cd" + c.id },
+    React.createElement("td", { className: "border p-2" }, c.name || "控除"),
+    React.createElement("td", { className: "border p-2 text-right" }, "¥", Number(c.amount).toLocaleString()),
+    React.createElement("td", { className: "border p-2 text-right" }, "¥", Number(c.amount).toLocaleString()))),
                                         React.createElement("tr", { className: "bg-red-100 font-bold" },
                                             React.createElement("td", { className: "border p-2" }, "\u7DCF\u63A7\u9664\u984D"),
                                             React.createElement("td", { className: "border p-2 text-right" },
@@ -6946,7 +6998,7 @@ const AdminSystem = () => {
                                         React.createElement("td", { className: "border p-3 text-right font-bold" },
                                             "\u00A5",
                                             totals.transport.toLocaleString())),
-                                    totals.totalAllowances > 0 && (React.createElement(React.Fragment, null,
+                                    (totals.totalAllowances > 0 || totals.customNonTaxable > 0) && (React.createElement(React.Fragment, null,
                                         totals.allowances.family > 0 && React.createElement("tr", null,
                                             React.createElement("td", { className: "border p-3" }, "\u5BB6\u65CF\u624B\u5F53"),
                                             React.createElement("td", { className: "border p-3 text-right" },
@@ -6976,7 +7028,10 @@ const AdminSystem = () => {
                                             React.createElement("td", { className: "border p-3" }, "\u5BB6\u8CC3\u88DC\u52A9"),
                                             React.createElement("td", { className: "border p-3 text-right" },
                                                 "\u00A5",
-                                                totals.allowances.housing.toLocaleString())))),
+                                                totals.allowances.housing.toLocaleString())),
+                                    (totals.allowances.custom || []).filter(c => (Number(c.amount) || 0) > 0).map(c => React.createElement("tr", { key: "ca" + c.id },
+    React.createElement("td", { className: "border p-3" }, (c.name || "手当") + (c.taxable === false ? "（非課税）" : "")),
+    React.createElement("td", { className: "border p-3 text-right" }, "¥", Number(c.amount).toLocaleString()))))),
                                     React.createElement("tr", { className: "bg-blue-50" },
                                         React.createElement("td", { className: "border p-3 font-bold text-lg" }, "\u7DCF\u652F\u7D66\u984D"),
                                         React.createElement("td", { className: "border p-3 text-right font-bold text-lg text-blue-600" },
@@ -7135,6 +7190,24 @@ const AdminSystem = () => {
                     React.createElement("div", { className: "text-sm font-semibold text-gray-700" }, "\u5F25\u751F\u4F1A\u8A08\u5F62\u5F0F"))))));
 };
 // フォームコンポーネント
+function CustomPayItemsEditor(props) {
+    // 🆕 手当・控除の「項目の追加」入力欄（項目名・金額・課税/非課税）
+    const list = Array.isArray(props.items) ? props.items : [];
+    const inputCls = (props.size === 'md' ? 'p-2' : 'p-1') + ' border rounded text-sm';
+    const update = (id, patch) => props.onChange(list.map(it => it.id === id ? Object.assign({}, it, patch) : it));
+    const remove = (id) => props.onChange(list.filter(it => it.id !== id));
+    const add = () => props.onChange([...list, { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: '', amount: 0, taxable: true }]);
+    return React.createElement("div", { className: "mt-3 space-y-2" },
+        list.map(it => React.createElement("div", { key: it.id, className: "flex flex-wrap items-center gap-2" },
+            React.createElement("input", { type: "text", value: it.name, placeholder: "項目名", onChange: (e) => update(it.id, { name: e.target.value }), className: "flex-1 " + inputCls }),
+            React.createElement("input", { type: "number", value: it.amount, placeholder: "金額", onChange: (e) => update(it.id, { amount: parseFloat(e.target.value) || 0 }), className: "w-28 " + inputCls }),
+            props.withTaxable && React.createElement("select", { value: it.taxable === false ? 'nontax' : 'tax', onChange: (e) => update(it.id, { taxable: e.target.value !== 'nontax' }), className: inputCls },
+                React.createElement("option", { value: "tax" }, "課税"),
+                React.createElement("option", { value: "nontax" }, "非課税")),
+            React.createElement("button", { type: "button", onClick: () => remove(it.id), className: "px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600" }, "削除"))),
+        React.createElement("button", { type: "button", onClick: add, className: "text-xs px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600" }, props.addLabel),
+        props.withTaxable && React.createElement("div", { className: "text-xs text-gray-500" }, "※課税: 総支給額に含まれ、社会保険料・所得税の計算対象になります。非課税（経費など）: 総支給額の計算対象外で、手取りにだけ加算されます。"));
+}
 const EditEmployeeForm = ({ employee, onSave, onCancel }) => {
     const [name, setName] = useState((employee === null || employee === void 0 ? void 0 : employee.name) || '');
     const [rate, setRate] = useState((employee === null || employee === void 0 ? void 0 : employee.hourlyRate) || 0);
@@ -7233,7 +7306,8 @@ const EditEmployeeForm = ({ employee, onSave, onCancel }) => {
                     React.createElement("input", { type: "number", value: allowances.expense, onChange: (e) => setAllowances(Object.assign(Object.assign({}, allowances), { expense: parseFloat(e.target.value) || 0 })), className: "w-full p-1 border rounded text-sm" })),
                 React.createElement("div", null,
                     React.createElement("label", { className: "text-xs" }, "\u5BB6\u8CC3\u88DC\u52A9"),
-                    React.createElement("input", { type: "number", value: allowances.housing, onChange: (e) => setAllowances(Object.assign(Object.assign({}, allowances), { housing: parseFloat(e.target.value) || 0 })), className: "w-full p-1 border rounded text-sm" })))),
+                    React.createElement("input", { type: "number", value: allowances.housing, onChange: (e) => setAllowances(Object.assign(Object.assign({}, allowances), { housing: parseFloat(e.target.value) || 0 })), className: "w-full p-1 border rounded text-sm" }))),
+        React.createElement(CustomPayItemsEditor, { items: allowances.custom, onChange: (v) => setAllowances(Object.assign(Object.assign({}, allowances), { custom: v })), withTaxable: true, addLabel: "＋ 手当を追加", size: "sm" })),
         React.createElement("div", { className: "bg-blue-50 p-2 rounded" },
             React.createElement("h5", { className: "text-sm font-bold mb-2" }, "\u793E\u4F1A\u4FDD\u967A\u30FB\u7A0E\u91D1\u8A2D\u5B9A"),
             React.createElement("div", { className: "text-xs text-gray-600 mb-2" }, "\u203B\u30A2\u30EB\u30D0\u30A4\u30C8\u3084\u56FD\u6C11\u5065\u5EB7\u4FDD\u967A\u306E\u65B9\u306F\u8A72\u5F53\u9805\u76EE\u3092OFF\u306B\u3057\u3066\u304F\u3060\u3055\u3044"),
@@ -7258,7 +7332,8 @@ const EditEmployeeForm = ({ employee, onSave, onCancel }) => {
                     React.createElement("input", { type: "number", value: deductions.rent, onChange: (e) => setDeductions(Object.assign(Object.assign({}, deductions), { rent: parseFloat(e.target.value) || 0 })), className: "w-full p-1 border rounded text-sm" })),
                 React.createElement("div", null,
                     React.createElement("label", { className: "text-xs" }, "\u5149\u71B1\u8CBB"),
-                    React.createElement("input", { type: "number", value: deductions.utilities, onChange: (e) => setDeductions(Object.assign(Object.assign({}, deductions), { utilities: parseFloat(e.target.value) || 0 })), className: "w-full p-1 border rounded text-sm" })))),
+                    React.createElement("input", { type: "number", value: deductions.utilities, onChange: (e) => setDeductions(Object.assign(Object.assign({}, deductions), { utilities: parseFloat(e.target.value) || 0 })), className: "w-full p-1 border rounded text-sm" }))),
+        React.createElement(CustomPayItemsEditor, { items: deductions.custom, onChange: (v) => setDeductions(Object.assign(Object.assign({}, deductions), { custom: v })), withTaxable: false, addLabel: "＋ 控除を追加", size: "sm" })),
         salaryType === '固定給' && (React.createElement("div", { className: "bg-purple-50 p-3 rounded border border-purple-200" },
             React.createElement("div", { className: "flex items-center justify-between mb-2" },
                 React.createElement("h5", { className: "text-sm font-bold text-purple-800" }, "\u7D66\u4E0E\u5909\u66F4\u5C65\u6B74\uFF08\u7D2F\u8A08\u5DEE\u984D\u8A08\u7B97\u306B\u4F7F\u7528\uFF09"),
@@ -7378,7 +7453,8 @@ const AddEmployeeForm = ({ onSave, onCancel }) => {
                     React.createElement("input", { type: "number", value: allowances.expense, onChange: (e) => setAllowances(Object.assign(Object.assign({}, allowances), { expense: parseFloat(e.target.value) || 0 })), className: "w-full p-2 border rounded text-sm", placeholder: "0" })),
                 React.createElement("div", null,
                     React.createElement("label", { className: "block text-xs mb-1" }, "\u5BB6\u8CC3\u88DC\u52A9"),
-                    React.createElement("input", { type: "number", value: allowances.housing, onChange: (e) => setAllowances(Object.assign(Object.assign({}, allowances), { housing: parseFloat(e.target.value) || 0 })), className: "w-full p-2 border rounded text-sm", placeholder: "0" })))),
+                    React.createElement("input", { type: "number", value: allowances.housing, onChange: (e) => setAllowances(Object.assign(Object.assign({}, allowances), { housing: parseFloat(e.target.value) || 0 })), className: "w-full p-2 border rounded text-sm", placeholder: "0" }))),
+        React.createElement(CustomPayItemsEditor, { items: allowances.custom, onChange: (v) => setAllowances(Object.assign(Object.assign({}, allowances), { custom: v })), withTaxable: true, addLabel: "＋ 手当を追加", size: "md" })),
         React.createElement("div", { className: "bg-blue-50 p-3 rounded" },
             React.createElement("h4", { className: "font-bold mb-3" }, "\u793E\u4F1A\u4FDD\u967A\u30FB\u7A0E\u91D1\u8A2D\u5B9A"),
             React.createElement("div", { className: "text-xs text-gray-600 mb-3" }, "\u203B\u30A2\u30EB\u30D0\u30A4\u30C8\u3084\u56FD\u6C11\u5065\u5EB7\u4FDD\u967A\u306E\u65B9\u306F\u8A72\u5F53\u9805\u76EE\u3092OFF\u306B\u3057\u3066\u304F\u3060\u3055\u3044"),
@@ -7405,7 +7481,8 @@ const AddEmployeeForm = ({ onSave, onCancel }) => {
                     React.createElement("input", { type: "number", value: deductions.rent, onChange: (e) => setDeductions(Object.assign(Object.assign({}, deductions), { rent: parseFloat(e.target.value) || 0 })), className: "w-full p-2 border rounded text-sm", placeholder: "0" })),
                 React.createElement("div", null,
                     React.createElement("label", { className: "block text-xs mb-1" }, "\u5149\u71B1\u8CBB"),
-                    React.createElement("input", { type: "number", value: deductions.utilities, onChange: (e) => setDeductions(Object.assign(Object.assign({}, deductions), { utilities: parseFloat(e.target.value) || 0 })), className: "w-full p-2 border rounded text-sm", placeholder: "0" })))),
+                    React.createElement("input", { type: "number", value: deductions.utilities, onChange: (e) => setDeductions(Object.assign(Object.assign({}, deductions), { utilities: parseFloat(e.target.value) || 0 })), className: "w-full p-2 border rounded text-sm", placeholder: "0" }))),
+        React.createElement(CustomPayItemsEditor, { items: deductions.custom, onChange: (v) => setDeductions(Object.assign(Object.assign({}, deductions), { custom: v })), withTaxable: false, addLabel: "＋ 控除を追加", size: "md" })),
         React.createElement("div", { className: "flex gap-3 justify-end sticky bottom-0 bg-white pt-3 border-t" },
             React.createElement("button", { onClick: onCancel, className: "px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600" }, "\u30AD\u30E3\u30F3\u30BB\u30EB"),
             React.createElement("button", { onClick: () => {
