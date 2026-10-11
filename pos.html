@@ -824,7 +824,23 @@
     
     // 🆕 消費税率設定（軽減税率・標準税率の「実際の％」。kanriの「消費税率設定」で編集される）
     window.taxRateSettings = { reducedRatePercent: 8, standardRatePercent: 10 };
+    // 🆕 ご利用方法（店内飲食/持ち帰り）の名称設定（kanriで設定）。未設定なら標準の名称
+    window.eatStyleSettings = { enabled: true, dineInLabel: '店内飲食', takeoutLabel: '持ち帰り' };
+    window.getEatStyleLabel = function(style) {
+      return style === 'dinein' ? (window.eatStyleSettings.dineInLabel || '店内飲食') : (window.eatStyleSettings.takeoutLabel || '持ち帰り');
+    };
+    async function loadEatStyleSettings() {
+      try {
+        const snap = await window.getDoc(window.getStoreDoc('eat_style_settings', 'default'));
+        if (snap.exists()) {
+          window.eatStyleSettings = Object.assign({ enabled: true, dineInLabel: '店内飲食', takeoutLabel: '持ち帰り' }, snap.data());
+        }
+      } catch (e) {
+        console.error('ご利用方法設定の読み込みエラー（標準の名称を使用します）:', e);
+      }
+    }
     async function loadTaxRateSettings() {
+      loadEatStyleSettings(); // 🆕
       const ref = window.getStoreDoc('tax_rate_settings', 'default');
       // 🆕 実際の取得は諦めず継続させ、届き次第反映＆再描画する（タイムアウトは初期表示をブロックしないためだけ）
       const fetchPromise = window.getDoc(ref).then(snap => {
@@ -6572,6 +6588,9 @@
         let totalRedSlipTax10Inclusive = 0;  // 🆕 赤伝票10%内税
         let totalRedSlipTax8Exclusive = 0;  // 🆕 赤伝票8%外税
         let totalRedSlipTax10Exclusive = 0;  // 🆕 赤伝票10%外税
+        const v2Days = {};            // 🆕 案B（会計ごとに税額を確定して保存した日）の保存値
+        const redLegacyDays = new Set(); // 🆕 赤伝票の内税/外税が保存されていない日（従来方式の日）
+        let salesDayCount = 0;
         let totalExpense = 0;
         let totalLaborCost = 0;
         const itemCounts = {}; // 商品別カウント
@@ -6603,6 +6622,9 @@
         
         console.log('ordersから集計した商品データ:', itemCounts);
         
+        // 🆕 勤怠は期間全体で1回だけ取得（以前は日付ごとに全件取得していた）
+        const attendanceSnapshotAll = await window.getDocs(window.getStoreCollection('attendance'));
+        
         for (const dateStr of dates) {
           // 売上データ
           const salesDoc = await window.getDoc(window.getStoreDoc('dailySales', dateStr));
@@ -6625,6 +6647,17 @@
             totalRedSlipTax10Inclusive += data.redSlipTax10Inclusive || 0;  // 🆕 赤伝票10%内税
             totalRedSlipTax8Exclusive += data.redSlipTax8Exclusive || 0;  // 🆕 赤伝票8%外税
             totalRedSlipTax10Exclusive += data.redSlipTax10Exclusive || 0;  // 🆕 赤伝票10%外税
+            // 🆕 案Bの日は、保存した税額をそのまま使う（日次ジャーナル・レシートと同じ値）
+            salesDayCount++;
+            if (data.taxMethodVersion === 2) {
+              v2Days[dateStr] = {
+                t8i: data.tax8TaxInclusive || 0, t8e: data.tax8TaxExclusive || 0,
+                t10i: data.tax10TaxInclusive || 0, t10e: data.tax10TaxExclusive || 0
+              };
+            }
+            const _rsStored = (data.redSlipTax8Inclusive || 0) + (data.redSlipTax8Exclusive || 0) +
+                              (data.redSlipTax10Inclusive || 0) + (data.redSlipTax10Exclusive || 0);
+            if ((data.redSlipCount || 0) > 0 && _rsStored === 0) redLegacyDays.add(dateStr);
           }
           
           // 支出データ
@@ -6634,8 +6667,7 @@
           }
           
           // 人件費データ
-          const attendanceSnapshot = await window.getDocs(window.getStoreCollection('attendance'));
-          attendanceSnapshot.forEach(doc => {
+          attendanceSnapshotAll.forEach(doc => {
             const attData = doc.data();
             if (attData.date === dateStr) {
               // 既に計算済みの総賃金がある場合はそれを使用
@@ -6741,7 +6773,7 @@
           const orderDate = data.paidAt.toDate();
           const orderDateStr = window.getBusinessDay(orderDate).str;
           
-          if (dates.includes(orderDateStr)) {
+          if (dates.includes(orderDateStr) && !v2Days[orderDateStr]) { // 案Bの日は保存値を使うので除外
             data.items.forEach(item => {
               const taxType = item.taxType || 'inclusive';
               const taxAmount = getTaxAmount(item, item.quantity || 1);
@@ -6763,16 +6795,20 @@
           }
         });
         
+        // 🆕 案Bの日の消費税（保存値）を加える
+        Object.values(v2Days).forEach(d => {
+          tax8InclusiveTotal += d.t8i; tax8ExclusiveTotal += d.t8e;
+          tax10InclusiveTotal += d.t10i; tax10ExclusiveTotal += d.t10e;
+        });
+        
         // 🆕 赤伝票の内税・外税がdailySalesに保存されていない場合はredSlipsから計算
-        if ((totalRedSlipTax8Inclusive === 0 && totalRedSlipTax8Exclusive === 0 && 
-             totalRedSlipTax10Inclusive === 0 && totalRedSlipTax10Exclusive === 0) &&
-            totalRedSlipCount > 0) {
+        if (redLegacyDays.size > 0) {
           console.log('⚠️ dailySalesに赤伝票の内税・外税が保存されていないため、redSlipsから計算します');
           try {
             const redSlipsSnapshot = await window.getDocs(window.getStoreCollection('redSlips'));
             redSlipsSnapshot.forEach(doc => {
               const data = doc.data();
-              if (!data.businessDate || !dates.includes(data.businessDate) || !data.items) return;
+              if (!data.businessDate || !redLegacyDays.has(data.businessDate) || !data.items) return;
               
               data.items.forEach(item => {
                 const taxType = item.taxType || 'inclusive';
@@ -6810,7 +6846,12 @@
         const tax8Amount = totalTax8 - tax8Excluded;
         const tax10Amount = totalTax10 - tax10Excluded;
         const totalTax = tax8Amount + tax10Amount;
-        const taxExcludedTotal = tax8Excluded + tax10Excluded;
+        const taxSumAll = tax8InclusiveTotal + tax8ExclusiveTotal + tax10InclusiveTotal + tax10ExclusiveTotal;
+        const taxExcludedTotal = (totalTax8 + totalTax10) - taxSumAll; // 🆕 税込合計 − 消費税の合計
+        // 🆕 赤伝票の消費税（保存した内税+外税。無ければ従来の逆算）
+        const _p8 = window.getActualTaxPercent(8), _p10 = window.getActualTaxPercent(10);
+        const _rsT8 = (totalRedSlipTax8Inclusive + totalRedSlipTax8Exclusive) > 0 ? (totalRedSlipTax8Inclusive + totalRedSlipTax8Exclusive) : Math.floor(totalRedSlipTax8 * _p8 / (100 + _p8));
+        const _rsT10 = (totalRedSlipTax10Inclusive + totalRedSlipTax10Exclusive) > 0 ? (totalRedSlipTax10Inclusive + totalRedSlipTax10Exclusive) : Math.floor(totalRedSlipTax10 * _p10 / (100 + _p10));
         const taxIncludedTotal = totalTax8 + totalTax10;
         const finalTotalSales = taxIncludedTotal - totalDiscount - totalExpense;
         
@@ -6853,6 +6894,7 @@ ${window.getActualTaxPercent(10)}%合計: ¥${(tax10InclusiveTotal + tax10Exclus
 消費税の合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal + tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
 税抜合計: ¥${taxExcludedTotal.toLocaleString()}
 税込合計: ¥${taxIncludedTotal.toLocaleString()}
+（税額の集計方式：注文ごと ${Object.keys(v2Days).length}日 / 従来 ${Math.max(0, salesDayCount - Object.keys(v2Days).length)}日）
 
 支出: ¥${totalExpense.toLocaleString()}
 合計売上: ¥${(taxIncludedTotal - totalExpense).toLocaleString()}
@@ -6860,20 +6902,20 @@ ${window.getActualTaxPercent(10)}%合計: ¥${(tax10InclusiveTotal + tax10Exclus
 -------------------------------------
 赤伝票の税金内訳
 -------------------------------------
-${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${(totalRedSlipTax8 - Math.floor(totalRedSlipTax8 * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8)))).toLocaleString()}
-${window.getActualTaxPercent(8)}%の赤伝票（税込）: -¥${totalRedSlipTax8.toLocaleString()}
-${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${(totalRedSlipTax8 - (totalRedSlipTax8 - Math.floor(totalRedSlipTax8 * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))))).toLocaleString()}
+${_p8}%の赤伝票（税抜）: -¥${(totalRedSlipTax8 - _rsT8).toLocaleString()}
+${_p8}%の赤伝票（税込）: -¥${totalRedSlipTax8.toLocaleString()}
+${_p8}%の赤伝票の消費税: -¥${_rsT8.toLocaleString()}
   内税: -¥${totalRedSlipTax8Inclusive.toLocaleString()}
   外税: -¥${totalRedSlipTax8Exclusive.toLocaleString()}
 
-${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${(totalRedSlipTax10 - Math.floor(totalRedSlipTax10 * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))).toLocaleString()}
-${window.getActualTaxPercent(10)}%の赤伝票（税込）: -¥${totalRedSlipTax10.toLocaleString()}
-${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTax10 - (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))))).toLocaleString()}
+${_p10}%の赤伝票（税抜）: -¥${(totalRedSlipTax10 - _rsT10).toLocaleString()}
+${_p10}%の赤伝票（税込）: -¥${totalRedSlipTax10.toLocaleString()}
+${_p10}%の赤伝票の消費税: -¥${_rsT10.toLocaleString()}
   内税: -¥${totalRedSlipTax10Inclusive.toLocaleString()}
   外税: -¥${totalRedSlipTax10Exclusive.toLocaleString()}
 
-赤伝票消費税の合計: -¥${((totalRedSlipTax8 - (totalRedSlipTax8 - Math.floor(totalRedSlipTax8 * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8))))) + (totalRedSlipTax10 - (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10)))))).toLocaleString()}
-赤伝票税抜合計: -¥${((totalRedSlipTax8 - Math.floor(totalRedSlipTax8 * window.getActualTaxPercent(8) / (100 + window.getActualTaxPercent(8)))) + (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 * window.getActualTaxPercent(10) / (100 + window.getActualTaxPercent(10))))).toLocaleString()}
+赤伝票消費税の合計: -¥${(_rsT8 + _rsT10).toLocaleString()}
+赤伝票税抜合計: -¥${((totalRedSlipTax8 - _rsT8) + (totalRedSlipTax10 - _rsT10)).toLocaleString()}
 赤伝票税込合計: -¥${(totalRedSlipTax8 + totalRedSlipTax10).toLocaleString()}
 
 -------------------------------------
@@ -12618,8 +12660,8 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
     // 税率選択項目を追加
     // 🆕 店内飲食/持ち帰りの小さなラベル（絵文字なし）
     function eatStyleLabelHtml(eatStyle) {
-      if (eatStyle === 'dinein') return '<span style="background:#4CAF50;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;">店内飲食</span>';
-      if (eatStyle === 'takeout') return '<span style="background:#FF9800;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;">持ち帰り</span>';
+      if (eatStyle === 'dinein') return '<span style="background:#4CAF50;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;">' + window.getEatStyleLabel('dinein') + '</span>';
+      if (eatStyle === 'takeout') return '<span style="background:#FF9800;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;">' + window.getEatStyleLabel('takeout') + '</span>';
       return '';
     }
     
@@ -19664,7 +19706,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">
               <span style="font-weight: bold; font-size: 16px;">注文 #${order.orderNumber || '未設定'} ${orderTime}</span>
               <div style="display: flex; gap: 8px; align-items: center;">
-                ${order.eatStyle === 'dinein' ? '<span style="background: #4CAF50; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;">店内飲食</span>' : (order.eatStyle === 'takeout' ? '<span style="background: #FF9800; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;">持ち帰り</span>' : '')}
+                ${order.eatStyle === 'dinein' ? '<span style="background: #4CAF50; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;">' + window.getEatStyleLabel('dinein') + '</span>' : (order.eatStyle === 'takeout' ? '<span style="background: #FF9800; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;">' + window.getEatStyleLabel('takeout') + '</span>' : '')}
                 ${order.paidAt ? '<span style="background: #2196F3; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;">会計済</span>' : ''}
                 <span style="background: ${order.status === 'completed' ? '#4CAF50' : '#FF9800'}; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold;">
                   ${order.status === 'completed' ? '完了' : '準備中'}
@@ -20015,7 +20057,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
           tableNumber: currentSelectedTableName,  // 🆕 テーブル番号を追加
           tableId: currentSelectedTableId,
           tableName: currentSelectedTableName,
-          eatStyle: (function () { try { return sessionStorage.getItem('eatStyle:pos:' + (currentSelectedTableName || '')) || null; } catch (e) { return null; } })(), // 🆕 店内飲食/持ち帰り（メニューで選択）
+          eatStyle: (function () { try { if (window.eatStyleSettings && window.eatStyleSettings.enabled === false) return null; return sessionStorage.getItem('eatStyle:pos:' + (currentSelectedTableName || '')) || null; } catch (e) { return null; } })(), // 🆕 店内飲食/持ち帰り（メニューで選択）
           items: newUICart,
           totalAmount: totalAmount,  // 🆕 合計金額を追加
           timestamp: window.Timestamp.now(),  // 🆕 タイムスタンプを追加

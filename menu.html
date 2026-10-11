@@ -1293,7 +1293,33 @@
     // 計算時のみ getActualTaxPercent() で実際の％へ変換する（pos.htmlと同じ方式）
     window.taxRateSettings = { reducedRatePercent: 8, standardRatePercent: 10 };
     window._lastDisplayedMenuItems = null;
+    // 🆕 ご利用方法選択（店内/持ち帰り）の設定を読み込む。OFFならこのページでは選択を使わない
+    window.loadEatStyleSettings = async function() {
+      try {
+        if (window.authReadyPromise) { await window.authReadyPromise; }
+        const snap = await Promise.race([
+          getDoc(window.getStoreDoc('eat_style_settings', 'default')),
+          new Promise(resolve => setTimeout(() => resolve(null), 3000))
+        ]);
+        if (snap && snap.exists && snap.exists()) {
+          window.eatStyleSettings = Object.assign({ enabled: true, dineInLabel: '店内飲食', takeoutLabel: '持ち帰り' }, snap.data());
+        }
+      } catch (e) {
+        console.error('ご利用方法設定の読み込みエラー（標準の設定で続行）:', e);
+      }
+      if (window.eatStyleSettings.enabled === false) {
+        window.eatStyle = null;
+        window.needEatStyleChoice = false;
+        const bar = document.getElementById('eat-style-bar');
+        if (bar) bar.style.display = 'none';
+        try { sessionStorage.removeItem(window._eatStyleKey); } catch (e) {}
+      } else {
+        try { if (typeof updateEatStyleBar === 'function') updateEatStyleBar(); } catch (e) {}
+      }
+      window.eatStyleSettingsLoaded = true;
+    };
     async function loadTaxRateSettings() {
+      await window.loadEatStyleSettings(); // 🆕 先にご利用方法の設定を確認
       const fetchPromise = (async () => {
         try {
           if (window.authReadyPromise) { await window.authReadyPromise; }
@@ -1514,6 +1540,12 @@
     // 選択は同じタブ(セッション)内で保持し、新しいQR読込(新しいタブ)では再度聞く。
     // 店内=全商品を標準税率 / 持ち帰り=食材は軽減税率（食材以外は標準税率）
     window.eatStyle = null;            // 'dinein' | 'takeout' | null(選択機能なし)
+    // 🆕 kanriの「ご利用方法選択の設定」（ON/OFFと名称）。未設定なら 有効 / 「店内飲食」「持ち帰り」
+    window.eatStyleSettings = { enabled: true, dineInLabel: '店内飲食', takeoutLabel: '持ち帰り' };
+    window.eatStyleSettingsLoaded = false;
+    window.getEatStyleLabel = function(style) {
+      return style === 'dinein' ? (window.eatStyleSettings.dineInLabel || '店内飲食') : (window.eatStyleSettings.takeoutLabel || '持ち帰り');
+    };
     window.needEatStyleChoice = false;
     window._eatStyleKey = 'eatStyle:' + (urlParams.get('store') || '') + ':' + tableNumber;
     (function initEatStyle() {
@@ -1552,8 +1584,8 @@
         };
         return b;
       };
-      box.appendChild(mk('店内飲食', 'dinein', 'linear-gradient(135deg,#4CAF50 0%,#45a049 100%)'));
-      box.appendChild(mk('持ち帰り', 'takeout', 'linear-gradient(135deg,#FF9800 0%,#F57C00 100%)'));
+      box.appendChild(mk(window.getEatStyleLabel('dinein'), 'dinein', 'linear-gradient(135deg,#4CAF50 0%,#45a049 100%)'));
+      box.appendChild(mk(window.getEatStyleLabel('takeout'), 'takeout', 'linear-gradient(135deg,#FF9800 0%,#F57C00 100%)'));
       // 🆕 index(オープニング)ページにあった「呼出」「会計」ボタン（お客様用。POS/ハンディでは出さない）
       if (!window.isPOSMode && !window.isHandyMode) {
         const row = document.createElement('div');
@@ -1577,7 +1609,7 @@
       const bar = document.getElementById('eat-style-bar');
       const label = document.getElementById('eat-style-label');
       if (!bar || !label || !window.eatStyle) return;
-      label.textContent = 'ご利用方法：' + (window.eatStyle === 'dinein' ? '店内飲食' : '持ち帰り');
+      label.textContent = 'ご利用方法：' + window.getEatStyleLabel(window.eatStyle);
       bar.style.display = 'block';
     }
 
@@ -1592,7 +1624,11 @@
     };
 
     (function bootEatStyleUi() {
-      const run = () => {
+      const run = async () => {
+        // 🆕 設定（ON/OFF・名称）の読み込みを待つ（最大4秒。間に合わなければ標準の設定で動く）
+        const t0 = Date.now();
+        while (!window.eatStyleSettingsLoaded && Date.now() - t0 < 4000) { await new Promise(r => setTimeout(r, 50)); }
+        if (window.eatStyleSettings && window.eatStyleSettings.enabled === false) { return; } // 選択画面を使わない設定
         updateEatStyleBar();
         if (window.needEatStyleChoice) {
           // すでに注文済みで注文番号画面を復元する場合は聞かない（「新しい注文」で聞く）
