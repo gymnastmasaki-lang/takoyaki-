@@ -3158,6 +3158,9 @@
         
         <button onclick="generatePeriodJournal()" style="padding: 12px 24px; background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">ジャーナル生成</button>
         <button onclick="exportPeriodCSV()" style="padding: 12px 24px; background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">CSV出力</button>
+        <button onclick="showYearOverYear()" style="padding: 12px 24px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">前年比</button>
+        <button onclick="document.getElementById('priorYearFile').click()" style="padding: 12px 24px; background: #78909c; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 20px;">前年データ取込</button>
+        <input type="file" id="priorYearFile" accept=".csv,.txt,text/csv" style="display:none" onchange="importPriorYearCSV(this)">
       </div>
       
       <div id="monthlyReportContent">
@@ -3508,7 +3511,7 @@
             
             // createdAtフィールドがある場合のみチェック
             if (data.createdAt) {
-              const docDate = data.createdAt.toDate();
+              const docDate = safeToDate(data.createdAt);
               
               // 7年以上前のデータは削除
               if (docDate < sevenYearsAgo) {
@@ -3532,7 +3535,7 @@
             
             // createdAtフィールドがある場合のみチェック
             if (data.createdAt) {
-              const docDate = data.createdAt.toDate();
+              const docDate = safeToDate(data.createdAt);
               
               // 7年以上前のデータは削除
               if (docDate < sevenYearsAgo) {
@@ -4461,7 +4464,7 @@
         const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
         builder.createTextElement({data: `発行日時: ${dateStr}\n`});
         
-        const orderDate = orderData.timestamp?.toDate() || new Date();
+        const orderDate = safeToDate(orderData.timestamp) || new Date();
         const orderDateStr = `${orderDate.getFullYear()}/${String(orderDate.getMonth()+1).padStart(2,'0')}/${String(orderDate.getDate()).padStart(2,'0')} ${String(orderDate.getHours()).padStart(2,'0')}:${String(orderDate.getMinutes()).padStart(2, '0')}`;
         builder.createTextElement({data: `元注文日時: ${orderDateStr}\n`});
         builder.createTextElement({data: `テーブル: ${orderData.tableNumber}\n`});
@@ -4535,7 +4538,7 @@
         console.log('📊 売上データ更新開始');
         
         // 営業日を計算（午前3時基準）
-        const orderDate = orderData.paidAt?.toDate() || orderData.timestamp?.toDate() || new Date();
+        const orderDate = safeToDate(orderData.paidAt) || safeToDate(orderData.timestamp) || new Date();
         const dateKey = window.getBusinessDay(orderDate).str;
         
         // 売上データを取得
@@ -4939,12 +4942,12 @@
           
           // paidAtがある場合はそれを使用
           if (currentEditingOrder.paidAt) {
-            dateToUse = currentEditingOrder.paidAt.toDate();
+            dateToUse = safeToDate(currentEditingOrder.paidAt);
             console.log('📅 paidAtを使用:', dateToUse);
           }
           // paidAtがない場合はtimestampを使用
           else if (currentEditingOrder.timestamp) {
-            dateToUse = currentEditingOrder.timestamp.toDate();
+            dateToUse = safeToDate(currentEditingOrder.timestamp);
             useTimestamp = true;
             isUnpaidOrder = true;
             console.log('📅 timestampを使用:', dateToUse);
@@ -4994,8 +4997,8 @@
         // 🆕 未会計の注文を編集した場合は、会計済みにする
         if (isUnpaidOrder) {
           console.log('💡 未会計の注文なので、会計済みとして更新します');
-          console.log('   元の注文日時:', currentEditingOrder.timestamp.toDate().toLocaleString('ja-JP'));
-          console.log('   paidAtとして設定する日時:', currentEditingOrder.timestamp.toDate().toLocaleString('ja-JP'));
+          console.log('   元の注文日時:', safeToDate(currentEditingOrder.timestamp)?.toLocaleString('ja-JP'));
+          console.log('   paidAtとして設定する日時:', safeToDate(currentEditingOrder.timestamp)?.toLocaleString('ja-JP'));
           
           // timestampをpaidAtとして設定（元の注文日時で会計済みにする）
           orderUpdates.paidAt = currentEditingOrder.timestamp;
@@ -5266,7 +5269,7 @@
           console.log('💰 会計済み注文のため、dailySalesを更新します');
           
           // 注文日を取得（JSTに変換）
-          const orderDate = currentEditingOrder.timestamp.toDate();
+          const orderDate = safeToDate(currentEditingOrder.timestamp);
           const jstOrderDate = new Date(orderDate.getTime() + (9 * 60 * 60 * 1000));
           const dateStr = `${jstOrderDate.getFullYear()}-${String(jstOrderDate.getMonth() + 1).padStart(2, '0')}-${String(jstOrderDate.getDate()).padStart(2, '0')}`;
           
@@ -5499,7 +5502,7 @@
         });
         
         // 会計日時から営業日を計算（3時基準）
-        const paidDate = orderData.paidAt.toDate();
+        const paidDate = safeToDate(orderData.paidAt);
         const dateStr = window.getBusinessDay(paidDate).str;
         
         console.log('📅 営業日:', dateStr);
@@ -5793,7 +5796,7 @@
           console.log('📋 注文データ詳細:', JSON.stringify(orderData, null, 2));
           
           //  修正: 会計日時から営業日を計算（3時基準）
-          const paidDate = orderData.paidAt.toDate();
+          const paidDate = safeToDate(orderData.paidAt);
           console.log('🕐 会計日時（paidAt）:', paidDate);
           console.log('🕐 paidDate.getHours():', paidDate.getHours());
           
@@ -5992,7 +5995,7 @@
         });
         
         // 会計日時から営業日を計算（3時基準）
-        const paidDate = orderData.paidAt.toDate();
+        const paidDate = safeToDate(orderData.paidAt);
         const dateStr = window.getBusinessDay(paidDate).str;
         
         console.log('📅 営業日:', dateStr);
@@ -6535,6 +6538,189 @@
     };
     
     // 月次レポートモーダルを閉じる
+    // ===== 🆕 前年比（今年と前年の 売上・客数・点数 の比較） =====
+    // ・日別: 前年の比較日は「364日前」（前年の同じ曜日）。月別: 前年の同じ月の合計
+    // ・前年の日次売上(dailySales)が無い日は、「前年データ取込」で入れた prior_year_sales を使う
+    // ・予算は売上画面と同じ目標（平日50,000円 / 土日70,000円）
+    window.showYearOverYear = async function() {
+      const container = document.getElementById('monthlyReportContent');
+      const startStr = document.getElementById('reportStartDate').value;
+      const endStr = document.getElementById('reportEndDate').value;
+      if (!startStr || !endStr || startStr > endStr) { alert('開始日と終了日を正しく入力してください'); return; }
+      container.innerHTML = '<div style="text-align:center; padding:30px; color:#666;">前年比を集計しています...</div>';
+      try {
+        const readMap = async (col) => {
+          const m = {};
+          try {
+            const snap = await window.getDocs(window.getStoreCollection(col));
+            snap.forEach(d => {
+              const x = d.data();
+              const key = /^\d{4}-\d{2}-\d{2}$/.test(d.id) ? d.id : (x.date || '');
+              if (key) m[key] = x;
+            });
+          } catch (e) { console.warn('前年比: ' + col + ' の読み込みに失敗（なしとして扱います）', e); }
+          return m;
+        };
+        const [sales, prior] = await Promise.all([readMap('dailySales'), readMap('prior_year_sales')]);
+        const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const parseD = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+        const shift = (s, days) => { const d = parseD(s); d.setDate(d.getDate() + days); return ymd(d); };
+        const WD = ['日', '月', '火', '水', '木', '金', '土'];
+        const cur = (key) => {
+          const a = sales[key];
+          if (a && ((a.totalSales || 0) > 0 || (a.customerCount || 0) > 0)) return { s: a.totalSales || 0, c: a.customerCount || 0, i: a.totalItems || 0, ok: true };
+          return { s: 0, c: 0, i: 0, ok: false };
+        };
+        const last = (key) => {
+          const a = cur(key);
+          if (a.ok) return a;
+          const p = prior[key];
+          if (p && ((p.totalSales || 0) > 0 || (p.customerCount || 0) > 0)) return { s: p.totalSales || 0, c: p.customerCount || 0, i: p.totalItems || 0, ok: true };
+          return { s: 0, c: 0, i: 0, ok: false };
+        };
+        const yen = (n) => '¥' + Math.round(n).toLocaleString();
+        const num = (n) => Math.round(n).toLocaleString();
+        const pct = (a, b) => (b > 0) ? (Math.round(a / b * 1000) / 10) : null;
+        const pctHtml = (v, base) => v === null ? '-' : `<span style="color:${v >= (base || 100) ? '#2e7d32' : '#c62828'}; font-weight:bold;">${v.toFixed(1)}%</span>`;
+        const th = (t, extra) => `<th style="padding:6px 8px; border:1px solid #888; background:#455a64; color:#fff; font-size:12px; white-space:nowrap; ${extra || ''}">${t}</th>`;
+        const td = (t, extra) => `<td style="padding:5px 8px; border:1px solid #ccc; font-size:12px; text-align:right; white-space:nowrap; ${extra || ''}">${t}</td>`;
+        
+        // ---- 日別 ----
+        let rows = '';
+        const T = { target: 0, cs: 0, cc: 0, ci: 0, ls: 0, lc: 0, li: 0, bothS: 0, bothLS: 0, bothC: 0, bothLC: 0 };
+        let d = parseD(startStr); const endD = parseD(endStr);
+        let guard = 0;
+        while (d <= endD && guard++ < 400) {
+          const key = ymd(d);
+          const dow = d.getDay();
+          const target = (dow === 0 || dow === 6) ? 70000 : 50000;
+          const lyKey = shift(key, -364);
+          const a = cur(key), b = last(lyKey);
+          if (a.ok) { T.target += target; T.cs += a.s; T.cc += a.c; T.ci += a.i; }
+          if (b.ok) { T.ls += b.s; T.lc += b.c; T.li += b.i; }
+          if (a.ok && b.ok) { T.bothS += a.s; T.bothLS += b.s; T.bothC += a.c; T.bothLC += b.c; }
+          const lyD = parseD(lyKey);
+          rows += `<tr>
+            ${td(`${d.getMonth() + 1}/${d.getDate()}（${WD[dow]}）`, 'text-align:left; ' + (dow === 0 ? 'color:#c62828;' : (dow === 6 ? 'color:#1565c0;' : '')))}
+            ${td(num(target))}
+            ${td(a.ok ? yen(a.s) : '-')}
+            ${td(a.ok ? pctHtml(pct(a.s, target), 100) : '-')}
+            ${td(a.ok ? num(a.c) : '-')}
+            ${td(a.ok ? num(a.i) : '-')}
+            ${td(`${lyD.getMonth() + 1}/${lyD.getDate()}`, 'text-align:center; color:#666;')}
+            ${td(b.ok ? yen(b.s) : '-')}
+            ${td(b.ok ? num(b.c) : '-')}
+            ${td(b.ok ? num(b.i) : '-')}
+            ${td(a.ok && b.ok ? pctHtml(pct(a.s, b.s), 100) : '-')}
+            ${td(a.ok && b.ok ? pctHtml(pct(a.c, b.c), 100) : '-')}
+          </tr>`;
+          d.setDate(d.getDate() + 1);
+        }
+        const totalRow = `<tr style="background:#eceff1; font-weight:bold;">
+            ${td('合計', 'text-align:left;')}${td(num(T.target))}${td(yen(T.cs))}${td(pctHtml(pct(T.cs, T.target), 100))}${td(num(T.cc))}${td(num(T.ci))}${td('')}${td(yen(T.ls))}${td(num(T.lc))}${td(num(T.li))}
+            ${td(pctHtml(pct(T.bothS, T.bothLS), 100))}${td(pctHtml(pct(T.bothC, T.bothLC), 100))}
+          </tr>`;
+        
+        // ---- 月別（開始日の年の1〜12月。前年は同じ月の合計） ----
+        const year = Number(startStr.slice(0, 4));
+        const sumMonth = (y, m, useFallback) => {
+          const prefix = `${y}-${String(m).padStart(2, '0')}-`;
+          const keys = new Set(Object.keys(sales).filter(k => k.startsWith(prefix)));
+          if (useFallback) Object.keys(prior).filter(k => k.startsWith(prefix)).forEach(k => keys.add(k));
+          const r = { s: 0, c: 0, i: 0, ok: false };
+          keys.forEach(k => { const v = useFallback ? last(k) : cur(k); if (v.ok) { r.s += v.s; r.c += v.c; r.i += v.i; r.ok = true; } });
+          return r;
+        };
+        let mRows = '';
+        const MT = { cs: 0, cc: 0, ci: 0, ls: 0, lc: 0, li: 0, bs: 0, bls: 0, bc: 0, blc: 0 };
+        for (let m = 1; m <= 12; m++) {
+          const a = sumMonth(year, m, false), b = sumMonth(year - 1, m, true);
+          if (!a.ok && !b.ok) continue;
+          if (a.ok) { MT.cs += a.s; MT.cc += a.c; MT.ci += a.i; }
+          if (b.ok) { MT.ls += b.s; MT.lc += b.c; MT.li += b.i; }
+          if (a.ok && b.ok) { MT.bs += a.s; MT.bls += b.s; MT.bc += a.c; MT.blc += b.c; }
+          mRows += `<tr>${td(m + '月', 'text-align:left;')}${td(a.ok ? yen(a.s) : '-')}${td(a.ok ? num(a.c) : '-')}${td(a.ok ? num(a.i) : '-')}${td(b.ok ? yen(b.s) : '-')}${td(b.ok ? num(b.c) : '-')}${td(b.ok ? num(b.i) : '-')}${td(a.ok && b.ok ? pctHtml(pct(a.s, b.s), 100) : '-')}${td(a.ok && b.ok ? pctHtml(pct(a.c, b.c), 100) : '-')}</tr>`;
+        }
+        const mTotal = `<tr style="background:#eceff1; font-weight:bold;">${td('合計', 'text-align:left;')}${td(yen(MT.cs))}${td(num(MT.cc))}${td(num(MT.ci))}${td(yen(MT.ls))}${td(num(MT.lc))}${td(num(MT.li))}${td(pctHtml(pct(MT.bs, MT.bls), 100))}${td(pctHtml(pct(MT.bc, MT.blc), 100))}</tr>`;
+        
+        const priorCount = Object.keys(prior).length;
+        container.innerHTML = `
+          <h4 style="margin:10px 0; border-bottom:2px solid #FF9800; padding-bottom:6px;">前年比（${startStr} ～ ${endStr}）</h4>
+          <div style="font-size:12px; color:#666; margin-bottom:8px;">前年の比較日は364日前（前年の同じ曜日）です。「-」はその日の売上データがない日です。前年データ取込分: ${priorCount}日</div>
+          <div style="overflow-x:auto; margin-bottom:24px;">
+            <table style="border-collapse:collapse; width:100%;">
+              <thead><tr>${th('日付')}${th('予算')}${th('今年の売上')}${th('達成率')}${th('客数')}${th('点数')}${th('前年の日')}${th('前年の売上')}${th('前年客数')}${th('前年点数')}${th('売上前年比')}${th('客数前年比')}</tr></thead>
+              <tbody>${rows}${totalRow}</tbody>
+            </table>
+          </div>
+          <h4 style="margin:10px 0; border-bottom:2px solid #FF9800; padding-bottom:6px;">月別（${year}年と${year - 1}年・同じ月の合計）</h4>
+          <div style="overflow-x:auto;">
+            <table style="border-collapse:collapse; width:100%;">
+              <thead><tr>${th('月')}${th('今年の売上')}${th('客数')}${th('点数')}${th('前年の売上')}${th('前年客数')}${th('前年点数')}${th('売上前年比')}${th('客数前年比')}</tr></thead>
+              <tbody>${mRows || '<tr><td colspan="9" style="padding:12px; text-align:center; color:#888;">データがありません</td></tr>'}${mRows ? mTotal : ''}</tbody>
+            </table>
+          </div>`;
+      } catch (e) {
+        console.error('前年比の集計エラー:', e);
+        container.innerHTML = '';
+        alert('前年比の集計に失敗しました: ' + e.message);
+      }
+    };
+    
+    // 前年データ取込（CSV: 日付・売上・客数・点数）。他のレジの出力(Shift-JIS/UTF-8)にも対応。取込先は prior_year_sales（日次売上とは別）
+    window.importPriorYearCSV = async function(input) {
+      const file = input && input.files && input.files[0];
+      if (input) input.value = '';
+      if (!file) return;
+      try {
+        const buf = await file.arrayBuffer();
+        let text;
+        try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+        catch (e) { text = new TextDecoder('shift_jis').decode(buf); }
+        text = text.replace(/^\uFEFF/, '');
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length < 2) { alert('データが読み取れませんでした'); return; }
+        const split = (l) => l.split(/,|\t/).map(c => c.replace(/^"|"$/g, '').trim());
+        const head = split(lines[0]);
+        const find = (re) => head.findIndex(h => re.test(h));
+        let iDate = find(/年日|日付|date/i), iSales = find(/今年の結果|売上/), iCust = find(/ゲスト数|客数|来客/), iItems = find(/点数|商品数|個数/);
+        let startLine = 1;
+        if (iDate < 0 || iSales < 0) { // 見出しが無い/形式が違う → 1列目=日付, 2列目=売上, 3列目=客数, 4列目=点数
+          iDate = 0; iSales = 1; iCust = 2; iItems = 3;
+          startLine = /^\d/.test(head[0].replace(/[\/\-]/g, '')) ? 0 : 1;
+        }
+        const toNum = (v) => Number(String(v == null ? '' : v).replace(/[^\d.\-]/g, '')) || 0;
+        const toDate = (v) => {
+          const digits = String(v || '').replace(/[^\d]/g, '');
+          if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+          const m = String(v || '').match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+          return m ? `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}` : null;
+        };
+        const items = [];
+        for (let i = startLine; i < lines.length; i++) {
+          const c = split(lines[i]);
+          const date = toDate(c[iDate]);
+          if (!date) continue;
+          const s = toNum(c[iSales]), cu = iCust >= 0 ? toNum(c[iCust]) : 0, it = iItems >= 0 ? toNum(c[iItems]) : 0;
+          if (s === 0 && cu === 0) continue; // データの無い日は取り込まない
+          items.push({ date, totalSales: s, customerCount: cu, totalItems: it });
+        }
+        if (items.length === 0) { alert('取り込めるデータがありませんでした（日付と売上の列を確認してください）'); return; }
+        items.sort((a, b) => a.date.localeCompare(b.date));
+        const sample = items.slice(0, 3).map(x => `${x.date}  売上¥${x.totalSales.toLocaleString()} 客数${x.customerCount}`).join('\n');
+        if (!confirm(`前年データとして ${items.length} 日分（${items[0].date} ～ ${items[items.length - 1].date}）を取り込みます。\n\n【先頭の例】\n${sample}\n\n同じ日付の前年データがある場合は上書きします（日次売上・ジャーナルには影響しません）。\nよろしいですか？`)) return;
+        let done = 0;
+        for (let i = 0; i < items.length; i += 10) {
+          await Promise.all(items.slice(i, i + 10).map(x => window.setDoc(window.getStoreDoc('prior_year_sales', x.date), Object.assign({}, x, { importedAt: new Date() }))));
+          done += Math.min(10, items.length - i);
+        }
+        alert(`前年データを ${done} 日分取り込みました`);
+      } catch (e) {
+        console.error('前年データ取込エラー:', e);
+        alert('前年データの取り込みに失敗しました: ' + e.message);
+      }
+    };
+    
     window.closeMonthlyReportModal = function() {
       document.getElementById('monthlyReportModal').classList.add('hidden');
     };
@@ -6607,7 +6793,7 @@
           // paidAtを使用して会計日時を取得
           if (!data.paidAt) return;
           
-          const orderDate = data.paidAt.toDate();
+          const orderDate = safeToDate(data.paidAt);
           
           // 3時基準の営業日計算
           const orderDateStr = window.getBusinessDay(orderDate).str;
@@ -6770,7 +6956,7 @@
           const data = doc.data();
           if (!data.paidAt || !data.items) return;
           
-          const orderDate = data.paidAt.toDate();
+          const orderDate = safeToDate(data.paidAt);
           const orderDateStr = window.getBusinessDay(orderDate).str;
           
           if (dates.includes(orderDateStr) && !v2Days[orderDateStr]) { // 案Bの日は保存値を使うので除外
@@ -7097,7 +7283,7 @@ ${_p10}%の赤伝票の消費税: -¥${_rsT10.toLocaleString()}
           const data = doc.data();
           if (!data.paidAt) return;
           
-          const orderDate = data.paidAt.toDate();
+          const orderDate = safeToDate(data.paidAt);
           const orderDateStr = window.getBusinessDay(orderDate).str;
           
           if (dates.includes(orderDateStr) && data.items) {
@@ -9248,7 +9434,7 @@ ${_p10}%の赤伝票の消費税: -¥${_rsT10.toLocaleString()}
             const data = doc.data();
             if (!data.paidAt || !data.items) return;
             
-            const orderDate = data.paidAt.toDate();
+            const orderDate = safeToDate(data.paidAt);
             const orderDateStr = window.getBusinessDay(orderDate).str;
             
             if (orderDateStr === dateStr) {
@@ -11653,7 +11839,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
       let timeStr = '--:--';
       try {
         if (order.timestamp && order.timestamp.toDate) {
-          const timestamp = order.timestamp.toDate();
+          const timestamp = safeToDate(order.timestamp);
           timeStr = `${timestamp.getHours()}:${String(timestamp.getMinutes()).padStart(2, '0')}`;
         }
       } catch (e) {
@@ -19545,8 +19731,8 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
         
         // 注文日時でソート（新しい順）
         orders.sort((a, b) => {
-          const timeA = (a.orderedAt || a.timestamp) ? (a.orderedAt || a.timestamp).toDate().getTime() : 0;
-          const timeB = (b.orderedAt || b.timestamp) ? (b.orderedAt || b.timestamp).toDate().getTime() : 0;
+          const timeA = safeToDate(a.orderedAt || a.timestamp)?.getTime() || 0;
+          const timeB = safeToDate(b.orderedAt || b.timestamp)?.getTime() || 0;
           return timeB - timeA;
         });
         
@@ -19677,8 +19863,8 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
           const totalHtml = _bdCard.hasEx ? posTaxSummaryHtml(_bdCard, true) : `合計: ¥${total.toLocaleString()}`;
           
           // 注文時刻を取得（orderedAtまたはtimestampフィールドから）
-          const orderTime = (order.orderedAt || order.timestamp) ? 
-            (order.orderedAt || order.timestamp).toDate().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : 
+          const orderTime = (safeToDate(order.orderedAt || order.timestamp)) ? 
+            safeToDate(order.orderedAt || order.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : 
             '';
           
           // 🆕 顧客情報を整形
