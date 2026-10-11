@@ -6673,42 +6673,70 @@
       if (input) input.value = '';
       if (!file) return;
       try {
+        // ---- 文字コード: BOM(UTF-16/UTF-8)を見て判定。無ければUTF-8、ダメならShift-JIS ----
         const buf = await file.arrayBuffer();
+        const u8 = new Uint8Array(buf);
         let text;
-        try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
-        catch (e) { text = new TextDecoder('shift_jis').decode(buf); }
+        if (u8[0] === 0xFF && u8[1] === 0xFE) text = new TextDecoder('utf-16le').decode(buf);
+        else if (u8[0] === 0xFE && u8[1] === 0xFF) text = new TextDecoder('utf-16be').decode(buf);
+        else {
+          try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+          catch (e) { text = new TextDecoder('shift_jis').decode(buf); }
+        }
         text = text.replace(/^\uFEFF/, '');
         const lines = text.split(/\r?\n/).filter(l => l.trim());
         if (lines.length < 2) { alert('データが読み取れませんでした'); return; }
-        const split = (l) => l.split(/,|\t/).map(c => c.replace(/^"|"$/g, '').trim());
+        // ---- 区切り文字（タブ or カンマ）と、引用符つきの項目に対応した分割 ----
+        const sep = (lines[0].split('\t').length > lines[0].split(',').length) ? '\t' : ',';
+        const split = (l) => {
+          const out = []; let cur = '', q = false;
+          for (let i = 0; i < l.length; i++) {
+            const ch = l[i];
+            if (ch === '"') { if (q && l[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
+            else if (ch === sep && !q) { out.push(cur.trim()); cur = ''; }
+            else cur += ch;
+          }
+          out.push(cur.trim());
+          return out;
+        };
         const head = split(lines[0]);
-        const find = (re) => head.findIndex(h => re.test(h));
-        let iDate = find(/年日|日付|date/i), iSales = find(/今年の結果|売上/), iCust = find(/ゲスト数|客数|来客/), iItems = find(/点数|商品数|個数/);
+        const findFirst = (...tests) => { for (const t of tests) { const i = head.findIndex(h => t(h)); if (i >= 0) return i; } return -1; };
+        let iDate = findFirst(h => /当年日付|現在の年日/.test(h), h => /日付|年日|date/i.test(h) && !/前年/.test(h));
+        let iSales = findFirst(h => h === '当年実績', h => /当年実績/.test(h) && !/定価|差異|率/.test(h), h => /今年の結果/.test(h), h => /売上/.test(h) && !/前年/.test(h));
+        let iCust = findFirst(h => h === '当年客数', h => /当年客数/.test(h), h => /ゲスト数|客数|来客/.test(h) && !/前年|差|単/.test(h));
+        let iItems = findFirst(h => /点数|商品数|個数/.test(h) && !/前年/.test(h));
         let startLine = 1;
-        if (iDate < 0 || iSales < 0) { // 見出しが無い/形式が違う → 1列目=日付, 2列目=売上, 3列目=客数, 4列目=点数
-          iDate = 0; iSales = 1; iCust = 2; iItems = 3;
-          startLine = /^\d/.test(head[0].replace(/[\/\-]/g, '')) ? 0 : 1;
+        const headerLooksNumeric = /^\d/.test((head[0] || '').replace(/[\/\-]/g, ''));
+        if (iDate < 0 || iSales < 0) {
+          if (!headerLooksNumeric) { // 見出しがあるのに列が見つからない → 間違った列を取り込まない
+            alert('日付と売上の列が見つかりませんでした。\n見出し: ' + head.join(' / ') + '\n\n「日付」「売上」を含む見出しのCSVを使うか、1列目=日付、2列目=売上、3列目=客数、4列目=点数 の形式にしてください。');
+            return;
+          }
+          iDate = 0; iSales = 1; iCust = 2; iItems = 3; startLine = 0; // 見出しなし: 1列目=日付, 2列目=売上, 3列目=客数, 4列目=点数
         }
         const toNum = (v) => Number(String(v == null ? '' : v).replace(/[^\d.\-]/g, '')) || 0;
         const toDate = (v) => {
           const digits = String(v || '').replace(/[^\d]/g, '');
-          if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+          if (/^\d{8}$/.test(String(v || '').trim().replace(/[\/\-]/g, '')) && digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
           const m = String(v || '').match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
           return m ? `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}` : null;
         };
         const items = [];
         for (let i = startLine; i < lines.length; i++) {
           const c = split(lines[i]);
-          const date = toDate(c[iDate]);
+          const date = toDate(c[iDate]); // 合計行・週の集計行など、日付でない行は読み飛ばす
           if (!date) continue;
-          const s = toNum(c[iSales]), cu = iCust >= 0 ? toNum(c[iCust]) : 0, it = iItems >= 0 ? toNum(c[iItems]) : 0;
-          if (s === 0 && cu === 0) continue; // データの無い日は取り込まない
-          items.push({ date, totalSales: s, customerCount: cu, totalItems: it });
+          items.push({ date, totalSales: toNum(c[iSales]), customerCount: iCust >= 0 ? toNum(c[iCust]) : 0, totalItems: iItems >= 0 ? toNum(c[iItems]) : 0 });
         }
-        if (items.length === 0) { alert('取り込めるデータがありませんでした（日付と売上の列を確認してください）'); return; }
+        if (items.length === 0) { alert('取り込める日付の行がありませんでした（日付の列を確認してください）'); return; }
+        // 安全確認: 1日の売上が極端に大きい場合は列の取り違えの可能性があるので中止
+        const biggest = items.reduce((m, x) => Math.max(m, x.totalSales), 0);
+        if (biggest > 5000000) { alert('1日の売上が ¥' + biggest.toLocaleString() + ' になっています。売上の列を取り違えている可能性があるため、取り込みを中止しました。'); return; }
         items.sort((a, b) => a.date.localeCompare(b.date));
+        const withData = items.filter(x => x.totalSales > 0 || x.customerCount > 0);
+        const sumSales = items.reduce((s, x) => s + x.totalSales, 0);
         const sample = items.slice(0, 3).map(x => `${x.date}  売上¥${x.totalSales.toLocaleString()} 客数${x.customerCount}`).join('\n');
-        if (!confirm(`前年データとして ${items.length} 日分（${items[0].date} ～ ${items[items.length - 1].date}）を取り込みます。\n\n【先頭の例】\n${sample}\n\n同じ日付の前年データがある場合は上書きします（日次売上・ジャーナルには影響しません）。\nよろしいですか？`)) return;
+        if (!confirm(`前年データとして ${items.length} 日分（${items[0].date} ～ ${items[items.length - 1].date}）を取り込みます。\n売上のある日: ${withData.length}日 / 売上合計: ¥${sumSales.toLocaleString()}\n使う列: 日付=「${head[iDate]}」 売上=「${head[iSales]}」 客数=「${iCust >= 0 ? head[iCust] : 'なし'}」\n\n【先頭の例】\n${sample}\n\n同じ日付の前年データがある場合は上書きします（日次売上・ジャーナルには影響しません）。\nよろしいですか？`)) return;
         let done = 0;
         for (let i = 0; i < items.length; i += 10) {
           await Promise.all(items.slice(i, i + 10).map(x => window.setDoc(window.getStoreDoc('prior_year_sales', x.date), Object.assign({}, x, { importedAt: new Date() }))));
@@ -6777,6 +6805,7 @@
         const v2Days = {};            // 🆕 案B（会計ごとに税額を確定して保存した日）の保存値
         const redLegacyDays = new Set(); // 🆕 赤伝票の内税/外税が保存されていない日（従来方式の日）
         let salesDayCount = 0;
+        const redDiffDays = []; // 🆕 赤伝票金額と税込合計(税率別)に差がある日（原因調査用）
         let totalExpense = 0;
         let totalLaborCost = 0;
         const itemCounts = {}; // 商品別カウント
@@ -6835,6 +6864,8 @@
             totalRedSlipTax10Exclusive += data.redSlipTax10Exclusive || 0;  // 🆕 赤伝票10%外税
             // 🆕 案Bの日は、保存した税額をそのまま使う（日次ジャーナル・レシートと同じ値）
             salesDayCount++;
+            const _rsDiff = (data.redSlipAmount || 0) - ((data.redSlipTax8Total || 0) + (data.redSlipTax10Total || 0));
+            if (_rsDiff !== 0) redDiffDays.push(`${dateStr.slice(5).replace('-', '/')} ${_rsDiff > 0 ? '+' : ''}${_rsDiff.toLocaleString()}円`);
             if (data.taxMethodVersion === 2) {
               v2Days[dateStr] = {
                 t8i: data.tax8TaxInclusive || 0, t8e: data.tax8TaxExclusive || 0,
@@ -7110,6 +7141,7 @@ ${_p10}%の赤伝票の消費税: -¥${_rsT10.toLocaleString()}
 ドロアオープン数: ${totalDrawerOpen}回
 赤伝票件数: ${totalRedSlipCount}件
 赤伝票金額: ¥${totalRedSlipAmount.toLocaleString()}
+${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(totalRedSlipAmount - (totalRedSlipTax8 + totalRedSlipTax10)).toLocaleString()} ／ 差のある日: ${redDiffDays.join('、')}）` : ''}
 人件費: ¥${Math.round(totalLaborCost).toLocaleString()}
 
 =====================================
