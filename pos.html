@@ -6542,6 +6542,43 @@
     // ・日別: 前年の比較日は「364日前」（前年の同じ曜日）。月別: 前年の同じ月の合計
     // ・前年の日次売上(dailySales)が無い日は、「前年データ取込」で入れた prior_year_sales を使う
     // ・予算は売上画面と同じ目標（平日50,000円 / 土日70,000円）
+    // 🆕 日本の祝日の判定（2000年以降。振替休日・国民の休日・春分/秋分の日・特例(2019/2020/2021)を含む）
+    //    予算（平日50,000円／土日祝70,000円）の判定に使う。法改正で祝日が変わった場合はここを直す
+    window.isJapaneseHoliday = function(date) {
+      const nthMonday = (yy, mm, n) => { const first = new Date(yy, mm - 1, 1).getDay(); return 1 + ((8 - first) % 7) + (n - 1) * 7; };
+      const isBase = (dt) => {
+        const yy = dt.getFullYear(), mm = dt.getMonth() + 1, dd = dt.getDate();
+        if (yy < 2000) return false;
+        if (mm === 1 && dd === 1) return true;                                   // 元日
+        if (mm === 1 && dd === nthMonday(yy, 1, 2)) return true;                 // 成人の日
+        if (mm === 2 && dd === 11) return true;                                  // 建国記念の日
+        if (mm === 2 && dd === 23 && yy >= 2020) return true;                    // 天皇誕生日
+        if (mm === 3 && dd === Math.floor(20.8431 + 0.242194 * (yy - 1980) - Math.floor((yy - 1980) / 4))) return true; // 春分の日
+        if (mm === 4 && dd === 29) return true;                                  // 昭和の日
+        if (mm === 5 && (dd === 3 || dd === 4 || dd === 5)) return true;         // 憲法記念日・みどりの日・こどもの日
+        if (yy === 2020) { if (mm === 7 && dd === 23) return true; if (mm === 7 && dd === 24) return true; if (mm === 8 && dd === 10) return true; }
+        else if (yy === 2021) { if (mm === 7 && dd === 22) return true; if (mm === 7 && dd === 23) return true; if (mm === 8 && dd === 8) return true; }
+        else {
+          if (mm === 7 && dd === nthMonday(yy, 7, 3)) return true;               // 海の日
+          if (mm === 8 && dd === 11 && yy >= 2016) return true;                  // 山の日
+          if (mm === 10 && dd === nthMonday(yy, 10, 2)) return true;             // スポーツの日（体育の日）
+        }
+        if (mm === 9 && dd === nthMonday(yy, 9, 3)) return true;                 // 敬老の日
+        if (mm === 9 && dd === Math.floor(23.2488 + 0.242194 * (yy - 1980) - Math.floor((yy - 1980) / 4))) return true; // 秋分の日
+        if (mm === 11 && (dd === 3 || dd === 23)) return true;                   // 文化の日・勤労感謝の日
+        if (yy === 2019 && ((mm === 5 && dd === 1) || (mm === 10 && dd === 22))) return true; // 即位に伴う祝日
+        return false;
+      };
+      const day = (offset) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset);
+      if (isBase(day(0))) return true;
+      // 振替休日: 日曜の祝日のあと、祝日が続く場合はその次の祝日でない日
+      let p = -1;
+      while (isBase(day(p))) { if (day(p).getDay() === 0) return true; p--; }
+      // 国民の休日: 前日と翌日がどちらも祝日の日
+      if (isBase(day(-1)) && isBase(day(1))) return true;
+      return false;
+    };
+    
     window.showYearOverYear = async function() {
       const container = document.getElementById('monthlyReportContent');
       const startStr = document.getElementById('reportStartDate').value;
@@ -6593,7 +6630,7 @@
         while (d <= endD && guard++ < 400) {
           const key = ymd(d);
           const dow = d.getDay();
-          const target = (dow === 0 || dow === 6) ? 70000 : 50000;
+          const target = (dow === 0 || dow === 6 || window.isJapaneseHoliday(d)) ? 70000 : 50000; // 土日祝は70,000円
           const lyKey = shift(key, -364);
           const a = cur(key), b = last(lyKey);
           T.target += target; // 予算は売上の有無にかかわらず期間の全日分を合計（達成率は期間全体の予算に対する割合）
@@ -7717,7 +7754,7 @@ ${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(t
         
         // 🆕 売上目標達成率を計算（選択された営業日の曜日で判定）
         const dayOfWeek = displayDate.getDay(); // 0=日曜, 6=土曜
-        const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+        const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6 || window.isJapaneseHoliday(displayDate)); // 土日祝
         const targetSales = isWeekend ? 70000 : 50000;
         const achievementRate = Math.round((totalSales / targetSales) * 100);
         

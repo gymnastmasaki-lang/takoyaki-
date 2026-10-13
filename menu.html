@@ -1319,7 +1319,7 @@
       window.eatStyleSettingsLoaded = true;
     };
     async function loadTaxRateSettings() {
-      await window.loadEatStyleSettings(); // 🆕 先にご利用方法の設定を確認
+      await (window._eatStyleSettingsPromise || window.loadEatStyleSettings()); // 🆕 ご利用方法の設定（onload時に読み始め済み）
       const fetchPromise = (async () => {
         try {
           if (window.authReadyPromise) { await window.authReadyPromise; }
@@ -2337,6 +2337,8 @@
 
     window.onload = async function() {
       console.log('🚀 ページ読み込み開始');
+      // 🆕 ご利用方法選択の設定は、他の読み込みと並行して先に読み始める（メニュー表示の直前に待たされないように）
+      window._eatStyleSettingsPromise = window.loadEatStyleSettings();
 
       // 🆕 修正: 電波状況等で読み込みが極端に遅い/失敗した場合、
       // 10秒たっても商品が表示されなければ自動でページを再読み込みする。
@@ -2455,12 +2457,14 @@
       if (window.isPOSMode || window.isHandyMode) {
         console.log('✅ POSモードのため営業時間チェックをスキップします');
         try {
-          await loadGlobalMenuSettings();
-          await loadAllData();
-          await loadMenuSettings();
-          await loadAlertSettings();
-          await loadStatusDisplaySettings();
-          await updateTopWaitingCount();
+          // 🆕 互いに依存しない読み込みは並行して行う（以前は1つずつ順番に待ち、メニューが出るまで数秒かかっていた）。
+          //    loadGlobalMenuSettings は上ですでに読み込み済みなので、ここでは繰り返さない
+          await Promise.all([
+            (async () => { await loadAllData(); await loadMenuSettings(); })(),
+            loadAlertSettings(),
+            loadStatusDisplaySettings(),
+            updateTopWaitingCount()
+          ]);
           setInterval(updateTopWaitingCount, 20000);
           watchSoldOutItems();
           onSnapshot(window.getStoreCollection('settings'), () => {
