@@ -839,8 +839,42 @@
         console.error('ご利用方法設定の読み込みエラー（標準の名称を使用します）:', e);
       }
     }
+    // 🆕 売上予算（目標）の設定。kanriの「売上予算の設定」で変更できる。未設定なら 平日50,000円 / 土日祝70,000円
+    //    期間指定（開始日〜終了日の金額）は、平日・土日祝の金額より優先。同じ日に複数あるときは後ろに登録したものを優先
+    window.salesTargetSettings = { weekday: 50000, holiday: 70000, ranges: [] };
+    window.loadSalesTargetSettings = async function() {
+      try {
+        const snap = await window.getDoc(window.getStoreDoc('sales_target_settings', 'default'));
+        if (snap.exists()) {
+          const d = snap.data();
+          window.salesTargetSettings = {
+            weekday: Number(d.weekday) >= 0 && d.weekday !== undefined && d.weekday !== null ? Number(d.weekday) : 50000,
+            holiday: Number(d.holiday) >= 0 && d.holiday !== undefined && d.holiday !== null ? Number(d.holiday) : 70000,
+            ranges: Array.isArray(d.ranges) ? d.ranges : []
+          };
+        }
+      } catch (e) {
+        console.error('売上予算の設定の読み込みエラー（標準の金額を使用します）:', e);
+      }
+    };
+    window.getSalesTargetInfo = function(date) {
+      const st = window.salesTargetSettings;
+      const ymd = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      for (let i = st.ranges.length - 1; i >= 0; i--) {
+        const r = st.ranges[i];
+        if (r && r.from && r.to && ymd >= r.from && ymd <= r.to && Number(r.amount) >= 0) {
+          return { amount: Number(r.amount), kind: 'custom', label: r.label || '個別設定' };
+        }
+      }
+      const dow = date.getDay();
+      const off = (dow === 0 || dow === 6 || window.isJapaneseHoliday(date));
+      return { amount: off ? st.holiday : st.weekday, kind: off ? 'holiday' : 'weekday', label: off ? '土日祝' : '平日' };
+    };
+    window.getSalesTarget = function(date) { return window.getSalesTargetInfo(date).amount; };
+    
     async function loadTaxRateSettings() {
       loadEatStyleSettings(); // 🆕
+      window.loadSalesTargetSettings(); // 🆕
       const ref = window.getStoreDoc('tax_rate_settings', 'default');
       // 🆕 実際の取得は諦めず継続させ、届き次第反映＆再描画する（タイムアウトは初期表示をブロックしないためだけ）
       const fetchPromise = window.getDoc(ref).then(snap => {
@@ -6586,6 +6620,7 @@
       if (!startStr || !endStr || startStr > endStr) { alert('開始日と終了日を正しく入力してください'); return; }
       container.innerHTML = '<div style="text-align:center; padding:30px; color:#666;">前年比を集計しています...</div>';
       try {
+        await window.loadSalesTargetSettings(); // 🆕 最新の予算設定
         const readMap = async (col) => {
           const m = {};
           try {
@@ -6630,7 +6665,8 @@
         while (d <= endD && guard++ < 400) {
           const key = ymd(d);
           const dow = d.getDay();
-          const target = (dow === 0 || dow === 6 || window.isJapaneseHoliday(d)) ? 70000 : 50000; // 土日祝は70,000円
+          const target = window.getSalesTarget(d); // 🆕 kanriで設定した予算（平日/土日祝/期間指定）
+          const isHol = window.isJapaneseHoliday(d);
           const lyKey = shift(key, -364);
           const a = cur(key), b = last(lyKey);
           T.target += target; // 予算は売上の有無にかかわらず期間の全日分を合計（達成率は期間全体の予算に対する割合）
@@ -6639,7 +6675,7 @@
           if (a.ok && b.ok) { T.bothS += a.s; T.bothLS += b.s; T.bothC += a.c; T.bothLC += b.c; }
           const lyD = parseD(lyKey);
           rows += `<tr>
-            ${td(`${d.getMonth() + 1}/${d.getDate()}（${WD[dow]}）`, 'text-align:left; ' + (dow === 0 ? 'color:#c62828;' : (dow === 6 ? 'color:#1565c0;' : '')))}
+            ${td(`${d.getMonth() + 1}/${d.getDate()}（${WD[dow]}${isHol ? '・祝' : ''}）`, 'text-align:left; ' + ((dow === 0 || isHol) ? 'color:#c62828;' : (dow === 6 ? 'color:#1565c0;' : '')))}
             ${td(num(target))}
             ${td(a.ok ? yen(a.s) : '-')}
             ${td(a.ok ? pctHtml(pct(a.s, target), 100) : '-')}
@@ -7753,10 +7789,10 @@ ${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(t
         const noSalesMessage = totalSales === 0 ? '<div style="font-size: 12px; opacity: 0.8; margin-top: 5px;">※ 本日の売上データがありません</div>' : '';
         
         // 🆕 売上目標達成率を計算（選択された営業日の曜日で判定）
-        const dayOfWeek = displayDate.getDay(); // 0=日曜, 6=土曜
-        const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6 || window.isJapaneseHoliday(displayDate)); // 土日祝
-        const targetSales = isWeekend ? 70000 : 50000;
-        const achievementRate = Math.round((totalSales / targetSales) * 100);
+        await window.loadSalesTargetSettings(); // 🆕 kanriで設定した予算（最新）
+        const targetInfo = window.getSalesTargetInfo(displayDate); // 平日/土日祝/期間指定
+        const targetSales = targetInfo.amount;
+        const achievementRate = targetSales > 0 ? Math.round((totalSales / targetSales) * 100) : 0;
         
         const rateColor = achievementRate >= 100 ? '#4CAF50' : achievementRate >= 80 ? '#FF9800' : '#f44336';
         const netProfitColor = netProfit >= 0 ? '#4CAF50' : '#f44336';
@@ -7765,7 +7801,7 @@ ${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(t
             <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white;">
               <h4 style="margin: 0 0 10px 0;">売上目標</h4>
               <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                <span>目標金額（${isWeekend ? '土日祝' : '平日'}）</span>
+                <span>目標金額（${targetInfo.label}）</span>
                 <strong>¥${targetSales.toLocaleString()}</strong>
               </div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">

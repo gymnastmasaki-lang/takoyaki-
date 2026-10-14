@@ -544,6 +544,9 @@ const AdminSystem = () => {
     // 🆕 ご利用方法選択（店内飲食/持ち帰り）の設定用のstate
     const [showEatStyleSettings, setShowEatStyleSettings] = useState(false);
     const [eatStyleSettings, setEatStyleSettings] = useState({ enabled: true, dineInLabel: '店内飲食', takeoutLabel: '持ち帰り' });
+    // 🆕 売上予算の設定用のstate
+    const [showSalesTargetSettings, setShowSalesTargetSettings] = useState(false);
+    const [salesTargetSettings, setSalesTargetSettings] = useState({ weekday: 50000, holiday: 70000, ranges: [] });
     // 🆕 データ連携用のstate
     const [showDataExport, setShowDataExport] = useState(false);
     const [exportStartDate, setExportStartDate] = useState(() => {
@@ -2125,6 +2128,56 @@ const AdminSystem = () => {
             await setDoc(window.getStoreDoc('eat_style_settings', 'default'), data);
             setEatStyleSettings(data);
             showCustomAlertFunc('✅ ご利用方法選択の設定を保存しました', '保存完了', '✅');
+        }
+        catch (error) {
+            showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
+        }
+    };
+    // 🆕 売上予算（目標）の設定を読み込み・保存
+    const loadSalesTargetSettingsKanri = async () => {
+        try {
+            while (!window.FirebaseReady || !window.db) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            const { getDoc } = window.firebaseModules;
+            const snap = await getDoc(window.getStoreDoc('sales_target_settings', 'default'));
+            if (snap.exists()) {
+                const d = snap.data();
+                setSalesTargetSettings({
+                    weekday: (d.weekday === undefined || d.weekday === null) ? 50000 : d.weekday,
+                    holiday: (d.holiday === undefined || d.holiday === null) ? 70000 : d.holiday,
+                    ranges: Array.isArray(d.ranges) ? d.ranges : []
+                });
+            }
+        }
+        catch (error) {
+            console.error('売上予算の設定の読み込みエラー:', error);
+        }
+    };
+    const saveSalesTargetSettingsKanri = async () => {
+        try {
+            const weekday = Number(salesTargetSettings.weekday), holiday = Number(salesTargetSettings.holiday);
+            if (!(weekday >= 0) || !(holiday >= 0) || salesTargetSettings.weekday === '' || salesTargetSettings.holiday === '') {
+                showCustomAlertFunc('平日と土日祝の予算を、0以上の数字で入力してください', '入力エラー', '❌');
+                return;
+            }
+            const ranges = (salesTargetSettings.ranges || []).filter(r => r.from || r.to || r.amount).map(r => ({
+                from: r.from || '', to: r.to || r.from || '', amount: Number(r.amount) || 0, label: (r.label || '').trim()
+            }));
+            for (const r of ranges) {
+                if (!r.from || !r.to || r.from > r.to) {
+                    showCustomAlertFunc('期間ごとの予算の、開始日と終了日を正しく入力してください（開始日は終了日以前）', '入力エラー', '❌');
+                    return;
+                }
+            }
+            while (!window.FirebaseReady || !window.db) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            const { setDoc } = window.firebaseModules;
+            const data = { weekday, holiday, ranges };
+            await setDoc(window.getStoreDoc('sales_target_settings', 'default'), data);
+            setSalesTargetSettings(data);
+            showCustomAlertFunc('✅ 売上予算の設定を保存しました', '保存完了', '✅');
         }
         catch (error) {
             showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
@@ -6426,6 +6479,34 @@ const AdminSystem = () => {
                     React.createElement("div", { className: "flex gap-2" },
                         React.createElement("button", { onClick: saveEatStyleSettings, className: "px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold" }, "保存"),
                         React.createElement("button", { onClick: () => setEatStyleSettings({ enabled: true, dineInLabel: '店内飲食', takeoutLabel: '持ち帰り' }), className: "px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold" }, "標準に戻す（保存で確定）"))))),
+            React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
+                React.createElement("div", { className: "flex justify-between items-center mb-4" },
+                    React.createElement("div", null,
+                        React.createElement("h2", { className: "text-2xl font-bold text-gray-800 flex items-center gap-2" }, "売上予算の設定"),
+                        React.createElement("p", { className: "text-sm text-gray-600 mt-1" }, "売上画面の目標と、月次の前年比の予算に使う金額を設定します")),
+                    React.createElement("button", { onClick: () => { const next = !showSalesTargetSettings; setShowSalesTargetSettings(next); if (next) loadSalesTargetSettingsKanri(); }, className: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600" }, showSalesTargetSettings ? '閉じる' : '設定を開く')),
+                showSalesTargetSettings && (React.createElement("div", { className: "space-y-6 border-t pt-4" },
+                    React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-4" },
+                        React.createElement("div", null,
+                            React.createElement("label", { className: "block text-sm font-medium mb-2" }, "平日の予算（円）"),
+                            React.createElement("input", { type: "number", min: "0", value: salesTargetSettings.weekday, onChange: (e) => setSalesTargetSettings(Object.assign(Object.assign({}, salesTargetSettings), { weekday: e.target.value === '' ? '' : parseInt(e.target.value, 10) })), className: "w-full p-3 border rounded-lg" })),
+                        React.createElement("div", null,
+                            React.createElement("label", { className: "block text-sm font-medium mb-2" }, "土日祝の予算（円）"),
+                            React.createElement("input", { type: "number", min: "0", value: salesTargetSettings.holiday, onChange: (e) => setSalesTargetSettings(Object.assign(Object.assign({}, salesTargetSettings), { holiday: e.target.value === '' ? '' : parseInt(e.target.value, 10) })), className: "w-full p-3 border rounded-lg" }))),
+                    React.createElement("div", null,
+                        React.createElement("div", { className: "font-bold mb-2" }, "期間ごとの予算（平日・土日祝の金額より優先）"),
+                        React.createElement("div", { className: "text-sm text-gray-600 mb-3" }, "例: お盆・年末年始・イベント日など。1日だけなら、開始日と終了日を同じにします。同じ日に複数ある場合は、下に追加したものが優先されます。"),
+                        (salesTargetSettings.ranges || []).map((r, idx) => React.createElement("div", { key: idx, className: "flex flex-wrap items-center gap-2 mb-2" },
+                            React.createElement("input", { type: "date", value: r.from || '', onChange: (e) => setSalesTargetSettings(Object.assign(Object.assign({}, salesTargetSettings), { ranges: salesTargetSettings.ranges.map((x, i) => i === idx ? Object.assign(Object.assign({}, x), { from: e.target.value }) : x) })), className: "p-2 border rounded-lg" }),
+                            React.createElement("span", null, "～"),
+                            React.createElement("input", { type: "date", value: r.to || '', onChange: (e) => setSalesTargetSettings(Object.assign(Object.assign({}, salesTargetSettings), { ranges: salesTargetSettings.ranges.map((x, i) => i === idx ? Object.assign(Object.assign({}, x), { to: e.target.value }) : x) })), className: "p-2 border rounded-lg" }),
+                            React.createElement("input", { type: "number", min: "0", value: r.amount, placeholder: "金額", onChange: (e) => setSalesTargetSettings(Object.assign(Object.assign({}, salesTargetSettings), { ranges: salesTargetSettings.ranges.map((x, i) => i === idx ? Object.assign(Object.assign({}, x), { amount: e.target.value === '' ? '' : parseInt(e.target.value, 10) }) : x) })), className: "w-32 p-2 border rounded-lg" }),
+                            React.createElement("input", { type: "text", value: r.label || '', placeholder: "名称（任意）", onChange: (e) => setSalesTargetSettings(Object.assign(Object.assign({}, salesTargetSettings), { ranges: salesTargetSettings.ranges.map((x, i) => i === idx ? Object.assign(Object.assign({}, x), { label: e.target.value }) : x) })), className: "flex-1 p-2 border rounded-lg" }),
+                            React.createElement("button", { onClick: () => setSalesTargetSettings(Object.assign(Object.assign({}, salesTargetSettings), { ranges: salesTargetSettings.ranges.filter((x, i) => i !== idx) })), className: "px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm" }, "削除"))),
+                        React.createElement("button", { onClick: () => setSalesTargetSettings(Object.assign(Object.assign({}, salesTargetSettings), { ranges: [...(salesTargetSettings.ranges || []), { from: '', to: '', amount: salesTargetSettings.holiday || 0, label: '' }] })), className: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm font-bold" }, "＋ 期間ごとの予算を追加")),
+                    React.createElement("div", { className: "flex gap-2" },
+                        React.createElement("button", { onClick: saveSalesTargetSettingsKanri, className: "px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold" }, "保存"),
+                        React.createElement("button", { onClick: () => setSalesTargetSettings({ weekday: 50000, holiday: 70000, ranges: [] }), className: "px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold" }, "標準に戻す（保存で確定）"))))),
             React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
                 React.createElement("div", { className: "flex justify-between items-center mb-4" },
                     React.createElement("h2", { className: "text-2xl font-bold text-gray-800 flex items-center gap-2" }, "\u30EC\u30B7\u30FC\u30C8/\u9818\u53CE\u66F8\u8A2D\u5B9A"),
