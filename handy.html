@@ -1300,11 +1300,11 @@
         <div id="taxRateItemsList"></div>
         <div style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #4CAF50; font-weight: bold; font-size: 14px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-            <span>8%対象:</span>
+            <span id="handyTax8Label">8%対象:</span>
             <span id="tax8Summary" style="color: #FF9800;">¥0</span>
           </div>
           <div style="display: flex; justify-content: space-between;">
-            <span>10%対象:</span>
+            <span id="handyTax10Label">10%対象:</span>
             <span id="tax10Summary" style="color: #2196F3;">¥0</span>
           </div>
         </div>
@@ -1653,6 +1653,67 @@
       });
     };
     
+    // ===== 🆕 消費税率の設定（kanriの「消費税率設定」の実際の％）。区分(8/10)は据え置き、実際の％だけ設定で変換する =====
+    //   これが無いと receipt-display-functions-v4.js が window.getActualTaxPercent を呼べず、レシート・領収書・会計票が表示できなかった
+    window.taxRateSettings = { reducedRatePercent: 8, standardRatePercent: 10 };
+    window.getActualTaxPercent = function(categoryRate) {
+      return (categoryRate === 8) ? window.taxRateSettings.reducedRatePercent : window.taxRateSettings.standardRatePercent;
+    };
+    async function loadTaxRateSettings() {
+      try {
+        const snap = await window.getDoc(window.getStoreDoc('tax_rate_settings', 'default'));
+        if (snap.exists()) {
+          window.taxRateSettings = Object.assign({ reducedRatePercent: 8, standardRatePercent: 10 }, snap.data());
+        }
+        console.log('✅ 消費税率設定:', window.taxRateSettings);
+      } catch (e) {
+        console.error('消費税率設定の読み込みエラー（8%/10%で動作します）:', e);
+      }
+    }
+    
+    // 日時を安全にDateへ変換する（日時が空・文字列・{seconds,nanoseconds}形式でも例外にしない）
+    window.safeToDate = function(value) {
+      if (!value) return null;
+      if (typeof value.toDate === 'function') return value.toDate();
+      if (typeof value === 'object' && typeof value.seconds === 'number') {
+        return new Date(value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1e6));
+      }
+      return new Date(value);
+    };
+    
+    // 🆕 レシート用の商品データ（外税は「税抜単価＋税込の行合計」、店内/持ち帰りの区分つき）
+    function buildHandyReceiptItem(item, order) {
+      const taxType = item.taxType || 'inclusive';
+      const cat = (item.taxRate === 8 || item.taxRate === 10) ? item.taxRate : getApplicableTaxRate(item, currentTableSettings);
+      const itemData = {
+        name: item.name,
+        toppings: item.toppings || 'なし',
+        price: item.price,
+        basePrice: item.basePrice || item.price,
+        toppingPrice: item.toppingPrice || 0,
+        quantity: item.quantity,
+        taxRate: cat,
+        taxType: taxType,
+        eatStyle: item.eatStyle || (order && order.eatStyle) || null
+      };
+      if (taxType === 'exclusive') {
+        const base = ((item.price || 0) + (item.toppingPrice || 0)) * (item.quantity || 1);
+        itemData.lineTotalWithTax = Math.floor(base * (1 + window.getActualTaxPercent(cat) / 100));
+      }
+      return itemData;
+    }
+    // 🆕 商品から税率区分別の税込金額を集計（未会計の注文は税率別の金額が保存されていないため）
+    function handyTaxTotalsFromItems(items, bagPrice) {
+      let t8 = 0, t10 = 0;
+      (items || []).forEach(it => {
+        const base = ((it.price || 0) + (it.toppingPrice || 0)) * (it.quantity || 1);
+        const gross = (it.taxType === 'exclusive' && typeof it.lineTotalWithTax === 'number') ? it.lineTotalWithTax : base;
+        if (it.taxRate === 8) t8 += gross; else t10 += gross;
+      });
+      t10 += (bagPrice || 0); // レジ袋は10%
+      return { t8, t10 };
+    }
+    
     // 🆕 税額計算関数
     function getTaxAmount(item, quantity = 1) {
       const taxType = item.taxType || 'inclusive';
@@ -1662,10 +1723,10 @@
       const taxRate = getApplicableTaxRate(item, currentTableSettings);
       
       if (taxType === 'exclusive') {
-        return Math.floor(basePrice * quantity * taxRate / 100);
+        return Math.floor(basePrice * quantity * window.getActualTaxPercent(taxRate) / 100);
       } else {
         const totalWithTax = basePrice * quantity;
-        const totalWithoutTax = Math.floor(totalWithTax / (1 + taxRate / 100));
+        const totalWithoutTax = Math.floor(totalWithTax / (1 + window.getActualTaxPercent(taxRate) / 100));
         return totalWithTax - totalWithoutTax;
       }
     }
@@ -1684,6 +1745,10 @@
           foodType = 'non-food';
         }
       }
+      
+      // 🆕 お客様/スタッフが選んだ「店内飲食/持ち帰り」を最優先（テーブルの税設定より優先）
+      if (item.eatStyle === 'takeout') return (foodType === 'food') ? 8 : 10;
+      if (item.eatStyle === 'dinein') return 10;
       
       // テーブル設定が有効な場合
       if (tableSettings && tableSettings.taxRule && tableSettings.taxRule !== 'none') {
@@ -1771,6 +1836,10 @@
       } else {
         console.log(`✅ foodType設定済み: ${foodType} (商品: ${item.name})`);
       }
+      
+      // 🆕 お客様/スタッフが選んだ「店内飲食/持ち帰り」を最優先（テーブルの税設定より優先）
+      if (item.eatStyle === 'takeout') return (foodType === 'food') ? 8 : 10;
+      if (item.eatStyle === 'dinein') return 10;
       
       // 🔥 改善: テーブル設定が有効（takeout/dine-in）な場合、foodTypeを優先
       if (tableSettings && tableSettings.taxRule && tableSettings.taxRule !== 'none') {
@@ -1955,6 +2024,7 @@
       document.getElementById('tablesScreen').classList.remove('hidden');
       document.getElementById('storeNameDisplay').textContent = currentStoreName;
       
+      loadTaxRateSettings(); // 🆕 消費税率設定（待たずに並行して読み込む）
       await loadTables();
       startOrdersListener();
       startTablesListener();
@@ -2322,14 +2392,7 @@
         orders.forEach(order => {
           if (order.items && Array.isArray(order.items)) {
             order.items.forEach(item => {
-              const itemData = {
-                name: item.name,
-                toppings: item.toppings || 'なし',
-                price: item.price,
-                basePrice: item.basePrice || item.price,
-                toppingPrice: item.toppingPrice || 0,
-                quantity: item.quantity
-              };
+              const itemData = buildHandyReceiptItem(item, order); // 🆕
               
               // トッピング詳細を保持
               if (item.toppingDetails && Array.isArray(item.toppingDetails)) {
@@ -2346,6 +2409,13 @@
         });
         
         console.log('会計票データ:', receiptData);
+        
+        // 🆕 未会計の注文には税率別の金額が保存されていないため、商品から計算する
+        if ((receiptData.tax8Total + receiptData.tax10Total) === 0) {
+          const _t = handyTaxTotalsFromItems(receiptData.items, receiptData.bagPrice);
+          receiptData.tax8Total = _t.t8;
+          receiptData.tax10Total = _t.t10;
+        }
         
         // レシート表示
         showReceiptDisplay(receiptData);
@@ -2533,8 +2603,8 @@
       let displayTotal = itemTotal;
       if (taxType === 'exclusive') {
         // 外税の場合、itemTotalは本体価格なので税を加算
-        displayTotal = itemTotal + Math.floor(itemTotal * (defaultTaxRate / 100));
-        console.log(`🆕 外税計算: 本体${itemTotal}円 + 税${Math.floor(itemTotal * (defaultTaxRate / 100))}円 → ${displayTotal}円（税率${defaultTaxRate}%）`);
+        displayTotal = itemTotal + Math.floor(itemTotal * (window.getActualTaxPercent(defaultTaxRate) / 100));
+        console.log(`🆕 外税計算: 本体${itemTotal}円 + 税${Math.floor(itemTotal * (window.getActualTaxPercent(defaultTaxRate) / 100))}円 → ${displayTotal}円（税率${window.getActualTaxPercent(defaultTaxRate)}%）`);
       }
       
       const itemDiv = document.createElement('div');
@@ -2558,8 +2628,8 @@
       const radio8 = createRadio(index, 8, displayTotal, defaultTaxRate === 8, itemTotal, taxType);
       const radio10 = createRadio(index, 10, displayTotal, defaultTaxRate === 10, itemTotal, taxType);
       
-      radioDiv.appendChild(createRadioLabel(radio8, '8%持ち帰り', '#fff3e0', '#FF9800'));
-      radioDiv.appendChild(createRadioLabel(radio10, '10%店内', '#e3f2fd', '#2196F3'));
+      radioDiv.appendChild(createRadioLabel(radio8, window.getActualTaxPercent(8) + '%持ち帰り', '#fff3e0', '#FF9800'));
+      radioDiv.appendChild(createRadioLabel(radio10, window.getActualTaxPercent(10) + '%店内', '#e3f2fd', '#2196F3'));
       
       itemDiv.appendChild(headerDiv);
       itemDiv.appendChild(radioDiv);
@@ -2580,7 +2650,7 @@
       // 🆕 外税の場合は税率変更時に金額を再計算
       radio.onchange = function() {
         if (taxType === 'exclusive') {
-          const newAmount = parseInt(radio.dataset.baseAmount) + Math.floor(parseInt(radio.dataset.baseAmount) * (rate / 100));
+          const newAmount = parseInt(radio.dataset.baseAmount) + Math.floor(parseInt(radio.dataset.baseAmount) * (window.getActualTaxPercent(rate) / 100));
           // 同じグループの全ラジオボタンのamountを更新
           document.querySelectorAll(`input[name="taxRate${index}"]`).forEach(r => {
             r.dataset.amount = newAmount;
@@ -2603,6 +2673,9 @@
     }
     
     function calculateTaxSummary() {
+      const _l8 = document.getElementById('handyTax8Label'), _l10 = document.getElementById('handyTax10Label');
+      if (_l8) _l8.textContent = window.getActualTaxPercent(8) + '%対象:';
+      if (_l10) _l10.textContent = window.getActualTaxPercent(10) + '%対象:';
       let tax8 = 0, tax10 = 0;
       document.querySelectorAll('#taxRateItemsList input[type="radio"]:checked').forEach(r => {
         if (r.value === '8') tax8 += parseFloat(r.dataset.amount);
@@ -3120,14 +3193,7 @@
           checkoutData.orders.forEach(order => {
             if (order.items && Array.isArray(order.items)) {
               order.items.forEach(item => {
-                const itemData = {
-                  name: item.name,
-                  toppings: item.toppings || 'なし',
-                  price: item.price,
-                  basePrice: item.basePrice || item.price,
-                  toppingPrice: item.toppingPrice || 0,
-                  quantity: item.quantity
-                };
+                const itemData = buildHandyReceiptItem(item, order); // 🆕
                 
                 // トッピング詳細を保持
                 if (item.toppingDetails && Array.isArray(item.toppingDetails)) {
@@ -4559,12 +4625,12 @@
         const tax10TotalWithTax = settlementData.tax10Total || 0; // 10%商品合計（税込）
         
         // 税抜価格を計算（内税なので税込価格から逆算）
-        const tax8Excluded = Math.floor(tax8TotalWithTax / 1.08);  // 8%商品合計（税抜）
-        const tax10Excluded = Math.floor(tax10TotalWithTax / 1.10); // 10%商品合計（税抜）
+        const tax8Excluded = Math.floor(tax8TotalWithTax / (1 + window.getActualTaxPercent(8) / 100));  // 8%商品合計（税抜）
+        const tax10Excluded = Math.floor(tax10TotalWithTax / (1 + window.getActualTaxPercent(10) / 100)); // 10%商品合計（税抜）
         
         // 消費税額を計算
-        const tax8Amount = tax8TotalWithTax - tax8Excluded;  // 8%の消費税
-        const tax10Amount = tax10TotalWithTax - tax10Excluded; // 10%の消費税
+        const tax8Amount = tax8TotalWithTax - tax8Excluded;  // ${window.getActualTaxPercent(8)}%の消費税
+        const tax10Amount = tax10TotalWithTax - tax10Excluded; // ${window.getActualTaxPercent(10)}%の消費税
         
         // 合計
         const totalTax = tax8Amount + tax10Amount;  // 消費税の合計
@@ -4598,7 +4664,7 @@
             const data = doc.data();
             if (!data.paidAt || !data.items) return;
             
-            const orderDate = data.paidAt.toDate();
+            const orderDate = (window.safeToDate(data.paidAt) || new Date(0));
             const orderDateStr = window.getBusinessDay(orderDate).str;
             
             if (orderDateStr === dateStr) {
@@ -4871,15 +4937,15 @@
 -------------------------------------
 税金内訳
 -------------------------------------
-8%の商品合計（税抜）: ¥${tax8Excluded.toLocaleString()}
-8%の商品合計（税込）: ¥${tax8TotalWithTax.toLocaleString()}
-8%の消費税: ¥${tax8Amount.toLocaleString()}
+${window.getActualTaxPercent(8)}%の商品合計（税抜）: ¥${tax8Excluded.toLocaleString()}
+${window.getActualTaxPercent(8)}%の商品合計（税込）: ¥${tax8TotalWithTax.toLocaleString()}
+${window.getActualTaxPercent(8)}%の消費税: ¥${tax8Amount.toLocaleString()}
   内税: ¥${tax8InclusiveTotal.toLocaleString()}
   外税: ¥${tax8ExclusiveTotal.toLocaleString()}
 
-10%の商品合計（税抜）: ¥${tax10Excluded.toLocaleString()}
-10%の商品合計（税込）: ¥${tax10TotalWithTax.toLocaleString()}
-10%の消費税: ¥${tax10Amount.toLocaleString()}
+${window.getActualTaxPercent(10)}%の商品合計（税抜）: ¥${tax10Excluded.toLocaleString()}
+${window.getActualTaxPercent(10)}%の商品合計（税込）: ¥${tax10TotalWithTax.toLocaleString()}
+${window.getActualTaxPercent(10)}%の消費税: ¥${tax10Amount.toLocaleString()}
   内税: ¥${tax10InclusiveTotal.toLocaleString()}
   外税: ¥${tax10ExclusiveTotal.toLocaleString()}
 
@@ -4893,20 +4959,20 @@ ${redSlipCount > 0 ? `
 -------------------------------------
 赤伝票の税金内訳
 -------------------------------------
-8%の赤伝票（税抜）: -¥${Math.floor(redSlipTax8Total / 1.08).toLocaleString()}
-8%の赤伝票（税込）: -¥${redSlipTax8Total.toLocaleString()}
-8%の赤伝票の消費税: -¥${(redSlipTax8Total - Math.floor(redSlipTax8Total / 1.08)).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100)).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税込）: -¥${redSlipTax8Total.toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${(redSlipTax8Total - Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100))).toLocaleString()}
   内税: -¥${redSlipTax8Inclusive.toLocaleString()}
   外税: -¥${redSlipTax8Exclusive.toLocaleString()}
 
-10%の赤伝票（税抜）: -¥${Math.floor(redSlipTax10Total / 1.10).toLocaleString()}
-10%の赤伝票（税込）: -¥${redSlipTax10Total.toLocaleString()}
-10%の赤伝票の消費税: -¥${(redSlipTax10Total - Math.floor(redSlipTax10Total / 1.10)).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100)).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税込）: -¥${redSlipTax10Total.toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(redSlipTax10Total - Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
   内税: -¥${redSlipTax10Inclusive.toLocaleString()}
   外税: -¥${redSlipTax10Exclusive.toLocaleString()}
 
-赤伝票消費税の合計: -¥${((redSlipTax8Total - Math.floor(redSlipTax8Total / 1.08)) + (redSlipTax10Total - Math.floor(redSlipTax10Total / 1.10))).toLocaleString()}
-赤伝票税抜合計: -¥${(Math.floor(redSlipTax8Total / 1.08) + Math.floor(redSlipTax10Total / 1.10)).toLocaleString()}
+赤伝票消費税の合計: -¥${((redSlipTax8Total - Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100))) + (redSlipTax10Total - Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100)))).toLocaleString()}
+赤伝票税抜合計: -¥${(Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100)) + Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
 赤伝票税込合計: -¥${(redSlipTax8Total + redSlipTax10Total).toLocaleString()}
 ` : ''}
 
@@ -6349,7 +6415,7 @@ ${fileName}`,
         const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2, '0')}`;
         builder.createTextElement({data: `発行日時: ${dateStr}\n`});
         
-        const orderDate = orderData.timestamp?.toDate() || new Date();
+        const orderDate = window.safeToDate(orderData.timestamp) || new Date();
         const orderDateStr = `${orderDate.getFullYear()}/${String(orderDate.getMonth()+1).padStart(2,'0')}/${String(orderDate.getDate()).padStart(2,'0')} ${String(orderDate.getHours()).padStart(2,'0')}:${String(orderDate.getMinutes()).padStart(2, '0')}`;
         builder.createTextElement({data: `元注文日時: ${orderDateStr}\n`});
         builder.createTextElement({data: `テーブル: ${orderData.tableNumber}\n`});
@@ -6423,7 +6489,7 @@ ${fileName}`,
         console.log('📊 売上データ更新開始');
         
         // 営業日を計算（午前3時基準）
-        const orderDate = orderData.paidAt?.toDate() || orderData.timestamp?.toDate() || new Date();
+        const orderDate = window.safeToDate(orderData.paidAt) || window.safeToDate(orderData.timestamp) || new Date();
         const dateKey = window.getBusinessDay(orderDate).str;
         
         // 売上データを取得
@@ -6514,7 +6580,7 @@ ${fileName}`,
       const now = new Date();
       
       let filtered = historyOrders.filter(order => {
-        const orderDate = order.timestamp.toDate();
+        const orderDate = (window.safeToDate(order.timestamp) || new Date(0));
         
         let dateMatch = true;
         if (dateFilter === 'today') {
@@ -6580,8 +6646,8 @@ ${fileName}`,
           border: 2px solid #ddd;
         `;
         
-        const orderDate = order.timestamp.toDate();
-        const dateStr = orderDate.toLocaleString('ja-JP');
+        const orderDate = (window.safeToDate(order.timestamp) || new Date(0));
+        const dateStr = orderDate.getTime() ? orderDate.toLocaleString('ja-JP') : '日時不明';
         
         const paymentMethodNames = {
           'cash': '現金',
@@ -6677,7 +6743,7 @@ ${fileName}`,
         if (!confirmed) return;
         
         // 会計日時から営業日を計算（3時基準）
-        const paidDate = orderData.paidAt.toDate();
+        const paidDate = (window.safeToDate(orderData.paidAt) || new Date(0));
         const dateStr = window.getBusinessDay(paidDate).str;
         
         // dailySalesを取得
@@ -7166,9 +7232,9 @@ ${fileName}`,
           let dateToUse = null;
           
           if (currentEditingOrder.paidAt) {
-            dateToUse = currentEditingOrder.paidAt.toDate();
+            dateToUse = (window.safeToDate(currentEditingOrder.paidAt) || new Date(0));
           } else if (currentEditingOrder.timestamp) {
-            dateToUse = currentEditingOrder.timestamp.toDate();
+            dateToUse = (window.safeToDate(currentEditingOrder.timestamp) || new Date(0));
             isUnpaidOrder = true;
           }
           
@@ -7605,7 +7671,7 @@ ${fileName}`,
           // paidAtを使用して会計日時を取得
           if (!data.paidAt) return;
           
-          const orderDate = data.paidAt.toDate();
+          const orderDate = (window.safeToDate(data.paidAt) || new Date(0));
           const orderDateStr = window.getBusinessDay(orderDate).str;
           
           // 期間内の注文のみ
@@ -7753,7 +7819,7 @@ ${fileName}`,
           const data = doc.data();
           if (!data.paidAt || !data.items) return;
           
-          const orderDate = data.paidAt.toDate();
+          const orderDate = (window.safeToDate(data.paidAt) || new Date(0));
           const orderDateStr = window.getBusinessDay(orderDate).str;
           
           if (dates.includes(orderDateStr)) {
@@ -7820,8 +7886,8 @@ ${fileName}`,
         }
         
         // 旧計算（互換性のため残す）
-        const tax8Excluded = Math.floor(totalTax8 / 1.08);
-        const tax10Excluded = Math.floor(totalTax10 / 1.10);
+        const tax8Excluded = Math.floor(totalTax8 / (1 + window.getActualTaxPercent(8) / 100));
+        const tax10Excluded = Math.floor(totalTax10 / (1 + window.getActualTaxPercent(10) / 100));
         const tax8Amount = totalTax8 - tax8Excluded;
         const tax10Amount = totalTax10 - tax10Excluded;
         const totalTax = tax8Amount + tax10Amount;
@@ -7855,15 +7921,15 @@ ${fileName}`,
 -------------------------------------
 税金内訳
 -------------------------------------
-【8%軽減税率】
+【${window.getActualTaxPercent(8)}%軽減税率】
 内税の消費税: ¥${tax8InclusiveTotal.toLocaleString()}
 外税の消費税: ¥${tax8ExclusiveTotal.toLocaleString()}
-8%合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal).toLocaleString()}
+${window.getActualTaxPercent(8)}%合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal).toLocaleString()}
 
-【10%標準税率】
+【${window.getActualTaxPercent(10)}%標準税率】
 内税の消費税: ¥${tax10InclusiveTotal.toLocaleString()}
 外税の消費税: ¥${tax10ExclusiveTotal.toLocaleString()}
-10%合計: ¥${(tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
+${window.getActualTaxPercent(10)}%合計: ¥${(tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
 
 消費税の合計: ¥${(tax8InclusiveTotal + tax8ExclusiveTotal + tax10InclusiveTotal + tax10ExclusiveTotal).toLocaleString()}
 税抜合計: ¥${taxExcludedTotal.toLocaleString()}
@@ -7875,20 +7941,20 @@ ${totalRedSlipCount > 0 ? `
 -------------------------------------
 赤伝票の税金内訳
 -------------------------------------
-8%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax8 / 1.08).toLocaleString()}
-8%の赤伝票（税込）: -¥${totalRedSlipTax8.toLocaleString()}
-8%の赤伝票の消費税: -¥${(totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / 1.08)).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100)).toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票（税込）: -¥${totalRedSlipTax8.toLocaleString()}
+${window.getActualTaxPercent(8)}%の赤伝票の消費税: -¥${(totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100))).toLocaleString()}
   内税: -¥${totalRedSlipTax8Inclusive.toLocaleString()}
   外税: -¥${totalRedSlipTax8Exclusive.toLocaleString()}
 
-10%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax10 / 1.10).toLocaleString()}
-10%の赤伝票（税込）: -¥${totalRedSlipTax10.toLocaleString()}
-10%の赤伝票の消費税: -¥${(totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / 1.10)).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税抜）: -¥${Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100)).toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票（税込）: -¥${totalRedSlipTax10.toLocaleString()}
+${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${(totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
   内税: -¥${totalRedSlipTax10Inclusive.toLocaleString()}
   外税: -¥${totalRedSlipTax10Exclusive.toLocaleString()}
 
-赤伝票消費税の合計: -¥${((totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / 1.08)) + (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / 1.10))).toLocaleString()}
-赤伝票税抜合計: -¥${(Math.floor(totalRedSlipTax8 / 1.08) + Math.floor(totalRedSlipTax10 / 1.10)).toLocaleString()}
+赤伝票消費税の合計: -¥${((totalRedSlipTax8 - Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100))) + (totalRedSlipTax10 - Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100)))).toLocaleString()}
+赤伝票税抜合計: -¥${(Math.floor(totalRedSlipTax8 / (1 + window.getActualTaxPercent(8) / 100)) + Math.floor(totalRedSlipTax10 / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}
 赤伝票税込合計: -¥${(totalRedSlipTax8 + totalRedSlipTax10).toLocaleString()}
 ` : ''}
 
@@ -8236,7 +8302,7 @@ saveFileWebViewSafe(imgData, `期間ジャーナル_${startDate}_${endDate}.png`
           const data = doc.data();
           if (!data.paidAt || !data.items) return;
           
-          const orderDate = data.paidAt.toDate();
+          const orderDate = (window.safeToDate(data.paidAt) || new Date(0));
           const orderDateStr = window.getBusinessDay(orderDate).str;
           
           if (orderDateStr === dateStr) {
@@ -8305,8 +8371,8 @@ saveFileWebViewSafe(imgData, `期間ジャーナル_${startDate}_${endDate}.png`
         }
         
         // 税金計算
-        const tax8Excluded = Math.floor(tax8Total / 1.08);
-        const tax10Excluded = Math.floor(tax10Total / 1.10);
+        const tax8Excluded = Math.floor(tax8Total / (1 + window.getActualTaxPercent(8) / 100));
+        const tax10Excluded = Math.floor(tax10Total / (1 + window.getActualTaxPercent(10) / 100));
         const tax8Amount = tax8Total - tax8Excluded;
         const tax10Amount = tax10Total - tax10Excluded;
         const totalTax = tax8Amount + tax10Amount;
@@ -8369,7 +8435,7 @@ saveFileWebViewSafe(imgData, `期間ジャーナル_${startDate}_${endDate}.png`
             <div style="margin: 20px 0; border-top: 1px dashed #999; padding-top: 15px;">
               <div style="font-weight: bold; margin-bottom: 10px;">税金内訳</div>
               <div style="margin-left: 10px;">
-                <div style="font-weight: bold; margin: 10px 0;">8%の商品</div>
+                <div style="font-weight: bold; margin: 10px 0;">${window.getActualTaxPercent(8)}%の商品</div>
                 <div style="display: flex; justify-content: space-between; margin: 3px 0;">
                   <span>　税抜:</span>
                   <span>¥${tax8Excluded.toLocaleString()}</span>
@@ -8391,7 +8457,7 @@ saveFileWebViewSafe(imgData, `期間ジャーナル_${startDate}_${endDate}.png`
                   <span>¥${tax8ExclusiveTotal.toLocaleString()}</span>
                 </div>
                 
-                <div style="font-weight: bold; margin: 10px 0;">10%の商品</div>
+                <div style="font-weight: bold; margin: 10px 0;">${window.getActualTaxPercent(10)}%の商品</div>
                 <div style="display: flex; justify-content: space-between; margin: 3px 0;">
                   <span>　税抜:</span>
                   <span>¥${tax10Excluded.toLocaleString()}</span>
@@ -8434,10 +8500,10 @@ saveFileWebViewSafe(imgData, `期間ジャーナル_${startDate}_${endDate}.png`
             <div style="margin: 20px 0; border-top: 1px dashed #999; padding-top: 15px;">
               <div style="font-weight: bold; margin-bottom: 10px; color: #d32f2f;">🔴 赤伝票の税金内訳</div>
               <div style="margin-left: 10px;">
-                <div style="font-weight: bold; margin: 10px 0;">8%の赤伝票</div>
+                <div style="font-weight: bold; margin: 10px 0;">${window.getActualTaxPercent(8)}%の赤伝票</div>
                 <div style="display: flex; justify-content: space-between; margin: 3px 0;">
                   <span>　税抜:</span>
-                  <span>-¥${Math.floor(redSlipTax8Total / 1.08).toLocaleString()}</span>
+                  <span>-¥${Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100)).toLocaleString()}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin: 3px 0;">
                   <span>　税込:</span>
@@ -8445,7 +8511,7 @@ saveFileWebViewSafe(imgData, `期間ジャーナル_${startDate}_${endDate}.png`
                 </div>
                 <div style="display: flex; justify-content: space-between; margin: 3px 0;">
                   <span>　消費税:</span>
-                  <span>-¥${(redSlipTax8Total - Math.floor(redSlipTax8Total / 1.08)).toLocaleString()}</span>
+                  <span>-¥${(redSlipTax8Total - Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100))).toLocaleString()}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin: 3px 0; margin-left: 15px;">
                   <span>内税:</span>
@@ -8456,10 +8522,10 @@ saveFileWebViewSafe(imgData, `期間ジャーナル_${startDate}_${endDate}.png`
                   <span>-¥${redSlipTax8Exclusive.toLocaleString()}</span>
                 </div>
                 
-                <div style="font-weight: bold; margin: 10px 0;">10%の赤伝票</div>
+                <div style="font-weight: bold; margin: 10px 0;">${window.getActualTaxPercent(10)}%の赤伝票</div>
                 <div style="display: flex; justify-content: space-between; margin: 3px 0;">
                   <span>　税抜:</span>
-                  <span>-¥${Math.floor(redSlipTax10Total / 1.10).toLocaleString()}</span>
+                  <span>-¥${Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100)).toLocaleString()}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin: 3px 0;">
                   <span>　税込:</span>
@@ -8467,7 +8533,7 @@ saveFileWebViewSafe(imgData, `期間ジャーナル_${startDate}_${endDate}.png`
                 </div>
                 <div style="display: flex; justify-content: space-between; margin: 3px 0;">
                   <span>　消費税:</span>
-                  <span>-¥${(redSlipTax10Total - Math.floor(redSlipTax10Total / 1.10)).toLocaleString()}</span>
+                  <span>-¥${(redSlipTax10Total - Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin: 3px 0; margin-left: 15px;">
                   <span>内税:</span>
@@ -8482,11 +8548,11 @@ saveFileWebViewSafe(imgData, `期間ジャーナル_${startDate}_${endDate}.png`
               <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #ddd;">
                 <div style="display: flex; justify-content: space-between; margin: 5px 0;">
                   <span>赤伝票消費税の合計:</span>
-                  <strong>-¥${((redSlipTax8Total - Math.floor(redSlipTax8Total / 1.08)) + (redSlipTax10Total - Math.floor(redSlipTax10Total / 1.10))).toLocaleString()}</strong>
+                  <strong>-¥${((redSlipTax8Total - Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100))) + (redSlipTax10Total - Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100)))).toLocaleString()}</strong>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin: 5px 0;">
                   <span>赤伝票税抜合計:</span>
-                  <strong>-¥${(Math.floor(redSlipTax8Total / 1.08) + Math.floor(redSlipTax10Total / 1.10)).toLocaleString()}</strong>
+                  <strong>-¥${(Math.floor(redSlipTax8Total / (1 + window.getActualTaxPercent(8) / 100)) + Math.floor(redSlipTax10Total / (1 + window.getActualTaxPercent(10) / 100))).toLocaleString()}</strong>
                 </div>
                 <div style="display: flex; justify-content: space-between; margin: 5px 0;">
                   <span>赤伝票税込合計:</span>
@@ -9544,6 +9610,85 @@ saveFileWebViewSafe(_imgData, `精算ジャーナル_${dateStr}.png`, 'image/png
       }
     };
     
+    // 🆕 本日品切れ設定（商品ごと）。POS・controllerと同じ sold_out コレクションを使い、その日だけ有効（翌日は自動で解除）
+    function handyTodayJst() { return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10); }
+    function handyToast(msg) {
+      const t = document.createElement('div');
+      t.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.9);color:white;padding:24px 40px;border-radius:15px;font-size:22px;font-weight:bold;z-index:2000000;';
+      t.textContent = msg;
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 1800);
+    }
+    let handySoldOutMenus = [];
+    window.showHandySoldOutModal = async function() {
+      try {
+        playTapSound();
+        closeBulkInventoryModal();
+        const menuSnapshot = await window.getDocs(window.getStoreCollection('menus'));
+        handySoldOutMenus = [];
+        const categories = new Set();
+        menuSnapshot.forEach(d => {
+          const data = d.data();
+          handySoldOutMenus.push({ id: data.id || d.id, name: data.name || '', price: data.price || 0, category: data.category || '' });
+          if (data.category) categories.add(data.category);
+        });
+        const sel = document.getElementById('handySoldOutCategory');
+        sel.innerHTML = '<option value="">全ての商品</option>';
+        Array.from(categories).sort().forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+        sel.onchange = () => renderHandySoldOutList();
+        await renderHandySoldOutList();
+        document.getElementById('handySoldOutModal').style.display = 'flex';
+      } catch (e) {
+        console.error('本日品切れ設定の表示エラー:', e);
+        showCustomAlert('エラーが発生しました: ' + e.message, 'エラー');
+      }
+    };
+    window.closeHandySoldOutModal = function() {
+      document.getElementById('handySoldOutModal').style.display = 'none';
+    };
+    async function renderHandySoldOutList() {
+      const list = document.getElementById('handySoldOutList');
+      const cat = document.getElementById('handySoldOutCategory').value;
+      const items = (cat ? handySoldOutMenus.filter(i => i.category === cat) : handySoldOutMenus.slice());
+      const snap = await window.getDocs(window.getStoreCollection('sold_out'));
+      const today = handyTodayJst();
+      const soldOutIds = new Set();
+      snap.forEach(d => { const x = d.data(); if (!x.dateStr || x.dateStr === today) soldOutIds.add(x.menuId); }); // 今日の分だけ有効
+      items.sort((a, b) => (parseInt(String(a.id).replace(/\D/g, '') || '0')) - (parseInt(String(b.id).replace(/\D/g, '') || '0')));
+      list.innerHTML = '';
+      items.forEach(item => {
+        const isSold = soldOutIds.has(item.id);
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px;border-bottom:1px solid #eee;' + (isSold ? 'background:#ffebee;' : '');
+        const info = document.createElement('div');
+        info.innerHTML = `<div style="font-weight:bold;">${item.name}</div><div style="font-size:13px;color:#666;">¥${Number(item.price).toLocaleString()}${isSold ? ' <span style="color:#d32f2f;font-weight:bold;">品切れ中</span>' : ''}</div>`;
+        const btn = document.createElement('button');
+        btn.textContent = isSold ? '販売再開' : '品切れ';
+        btn.style.cssText = 'padding:10px 16px;border:none;border-radius:8px;color:white;font-weight:bold;cursor:pointer;white-space:nowrap;background:' + (isSold ? '#4CAF50' : '#f44336') + ';';
+        btn.onclick = () => { playTapSound(); window.toggleHandySoldOut(item.id, !isSold); };
+        row.appendChild(info); row.appendChild(btn);
+        list.appendChild(row);
+      });
+    }
+    window.toggleHandySoldOut = async function(menuId, setSoldOut) {
+      try {
+        if (setSoldOut) {
+          await window.setDoc(window.getStoreDoc('sold_out', menuId), { menuId: menuId, timestamp: window.Timestamp.now(), dateStr: handyTodayJst() });
+          handyToast('品切れに設定');
+        } else {
+          const snap = await window.getDocs(window.getStoreCollection('sold_out'));
+          const dels = [];
+          snap.forEach(d => { const x = d.data(); if (x.menuId === menuId || d.id === menuId) dels.push(window.deleteDoc(d.ref)); });
+          await Promise.all(dels);
+          handyToast('販売再開');
+        }
+        await renderHandySoldOutList();
+      } catch (e) {
+        console.error('品切れ切り替えエラー:', e);
+        showCustomAlert('エラーが発生しました: ' + e.message, 'エラー');
+      }
+    };
+    
     // ========================================
     // 即会計機能
     // ========================================
@@ -10161,10 +10306,34 @@ saveFileWebViewSafe(_imgData, `精算ジャーナル_${dateStr}.png`, 'image/png
             style="width: 100%; padding: 20px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(255,152,0,0.3);">
             全商品を復活させる
           </button>
+          
+          <button 
+            onclick="playTapSound(); showHandySoldOutModal()" 
+            style="width: 100%; padding: 20px; background: linear-gradient(135deg, #607D8B 0%, #455A64 100%); color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer;">
+            本日品切れ設定（商品ごと）
+          </button>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="playTapSound(); closeBulkInventoryModal()">閉じる</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 🆕 本日品切れ設定モーダル（商品ごと） -->
+  <div id="handySoldOutModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 560px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <h3>本日品切れ設定</h3>
+        <button class="modal-close" onclick="playTapSound(); closeHandySoldOutModal()">×</button>
+      </div>
+      <div style="padding: 12px 20px 0 20px; font-size: 13px; color: #666;">品切れに設定した商品は、今日の営業日だけ品切れになります（翌日に自動で解除）。</div>
+      <div style="padding: 10px 20px;">
+        <select id="handySoldOutCategory" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;"><option value="">全ての商品</option></select>
+      </div>
+      <div id="handySoldOutList" style="overflow-y: auto; flex: 1; padding: 0 20px;"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="playTapSound(); closeHandySoldOutModal()">閉じる</button>
       </div>
     </div>
   </div>
