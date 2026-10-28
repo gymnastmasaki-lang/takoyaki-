@@ -34,9 +34,9 @@ async function showReceiptDisplay(receiptData) {
   await new Promise(resolve => setTimeout(resolve, 50));
   
   // レシート設定をFirestoreから読み込み
-  let receiptStoreName = '粉もん屋 八 下赤塚店';
-  let receiptAddress = '東京都板橋区赤塚2-2-4';
-  let receiptPhone = 'TEL: 03-6904-2888';
+  let receiptStoreName = '';  // 初期値は空欄（レシート設定の店名・住所・電話番号が入る）
+  let receiptAddress = '';
+  let receiptPhone = '';
   let receiptMessage1 = 'ご来店ありがとうございました';
   let receiptMessage2 = 'またのお越しをお待ちしております';
   
@@ -319,9 +319,9 @@ async function showReceiptDisplay(receiptData) {
   const receiptHtml = `
     <div style="font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 15px; max-width: 400px; margin: 0 auto; border: 2px solid #333; background: white;">
       <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px;">
-        <div style="font-size: 20px; font-weight: bold; margin-bottom: 5px;">${receiptStoreName}</div>
-        <div style="font-size: 11px; color: #666;">${receiptAddress}</div>
-        <div style="font-size: 11px; color: #666;">${receiptPhone}</div>
+        ${receiptStoreName ? `<div style="font-size: 20px; font-weight: bold; margin-bottom: 5px;">${receiptStoreName}</div>` : ''}
+        ${receiptAddress ? `<div style="font-size: 11px; color: #666;">${receiptAddress}</div>` : ''}
+        ${receiptPhone ? `<div style="font-size: 11px; color: #666;">${receiptPhone}</div>` : ''}
       </div>
       
       <div style="text-align: center; margin: 15px 0;">
@@ -490,9 +490,9 @@ async function showInvoiceDisplay(invoiceData) {
   await new Promise(resolve => setTimeout(resolve, 50));
   
   // レシート設定をFirestoreから読み込み
-  let receiptStoreName = '粉もん屋 八 下赤塚店';
-  let receiptAddress = '東京都板橋区赤塚2-2-4';
-  let receiptPhone = 'TEL: 03-6904-2888';
+  let receiptStoreName = '';  // 初期値は空欄（レシート設定の店名・住所・電話番号が入る）
+  let receiptAddress = '';
+  let receiptPhone = '';
   let sealImageData = '';
   
   try {
@@ -641,10 +641,10 @@ async function showInvoiceDisplay(invoiceData) {
       
       <div style="border-top: 2px solid #000; padding-top: 20px; margin-top: 0;">
         <div style="text-align: center;">
-          <div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>
+          ${receiptStoreName ? `<div style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">${receiptStoreName}</div>` : ''}
           <div style="font-size: 12px; color: #666;">
-            <div>${(receiptAddress || '').replace(/ /g, '<br>')}</div>
-            <div style="margin-top: 5px;">${receiptPhone}</div>
+            ${receiptAddress ? `<div>${receiptAddress.replace(/ /g, '<br>')}</div>` : ''}
+            ${receiptPhone ? `<div style="margin-top: 5px;">${receiptPhone}</div>` : ''}
             <div style="margin-top: 10px;">※この領収書は再発行できません</div>
           </div>
         </div>

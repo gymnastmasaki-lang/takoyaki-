@@ -4735,6 +4735,33 @@
     }
     
     // 精算を実行（CSVダウンロード）
+    // 🆕 精算処理の進捗オーバーレイ
+    function _showSettlementProgress(percent, label) {
+      let overlay = document.getElementById('settlementProgressOverlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'settlementProgressOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999999;';
+        overlay.innerHTML = `
+          <div style="background:white;border-radius:16px;padding:32px 40px;min-width:320px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,0.4);">
+            <div style="font-size:18px;font-weight:bold;color:#333;margin-bottom:16px;" id="settlementProgressLabel"></div>
+            <div style="width:100%;background:#eee;border-radius:999px;height:14px;overflow:hidden;">
+              <div id="settlementProgressBar" style="height:14px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);width:0%;transition:width 0.3s;"></div>
+            </div>
+            <div style="margin-top:8px;font-size:14px;color:#888;" id="settlementProgressPercent"></div>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+      }
+      document.getElementById('settlementProgressLabel').textContent = label;
+      document.getElementById('settlementProgressBar').style.width = percent + '%';
+      document.getElementById('settlementProgressPercent').textContent = percent + '%';
+    }
+    function _hideSettlementProgress() {
+      const overlay = document.getElementById('settlementProgressOverlay');
+      if (overlay) overlay.remove();
+    }
+
     window.confirmSettlement = async function() {
       // Firebase初期化を待つ
       if (!window.firebaseReady) {
@@ -4843,8 +4870,10 @@
       
       if (shouldBackup) {
         console.log(' バックアップを作成します');
+        _showSettlementProgress(10, 'バックアップを作成中...');
         const backupSuccess = await window.createAutoBackup();
         if (!backupSuccess) {
+          _hideSettlementProgress();
           const continueAnyway = await showCustomAlert({
             title: 'バックアップエラー',
             message: 'バックアップの作成に失敗しました。\n\nそれでも精算を続けますか？',
@@ -4863,10 +4892,12 @@
       }
       
       try {
+        _showSettlementProgress(30, '精算データを集計中...');
         const settlementData = window.currentSettlementData;
         const dateStr = window.currentSettlementDate;
         
         if (!settlementData) {
+          _hideSettlementProgress();
           await showCustomAlert({
             title: 'エラー',
             message: '精算データが見つかりません',
@@ -4883,8 +4914,8 @@
         const outputTime = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
         
         // ===== 担当者を取得 =====
-        const staffSelect = document.getElementById('staffSelect');
-        const staffName = staffSelect.value || '未選択';
+        const staffSelect = document.getElementById('staffSelect'); // handyには担当者の選択欄が無い
+        const staffName = (staffSelect && staffSelect.value) || '未選択';
         
         // ===== dailySalesから基本データを取得 =====
         const customerCount = settlementData.customerCount || 0;
@@ -5280,6 +5311,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
         document.body.appendChild(journalDiv);
         
         // html2canvasで画像化
+        _showSettlementProgress(65, 'ジャーナル画像を生成中...');
         const canvas = await html2canvas(journalDiv, {
           scale: 2,
           backgroundColor: '#ffffff',
@@ -5298,6 +5330,7 @@ saveFileWebViewSafe(imgData2, `精算ジャーナル_${dateStr}.png`, 'image/png
         });
         
         // ===== 精算記録をFirebaseに保存 =====
+        _showSettlementProgress(90, 'データを保存中...');
         await window.addDoc(window.getStoreCollection('settlements'), {
           date: dateStr,
           outputTime: outputTime,
@@ -5329,10 +5362,13 @@ saveFileWebViewSafe(imgData2, `精算ジャーナル_${dateStr}.png`, 'image/png
         });
         
         console.log('✅ 精算ジャーナル生成完了');
+        _showSettlementProgress(100, '完了！');
         closeSettlementModal();
+        setTimeout(() => { _hideSettlementProgress(); }, 800);
         
       } catch (e) {
         console.error('❌ 精算エラー:', e);
+        _hideSettlementProgress();
         await showCustomAlert({
           title: 'エラー',
           message: '精算に失敗しました: ' + e.message,
@@ -6927,8 +6963,8 @@ ${fileName}`,
       if (order.completedAt) badges.push('<span style="background:#4CAF50;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;">完了</span>');
       const eat = (order.eatStyle && window.getEatStyleLabel) ? ('<span style="margin-left:8px;font-size:12px;color:#555;border:1px solid #bbb;border-radius:10px;padding:1px 8px;">' + historyEscape(window.getEatStyleLabel(order.eatStyle)) + '</span>') : '';
       const itemsHtml = (order.items || []).map(item => {
-        const toppings = item.toppings && item.toppings !== 'なし' ? ' (' + historyEscape(item.toppings) + ')' : '';
-        return '<div style="margin:2px 0;">' + historyEscape(item.name) + toppings + ' ×' + item.quantity + ' - ¥' + Math.round(getPaidLineGross(item)).toLocaleString() + '</div>';
+        const toppings = item.toppings && item.toppings !== 'なし' ? ' (' + item.toppings + ')' : '';
+        return '<div style="margin:2px 0;">' + item.name + toppings + ' ×' + item.quantity + ' - ¥' + Math.round(getPaidLineGross(item)).toLocaleString() + '</div>';
       }).join('');
       const btn = (label, bg, fn) => '<button onclick="historyTap(); ' + fn + '" style="flex:1;min-width:90px;padding:10px;background:' + bg + ';color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;">' + label + '</button>';
       return '<div style="background:white;border:2px solid #e0e0e0;border-radius:12px;padding:14px;margin-bottom:12px;">' +
@@ -6977,8 +7013,8 @@ ${fileName}`,
         const paid = window.safeToDate(list[0].paidAt);
         const paidStr = (paid && paid.getTime()) ? paid.toLocaleString('ja-JP') : '';
         const itemsHtml = list.map(o => '<div style="font-size:12px;color:#888;margin-top:6px;">#' + o.orderNumber + '</div>' + (o.items || []).map(item => {
-          const toppings = item.toppings && item.toppings !== 'なし' ? ' (' + historyEscape(item.toppings) + ')' : '';
-          return '<div style="margin:2px 0;">' + historyEscape(item.name) + toppings + ' ×' + item.quantity + ' - ¥' + Math.round(getPaidLineGross(item)).toLocaleString() + '</div>';
+          const toppings = item.toppings && item.toppings !== 'なし' ? ' (' + item.toppings + ')' : '';
+          return '<div style="margin:2px 0;">' + item.name + toppings + ' ×' + item.quantity + ' - ¥' + Math.round(getPaidLineGross(item)).toLocaleString() + '</div>';
         }).join('')).join('');
         const btn = (label, bg, fn) => '<button onclick="historyTap(); ' + fn + '" style="flex:1;min-width:110px;padding:10px;background:' + bg + ';color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;">' + label + '</button>';
         html += '<div style="background:#f3f8ff;border:2px solid #2196F3;border-radius:12px;padding:14px;margin-bottom:12px;">' +
@@ -6998,6 +7034,24 @@ ${fileName}`,
         '</div>';
       });
       container.innerHTML = html;
+    }
+    // 🆕 赤伝票・取消で減らす客数。まとめて会計した注文は「1会計=1客」として数えているので、
+    //    その会計の最後の1件を取り消すときだけ客数を1減らす（以前は注文1件ごとに1ずつ減っていた）
+    async function checkoutCustomerDecrement(orderId, orderData) {
+      try {
+        if (!orderData || !orderData.paidAt) return 1;
+        const snap = await window.getDocs(window.query(window.getStoreCollection('orders'), window.where('paidAt', '==', orderData.paidAt)));
+        let others = 0;
+        snap.forEach(d => {
+          if (d.id === orderId) return;
+          const x = d.data();
+          if (x.tableNumber === orderData.tableNumber && (x.paymentMethod || '') === (orderData.paymentMethod || '')) others++;
+        });
+        return others > 0 ? 0 : 1;
+      } catch (e) {
+        console.warn('客数の判定に失敗（従来どおり1減らします）:', e);
+        return 1;
+      }
     }
     window.historyTap = function() { try { if (typeof playTapSound === 'function') playTapSound(); } catch (e) {} };
     window.toggleHistoryGroup = function(gid) {
@@ -7099,9 +7153,10 @@ ${fileName}`,
         await restoreInventoryFromRedSlip(orderData.items);
         
         // dailySalesから減算
+        const customerDec = await checkoutCustomerDecrement(orderId, orderData); // 🆕 1会計=1客
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
-          customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+          customerCount: Math.max(0, (dailyData.customerCount || 0) - customerDec),
           totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
           cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
           emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),

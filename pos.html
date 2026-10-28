@@ -2742,7 +2742,8 @@
             <button class="action-btn payment" id="paymentBtn" onclick="showPaymentFromTable()">
               <span>会計</span>
             </button>
-            <button class="action-btn back" onclick="backToTablesList()">
+            <button class="action-btn" id="bulkDeleteBtn" onclick="bulkDeleteTableOrders()" style="display:none; background: linear-gradient(135deg, #607D8B 0%, #455A64 100%); color: white;">会計済みを一括削除</button>
+          <button class="action-btn back" onclick="backToTablesList()">
               <span>← 戻る</span>
             </button>
           </div>
@@ -4162,8 +4163,8 @@
       if (order.completedAt) badges.push('<span style="background:#4CAF50;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;">完了</span>');
       const eat = (order.eatStyle && window.getEatStyleLabel) ? ('<span style="margin-left:8px;font-size:12px;color:#555;border:1px solid #bbb;border-radius:10px;padding:1px 8px;">' + historyEscape(window.getEatStyleLabel(order.eatStyle)) + '</span>') : '';
       const itemsHtml = (order.items || []).map(item => {
-        const toppings = item.toppings && item.toppings !== 'なし' ? ' (' + historyEscape(item.toppings) + ')' : '';
-        return '<div style="margin:2px 0;">' + historyEscape(item.name) + toppings + ' ×' + item.quantity + ' - ¥' + Math.round(getPaidLineGross(item)).toLocaleString() + '</div>';
+        const toppings = item.toppings && item.toppings !== 'なし' ? ' (' + item.toppings + ')' : '';
+        return '<div style="margin:2px 0;">' + item.name + toppings + ' ×' + item.quantity + ' - ¥' + Math.round(getPaidLineGross(item)).toLocaleString() + '</div>';
       }).join('');
       const btn = (label, bg, fn) => '<button onclick="historyTap(); ' + fn + '" style="flex:1;min-width:90px;padding:10px;background:' + bg + ';color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;">' + label + '</button>';
       return '<div style="background:white;border:2px solid #e0e0e0;border-radius:12px;padding:14px;margin-bottom:12px;">' +
@@ -4212,8 +4213,8 @@
         const paid = window.safeToDate(list[0].paidAt);
         const paidStr = (paid && paid.getTime()) ? paid.toLocaleString('ja-JP') : '';
         const itemsHtml = list.map(o => '<div style="font-size:12px;color:#888;margin-top:6px;">#' + o.orderNumber + '</div>' + (o.items || []).map(item => {
-          const toppings = item.toppings && item.toppings !== 'なし' ? ' (' + historyEscape(item.toppings) + ')' : '';
-          return '<div style="margin:2px 0;">' + historyEscape(item.name) + toppings + ' ×' + item.quantity + ' - ¥' + Math.round(getPaidLineGross(item)).toLocaleString() + '</div>';
+          const toppings = item.toppings && item.toppings !== 'なし' ? ' (' + item.toppings + ')' : '';
+          return '<div style="margin:2px 0;">' + item.name + toppings + ' ×' + item.quantity + ' - ¥' + Math.round(getPaidLineGross(item)).toLocaleString() + '</div>';
         }).join('')).join('');
         const btn = (label, bg, fn) => '<button onclick="historyTap(); ' + fn + '" style="flex:1;min-width:110px;padding:10px;background:' + bg + ';color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;">' + label + '</button>';
         html += '<div style="background:#f3f8ff;border:2px solid #2196F3;border-radius:12px;padding:14px;margin-bottom:12px;">' +
@@ -4233,6 +4234,24 @@
         '</div>';
       });
       container.innerHTML = html;
+    }
+    // 🆕 赤伝票・取消で減らす客数。まとめて会計した注文は「1会計=1客」として数えているので、
+    //    その会計の最後の1件を取り消すときだけ客数を1減らす（以前は注文1件ごとに1ずつ減っていた）
+    async function checkoutCustomerDecrement(orderId, orderData) {
+      try {
+        if (!orderData || !orderData.paidAt) return 1;
+        const snap = await window.getDocs(window.query(window.getStoreCollection('orders'), window.where('paidAt', '==', orderData.paidAt)));
+        let others = 0;
+        snap.forEach(d => {
+          if (d.id === orderId) return;
+          const x = d.data();
+          if (x.tableNumber === orderData.tableNumber && (x.paymentMethod || '') === (orderData.paymentMethod || '')) others++;
+        });
+        return others > 0 ? 0 : 1;
+      } catch (e) {
+        console.warn('客数の判定に失敗（従来どおり1減らします）:', e);
+        return 1;
+      }
     }
     window.historyTap = function() { try { if (typeof playTapSound === 'function') playTapSound(); } catch (e) {} };
     window.toggleHistoryGroup = function(gid) {
@@ -5332,9 +5351,10 @@
             }
             
             // 更新データを作成（マイナスにならないようにする）
+            const customerDec = await checkoutCustomerDecrement(currentEditingOrder.id, currentEditingOrder); // 🆕 1会計=1客
             const updateData = {
               totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
-              customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+              customerCount: Math.max(0, (dailyData.customerCount || 0) - customerDec),
               totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
               cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
               emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
@@ -5638,9 +5658,10 @@
         const rsExc8 = rsBreakdown.tax8Exclusive, rsExc10 = rsBreakdown.tax10Exclusive;
         console.log('🧾 赤伝票の税内訳を保存:', { inc8: rsInc8, exc8: rsExc8, inc10: rsInc10, exc10: rsExc10, 案Bの日: dailyData.taxMethodVersion === 2 });
         
+        const customerDec = await checkoutCustomerDecrement(currentEditingOrder.id, (typeof orderData !== "undefined" ? orderData : currentEditingOrder)); // 🆕 1会計=1客
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
-          customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+          customerCount: Math.max(0, (dailyData.customerCount || 0) - customerDec),
           totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
           cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
           emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
@@ -5873,9 +5894,10 @@
             console.log('商品数:', totalItems);
             
             // 更新データを作成（マイナスにならないようにする）
+            const customerDec = await checkoutCustomerDecrement(orderId, orderData); // 🆕 1会計=1客
             const updateData = {
               totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
-              customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+              customerCount: Math.max(0, (dailyData.customerCount || 0) - customerDec),
               totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
               cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
               emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
@@ -6115,9 +6137,10 @@
         const rsExc8 = rsBreakdown.tax8Exclusive, rsExc10 = rsBreakdown.tax10Exclusive;
         console.log('🧾 赤伝票の税内訳を保存:', { inc8: rsInc8, exc8: rsExc8, inc10: rsInc10, exc10: rsExc10, 案Bの日: dailyData.taxMethodVersion === 2 });
         
+        const customerDec = await checkoutCustomerDecrement(orderId, orderData); // 🆕 1会計=1客
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
-          customerCount: Math.max(0, (dailyData.customerCount || 0) - 1),
+          customerCount: Math.max(0, (dailyData.customerCount || 0) - customerDec),
           totalItems: Math.max(0, (dailyData.totalItems || 0) - totalItems),
           cashSales: Math.max(0, (dailyData.cashSales || 0) - cashSales),
           emoneSales: Math.max(0, (dailyData.emoneSales || 0) - emoneSales),
@@ -19771,14 +19794,42 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
 
     
     // テーブルを選択
+    // 🆕 そのテーブルの注文だけを取得する（tableId または tableNumber が一致するもの）。
+    //    以前は注文の全件(数MB)を毎回取得して絞り込んでいたため、テーブルをクリックするたびに数秒かかっていた。
+    //    絞り込み取得に失敗した場合は、従来どおり全件取得に切り替える（結果は同じ）
+    async function fetchTableOrderDocs(tableId, tableName) {
+      const ordersRef = window.getStoreCollection('orders');
+      try {
+        const queries = [];
+        if (tableId) queries.push(window.getDocs(window.query(ordersRef, window.where('tableId', '==', tableId))));
+        if (tableName) queries.push(window.getDocs(window.query(ordersRef, window.where('tableNumber', '==', tableName))));
+        if (queries.length === 0) throw new Error('条件なし');
+        const _t0 = performance.now();
+        const snaps = await Promise.all(queries);
+        const seen = new Set();
+        const docs = [];
+        snaps.forEach(snap => snap.forEach(d => { if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); } }));
+        console.log(`⏱ テーブルの注文取得: ${docs.length}件 / ${Math.round(performance.now() - _t0)}ms（絞り込み取得）`);
+        return docs;
+      } catch (e) {
+        console.warn('⚠️ テーブルの注文の絞り込み取得に失敗。全件取得に切り替えます:', e);
+        const all = await window.getDocs(ordersRef);
+        const docs = [];
+        all.forEach(d => docs.push(d));
+        return docs;
+      }
+    }
+    
     async function selectNewTable(tableId, tableName, orderCount) {
       currentSelectedTableId = tableId;
       currentSelectedTableName = tableName;
       
-      // 🆕 テーブル設定を読み込む（tableNameで取得）
-      currentTableSettings = await getTableSettings(tableName);
-      console.log('📋 テーブル選択 - テーブル設定読み込み完了:', tableName);
-      console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
+      // 🆕 テーブル設定の読み込みは待たずに画面を切り替え、注文一覧の取得と並行して行う
+      window._tableSettingsPromise = getTableSettings(tableName).then(s => {
+        currentTableSettings = s;
+        console.log('📋 テーブル選択 - テーブル設定読み込み完了:', tableName, '/ taxRule:', s?.taxRule || 'なし');
+        return s;
+      });
       
       // テーブル一覧を非表示、詳細を表示
       document.getElementById('tablesArea').style.display = 'none';
@@ -19810,7 +19861,9 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
         container.innerHTML = '<div class="loading">注文を読み込んでいます...</div>';
         
         const ordersRef = window.getStoreCollection('orders');
-        const snapshot = await window.getDocs(ordersRef);
+        const _tableDocs = await fetchTableOrderDocs(tableId, currentSelectedTableName); // 🆕 そのテーブルの注文だけ取得
+        const snapshot = { forEach: (fn) => _tableDocs.forEach(fn) };
+        if (window._tableSettingsPromise) { try { await window._tableSettingsPromise; } catch (e) {} } // サービス告知の表示に必要
         
         const orders = [];
         // 🆕 引取日が「今日」ではない予約注文は今日の一覧に含めない
@@ -19831,6 +19884,9 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
         
         if (orders.length === 0) {
           container.innerHTML = '<div style="text-align: center; color: #999; padding: 40px;">まだ注文がありません</div>';
+          window._tableOrdersCache = [];
+          const _bulkBtn0 = document.getElementById('bulkDeleteBtn');
+          if (_bulkBtn0) _bulkBtn0.style.display = 'none';
           return;
         }
         
@@ -20040,11 +20096,46 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
         document.getElementById('detailOrderCount').textContent = `注文: ${unpaidCount}件`;
         console.log('📊 注文カウント更新:', unpaidCount);
         
+        // 🆕 会計済みの注文を一括削除するボタン（会計済みの注文があるときだけ表示）
+        window._tableOrdersCache = orders;
+        const _paidCount = orders.filter(o => o.paidAt && !o.deleted).length;
+        const _bulkBtn = document.getElementById('bulkDeleteBtn');
+        if (_bulkBtn) { _bulkBtn.style.display = _paidCount > 0 ? '' : 'none'; _bulkBtn.textContent = `会計済みを一括削除（${_paidCount}件）`; }
+        
       } catch (error) {
         console.error('注文一覧読み込みエラー:', error);
         document.getElementById('detailOrdersList').innerHTML = '<div style="text-align: center; color: red; padding: 40px;">読み込みに失敗しました<br><small>' + error.message + '</small></div>';
       }
     }
+    
+    // 🆕 会計済みの注文を、このテーブルでまとめて削除する（1件ずつ削除しなくてよい）。売上には影響しない
+    window.bulkDeleteTableOrders = async function() {
+      const targets = (window._tableOrdersCache || []).filter(o => o.paidAt && !o.deleted);
+      if (targets.length === 0) {
+        await showCustomAlert('削除できる会計済みの注文がありません', '一括削除', 'ℹ️');
+        return;
+      }
+      const nums = targets.map(o => o.orderNumber).filter(n => n !== undefined && n !== null);
+      const label = (typeof formatOrderNumbers === 'function') ? formatOrderNumbers(nums) : nums.map(n => '#' + n).join('・');
+      const confirmed = await showCustomConfirm({
+        icon: '🗑️',
+        title: '会計済みの注文を一括削除',
+        message: `このテーブルの会計済みの注文 ${targets.length}件（${label}）をまとめて削除しますか？\n\n売上は変わりません。削除した注文は、履歴から復元できます。`,
+        btnText: '一括削除',
+        btnClass: 'modal-btn-danger'
+      });
+      if (!confirmed) return;
+      try {
+        const now = window.Timestamp.now();
+        await Promise.all(targets.map(o => window.updateDoc(window.getStoreDoc('orders', o.id), { deleted: true, deletedAt: now })));
+        console.log('🗑️ 会計済みの注文を一括削除:', targets.length, '件');
+        await loadTableOrders(currentSelectedTableId);
+        if (typeof updateNewTableStatus === 'function') updateNewTableStatus();
+      } catch (e) {
+        console.error('一括削除エラー:', e);
+        await showCustomAlert('一括削除に失敗しました: ' + e.message, 'エラー', '⚠️');
+      }
+    };
     
     // テーブル一覧に戻る
     function backToTablesList() {
@@ -20417,14 +20508,14 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
       }
       
       try {
-        // テーブル設定を読み込む（tableNameで取得）
-        currentTableSettings = await getTableSettings(currentSelectedTableName);
-        console.log('📋 テーブル全注文会計 - テーブル設定読み込み:', currentSelectedTableName);
-        console.log('  taxRule:', currentTableSettings?.taxRule || 'なし');
-        
-        // テーブルIDで注文を検索
-        const ordersRef = window.getStoreCollection('orders');
-        const snapshot = await window.getDocs(ordersRef);
+        // 🆕 テーブル設定とそのテーブルの注文を並行して取得（以前は順番に待ち、注文は全件取得していた）
+        const [_settings, _tableDocsPay] = await Promise.all([
+          getTableSettings(currentSelectedTableName),
+          fetchTableOrderDocs(currentSelectedTableId, currentSelectedTableName)
+        ]);
+        currentTableSettings = _settings;
+        console.log('📋 テーブル全注文会計 - テーブル設定読み込み:', currentSelectedTableName, '/ taxRule:', currentTableSettings?.taxRule || 'なし');
+        const snapshot = { forEach: (fn) => _tableDocsPay.forEach(fn) };
         
         const orders = [];
         let totalAmount = 0;
