@@ -2925,7 +2925,7 @@
       
       onSnapshot(inventoryRef, async (docSnap) => {
         // sold_outデータも再取得
-        const soldOutSnapshot = await getDocs(collection(db, 'sold_out'));
+        const soldOutSnapshot = await getDocs(window.getStoreCollection('sold_out')) /* 🆕 全店舗共通ではなくこの店舗のsold_out（以前は別の場所を見て、在庫が変わるたびに品切れ情報が消えていた） */;
         soldOutIds.clear();
         const todayStr2 = getTodayCalendarDateStrJst();
         soldOutSnapshot.forEach(doc => {
@@ -4513,6 +4513,11 @@
       }
       
       try {
+        // 🆕 品切れチェックの直前に、品切れ・在庫の最新の状態を取り直す（カートに入れたあとに品切れにされた場合、
+        //    画面を開いたままの端末は古い情報のままで、そのまま注文できてしまっていた）。通信が遅い時は4秒で諦めて手元の情報で判定する
+        try {
+          await Promise.race([loadSoldOutItems(), new Promise(r => setTimeout(r, 4000))]);
+        } catch (e) { console.warn('品切れ情報の再取得に失敗（手元の情報で判定します）:', e); }
         // 品切れチェック
         const soldOutItems = [];
         for (const item of cart) {
