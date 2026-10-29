@@ -629,6 +629,50 @@ async function uploadPending() {
     fs.writeFileSync(f,JSON.stringify(failed,null,2),'utf8');
   } catch(e){}
 }
+// ===== 税制データ(tax_law.json)の自動更新 =====
+// 年末調整・確定申告の税制数値は tax_law.json に分けてある。税制改正の時は、GitHub上の tax_law.json を更新するだけで、
+// インターネットにつながっているPiが自動で取得して /var/www/pos/tax_law.json を置き換える（HTMLの入れ替えは不要）。
+// 形式が正しいものだけを、versionが新しい時だけ反映する。壊れたデータで上書きしない（直前のものは .bak に残す）。
+const TAX_LAW_URL = process.env.TAX_LAW_URL || 'https://gymnastmasaki-lang.github.io/takoyaki-/tax_law.json';
+const TAX_LAW_FILE = OUT + '/tax_law.json';
+function validTaxLaw(j) {
+  try {
+    if (!j || typeof j.version !== 'string' || !j.years || typeof j.years !== 'object') return false;
+    const ks = Object.keys(j.years);
+    if (!ks.length) return false;
+    return ks.every(k => {
+      const y = j.years[k];
+      return /^\d{4}$/.test(k) && y && Array.isArray(y.salaryDeduction) && Array.isArray(y.basicDeduction) &&
+        Array.isArray(y.dependent) && Array.isArray(y.incomeTax) && y.spouse && Array.isArray(y.spouse.specialRows) &&
+        typeof y.reconstructionRate === 'number';
+    });
+  } catch (e) { return false; }
+}
+async function syncTaxLaw() {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    let res;
+    try { res = await fetch(TAX_LAW_URL + '?ts=' + Date.now(), { signal: ctrl.signal, headers: { 'Cache-Control': 'no-cache' } }); }
+    finally { clearTimeout(timer); }
+    if (!res.ok) { log('📜 税制データの取得に失敗 HTTP ' + res.status + '（次回再試行）'); return; }
+    const text = await res.text();
+    if (text.length > 1000000) { log('⚠ 税制データが大きすぎるため無視しました'); return; }
+    const j = JSON.parse(text);
+    if (!validTaxLaw(j)) { log('⚠ 税制データの形式が正しくないため無視しました'); return; }
+    let cur = null;
+    try { cur = JSON.parse(fs.readFileSync(TAX_LAW_FILE, 'utf8')); } catch (e) {}
+    if (cur && validTaxLaw(cur) && String(cur.version) >= String(j.version)) return; // 同じか古い時は何もしない
+    const tmp = TAX_LAW_FILE + '.tmp';
+    fs.writeFileSync(tmp, text, 'utf8');
+    if (cur) { try { fs.copyFileSync(TAX_LAW_FILE, TAX_LAW_FILE + '.bak'); } catch (e) {} }
+    fs.renameSync(tmp, TAX_LAW_FILE);
+    log('📜 税制データを更新しました version ' + (cur ? cur.version : '(なし)') + ' → ' + j.version);
+  } catch (e) {
+    log('📜 税制データの更新チェックに失敗（オフライン等。次回再試行）: ' + (e && e.message ? e.message : e));
+  }
+}
+
 async function main() {
   log('=== Firebase同期サービス起動 ===');
   const scope = loadStoreScope();
@@ -749,6 +793,8 @@ async function main() {
   await syncStaffCallsAll();
   await reconcileStaffCallsAll();
   await syncReceiptImagesAll();
+  await syncTaxLaw();
+  setInterval(syncTaxLaw, 6*60*60*1000); // 6時間ごとに税制データを確認
   setInterval(sync, 5*60*1000);
   setInterval(syncOrdersAll, 5*1000);
   setInterval(syncOrderStatusAll, 5*1000);
