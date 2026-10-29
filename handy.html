@@ -7154,7 +7154,7 @@ ${fileName}`,
         await restoreInventoryFromRedSlip(orderData.items);
         
         // dailySalesから減算
-        const customerDec = await checkoutCustomerDecrement(orderId, orderData); // 🆕 1会計=1客
+        const customerDec = (opts && typeof opts.customerDec === 'number') ? opts.customerDec : await checkoutCustomerDecrement(orderId, orderData); // 🆕 1会計=1客
         const updateData = {
           totalSales: Math.max(0, (dailyData.totalSales || 0) - totalAmount),
           customerCount: Math.max(0, (dailyData.customerCount || 0) - customerDec),
@@ -7294,8 +7294,10 @@ ${fileName}`,
       if (!confirmed) return;
       const fn = window.redSlipFromHistory || window.redSlip;
       let done = 0;
-      for (const o of orders) {
-        const ok = await fn(o.id, { skipConfirm: true, batch: true });
+      for (let oi = 0; oi < orders.length; oi++) {
+        const o = orders[oi];
+        // 1会計=1客: その会計の最後の1件を取り消すときだけ客数を1減らす（他の件は0）
+        const ok = await fn(o.id, { skipConfirm: true, batch: true, customerDec: (oi === orders.length - 1) ? 1 : 0 });
         if (!ok) break;
         done++;
       }
