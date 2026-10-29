@@ -2645,7 +2645,7 @@
       currentOrderId = orderId;
       const orderRef = window.getStoreDoc('orders', orderId);
       
-      orderStatusUnsubscribe = onSnapshot(orderRef, async (docSnap) => {
+      const handleOrderDoc = async (docSnap) => {
         if (!docSnap.exists()) {
           console.log('⚠️ 注文ドキュメントが存在しません（TTL期限切れまたは削除）');
           // ✅ 修正: LocalStorageはクリアしない（次のページ更新でも注文番号画面を維持）
@@ -2680,24 +2680,32 @@
         
         updateOrderStatusDisplay(data);
         
-        // ステータスが変更されたらアラートを表示
-        if (data.completedAt && !data.notifiedComplete) {
-          // アラートを表示（#{orderNumber}を実際の注文番号に置換）
-          const message = alertSettings.completeMessage.replace(/#{orderNumber}/g, data.orderNumber);
-          showCustomAlert(message);
-          
-          // 通知済みフラグを立てる（次回の監視で再度通知しないように）
-          updateDoc(orderRef, { notifiedComplete: true }).catch(e => console.error(e));
+        // 🆕 完了・キャンセルの通知。Firestoreの notifiedComplete だけに頼ると、画面が背面にある間に
+        // フラグだけ立って（アラートは誰にも見られず）二度と出なくなる。そのため端末側(localStorage)にも
+        // 「この端末で表示した」記録を持ち、画面が見えている時にだけ表示して記録する。
+        // 背面で受け取った場合は、画面が戻った時の再購読（下のvisibilitychange）で改めて表示される。
+        const notifyOnce = (kind, text, flagField) => {
+          const key = 'notified' + kind + 'Local_' + orderId;
+          let shown = false;
+          try { shown = !!localStorage.getItem(key); } catch (e) {}
+          if (shown) return;
+          if (document.visibilityState !== 'visible') { console.log('🔕 画面が見えていないため' + kind + '通知を保留'); return; }
+          try { localStorage.setItem(key, String(Date.now())); } catch (e) {}
+          showCustomAlert(text);
+          const upd = {}; upd[flagField] = true;
+          updateDoc(orderRef, upd).catch(e => console.error(e));
+        };
+        if (data.completedAt) {
+          notifyOnce('Complete', alertSettings.completeMessage.replace(/#{orderNumber}/g, data.orderNumber), 'notifiedComplete');
         }
-        
-        if (data.cancelledAt && !data.notifiedCancel) {
-          // アラートを表示（#{orderNumber}を実際の注文番号に置換）
-          const message = alertSettings.cancelMessage.replace(/#{orderNumber}/g, data.orderNumber);
-          showCustomAlert(message);
-          
-          updateDoc(orderRef, { notifiedCancel: true }).catch(e => console.error(e));
+        if (data.cancelledAt) {
+          notifyOnce('Cancel', alertSettings.cancelMessage.replace(/#{orderNumber}/g, data.orderNumber), 'notifiedCancel');
         }
-      });
+      };
+      orderStatusUnsubscribe = onSnapshot(orderRef, handleOrderDoc);
+      // 🆕 画面が見えている間は15秒ごとに最新の状態を取り直す保険（背面から戻った直後など、リスナーが止まっていても気づける）
+      window._handleOrderDoc = handleOrderDoc;
+      window._pollOrderRef = orderRef;
       
       // 全ての注文を監視して順番を更新（🔧 修正: 未完了(pending)の注文だけに絞る）
       if (allOrdersUnsubscribe) {
@@ -2716,6 +2724,26 @@
         }
       });
     }
+
+    // 🆕 背面（別ページ・他アプリ）から戻った時／回線が戻った時に、監視を張り直して最新の状態を取得する。
+    //    スマホは背面でFirestoreの接続が止まり、完了を受け取れないまま戻ってくることがあるため。
+    let _lastOrderRefresh = 0;
+    function refreshOrderWatch(reason) {
+      if (!currentOrderId || document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - _lastOrderRefresh < 3000) return;
+      _lastOrderRefresh = now;
+      console.log('🔄 注文の監視を張り直します:', reason);
+      try { watchOrderStatus(currentOrderId); } catch (e) { console.error(e); }
+    }
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshOrderWatch('画面が戻った'); });
+    window.addEventListener('pageshow', () => refreshOrderWatch('pageshow'));
+    window.addEventListener('focus', () => refreshOrderWatch('focus'));
+    window.addEventListener('online', () => refreshOrderWatch('回線復帰'));
+    setInterval(async () => {
+      if (!currentOrderId || document.visibilityState !== 'visible' || !window._pollOrderRef || !window._handleOrderDoc) return;
+      try { window._handleOrderDoc(await getDoc(window._pollOrderRef)); } catch (e) { /* 通信できない時は次回 */ }
+    }, 15000);
 
     // 自分の順番を計算して更新
     async function updateMyPosition(currentOrderData, ordersSnapshot = null) {
