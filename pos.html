@@ -7929,8 +7929,12 @@ ${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(t
         const currentYear = now.getFullYear();
         const currentMonth = now.getMonth() + 1;
         
-        // 今年と来年の年度を計算（1-3月は前年度）
-        const fiscalYear = currentMonth <= 3 ? currentYear - 1 : currentYear;
+        // 🆕 年度の開始月はkanriの「年度の設定」から読む（未設定は4月）。ファイルに年や月を固定しない
+        const fiscalStartMonth = await loadFiscalStartMonth();
+        window._fiscalStartMonth = fiscalStartMonth;
+        const fiscalPeriodLabel = (y) => fiscalStartMonth === 1 ? `${y}年` : `${y}/${y + 1}`;
+        // 今年と来年の年度を計算（開始月より前の月は前年度）
+        const fiscalYear = currentMonth < fiscalStartMonth ? currentYear - 1 : currentYear;
         const nextFiscalYear = fiscalYear + 1;
         const lastFiscalYear = fiscalYear - 1;
         
@@ -7954,7 +7958,7 @@ ${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(t
                 ¥${Math.round(currentYearTax.netTax).toLocaleString()}
               </div>
               <div style="font-size: 11px; opacity: 0.8; margin-top: 5px;">
-                今年度（${fiscalYear}/${fiscalYear + 1}）の実績ベース
+                今年度（${fiscalPeriodLabel(fiscalYear)}）の実績ベース
               </div>
             </div>
             
@@ -7964,7 +7968,7 @@ ${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(t
                 ¥${Math.round(lastYearTax.netTax).toLocaleString()}
               </div>
               <div style="font-size: 11px; opacity: 0.8; margin-top: 5px;">
-                前年度（${lastFiscalYear}/${lastFiscalYear + 1}）の実績
+                前年度（${fiscalPeriodLabel(lastFiscalYear)}）の実績
               </div>
             </div>
             
@@ -8024,9 +8028,22 @@ ${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(t
     };
     
     // 年度の消費税を計算
+    // 🆕 年度の開始月（kanriの「年度の設定」。未設定・読めない時は4月）
+    async function loadFiscalStartMonth() {
+      try {
+        const snap = await window.getDoc(window.getStoreDoc('fiscal_settings', 'default'));
+        if (snap.exists()) {
+          const m = parseInt(snap.data().startMonth, 10);
+          if (m >= 1 && m <= 12) return m;
+        }
+      } catch (e) { console.warn('年度の設定を読めないため4月開始で集計します:', e); }
+      return 4;
+    }
+
     async function calculateYearlyConsumptionTax(fiscalYear) {
-      const startDate = new Date(fiscalYear, 3, 1); // 4月1日
-      const endDate = new Date(fiscalYear + 1, 2, 31, 23, 59, 59); // 翌年3月31日
+      const sm = window._fiscalStartMonth || 4;
+      const startDate = new Date(fiscalYear, sm - 1, 1); // 年度の初日
+      const endDate = new Date(fiscalYear + 1, sm - 1, 0, 23, 59, 59); // 年度の最終日（翌年の開始月の前日）
       
       console.log(`📅 集計期間: ${startDate.toLocaleDateString()} 〜 ${endDate.toLocaleDateString()}`);
       
@@ -8036,9 +8053,8 @@ ${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(t
       let paidTax10 = 0; // 仮払消費税10%
       let laborCost = 0; // 人件費（消費税対象外）
       
-      const startDateStr = `${fiscalYear}-${String(4).padStart(2, '0')}-01`;
-      const endYear = fiscalYear + 1;
-      const endDateStr = `${endYear}-${String(3).padStart(2, '0')}-31`;
+      const startDateStr = `${fiscalYear}-${String(sm).padStart(2, '0')}-01`;
+      const endDateStr = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
       
       // 1. 注文データから仮受消費税を計算（商品ごとの税率を使用）
       try {

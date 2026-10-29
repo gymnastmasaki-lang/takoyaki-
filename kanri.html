@@ -446,6 +446,11 @@ const AdminSystem = () => {
         bagMessage: '※ 1枚3商品程度入ります' // レジ袋の説明メッセージ
     });
     const [showMenuSettings, setShowMenuSettings] = useState(false);
+    // 🆕 レジ袋設定を単独のカードにしたため、開閉用のstate
+    const [showBagSettings, setShowBagSettings] = useState(false);
+    // 🆕 年度の設定（納税額などの年単位の集計に使う年度の開始月。既定は4月）
+    const [showFiscalSettings, setShowFiscalSettings] = useState(false);
+    const [fiscalSettings, setFiscalSettings] = useState({ startMonth: 4 });
     // 🆕 テーブル設定用のstate
     const [tableSettings, setTableSettings] = useState({});
     const [showTableSettings, setShowTableSettings] = useState(false);
@@ -2128,6 +2133,43 @@ const AdminSystem = () => {
             await setDoc(window.getStoreDoc('eat_style_settings', 'default'), data);
             setEatStyleSettings(data);
             showCustomAlertFunc('✅ ご利用方法選択の設定を保存しました', '保存完了', '✅');
+        }
+        catch (error) {
+            showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
+        }
+    };
+    // 🆕 年度の設定（開始月）を読み込み・保存。POSの納税額の集計期間に使う（ファイルを毎年更新しなくてよいように設定で持つ）
+    const loadFiscalSettingsKanri = async () => {
+        try {
+            while (!window.FirebaseReady || !window.db) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            const { getDoc } = window.firebaseModules;
+            const snap = await getDoc(window.getStoreDoc('fiscal_settings', 'default'));
+            if (snap.exists()) {
+                const m = parseInt(snap.data().startMonth, 10);
+                setFiscalSettings({ startMonth: (m >= 1 && m <= 12) ? m : 4 });
+            }
+        }
+        catch (error) {
+            console.error('年度の設定の読み込みエラー:', error);
+        }
+    };
+    const saveFiscalSettingsKanri = async () => {
+        try {
+            const m = parseInt(fiscalSettings.startMonth, 10);
+            if (!(m >= 1 && m <= 12)) {
+                showCustomAlertFunc('年度の開始月を1〜12から選んでください', '入力エラー', '❌');
+                return;
+            }
+            while (!window.FirebaseReady || !window.db) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            const { setDoc } = window.firebaseModules;
+            const data = { startMonth: m };
+            await setDoc(window.getStoreDoc('fiscal_settings', 'default'), data);
+            setFiscalSettings(data);
+            showCustomAlertFunc('✅ 年度の設定を保存しました', '保存完了', '✅');
         }
         catch (error) {
             showCustomAlertFunc('❌ 保存に失敗しました: ' + error.message, 'エラー', '❌');
@@ -6177,6 +6219,13 @@ const AdminSystem = () => {
                             React.createElement("label", { className: "block text-md font-medium mb-2" }, "\u91CD\u8981\u306A\u304A\u77E5\u3089\u305B\uFF08\u8B66\u544A\u6587\uFF09"),
                             React.createElement("p", { className: "text-sm text-gray-600 mb-2" }, "\u6CE8\u6587\u756A\u53F7\u753B\u9762\u306E\u4E0B\u90E8\u306B\u8868\u793A\u3055\u308C\u308B\u8B66\u544A\u6587\uFF08\u7A7A\u6B04\u3067\u975E\u8868\u793A\uFF09"),
                             React.createElement("textarea", { value: menuSettings.warningMessage || '', onChange: (e) => setMenuSettings(Object.assign(Object.assign({}, menuSettings), { warningMessage: e.target.value })), rows: "5", className: "w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none", placeholder: "\u4F8B: \u91CD\u8981\u306A\u304A\u77E5\u3089\u305B\\n\\n\u2022 \u5E2D\u3092\u5916\u3059\u969B\u306B\u306F\u5148\u306B\\n\u304A\u4F1A\u8A08\u3092\u6E08\u307E\u305B\u3066\u304F\u3060\u3055\u3044" }))),
+                    React.createElement("div", { className: "flex gap-2" },
+                        React.createElement("button", { onClick: saveMenuSettings, className: "px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600" }, "\u4FDD\u5B58"))))),
+            React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
+                React.createElement("div", { className: "flex justify-between items-center mb-4" },
+                    React.createElement("h2", { className: "text-2xl font-bold text-gray-800 flex items-center gap-2" }, "レジ袋設定"),
+                    React.createElement("button", { onClick: () => setShowBagSettings(!showBagSettings), className: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600" }, showBagSettings ? '閉じる' : '設定を開く')),
+                showBagSettings && (React.createElement("div", { className: "space-y-4 border-t pt-4" },
                     React.createElement("div", { className: "border-l-4 border-blue-500 pl-4 mt-6" },
                         React.createElement("h3", { className: "text-lg font-bold mb-3" }, "\uD83D\uDECD\uFE0F \u30EC\u30B8\u888B\u8A2D\u5B9A"),
                         React.createElement("div", { className: "mb-4" },
@@ -6201,7 +6250,7 @@ const AdminSystem = () => {
                                 React.createElement("div", { className: "text-sm text-gray-700" },
                                     "1\u679A \u00A5", (_6 = menuSettings.bagPrice) !== null && _6 !== void 0 ? _6 : 3))))),
                     React.createElement("div", { className: "flex gap-2" },
-                        React.createElement("button", { onClick: saveMenuSettings, className: "px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600" }, "\u4FDD\u5B58"))))),
+                        React.createElement("button", { onClick: saveMenuSettings, className: "px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600" }, "保存"))))),
             React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
                 React.createElement("div", { className: "flex justify-between items-center mb-4" },
                     React.createElement("div", null,
@@ -6507,6 +6556,19 @@ const AdminSystem = () => {
                     React.createElement("div", { className: "flex gap-2" },
                         React.createElement("button", { onClick: saveSalesTargetSettingsKanri, className: "px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold" }, "保存"),
                         React.createElement("button", { onClick: () => setSalesTargetSettings({ weekday: 50000, holiday: 70000, ranges: [] }), className: "px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold" }, "標準に戻す（保存で確定）"))))),
+            React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
+                React.createElement("div", { className: "flex justify-between items-center mb-4" },
+                    React.createElement("div", null,
+                        React.createElement("h2", { className: "text-2xl font-bold text-gray-800 flex items-center gap-2" }, "年度の設定"),
+                        React.createElement("p", { className: "text-sm text-gray-600 mt-1" }, "POSの消費税納税額など、年単位の集計に使う年度の開始月を設定します（個人事業は1月、法人は決算月の翌月）")),
+                    React.createElement("button", { onClick: () => { const next = !showFiscalSettings; setShowFiscalSettings(next); if (next) loadFiscalSettingsKanri(); }, className: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600" }, showFiscalSettings ? '閉じる' : '設定を開く')),
+                showFiscalSettings && (React.createElement("div", { className: "space-y-4 border-t pt-4" },
+                    React.createElement("div", null,
+                        React.createElement("label", { className: "block text-sm font-medium mb-2" }, "年度の開始月"),
+                        React.createElement("select", { value: fiscalSettings.startMonth, onChange: (e) => setFiscalSettings({ startMonth: parseInt(e.target.value, 10) }), className: "w-40 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none" }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => React.createElement("option", { key: m, value: m }, m + "月"))),
+                        React.createElement("p", { className: "text-sm text-gray-600 mt-2" }, "例: 4月にすると 4月1日〜翌年3月31日 が1年度、1月にすると 1月1日〜12月31日 が1年度になります")),
+                    React.createElement("div", { className: "flex gap-2" },
+                        React.createElement("button", { onClick: saveFiscalSettingsKanri, className: "px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold" }, "保存"))))),
             React.createElement("div", { className: "bg-white rounded-lg shadow-lg p-6 mb-6" },
                 React.createElement("div", { className: "flex justify-between items-center mb-4" },
                     React.createElement("h2", { className: "text-2xl font-bold text-gray-800 flex items-center gap-2" }, "\u30EC\u30B7\u30FC\u30C8/\u9818\u53CE\u66F8\u8A2D\u5B9A"),
