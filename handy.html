@@ -5051,6 +5051,20 @@
         console.log('📊 settlementData全体:', settlementData);
         
         // ===== 🆕 赤伝票情報を取得 =====
+        // 🆕 当日の「会計の修正」の記録（件数・差額・理由）を精算ジャーナルに載せる
+        let editJournalText = '';
+        try {
+          const eds = await window.getDocs(window.query(window.getStoreCollection('orderEdits'), window.where('businessDate', '==', dateStr)));
+          const edRows = []; let edSum = 0;
+          eds.forEach(d => { const e = d.data(); const delta = (e.afterTotal || 0) - (e.beforeTotal || 0); edSum += delta; edRows.push({ at: window.safeToDate(e.editedAt), delta, reason: e.reason || '' }); });
+          edRows.sort((x, y) => ((x.at && x.at.getTime()) || 0) - ((y.at && y.at.getTime()) || 0));
+          const yen = (v) => (v >= 0 ? '+' : '-') + '¥' + Math.abs(Math.round(v)).toLocaleString();
+          if (edRows.length) {
+            editJournalText = '修正件数: ' + edRows.length + '件\n修正差額: ' + yen(edSum) + '\n' +
+              edRows.slice(0, 10).map(r => '  ' + ((r.at && r.at.getTime()) ? String(r.at.getHours()).padStart(2, '0') + ':' + String(r.at.getMinutes()).padStart(2, '0') : '--:--') + ' ' + (r.reason || '（理由の記入なし）') + '（' + yen(r.delta) + '）').join('\n') + '\n' +
+              (edRows.length > 10 ? '  ほか' + (edRows.length - 10) + '件\n' : '');
+          }
+        } catch (e) { console.warn('修正の記録の取得に失敗:', e.message); }
         const redSlipCount = settlementData.redSlipCount || 0;
         const redSlipAmount = settlementData.redSlipAmount || 0;
         const redSlipTax8Total = settlementData.redSlipTax8Total || 0;
@@ -5263,7 +5277,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
 ドロアオープン数: ${drawerOpenCount}回
 赤伝票件数: ${redSlipCount}件
 赤伝票金額: ¥${redSlipAmount.toLocaleString()}
-人件費: ¥${Math.round(laborCost).toLocaleString()}
+${editJournalText}人件費: ¥${Math.round(laborCost).toLocaleString()}
 担当者: ${staffName}
 
 =====================================
@@ -6944,6 +6958,13 @@ ${fileName}`,
       if (order.edited) badges.push('<span style="background:#FF9800;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;">修正済</span>');
       if (order.completedAt) badges.push('<span style="background:#4CAF50;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;">完了</span>');
       const eat = (order.eatStyle && window.getEatStyleLabel) ? ('<span style="margin-left:8px;font-size:12px;color:#555;border:1px solid #bbb;border-radius:10px;padding:1px 8px;">' + historyEscape(window.getEatStyleLabel(order.eatStyle)) + '</span>') : '';
+      // 🆕 修正した会計は、最後の修正の日時・担当者・理由・金額の変化を表示する
+      let editNote = '';
+      if (order.edited && Array.isArray(order.editHistory) && order.editHistory.length) {
+        const h = order.editHistory[order.editHistory.length - 1];
+        const at = h.at ? new Date(h.at).toLocaleString('ja-JP') : '';
+        editNote = '<div style="font-size:12px;color:#e65100;background:#fff3e0;border-radius:8px;padding:6px 10px;margin:6px 0;">✏️ 修正 ' + historyEscape(at) + (h.by ? '／' + historyEscape(h.by) : '') + '／理由: ' + historyEscape(h.reason || '（記入なし）') + '（¥' + Math.round(h.beforeTotal || 0).toLocaleString() + ' → ¥' + Math.round(h.afterTotal || 0).toLocaleString() + '）</div>';
+      }
       const itemsHtml = (order.items || []).map(item => {
         const toppings = item.toppings && item.toppings !== 'なし' ? ' (' + item.toppings + ')' : '';
         return '<div style="margin:2px 0;">' + item.name + toppings + ' ×' + item.quantity + ' - ¥' + Math.round(getPaidLineGross(item)).toLocaleString() + '</div>';
@@ -6954,7 +6975,7 @@ ${fileName}`,
           '<div><span style="font-size:18px;font-weight:bold;color:#667eea;">#' + order.orderNumber + '</span><span style="margin-left:10px;color:#666;">' + historyEscape(order.tableNumber) + '</span>' + eat + '</div>' +
           '<div style="display:flex;gap:6px;">' + badges.join('') + '</div></div>' +
         '<div style="font-size:12px;color:#999;margin:6px 0;">' + dateStr + ' <span style="background:#e3f2fd;color:#1976D2;padding:2px 8px;border-radius:8px;margin-left:6px;">' + historyEscape(historyPaymentLabel(order.paymentMethod)) + '</span></div>' +
-        '<div style="padding:8px 0;border-top:1px solid #eee;font-size:14px;">' + itemsHtml + '</div>' +
+        editNote + '<div style="padding:8px 0;border-top:1px solid #eee;font-size:14px;">' + itemsHtml + '</div>' +
         '<div style="text-align:right;font-size:18px;font-weight:bold;color:#667eea;border-top:1px solid #eee;padding-top:8px;">合計: ¥' + Math.round(order.totalAmount).toLocaleString() + '</div>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' +
           (order.paidAt && !order.deleted || (order.paidAt && typeof window.redSlipFromHistory === 'function')
@@ -7578,7 +7599,7 @@ ${fileName}`,
         bagNeeded: bagQuantity > 0,
         bagQuantity: bagQuantity,
         bagPrice: bagPrice,
-        paymentMethod: first.paymentMethod || '',
+        paymentMethod: (typeof historyPaymentLabel === 'function' ? historyPaymentLabel(first.paymentMethod) : (first.paymentMethod || '')),
         edited: orders.some(o => o.edited)
       };
     }
