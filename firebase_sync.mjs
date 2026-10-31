@@ -673,6 +673,73 @@ async function syncTaxLaw() {
   }
 }
 
+// ===== 🆕 ドロア中継（オンライン版POS/handy → Firebase → このPi → ドロア）=====
+// オンライン版のページ(https)は、ブラウザの安全機能で Pi(http) に直接つなげない。そこで、POS/handyが
+// Firestoreの drawer_commands に「開く依頼」を書き込み、このPiが受け取ってドロアサーバー(ポート3000)で開く。
+//  - 担当する店舗は /home/pi/pos-sync/drawer_store_ids.json（例: ["高田"]）に書く。無い間は何もしない
+//    （他の店舗の依頼で、このPiのドロアが勝手に開かないようにするため）
+//  - 起動した時点で溜まっていた古い依頼は、開かずに片付ける（再起動で勝手に開かないため）
+//  - 処理した依頼は削除する。1秒以内の連続した依頼は1回にまとめる（連打・悪用の対策）
+const DRAWER_STORES_FILE = '/home/pi/pos-sync/drawer_store_ids.json';
+const DRAWER_API = process.env.DRAWER_API || 'http://localhost:3000';
+const drawerWatchers = {};      // storeId -> 監視解除関数
+const drawerLastOpen = {};      // storeId -> 最後に開いた時刻
+let drawerConfigWarned = false;
+function loadDrawerStoreIds() {
+  try {
+    const a = JSON.parse(fs.readFileSync(DRAWER_STORES_FILE, 'utf8'));
+    return Array.isArray(a) ? a.filter(x => typeof x === 'string' && x) : [];
+  } catch (e) { return []; }
+}
+function drawerCommandsCol(storeId) {
+  return (!storeId || storeId === 'shimoarekasuka') ? db.collection('drawer_commands') : db.collection('stores').doc(storeId).collection('drawer_commands');
+}
+function watchDrawerCommands(storeId) {
+  let first = true;
+  const unsub = drawerCommandsCol(storeId).onSnapshot(async (snap) => {
+    const added = snap.docChanges().filter(c => c.type === 'added');
+    if (first) {
+      first = false;
+      for (const c of added) { try { await c.doc.ref.delete(); } catch (e) {} }
+      if (added.length) log(`🔓 ${storeId}: 起動前の古いドロア依頼 ${added.length}件を、開かずに削除しました`);
+      return;
+    }
+    for (const c of added) {
+      const data = c.doc.data() || {};
+      const nowMs = Date.now();
+      if (drawerLastOpen[storeId] && nowMs - drawerLastOpen[storeId] < 1000) {
+        log(`🔓 ${storeId}: 1秒以内の連続したドロア依頼を無視しました`);
+      } else {
+        drawerLastOpen[storeId] = nowMs;
+        const duration = Math.min(Math.max(parseInt(data.duration, 10) || 500, 100), 2000);
+        try {
+          const r = await fetch(`${DRAWER_API}/open`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duration }), signal: AbortSignal.timeout(5000) });
+          log(`🔓 ${storeId}: ドロアを開きました（依頼元: ${String(data.source || '').slice(0, 20)}）HTTP ${r.status}`);
+        } catch (e) { log(`❌ ${storeId}: ドロアを開けませんでした: ${e.message}`); }
+      }
+      try { await c.doc.ref.delete(); } catch (e) {}
+    }
+  }, (err) => {
+    log(`❌ ${storeId}: ドロア依頼の監視エラー: ${err.message}（次回の見回りで再接続）`);
+    delete drawerWatchers[storeId];
+  });
+  drawerWatchers[storeId] = unsub;
+  log(`🔓 ${storeId}: ドロア依頼の監視を開始しました`);
+}
+async function refreshDrawerWatchers() {
+  try {
+    const ids = new Set(loadDrawerStoreIds());
+    if (!ids.size && !drawerConfigWarned) {
+      drawerConfigWarned = true;
+      log('🔓 ドロア中継は無効です（有効にするには /home/pi/pos-sync/drawer_store_ids.json に担当の店舗IDを書きます。例: ["高田"]）');
+    }
+    for (const id of ids) { if (!drawerWatchers[id]) watchDrawerCommands(id); }
+    for (const id of Object.keys(drawerWatchers)) {
+      if (!ids.has(id)) { try { drawerWatchers[id](); } catch (e) {} delete drawerWatchers[id]; log(`🔓 ${id}: ドロア依頼の監視を停止しました`); }
+    }
+  } catch (e) { log('❌ ドロア中継の設定確認エラー: ' + e.message); }
+}
+
 async function main() {
   log('=== Firebase同期サービス起動 ===');
   const scope = loadStoreScope();
@@ -795,6 +862,8 @@ async function main() {
   await syncReceiptImagesAll();
   await syncTaxLaw();
   setInterval(syncTaxLaw, 6*60*60*1000); // 6時間ごとに税制データを確認
+  await refreshDrawerWatchers();
+  setInterval(refreshDrawerWatchers, 60*1000); // 1分ごとに担当店舗の設定を確認（設定ファイルを変えると再起動なしで反映）
   setInterval(sync, 5*60*1000);
   setInterval(syncOrdersAll, 5*1000);
   setInterval(syncOrderStatusAll, 5*1000);

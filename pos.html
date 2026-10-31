@@ -8280,21 +8280,7 @@ ${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(t
         }
 
         // Raspberry Pi ドロアサーバーに開くコマンドを送信
-        const drawerIp = window.getDrawerIp();
-        if (drawerIp) {
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3000);
-            const drawerRes = await fetch(`http://${drawerIp}:3000/open`, {
-              method: 'POST',
-              signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            console.log('✅ ドロアサーバー応答:', drawerRes.status);
-          } catch (drawerErr) {
-            console.warn('⚠️ ドロアサーバー接続失敗:', drawerErr.message);
-          }
-        }
+        await window.requestDrawerOpen('manual');
         
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
@@ -8387,10 +8373,35 @@ ${redDiffDays.length ? `（赤伝票金額と赤伝票税込合計の差: ¥${(t
       } finally { clearTimeout(timer); }
     };
 
+    // 🆕 ドロアを開く（全画面共通）。Piから配信されるページ(http)はPiに直接、オンライン版(https)は
+    //    ブラウザの安全機能でPiに直接つなげないので、Firebaseに「開く依頼」を書き込み、Piが受け取って開く
+    window.requestDrawerOpen = async function(source) {
+      if (location.protocol === 'http:') {
+        const ip = window.getDrawerIp();
+        if (!ip) return false;
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 3000);
+          await fetch('http://' + ip + ':3000/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duration: 500 }), signal: ctrl.signal });
+          clearTimeout(timer);
+          return true;
+        } catch (e) { console.warn('⚠️ ドロアサーバー接続失敗:', e.message); return false; }
+      }
+      try {
+        const id = 'cmd_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        await window.setDoc(window.getStoreDoc('drawer_commands', id), { createdAt: Date.now(), duration: 500, source: source || '' });
+        return true;
+      } catch (e) { console.warn('⚠️ ドロアを開く依頼に失敗:', e.message); return false; }
+    };
+
     // ステップ1: Piとドロア（USB）の状態
     window.refreshDrawerAutoStatus = async function() {
       const box = document.getElementById('drawerAutoStatus');
       if (!box) return;
+      if (location.protocol === 'https:') {
+        box.innerHTML = '☁️ オンライン版では、Firebase経由でRaspberry Piのドロアを開きます（Raspberry Piがインターネットにつながっている必要があります）<br><small>ドロアの接続状態、Wi-Fi・接続先名の変更は、Raspberry Piから開いたレジ画面（オフライン版）で行ってください</small>';
+        return;
+      }
       const ip = window.getDrawerIp();
       const auto = !(localStorage.getItem('drawerIp') && ip === localStorage.getItem('drawerIp') && !(location.protocol === 'http:' && ip === location.hostname));
       const det = document.getElementById('drawerManualIpDetails');
@@ -13660,14 +13671,7 @@ ${window.getActualTaxPercent(10)}%の赤伝票の消費税: -¥${rsTax10Amount.t
         closePaymentModal();
 
         // 🔓 会計完了時にドロアを自動で開く
-        const drawerIp = window.getDrawerIp();
-        if (drawerIp) {
-          try {
-            const ctrl = new AbortController();
-            setTimeout(() => ctrl.abort(), 3000);
-            await fetch(`http://${drawerIp}:3000/open`, { method: 'POST', signal: ctrl.signal });
-          } catch (e) { console.warn('ドロア自動オープン失敗:', e.message); }
-        }
+        await window.requestDrawerOpen('auto');
         
         // ✅ 即会計の場合はmanualCartをクリア & 注文を完了→削除
         if (isDirectPayment) {
