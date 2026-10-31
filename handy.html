@@ -6941,6 +6941,7 @@ ${fileName}`,
       const badges = [];
       if (order.deleted && !order.paidAt) badges.push('<span style="background:#666;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;">削除済み</span>');
       if (order.paidAt) badges.push('<span style="background:#2196F3;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;">会計済</span>');
+      if (order.edited) badges.push('<span style="background:#FF9800;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;">修正済</span>');
       if (order.completedAt) badges.push('<span style="background:#4CAF50;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;">完了</span>');
       const eat = (order.eatStyle && window.getEatStyleLabel) ? ('<span style="margin-left:8px;font-size:12px;color:#555;border:1px solid #bbb;border-radius:10px;padding:1px 8px;">' + historyEscape(window.getEatStyleLabel(order.eatStyle)) + '</span>') : '';
       const itemsHtml = (order.items || []).map(item => {
@@ -6957,7 +6958,7 @@ ${fileName}`,
         '<div style="text-align:right;font-size:18px;font-weight:bold;color:#667eea;border-top:1px solid #eee;padding-top:8px;">合計: ¥' + Math.round(order.totalAmount).toLocaleString() + '</div>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' +
           (order.paidAt && !order.deleted || (order.paidAt && typeof window.redSlipFromHistory === 'function')
-            ? btn('編集', '#FF9800', editFn + "('" + order.id + "')") + btn('赤伝票', '#f44336', redFn + "('" + order.id + "')")
+            ? btn('会計を修正', '#FB8C00', "editCheckoutByOrder('" + order.id + "')") + btn('編集', '#FF9800', editFn + "('" + order.id + "')") + btn('赤伝票', '#f44336', redFn + "('" + order.id + "')")
             : (order.deleted && !order.paidAt ? btn('復元', '#4CAF50', "restoreOrderFromHistory('" + order.id + "')") : btn('編集', '#FF9800', editFn + "('" + order.id + "')") + btn('削除', '#f44336', "deleteOrderFromHistory('" + order.id + "')"))) +
           btn('レシート表示', '#667eea', "reprintReceipt('" + order.id + "')") + btn('領収書表示', '#f093fb', "reprintInvoice('" + order.id + "')") +
         '</div></div>';
@@ -7001,13 +7002,14 @@ ${fileName}`,
         html += '<div style="background:#f3f8ff;border:2px solid #2196F3;border-radius:12px;padding:14px;margin-bottom:12px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">' +
             '<div><span style="font-size:18px;font-weight:bold;color:#1565c0;">会計 ' + formatOrderNumbers(list.map(o => o.orderNumber)) + '</span><span style="margin-left:10px;color:#666;">' + historyEscape(list[0].tableNumber) + '</span><span style="margin-left:8px;font-size:12px;color:#555;">（' + list.length + '件を1回で会計）</span></div>' +
-            '<div><span style="background:#2196F3;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;">会計済</span></div></div>' +
+            '<div><span style="background:#2196F3;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;">会計済</span>' + (list.some(o => o.edited) ? '<span style="background:#FF9800;color:white;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;margin-left:4px;">修正済</span>' : '') + '</div></div>' +
           '<div style="font-size:12px;color:#999;margin:6px 0;">' + paidStr + ' <span style="background:#e3f2fd;color:#1976D2;padding:2px 8px;border-radius:8px;margin-left:6px;">' + historyEscape(historyPaymentLabel(list[0].paymentMethod)) + '</span></div>' +
           '<div style="padding:8px 0;border-top:1px solid #cfe3fa;font-size:14px;">' + itemsHtml + '</div>' +
           '<div style="text-align:right;font-size:18px;font-weight:bold;color:#1565c0;border-top:1px solid #cfe3fa;padding-top:8px;">この会計の合計: ¥' + Math.round(total).toLocaleString() + '</div>' +
           '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' +
             btn('会計のレシート表示', '#667eea', "reprintCheckout('receipt','" + gid + "')") +
             btn('会計の領収書表示', '#f093fb', "reprintCheckout('invoice','" + gid + "')") +
+            btn('会計を修正', '#FB8C00', "editCheckout('" + gid + "')") +
             btn('会計の赤伝票', '#f44336', "redSlipCheckout('" + gid + "')") +
             btn('注文ごとの表示 ▼', '#607D8B', "toggleHistoryGroup('" + gid + "')") +
           '</div>' +
@@ -7044,6 +7046,286 @@ ${fileName}`,
     };
     
     // ========== 赤伝票機能 ==========
+    // ========== 🆕 会計の修正（商品の数量・追加・削除、税率区分、支払方法）==========
+    // 赤伝票で取り消して打ち直すのではなく、会計を「修正」する。売上・消費税・支払方法別・点数・商品別の数は、
+    // 修正前と修正後の差分だけを日次売上に反映する（客数は変わらない）。修正の履歴（元の内容・日時・担当者・理由）は
+    // 注文の editHistory と orderEdits コレクションに残し、履歴に「修正済」と表示する。
+    // 精算（レジ締め）済みの日は警告を出す。実行前に必ず「修正前→修正後」を表示して確認する（ドライラン）。
+    let ceState = null;
+    const cePayNames = { cash: '現金', emoney: '電子マネー', credit: 'クレジットカード' };
+    function ceEsc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    function ceYen(n) { return '¥' + Math.round(n || 0).toLocaleString(); }
+    function ceNormPay(pm) {
+      if (pm === '現金' || pm === 'cash') return 'cash';
+      if (pm === '電子マネー' || pm === 'emoney') return 'emoney';
+      if (pm === 'クレジットカード' || pm === 'credit') return 'credit';
+      return pm || 'cash';
+    }
+    // 1行の税込金額。数量・税率区分を変えていない行は、会計時に確定した金額をそのまま使う
+    function ceLineGross(l) {
+      if (l.qty <= 0) return 0;
+      if (!l.added && l.qty === l.qty0 && l.rate === l.rate0 && typeof l.grossOrig === 'number') return l.grossOrig;
+      const base = (l.unit + (l.toppingPrice || 0)) * l.qty;
+      if (l.taxType === 'exclusive') return base + Math.floor(base * l.pct / 100);
+      return base;
+    }
+    function ceLineNet(l) { return (l.unit + (l.toppingPrice || 0)) * l.qty; }
+    // 状態（lines, bags, payment）から、注文ごとの新しい内容・税内訳・合計を計算する
+    function ceCompute(st) {
+      const perOrder = st.orders.map(o => ({ id: o.id, order: o, items: [], acc: newTaxAccumulator(), total: 0, count: 0, bagQty: o.bagNeeded ? (o.bagQuantity || 0) : 0, bagPrice: 0 }));
+      const byId = {}; perOrder.forEach(p => { byId[p.id] = p; });
+      st.lines.forEach(l => {
+        if (l.qty <= 0) return;
+        const p = byId[l.orderId]; const gross = ceLineGross(l); const pct = window.getActualTaxPercent(l.rate);
+        l.pct = pct;
+        addToTaxAccumulator(p.acc, l.rate, l.taxType, gross, ceLineNet(l));
+        p.total += gross; p.count += l.qty;
+        if (l.isBag) { p.bagQty = l.qty; p.bagPrice = gross; return; }
+        const base = l.added ? { name: l.name, basePrice: l.unit, price: l.unit, toppings: 'なし', toppingPrice: 0, taxType: l.taxType, eatStyle: l.eatStyle || null, menuItemId: l.menuItemId || null } : l.orig;
+        p.items.push(Object.assign({}, base, { quantity: l.qty, taxRate: l.rate, taxPercent: pct, takeout: l.rate === 8, lineTotalWithTax: gross }));
+      });
+      perOrder.forEach(p => { p.breakdown = finalizeTaxBreakdown(p.acc); if (!st.lines.some(l => l.isBag && l.orderId === p.id && l.qty > 0)) { p.bagQty = 0; p.bagPrice = 0; } });
+      return perOrder;
+    }
+    function ceSummary(st) {
+      const per = ceCompute(st);
+      const oldB = { g8: 0, g10: 0, t8i: 0, t8e: 0, t10i: 0, t10e: 0 }, newB = { g8: 0, g10: 0, t8i: 0, t8e: 0, t10i: 0, t10e: 0 };
+      let oldTotal = 0, newTotal = 0, oldCount = 0, newCount = 0;
+      st.orders.forEach(o => {
+        const b = getOrderTaxBreakdown(o);
+        oldB.g8 += b.gross8; oldB.g10 += b.gross10; oldB.t8i += b.tax8Inclusive; oldB.t8e += b.tax8Exclusive; oldB.t10i += b.tax10Inclusive; oldB.t10e += b.tax10Exclusive;
+        oldTotal += o.totalAmount || 0;
+        (o.items || []).forEach(it => { oldCount += it.quantity || 0; });
+        if (o.bagNeeded && o.bagQuantity > 0) oldCount += o.bagQuantity;
+      });
+      per.forEach(p => {
+        const b = p.breakdown; newB.g8 += b.gross8; newB.g10 += b.gross10; newB.t8i += b.tax8Inclusive; newB.t8e += b.tax8Exclusive; newB.t10i += b.tax10Inclusive; newB.t10e += b.tax10Exclusive;
+        newTotal += p.total; newCount += p.count;
+      });
+      return { per, oldB, newB, oldTotal, newTotal, oldCount, newCount };
+    }
+    window.editCheckoutByOrder = async function(orderId) {
+      let ids = null;
+      const groups = window._historyCheckouts || {};
+      Object.keys(groups).forEach(k => { if (groups[k].indexOf(orderId) >= 0) ids = groups[k]; });
+      return ceOpen(ids || [orderId]);
+    };
+    window.editCheckout = async function(gid) {
+      const ids = (window._historyCheckouts || {})[gid];
+      if (!ids || !ids.length) { showCustomAlert('会計の情報が見つかりません。履歴を開き直してください', '⚠️ 警告', '⚠️'); return; }
+      return ceOpen(ids);
+    };
+    async function ceOpen(orderIds) {
+      try {
+        const need = ['getDoc', 'updateDoc', 'setDoc', 'deleteDoc', 'getDocs', 'query', 'where', 'getStoreDoc', 'getStoreCollection', 'getBusinessDay', 'safeToDate', 'getActualTaxPercent'];
+        const miss = need.filter(n => typeof window[n] !== 'function');
+        if (miss.length) { showCustomAlert('この画面では会計の修正を使えません（' + miss.join(', ') + '）', '⚠️ 警告', '⚠️'); return; }
+        const orders = [];
+        for (const id of orderIds) {
+          const d = await window.getDoc(window.getStoreDoc('orders', id));
+          if (!d.exists()) { showCustomAlert('注文が見つかりません。履歴を開き直してください', '⚠️ 警告', '⚠️'); return; }
+          orders.push(Object.assign({ id }, d.data()));
+        }
+        orders.sort((a, b) => (a.orderNumber || 0) - (b.orderNumber || 0));
+        if (orders.some(o => !o.paidAt)) { showCustomAlert('会計済みの注文だけ修正できます', '⚠️ 警告', '⚠️'); return; }
+        const paid = window.safeToDate(orders[0].paidAt);
+        const dateStr = window.getBusinessDay(paid).str;
+        // 精算（レジ締め）済みか
+        let settled = false;
+        try {
+          const ss = await window.getDocs(window.query(window.getStoreCollection('settlements'), window.where('date', '==', dateStr)));
+          settled = !ss.empty && ss.size !== 0;
+        } catch (e) { console.warn('精算記録の確認に失敗:', e.message); }
+        // 明細行を作る
+        const lines = [];
+        orders.forEach(o => {
+          const its = Array.isArray(o.items) ? o.items : [];
+          let itemsGross8 = 0;
+          its.forEach((it, idx) => {
+            const rate = (it.taxRate === 8) ? 8 : 10;
+            const gross = getPaidLineGross(it);
+            if (rate === 8) itemsGross8 += gross;
+            lines.push({ orderId: o.id, orderNumber: o.orderNumber, idx, name: it.name, toppings: it.toppings && it.toppings !== 'なし' ? it.toppings : '', toppingPrice: it.toppingPrice || 0,
+              taxType: it.taxType || 'inclusive', unit: it.price, qty: it.quantity || 1, qty0: it.quantity || 1, rate, rate0: rate, grossOrig: gross, pct: (typeof it.taxPercent === 'number') ? it.taxPercent : window.getActualTaxPercent(rate), orig: it });
+          });
+          if (o.bagNeeded && o.bagQuantity > 0) {
+            const bagPrice = o.bagPrice || o.bagQuantity * 3;
+            const b = getOrderTaxBreakdown(o);
+            const rate = (b.gross8 - itemsGross8 > 0 && Math.abs(b.gross8 - itemsGross8 - bagPrice) <= 1) ? 8 : 10;
+            lines.push({ orderId: o.id, orderNumber: o.orderNumber, isBag: true, name: 'レジ袋', toppings: '', toppingPrice: 0, taxType: 'inclusive', unit: bagPrice / o.bagQuantity, qty: o.bagQuantity, qty0: o.bagQuantity, rate, rate0: rate, grossOrig: bagPrice, pct: window.getActualTaxPercent(rate) });
+          }
+        });
+        ceState = { orderIds, orders, lines, dateStr, settled, payment: ceNormPay(orders[0].paymentMethod), pay0: ceNormPay(orders[0].paymentMethod), reason: '', busy: false };
+        ceRender();
+      } catch (e) {
+        console.error('会計の修正を開けません:', e);
+        showCustomAlert('会計の修正を開けませんでした: ' + e.message, '❌ エラー', '❌');
+      }
+    }
+    window.ceClose = function() { const el = document.getElementById('ceOverlay'); if (el) el.remove(); ceState = null; };
+    window.ceSetQty = function(i, v) { const l = ceState.lines[i]; let q = parseInt(v, 10); if (isNaN(q) || q < 0) q = 0; if (q > 999) q = 999; l.qty = q; ceRender(); };
+    window.ceStep = function(i, d) { const l = ceState.lines[i]; window.ceSetQty(i, l.qty + d); };
+    window.ceSetRate = function(i, v) { ceState.lines[i].rate = (parseInt(v, 10) === 8) ? 8 : 10; ceRender(); };
+    window.ceSetPay = function(v) { ceState.payment = v; ceRender(); };
+    window.ceSetReason = function(v) { ceState.reason = v; };
+    window.ceRemoveAdded = function(i) { ceState.lines.splice(i, 1); ceRender(); };
+    window.ceAddItem = function() {
+      const sel = document.getElementById('ceAddSel'); const qtyEl = document.getElementById('ceAddQty'); const rateEl = document.getElementById('ceAddRate');
+      const src = (typeof allMenuItems !== 'undefined' && allMenuItems.length) ? allMenuItems : ((typeof menuItems !== 'undefined' && Array.isArray(menuItems)) ? menuItems : []);
+      const m = src[parseInt(sel.value, 10)];
+      if (!m) { showCustomAlert('追加する商品を選んでください', '⚠️ 警告', '⚠️'); return; }
+      const qty = Math.max(1, parseInt(qtyEl.value, 10) || 1); const rate = parseInt(rateEl.value, 10) === 8 ? 8 : 10;
+      const first = ceState.orders[0];
+      ceState.lines.push({ orderId: first.id, orderNumber: first.orderNumber, added: true, name: m.name, toppings: '', toppingPrice: 0, taxType: m.taxType || 'inclusive', unit: m.price || 0, qty, qty0: 0, rate, rate0: rate, menuItemId: m.id || null, eatStyle: first.eatStyle || null, pct: window.getActualTaxPercent(rate) });
+      ceRender();
+    };
+    function ceRender() {
+      const st = ceState; if (!st) return;
+      const sm = ceSummary(st);
+      const first = st.orders[0]; const paid = window.safeToDate(first.paidAt);
+      const src = (typeof allMenuItems !== 'undefined' && allMenuItems.length) ? allMenuItems : ((typeof menuItems !== 'undefined' && Array.isArray(menuItems)) ? menuItems : []);
+      const optHtml = src.map((m, i) => '<option value="' + i + '">' + ceEsc(m.name) + '（' + ceYen(m.price) + '）</option>').join('');
+      const rows = st.lines.map((l, i) => {
+        const gross = ceLineGross(l);
+        const changed = l.added || l.qty !== l.qty0 || l.rate !== l.rate0;
+        return '<tr style="border-top:1px solid #eee;' + (l.qty === 0 ? 'opacity:.45;' : '') + '">' +
+          '<td style="padding:8px 4px;font-size:13px;"><div style="color:#888;font-size:11px;">#' + ceEsc(l.orderNumber) + (l.added ? ' ・追加' : '') + '</div>' + ceEsc(l.name) + (l.toppings ? '<div style="font-size:11px;color:#666;">' + ceEsc(l.toppings) + '</div>' : '') + '</td>' +
+          '<td style="padding:4px;"><select onchange="ceSetRate(' + i + ',this.value)" style="padding:6px;border:1px solid #ccc;border-radius:6px;"><option value="10"' + (l.rate === 10 ? ' selected' : '') + '>10%</option><option value="8"' + (l.rate === 8 ? ' selected' : '') + '>8%</option></select></td>' +
+          '<td style="padding:4px;white-space:nowrap;"><button onclick="ceStep(' + i + ',-1)" style="width:32px;height:32px;border:none;border-radius:6px;background:#eee;font-size:18px;">−</button>' +
+            '<input type="number" min="0" value="' + l.qty + '" onchange="ceSetQty(' + i + ',this.value)" style="width:52px;text-align:center;padding:6px;border:1px solid #ccc;border-radius:6px;margin:0 4px;">' +
+            '<button onclick="ceStep(' + i + ',1)" style="width:32px;height:32px;border:none;border-radius:6px;background:#eee;font-size:18px;">＋</button></td>' +
+          '<td style="padding:4px;text-align:right;font-weight:bold;' + (changed ? 'color:#e65100;' : '') + '">' + ceYen(gross) + (l.qty === 0 ? '<div style="font-size:10px;color:#c00;">削除</div>' : '') + '</td>' +
+          '<td style="padding:4px;">' + (l.added ? '<button onclick="ceRemoveAdded(' + i + ')" style="border:none;background:none;color:#c00;font-size:18px;">✕</button>' : '') + '</td></tr>';
+      }).join('');
+      const diff = sm.newTotal - sm.oldTotal;
+      const noLines = st.lines.every(l => l.qty <= 0);
+      const html = '<div id="ceOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:center;justify-content:center;">' +
+        '<div style="background:white;width:min(760px,95vw);max-height:93vh;overflow:auto;border-radius:14px;padding:18px;">' +
+        '<h3 style="margin:0 0 4px 0;font-size:20px;">会計の修正</h3>' +
+        '<div style="font-size:13px;color:#666;margin-bottom:10px;">会計 ' + formatOrderNumbers(st.orders.map(o => o.orderNumber)) + ' ／ ' + ceEsc(first.tableNumber) + ' ／ ' + ((paid && paid.getTime()) ? paid.toLocaleString('ja-JP') : '') + ' ／ 営業日 ' + ceEsc(st.dateStr) + '</div>' +
+        (st.settled ? '<div style="background:#fff3cd;border:2px solid #ffca2c;color:#664d03;padding:10px;border-radius:8px;margin-bottom:10px;font-size:13px;">⚠️ この営業日は精算（レジ締め）が済んでいます。修正すると、すでに出力した精算ジャーナルと金額が合わなくなります。必要なら、修正後に精算をやり直してください。</div>' : '') +
+        '<div style="margin-bottom:10px;"><b style="font-size:14px;">支払方法</b> <select onchange="ceSetPay(this.value)" style="padding:8px;border:2px solid #ccc;border-radius:8px;font-size:15px;margin-left:6px;">' +
+          Object.keys(cePayNames).map(k => '<option value="' + k + '"' + (st.payment === k ? ' selected' : '') + '>' + cePayNames[k] + '</option>').join('') + '</select></div>' +
+        '<table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#888;text-align:left;"><th>商品</th><th>税率</th><th>数量（0で削除）</th><th style="text-align:right;">税込</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:12px 0;padding:10px;background:#f6f6f6;border-radius:8px;">' +
+          '<b style="font-size:13px;">商品を追加</b><select id="ceAddSel" style="flex:1;min-width:150px;padding:8px;border:1px solid #ccc;border-radius:6px;">' + optHtml + '</select>' +
+          '<input id="ceAddQty" type="number" min="1" value="1" style="width:56px;padding:8px;border:1px solid #ccc;border-radius:6px;text-align:center;">' +
+          '<select id="ceAddRate" style="padding:8px;border:1px solid #ccc;border-radius:6px;"><option value="10">10%</option><option value="8">8%</option></select>' +
+          '<button onclick="ceAddItem()" style="padding:9px 14px;background:#4CAF50;color:white;border:none;border-radius:8px;font-weight:bold;">追加</button></div>' +
+        '<div style="border-top:2px solid #eee;padding-top:10px;font-size:14px;">' +
+          '<div>合計: ' + ceYen(sm.oldTotal) + ' → <b style="font-size:18px;color:' + (diff === 0 ? '#333' : '#e65100') + ';">' + ceYen(sm.newTotal) + '</b>（' + (diff >= 0 ? '+' : '') + Math.round(diff).toLocaleString() + '円）</div>' +
+          '<div style="font-size:12px;color:#666;margin-top:4px;">8%対象 ' + ceYen(sm.oldB.g8) + ' → ' + ceYen(sm.newB.g8) + ' ／ 10%対象 ' + ceYen(sm.oldB.g10) + ' → ' + ceYen(sm.newB.g10) + ' ／ 消費税 ' + ceYen(sm.oldB.t8i + sm.oldB.t8e + sm.oldB.t10i + sm.oldB.t10e) + ' → ' + ceYen(sm.newB.t8i + sm.newB.t8e + sm.newB.t10i + sm.newB.t10e) + '</div>' +
+          (st.payment !== st.pay0 ? '<div style="font-size:12px;color:#e65100;margin-top:4px;">支払方法: ' + cePayNames[st.pay0] + ' → ' + cePayNames[st.payment] + '</div>' : '') +
+          '<div style="font-size:11px;color:#999;margin-top:6px;">※ 数量・税率区分を変えた行は、税込金額を計算し直します（レジで手入力した金額は、変えた行だけ計算値になります）。値引きの扱いは変わりません。</div></div>' +
+        '<div style="margin-top:10px;"><input type="text" value="' + ceEsc(st.reason) + '" oninput="ceSetReason(this.value)" placeholder="修正の理由（例: 数量の打ち間違い）" style="width:100%;padding:10px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;"></div>' +
+        (noLines ? '<div style="color:#c00;font-size:13px;margin-top:8px;">すべての商品が0です。会計全体を取り消すときは「赤伝票」を使ってください。</div>' : '') +
+        '<div style="display:flex;gap:10px;margin-top:14px;"><button onclick="ceClose()" style="flex:1;padding:14px;background:#9e9e9e;color:white;border:none;border-radius:10px;font-size:15px;font-weight:bold;">キャンセル</button>' +
+        '<button onclick="ceConfirm()" ' + ((noLines || st.busy) ? 'disabled' : '') + ' style="flex:2;padding:14px;background:' + ((noLines || st.busy) ? '#bbb' : '#FF9800') + ';color:white;border:none;border-radius:10px;font-size:15px;font-weight:bold;">修正内容を確認して実行</button></div>' +
+        '</div></div>';
+      const old = document.getElementById('ceOverlay'); let scrollTop = 0;
+      if (old) { const inner = old.firstChild; scrollTop = inner ? inner.scrollTop : 0; old.remove(); }
+      document.body.insertAdjacentHTML('beforeend', html);
+      const inner2 = document.getElementById('ceOverlay').firstChild; if (inner2) inner2.scrollTop = scrollTop;
+    }
+    window.ceConfirm = async function() {
+      const st = ceState; if (!st || st.busy) return;
+      const sm = ceSummary(st);
+      const changes = [];
+      st.lines.forEach(l => {
+        if (l.added) changes.push('追加: ' + l.name + ' ×' + l.qty);
+        else if (l.qty <= 0) changes.push('削除: ' + l.name + '（#' + l.orderNumber + '）');
+        else if (l.qty !== l.qty0) changes.push('数量: ' + l.name + ' ' + l.qty0 + ' → ' + l.qty);
+        if (!l.added && l.qty > 0 && l.rate !== l.rate0) changes.push('税率: ' + l.name + ' ' + l.rate0 + '% → ' + l.rate + '%');
+      });
+      if (st.payment !== st.pay0) changes.push('支払方法: ' + cePayNames[st.pay0] + ' → ' + cePayNames[st.payment]);
+      if (!changes.length) { showCustomAlert('変更がありません', '⚠️ 警告', '⚠️'); return; }
+      const msg = '次の内容で会計を修正します。\n\n' + changes.join('\n') + '\n\n合計: ' + ceYen(sm.oldTotal) + ' → ' + ceYen(sm.newTotal) + '\n営業日 ' + st.dateStr + ' の売上・消費税を、この差額で直します。' + (st.settled ? '\n\n⚠️ この日は精算済みです。精算ジャーナルと金額が合わなくなります。' : '') + '\n\nよろしいですか？（元の内容は修正履歴に残ります）';
+      if (!window.confirm(msg)) return;
+      st.busy = true; ceRender();
+      try { await ceExecute(st, sm); }
+      catch (e) {
+        console.error('会計の修正エラー:', e);
+        st.busy = false; ceRender();
+        showCustomAlert('会計の修正に失敗しました: ' + e.message + '\n（売上は変更していません）', '❌ エラー', '❌');
+      }
+    };
+    async function ceExecute(st, sm) {
+      // 1) 実行直前に最新の内容を読み直し、開いてから変わっていないか確認
+      const fresh = [];
+      for (const o of st.orders) {
+        const d = await window.getDoc(window.getStoreDoc('orders', o.id));
+        if (!d.exists()) throw new Error('注文 #' + o.orderNumber + ' が見つかりません（先に別の操作で変更された可能性があります）。もう一度開いてください');
+        const data = d.data();
+        if (Math.round(data.totalAmount || 0) !== Math.round(o.totalAmount || 0) || ceNormPay(data.paymentMethod) !== ceNormPay(o.paymentMethod)) throw new Error('注文 #' + o.orderNumber + ' が、開いた後に別の操作で変更されています。もう一度開いてください');
+        fresh.push(Object.assign({ id: o.id }, data));
+      }
+      // 2) 日次売上の差分を計算（営業日は会計日時から）
+      const salesRef = window.getStoreDoc('dailySales', st.dateStr);
+      const salesDoc = await window.getDoc(salesRef);
+      if (!salesDoc.exists()) throw new Error('この営業日の日次売上が見つかりません（営業日: ' + st.dateStr + '）');
+      const dd = salesDoc.data();
+      const dTotal = sm.newTotal - sm.oldTotal;
+      const dItems = sm.newCount - sm.oldCount;
+      const upd = {
+        totalSales: Math.max(0, (dd.totalSales || 0) + dTotal),
+        totalItems: Math.max(0, (dd.totalItems || 0) + dItems),
+        tax8Total: Math.max(0, (dd.tax8Total || 0) + (sm.newB.g8 - sm.oldB.g8)),
+        tax10Total: Math.max(0, (dd.tax10Total || 0) + (sm.newB.g10 - sm.oldB.g10)),
+        updatedAt: window.Timestamp.now()
+      };
+      // 支払方法別
+      const field = { cash: 'cashSales', emoney: 'emoneSales', credit: 'creditSales' };
+      const bucket = { cashSales: dd.cashSales || 0, emoneSales: dd.emoneSales || 0, creditSales: dd.creditSales || 0 };
+      bucket[field[st.pay0]] -= sm.oldTotal; bucket[field[st.payment]] += sm.newTotal;
+      Object.keys(bucket).forEach(k => { upd[k] = Math.max(0, bucket[k]); });
+      // 商品別の数（itemCounts）
+      const counts = Object.assign({}, dd.itemCounts || {});
+      const add = (name, n) => { if (!name || !n) return; counts[name] = Math.max(0, (counts[name] || 0) + n); if (counts[name] === 0) delete counts[name]; };
+      st.orders.forEach(o => { (o.items || []).forEach(it => add(it.name, -(it.quantity || 0))); if (o.bagNeeded && o.bagQuantity > 0) add('レジ袋', -o.bagQuantity); });
+      sm.per.forEach(p => { p.items.forEach(it => add(it.name, it.quantity || 0)); if (p.bagQty > 0) add('レジ袋', p.bagQty); });
+      upd.itemCounts = counts;
+      // 案B（注文ごとの消費税額）の日は、税額も差分で直す
+      if (dd.taxMethodVersion === 2) {
+        const f = (k, oldV, newV) => Math.max(0, (dd[k] || 0) - oldV + newV);
+        upd.tax8TaxInclusive = f('tax8TaxInclusive', sm.oldB.t8i, sm.newB.t8i);
+        upd.tax8TaxExclusive = f('tax8TaxExclusive', sm.oldB.t8e, sm.newB.t8e);
+        upd.tax10TaxInclusive = f('tax10TaxInclusive', sm.oldB.t10i, sm.newB.t10i);
+        upd.tax10TaxExclusive = f('tax10TaxExclusive', sm.oldB.t10e, sm.newB.t10e);
+      }
+      // 3) 修正履歴（監査用）を先に残す
+      const staff = (document.getElementById('staffSelect') && document.getElementById('staffSelect').value) || '';
+      const nowTs = window.Timestamp.now();
+      const stamp = new Date().toISOString();
+      const editRef = window.doc(window.collection(window.db, 'stores', window.currentStoreId, 'orderEdits'));
+      await window.setDoc(editRef, { orderIds: st.orderIds, businessDate: st.dateStr, editedAt: nowTs, editedBy: staff, reason: st.reason || '',
+        before: fresh.map(o => JSON.parse(JSON.stringify(o))), afterTotal: sm.newTotal, beforeTotal: sm.oldTotal, beforeMethod: st.pay0, afterMethod: st.payment, salesDelta: { total: dTotal, items: dItems } });
+      // 4) 注文を更新（商品がなくなった注文は削除）。失敗したら元に戻す
+      const done = [];
+      try {
+        for (let i = 0; i < sm.per.length; i++) {
+          const p = sm.per[i]; const o = fresh[i];
+          if (p.items.length === 0 && p.bagQty === 0) {
+            await window.deleteDoc(window.getStoreDoc('orders', o.id)); done.push({ kind: 'delete', o });
+            continue;
+          }
+          const hist = Array.isArray(o.editHistory) ? o.editHistory.slice() : [];
+          hist.push({ at: stamp, by: staff, reason: st.reason || '', beforeTotal: o.totalAmount || 0, afterTotal: p.total, beforeMethod: st.pay0, afterMethod: st.payment });
+          const patch = { items: p.items, totalAmount: p.total, taxBreakdown: p.breakdown, paymentMethod: st.payment, edited: true, editedAt: nowTs, editCount: (o.editCount || 0) + 1, editHistory: hist };
+          if (o.bagNeeded || p.bagQty > 0) { patch.bagNeeded = p.bagQty > 0; patch.bagQuantity = p.bagQty; patch.bagPrice = p.bagPrice; }
+          await window.updateDoc(window.getStoreDoc('orders', o.id), patch); done.push({ kind: 'update', o });
+        }
+        await window.updateDoc(salesRef, upd);
+      } catch (e) {
+        console.error('修正の途中で失敗。元に戻します:', e);
+        for (const d of done) { try { const orig = Object.assign({}, d.o); delete orig.id; await window.setDoc(window.getStoreDoc('orders', d.o.id), orig); } catch (e2) { console.error('元に戻せません:', d.o.id, e2); } }
+        throw e;
+      }
+      console.log('✅ 会計を修正しました', { 注文: st.orderIds, 差額: dTotal, 営業日: st.dateStr });
+      window.ceClose();
+      showCustomAlert('会計を修正しました。\n\n合計: ' + ceYen(sm.oldTotal) + ' → ' + ceYen(sm.newTotal) + '\n売上・消費税・支払方法別に差額を反映しました。', '✅ 修正完了', '✅');
+      try { if (typeof loadHistory === 'function') await loadHistory(); } catch (e) { console.warn('履歴の再読み込みに失敗:', e.message); }
+    }
+
     window.redSlipFromHistory = async function(orderId, opts) {
       try {
         const orderDoc = await window.getDoc(window.getStoreDoc('orders', orderId));
