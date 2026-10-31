@@ -7052,6 +7052,51 @@ ${fileName}`,
     // 注文の editHistory と orderEdits コレクションに残し、履歴に「修正済」と表示する。
     // 精算（レジ締め）済みの日は警告を出す。実行前に必ず「修正前→修正後」を表示して確認する（ドライラン）。
     let ceState = null;
+    // 商品名にはHTMLタグ（<font>や<br>）が入っていることがあるので、画面表示ではタグを取り除いた文字にする
+    function ceText(t) { return String(t == null ? '' : t).replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim(); }
+    // 「商品を追加」用のメニューは、画面の変数に頼らずFirebase（このPiのDB）から読む
+    let ceMenuCache = null;
+    async function ceLoadMenu() {
+      if (ceMenuCache) return ceMenuCache;
+      const snap = await window.getDocs(window.getStoreCollection('menus'));
+      const list = [];
+      snap.forEach(d => {
+        const x = d.data();
+        if (!x || !x.name || typeof x.price !== 'number') return;
+        list.push({ id: x.id || d.id, name: x.name, price: x.price, taxRate: x.taxRate === 8 ? 8 : 10, taxType: x.taxType || 'inclusive', category: x.category || 'その他', order: (x.order !== undefined && x.order !== null) ? x.order : 999999 });
+      });
+      list.sort((a, b) => String(a.category).localeCompare(String(b.category), 'ja') || (a.order - b.order));
+      ceMenuCache = list;
+      return list;
+    }
+    // おしゃれな確認ダイアログ（ブラウザ標準の確認画面の代わり）。Promise<boolean> を返す
+    window.__styledConfirm = function(opt) {
+      return new Promise(resolve => {
+        const old = document.getElementById('scOverlay'); if (old) old.remove();
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const rows = (opt.rows || []).map(r => typeof r === 'string'
+          ? '<div style="padding:9px 12px;background:#f7f7fb;border-radius:8px;margin-bottom:6px;font-size:14px;color:#333;">' + esc(r) + '</div>'
+          : '<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 12px;background:#f7f7fb;border-radius:8px;margin-bottom:6px;font-size:14px;"><span style="color:#666;">' + esc(r.label) + '</span><b style="color:#222;text-align:right;">' + esc(r.value) + '</b></div>').join('');
+        const color = opt.okColor || '#FF9800';
+        const el = document.createElement('div');
+        el.id = 'scOverlay';
+        el.style.cssText = 'position:fixed;inset:0;background:rgba(20,20,35,.6);backdrop-filter:blur(3px);z-index:200000;display:flex;align-items:center;justify-content:center;padding:14px;';
+        el.innerHTML = '<div style="background:#fff;width:min(460px,94vw);max-height:90vh;overflow:auto;border-radius:20px;padding:26px 22px 20px;box-shadow:0 20px 60px rgba(0,0,0,.35);text-align:center;">' +
+          '<div style="width:68px;height:68px;margin:0 auto 12px;border-radius:50%;background:' + color + '22;display:flex;align-items:center;justify-content:center;font-size:34px;">' + esc(opt.icon || '❓') + '</div>' +
+          '<div style="font-size:21px;font-weight:800;color:#222;margin-bottom:4px;">' + esc(opt.title || '確認') + '</div>' +
+          (opt.subtitle ? '<div style="font-size:13px;color:#777;margin-bottom:12px;">' + esc(opt.subtitle) + '</div>' : '<div style="height:8px;"></div>') +
+          '<div style="text-align:left;">' + rows + '</div>' +
+          (opt.big ? '<div style="margin:10px 0 4px;font-size:15px;color:#333;">' + esc(opt.big) + '</div>' : '') +
+          (opt.warn ? '<div style="margin-top:10px;text-align:left;background:#fff3cd;border:1.5px solid #ffca2c;color:#664d03;padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.6;">⚠️ ' + esc(opt.warn) + '</div>' : '') +
+          (opt.note ? '<div style="margin-top:10px;font-size:12px;color:#888;">' + esc(opt.note) + '</div>' : '') +
+          '<div style="display:flex;gap:10px;margin-top:18px;"><button id="scNo" style="flex:1;padding:14px;background:#eceff3;color:#444;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;">' + esc(opt.cancelText || 'キャンセル') + '</button>' +
+          '<button id="scYes" style="flex:1.4;padding:14px;background:linear-gradient(135deg,' + color + ',' + color + 'dd);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 6px 16px ' + color + '55;">' + esc(opt.okText || '実行する') + '</button></div></div>';
+        document.body.appendChild(el);
+        const done = (v) => { el.remove(); resolve(v); };
+        el.querySelector('#scNo').onclick = () => done(false);
+        el.querySelector('#scYes').onclick = () => done(true);
+      });
+    };
     const cePayNames = { cash: '現金', emoney: '電子マネー', credit: 'クレジットカード' };
     function ceEsc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
     function ceYen(n) { return '¥' + Math.round(n || 0).toLocaleString(); }
@@ -7155,6 +7200,7 @@ ${fileName}`,
             lines.push({ orderId: o.id, orderNumber: o.orderNumber, isBag: true, name: 'レジ袋', toppings: '', toppingPrice: 0, taxType: 'inclusive', unit: bagPrice / o.bagQuantity, qty: o.bagQuantity, qty0: o.bagQuantity, rate, rate0: rate, grossOrig: bagPrice, pct: window.getActualTaxPercent(rate) });
           }
         });
+        try { await ceLoadMenu(); } catch (e) { console.warn('メニューの読み込みに失敗（商品の追加はできません）:', e.message); }
         ceState = { orderIds, orders, lines, dateStr, settled, payment: ceNormPay(orders[0].paymentMethod), pay0: ceNormPay(orders[0].paymentMethod), reason: '', busy: false };
         ceRender();
       } catch (e) {
@@ -7169,9 +7215,14 @@ ${fileName}`,
     window.ceSetPay = function(v) { ceState.payment = v; ceRender(); };
     window.ceSetReason = function(v) { ceState.reason = v; };
     window.ceRemoveAdded = function(i) { ceState.lines.splice(i, 1); ceRender(); };
+    window.ceAddSelChange = function() {
+      const sel = document.getElementById('ceAddSel'); const rateEl = document.getElementById('ceAddRate');
+      const m = (ceMenuCache || [])[parseInt(sel.value, 10)];
+      if (m && rateEl) rateEl.value = String(m.taxRate);
+    };
     window.ceAddItem = function() {
       const sel = document.getElementById('ceAddSel'); const qtyEl = document.getElementById('ceAddQty'); const rateEl = document.getElementById('ceAddRate');
-      const src = (typeof allMenuItems !== 'undefined' && allMenuItems.length) ? allMenuItems : ((typeof menuItems !== 'undefined' && Array.isArray(menuItems)) ? menuItems : []);
+      const src = ceMenuCache || [];
       const m = src[parseInt(sel.value, 10)];
       if (!m) { showCustomAlert('追加する商品を選んでください', '⚠️ 警告', '⚠️'); return; }
       const qty = Math.max(1, parseInt(qtyEl.value, 10) || 1); const rate = parseInt(rateEl.value, 10) === 8 ? 8 : 10;
@@ -7183,13 +7234,13 @@ ${fileName}`,
       const st = ceState; if (!st) return;
       const sm = ceSummary(st);
       const first = st.orders[0]; const paid = window.safeToDate(first.paidAt);
-      const src = (typeof allMenuItems !== 'undefined' && allMenuItems.length) ? allMenuItems : ((typeof menuItems !== 'undefined' && Array.isArray(menuItems)) ? menuItems : []);
-      const optHtml = src.map((m, i) => '<option value="' + i + '">' + ceEsc(m.name) + '（' + ceYen(m.price) + '）</option>').join('');
+      const src = ceMenuCache || [];
+      const optHtml = '<option value="">商品を選んでください</option>' + src.map((m, i) => '<option value="' + i + '">' + ceEsc(ceText(m.name)) + '（' + ceYen(m.price) + '・' + m.taxRate + '%）</option>').join('');
       const rows = st.lines.map((l, i) => {
         const gross = ceLineGross(l);
         const changed = l.added || l.qty !== l.qty0 || l.rate !== l.rate0;
         return '<tr style="border-top:1px solid #eee;' + (l.qty === 0 ? 'opacity:.45;' : '') + '">' +
-          '<td style="padding:8px 4px;font-size:13px;"><div style="color:#888;font-size:11px;">#' + ceEsc(l.orderNumber) + (l.added ? ' ・追加' : '') + '</div>' + ceEsc(l.name) + (l.toppings ? '<div style="font-size:11px;color:#666;">' + ceEsc(l.toppings) + '</div>' : '') + '</td>' +
+          '<td style="padding:8px 4px;font-size:13px;"><div style="color:#888;font-size:11px;">#' + ceEsc(l.orderNumber) + (l.added ? ' ・追加' : '') + '</div>' + ceEsc(ceText(l.name)) + (l.toppings ? '<div style="font-size:11px;color:#666;">' + ceEsc(ceText(l.toppings)) + '</div>' : '') + '</td>' +
           '<td style="padding:4px;"><select onchange="ceSetRate(' + i + ',this.value)" style="padding:6px;border:1px solid #ccc;border-radius:6px;"><option value="10"' + (l.rate === 10 ? ' selected' : '') + '>10%</option><option value="8"' + (l.rate === 8 ? ' selected' : '') + '>8%</option></select></td>' +
           '<td style="padding:4px;white-space:nowrap;"><button onclick="ceStep(' + i + ',-1)" style="width:32px;height:32px;border:none;border-radius:6px;background:#eee;font-size:18px;">−</button>' +
             '<input type="number" min="0" value="' + l.qty + '" onchange="ceSetQty(' + i + ',this.value)" style="width:52px;text-align:center;padding:6px;border:1px solid #ccc;border-radius:6px;margin:0 4px;">' +
@@ -7208,7 +7259,7 @@ ${fileName}`,
           Object.keys(cePayNames).map(k => '<option value="' + k + '"' + (st.payment === k ? ' selected' : '') + '>' + cePayNames[k] + '</option>').join('') + '</select></div>' +
         '<table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#888;text-align:left;"><th>商品</th><th>税率</th><th>数量（0で削除）</th><th style="text-align:right;">税込</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:12px 0;padding:10px;background:#f6f6f6;border-radius:8px;">' +
-          '<b style="font-size:13px;">商品を追加</b><select id="ceAddSel" style="flex:1;min-width:150px;padding:8px;border:1px solid #ccc;border-radius:6px;">' + optHtml + '</select>' +
+          '<b style="font-size:13px;">商品を追加</b><select id="ceAddSel" onchange="ceAddSelChange()" style="flex:1;min-width:150px;padding:8px;border:1px solid #ccc;border-radius:6px;">' + optHtml + '</select>' +
           '<input id="ceAddQty" type="number" min="1" value="1" style="width:56px;padding:8px;border:1px solid #ccc;border-radius:6px;text-align:center;">' +
           '<select id="ceAddRate" style="padding:8px;border:1px solid #ccc;border-radius:6px;"><option value="10">10%</option><option value="8">8%</option></select>' +
           '<button onclick="ceAddItem()" style="padding:9px 14px;background:#4CAF50;color:white;border:none;border-radius:8px;font-weight:bold;">追加</button></div>' +
@@ -7219,7 +7270,7 @@ ${fileName}`,
           '<div style="font-size:11px;color:#999;margin-top:6px;">※ 数量・税率区分を変えた行は、税込金額を計算し直します（レジで手入力した金額は、変えた行だけ計算値になります）。値引きの扱いは変わりません。</div></div>' +
         '<div style="margin-top:10px;"><input type="text" value="' + ceEsc(st.reason) + '" oninput="ceSetReason(this.value)" placeholder="修正の理由（例: 数量の打ち間違い）" style="width:100%;padding:10px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;"></div>' +
         (noLines ? '<div style="color:#c00;font-size:13px;margin-top:8px;">すべての商品が0です。会計全体を取り消すときは「赤伝票」を使ってください。</div>' : '') +
-        '<div style="display:flex;gap:10px;margin-top:14px;"><button onclick="ceClose()" style="flex:1;padding:14px;background:#9e9e9e;color:white;border:none;border-radius:10px;font-size:15px;font-weight:bold;">キャンセル</button>' +
+        '<div style="display:flex;gap:10px;margin-top:14px;position:sticky;bottom:-18px;background:#fff;padding:10px 0 4px;"><button onclick="ceClose()" style="flex:1;padding:14px;background:#9e9e9e;color:white;border:none;border-radius:10px;font-size:15px;font-weight:bold;">キャンセル</button>' +
         '<button onclick="ceConfirm()" ' + ((noLines || st.busy) ? 'disabled' : '') + ' style="flex:2;padding:14px;background:' + ((noLines || st.busy) ? '#bbb' : '#FF9800') + ';color:white;border:none;border-radius:10px;font-size:15px;font-weight:bold;">修正内容を確認して実行</button></div>' +
         '</div></div>';
       const old = document.getElementById('ceOverlay'); let scrollTop = 0;
@@ -7232,15 +7283,22 @@ ${fileName}`,
       const sm = ceSummary(st);
       const changes = [];
       st.lines.forEach(l => {
-        if (l.added) changes.push('追加: ' + l.name + ' ×' + l.qty);
-        else if (l.qty <= 0) changes.push('削除: ' + l.name + '（#' + l.orderNumber + '）');
-        else if (l.qty !== l.qty0) changes.push('数量: ' + l.name + ' ' + l.qty0 + ' → ' + l.qty);
-        if (!l.added && l.qty > 0 && l.rate !== l.rate0) changes.push('税率: ' + l.name + ' ' + l.rate0 + '% → ' + l.rate + '%');
+        const nm = ceText(l.name);
+        if (l.added) changes.push('追加　' + nm + ' ×' + l.qty);
+        else if (l.qty <= 0) changes.push('削除　' + nm + '（#' + l.orderNumber + '）');
+        else if (l.qty !== l.qty0) changes.push('数量　' + nm + '　' + l.qty0 + ' → ' + l.qty);
+        if (!l.added && l.qty > 0 && l.rate !== l.rate0) changes.push('税率　' + nm + '　' + l.rate0 + '% → ' + l.rate + '%');
       });
-      if (st.payment !== st.pay0) changes.push('支払方法: ' + cePayNames[st.pay0] + ' → ' + cePayNames[st.payment]);
+      if (st.payment !== st.pay0) changes.push('支払方法　' + cePayNames[st.pay0] + ' → ' + cePayNames[st.payment]);
       if (!changes.length) { showCustomAlert('変更がありません', '⚠️ 警告', '⚠️'); return; }
-      const msg = '次の内容で会計を修正します。\n\n' + changes.join('\n') + '\n\n合計: ' + ceYen(sm.oldTotal) + ' → ' + ceYen(sm.newTotal) + '\n営業日 ' + st.dateStr + ' の売上・消費税を、この差額で直します。' + (st.settled ? '\n\n⚠️ この日は精算済みです。精算ジャーナルと金額が合わなくなります。' : '') + '\n\nよろしいですか？（元の内容は修正履歴に残ります）';
-      if (!window.confirm(msg)) return;
+      const diff = sm.newTotal - sm.oldTotal;
+      const ok = await window.__styledConfirm({
+        icon: '🧾', title: '会計を修正します', subtitle: '営業日 ' + st.dateStr + ' の売上・消費税を、この差額で直します',
+        rows: changes.concat([{ label: '合計', value: ceYen(sm.oldTotal) + ' → ' + ceYen(sm.newTotal) + '（' + (diff >= 0 ? '+' : '') + Math.round(diff).toLocaleString() + '円）' }]),
+        warn: st.settled ? 'この日は精算（レジ締め）済みです。すでに出力した精算ジャーナルと金額が合わなくなります。' : '',
+        note: '元の内容は修正履歴に残ります', okText: '修正を実行', okColor: '#FF9800'
+      });
+      if (!ok) return;
       st.busy = true; ceRender();
       try { await ceExecute(st, sm); }
       catch (e) {
@@ -7520,7 +7578,8 @@ ${fileName}`,
         bagNeeded: bagQuantity > 0,
         bagQuantity: bagQuantity,
         bagPrice: bagPrice,
-        paymentMethod: first.paymentMethod || ''
+        paymentMethod: first.paymentMethod || '',
+        edited: orders.some(o => o.edited)
       };
     }
     async function historyAlert(title, message) {
@@ -9885,6 +9944,12 @@ saveFileWebViewSafe(_imgData, `精算ジャーナル_${dateStr}.png`, 'image/png
         if (d.success) {
           el.textContent = '現在の接続先名: ' + d.ssid;
           const nn = document.getElementById('apNewSsid'); if (nn && !nn.value) nn.value = d.ssid;
+          if (d.lastChange && d.lastChange.ok === false) {
+            const w = document.createElement('div');
+            w.style.cssText = 'margin-top:8px;padding:10px;background:#f8d7da;color:#721c24;border-radius:8px;font-size:13px;line-height:1.6;';
+            w.textContent = '⚠️ 前回の変更（' + new Date(d.lastChange.at).toLocaleString('ja-JP') + '）は、新しい設定で起動できなかったため、元の設定に戻しました。' + (d.lastChange.reasons ? '（' + d.lastChange.reasons.join(' / ') + '）' : '');
+            el.appendChild(w);
+          }
         } else { el.textContent = '現在の接続先名: 取得できませんでした'; }
       } catch (e) { el.textContent = '現在の接続先名: 取得できませんでした（Raspberry Piに接続できません）'; }
     };
@@ -9905,11 +9970,13 @@ saveFileWebViewSafe(_imgData, `精算ジャーナル_${dateStr}.png`, 'image/png
         const plan = await post({ dryRun: true });
         if (!plan.success) { show('#f8d7da', '#721c24', '❌ ' + window.__escHtml(plan.error || '確認に失敗しました')); return; }
         const p = plan.plan;
-        const msg = '次の内容に変更します。\n\n' +
-          '接続先名: ' + p.currentSsid + (p.ssidChanged ? ' → ' + p.newSsid : '（変更なし）') + '\n' +
-          'パスワード: ' + (p.passwordChanged ? '変更する' : '変更なし') + '\n\n' +
-          '変更するとWi-Fiが一度切れます。新しい接続先名・パスワードで、タブレットやスマホのWi-Fiをつなぎ直してください。\n\nよろしいですか？';
-        if (!window.confirm(msg)) { show('#e2e3e5', '#41464b', '変更をやめました'); return; }
+        const okAp = await window.__styledConfirm({
+          icon: '📶', title: 'レジのWi-Fiを変更します', subtitle: 'Raspberry Pi自身のWi-Fi（接続先名・パスワード）',
+          rows: [{ label: '接続先名', value: p.currentSsid + (p.ssidChanged ? ' → ' + p.newSsid : '（変更なし）') }, { label: 'パスワード', value: p.passwordChanged ? '変更する' : '変更なし' }],
+          warn: '変更するとWi-Fiが一度切れます。新しい接続先名・パスワードで、タブレットやスマホのWi-Fiをつなぎ直してください。',
+          okText: '変更する', okColor: '#f57c00'
+        });
+        if (!okAp) { show('#e2e3e5', '#41464b', '変更をやめました'); return; }
         show('#cff4fc', '#055160', '⏳ 変更中...');
         const done = await post({});
         if (done.success) {

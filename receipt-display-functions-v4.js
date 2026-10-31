@@ -327,6 +327,7 @@ async function showReceiptDisplay(receiptData) {
       <div style="text-align: center; margin: 15px 0;">
         <div style="font-size: 12px; color: #666;">日時: ${dateStr}</div>
         <div style="font-size: 12px; color: #666; margin-top: 3px;">注文番号: #${orderNum}</div>
+        ${receiptData.edited ? `<div style="font-size: 12px; color: #e65100; margin-top: 3px; font-weight: bold;">【修正済】この会計は修正されています</div>` : ''}
         ${receiptData.tableNumber && receiptData.tableNumber !== '即会計' ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">テーブル: ${receiptData.tableNumber}</div>` : ''}
         ${receiptData.paymentMethod ? `<div style="font-size: 12px; color: #666; margin-top: 3px;">支払方法: ${receiptData.paymentMethod}</div>` : ''}
       </div>
@@ -626,6 +627,7 @@ async function showInvoiceDisplay(invoiceData) {
           <span style="display: inline-block; width: 100px;">注文番号</span>
           <span>#${orderNum}</span>
         </div>
+        ${invoiceData.edited ? `<div style="margin: 10px 0; color: #e65100; font-weight: bold;">【修正済】この会計は修正されています</div>` : ''}
         ${invoiceData.tableNumber && invoiceData.tableNumber !== '即会計' ? `<div style="margin: 10px 0;">
           <span style="display: inline-block; width: 100px;">テーブル</span>
           <span>${invoiceData.tableNumber}</span>
