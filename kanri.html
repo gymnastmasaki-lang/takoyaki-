@@ -7721,6 +7721,183 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     const [loading, setLoading] = useState(true);
     const [restoring, setRestoring] = useState(false);
     const [restoreProgress, setRestoreProgress] = useState(null); // 🆕 復元進捗 {percent, label} | null
+
+    // 🆕 復元対象の選択（チェックボタン）
+    // 復元時に、バックアップ内の項目ごとに「復元する／しない」を選べる。
+    // 商品・トッピング・テーブルは、復元前に「削除される件数」を確認（ドライラン表示）してから実行する。
+    const [restorePicker, setRestorePicker] = useState(null); // { source, data, info, selection, preview, previewing }
+    const RESTORE_SETTING_KEYS = [
+        ['receipt_settings', 'レシート設定'],
+        ['inventory_settings', '在庫設定'],
+        ['alert_settings', 'アラート設定'],
+        ['business_hours', '営業時間設定'],
+        ['table_settings', 'テーブル設定'],
+        ['status_display_settings', 'ステータス表示設定'],
+        ['payroll_settings', '給与計算設定'],
+        ['tax_rate_settings', '消費税率設定']
+    ];
+    const RESTORE_GROUPS = [
+        { key: 'menus', label: '商品（メニュー）', section: 'mirror', count: d => (d.menus || []).length, unit: '件' },
+        { key: 'toppings', label: 'トッピング', section: 'mirror', count: d => ((d.menu_settings && d.menu_settings.toppings) || []).length, unit: '件' },
+        { key: 'tables', label: 'テーブル', section: 'mirror', count: d => (d.tables || []).length, unit: '件' },
+        { key: 'menu_settings', label: '商品カテゴリ設定', section: 'settings', count: d => (d.menu_settings ? 1 : 0), unit: '' }
+    ].concat(RESTORE_SETTING_KEYS.map(([k, label]) => ({ key: k, label: label, section: 'settings', count: d => (d[k] ? 1 : 0), unit: '' }))).concat([
+        { key: 'employees', label: '従業員', section: 'record', count: d => (d.employees || []).length, unit: '名' },
+        { key: 'orders', label: '注文履歴（売上）', section: 'record', count: d => (d.orders || []).length, unit: '件' },
+        { key: 'attendance', label: '勤怠', section: 'record', count: d => (d.attendance || []).length, unit: '件' },
+        { key: 'receipts', label: '経費レシート', section: 'record', count: d => (d.receipts || []).length, unit: '件' },
+        { key: 'expenses', label: '支出', section: 'record', count: d => (d.expenses || []).length, unit: '件' }
+    ]);
+    // 選択された項目だけを残したdataと、applyRestoreDataに渡すオプションを作る
+    const filterRestoreData = (data, sel) => {
+        const out = {};
+        const opts = {};
+        ['menus', 'tables', 'employees', 'orders', 'attendance', 'receipts', 'expenses'].forEach(k => { if (sel[k]) out[k] = data[k]; });
+        RESTORE_SETTING_KEYS.forEach(([k]) => { if (sel[k]) out[k] = data[k]; });
+        if (sel.menu_settings || sel.toppings) {
+            out.menu_settings = data.menu_settings;
+            if (!sel.menu_settings) opts.skipMenuSettingsDoc = true;
+            if (!sel.toppings) opts.skipToppings = true;
+        }
+        return { filtered: out, opts: opts };
+    };
+    // ドライラン: 実際には何も書き換えず、商品・トッピング・テーブルで削除/追加/上書きされる件数を数える
+    const computeRestorePreview = async (data) => {
+        const { getDocs } = window.firebaseModules;
+        const result = {};
+        const targets = [
+            ['menus', 'menus', data.menus || []],
+            ['toppings', 'toppings', (data.menu_settings && data.menu_settings.toppings) || []],
+            ['tables', 'tables', data.tables || []]
+        ];
+        for (const [key, col, backupDocs] of targets) {
+            const snap = await getDocs(window.getStoreCollection(col));
+            const current = [];
+            snap.forEach(d => { const dd = d.data() || {}; current.push({ id: d.id, name: String(dd.name || '') }); });
+            const backupIds = new Set(backupDocs.map(d => d.id));
+            const currentIds = new Set(current.map(c => c.id));
+            // backup側が0件のときは削除処理自体を行わない（applyRestoreDataの mirrorCollection と同じ条件）
+            const toDelete = backupDocs.length > 0 ? current.filter(c => !backupIds.has(c.id)) : [];
+            result[key] = {
+                current: current.length,
+                backup: backupDocs.length,
+                deleteCount: toDelete.length,
+                deleteNames: toDelete.slice(0, 8).map(c => c.name || c.id),
+                addCount: backupDocs.filter(d => !currentIds.has(d.id)).length,
+                overwriteCount: backupDocs.filter(d => currentIds.has(d.id)).length
+            };
+        }
+        return result;
+    };
+    const openRestorePicker = async (source, data, info) => {
+        const selection = {};
+        RESTORE_GROUPS.forEach(g => { selection[g.key] = g.count(data) > 0; });
+        setRestorePicker({ source: source, data: data, info: info, selection: selection, preview: null, previewing: true });
+        let preview = null;
+        try { preview = await computeRestorePreview(data); }
+        catch (e) { console.warn('復元プレビューの取得に失敗:', e.message); preview = { error: e.message }; }
+        setRestorePicker(prev => (prev && prev.data === data) ? Object.assign({}, prev, { preview: preview, previewing: false }) : prev);
+    };
+    const toggleRestoreGroup = (key) => {
+        setRestorePicker(prev => prev ? Object.assign({}, prev, { selection: Object.assign({}, prev.selection, { [key]: !prev.selection[key] }) }) : prev);
+    };
+    const setRestorePreset = (name) => {
+        setRestorePicker(prev => {
+            if (!prev) return prev;
+            const selection = {};
+            RESTORE_GROUPS.forEach(g => {
+                const available = g.count(prev.data) > 0;
+                selection[g.key] = available && (name === 'all' || (name === 'menuOnly' && (g.key === 'menus' || g.key === 'toppings')));
+            });
+            return Object.assign({}, prev, { selection: selection });
+        });
+    };
+    const executeRestoreFromPicker = async () => {
+        const picker = restorePicker;
+        if (!picker) return;
+        const selectedKeys = RESTORE_GROUPS.filter(g => picker.selection[g.key]).map(g => g.key);
+        if (selectedKeys.length === 0) {
+            showCustomAlert('復元する項目が選択されていません', '確認', 'ℹ️');
+            return;
+        }
+        if (picker.previewing) {
+            showCustomAlert('削除される件数を確認中です。数秒待ってからもう一度押してください', '確認', 'ℹ️');
+            return;
+        }
+        const { filtered, opts } = filterRestoreData(picker.data, picker.selection);
+        let deleteTotal = 0;
+        if (picker.preview && !picker.preview.error) {
+            ['menus', 'toppings', 'tables'].forEach(k => { if (picker.selection[k] && picker.preview[k]) deleteTotal += picker.preview[k].deleteCount; });
+        }
+        let warn = '';
+        if (picker.preview && picker.preview.error) {
+            warn = '削除される件数の事前確認に失敗しました（' + picker.preview.error + '）。\n\nバックアップにない商品・トッピング・テーブルは削除される場合があります。このまま復元しますか？';
+        }
+        else if (deleteTotal > 0) {
+            warn = '選択した項目の復元で、現在のデータのうち ' + deleteTotal + ' 件が削除されます（バックアップに存在しないため）。\n\n続けますか？';
+        }
+        if (warn) {
+            const okDelete = await showCustomConfirm(warn, '削除を含む復元', '復元する', 'キャンセル');
+            if (!okDelete) return;
+        }
+        const isFile = picker.source === 'file';
+        setRestorePicker(null);
+        if (isFile) setImporting(true); else setRestoring(true);
+        setRestoreProgress({ percent: 0, label: '準備中' });
+        try {
+            await applyRestoreData(filtered, (percent, label) => setRestoreProgress({ percent: percent, label: label }), opts);
+            if (isFile) { setImporting(false); setImportPreview(null); } else { setRestoring(false); }
+            setRestoreProgress(null);
+            showCustomAlert((isFile ? 'ファイル' : 'バックアップ') + 'からの復元が完了しました\n\nページを再読み込みしてください。', '復元完了', '✅');
+            setTimeout(() => { window.location.reload(); }, 2000);
+        }
+        catch (error) {
+            console.error('復元エラー:', error);
+            if (isFile) setImporting(false); else setRestoring(false);
+            setRestoreProgress(null);
+            showCustomAlert('復元に失敗しました: ' + error.message, 'エラー', '❌');
+        }
+    };
+    const renderRestorePickerModal = () => {
+        const p = restorePicker;
+        if (!p) return null;
+        const sections = [
+            ['mirror', '商品・トッピング・テーブル（バックアップにないものは現在のデータから削除されます）'],
+            ['settings', '各種設定（バックアップの内容で上書きされます）'],
+            ['record', '実績データ（上書き・追加のみ。現在のデータは削除されません）']
+        ];
+        const previewLine = (g) => {
+            if (g.section !== 'mirror' || !p.selection[g.key]) return null;
+            if (p.previewing) return React.createElement("div", { className: "text-xs text-gray-500 ml-6" }, '現在のデータと比較中…');
+            const pv = p.preview && p.preview[g.key];
+            if (!pv) return null;
+            const parts = ['現在 ' + pv.current + '件 / バックアップ ' + pv.backup + '件', '追加 ' + pv.addCount + '件', '上書き ' + pv.overwriteCount + '件'];
+            return React.createElement("div", { className: "text-xs ml-6 " + (pv.deleteCount > 0 ? "text-red-600 font-bold" : "text-gray-500") },
+                parts.join(' ／ ') + ' ／ 削除 ' + pv.deleteCount + '件' + (pv.deleteCount > 0 ? '（' + pv.deleteNames.join('、') + (pv.deleteCount > pv.deleteNames.length ? ' ほか' : '') + '）' : ''));
+        };
+        const selectedCount = RESTORE_GROUPS.filter(g => p.selection[g.key]).length;
+        return React.createElement("div", { style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' } },
+            React.createElement("div", { className: "bg-white rounded-lg shadow-xl w-full", style: { maxWidth: '640px', maxHeight: '90vh', overflowY: 'auto', padding: '20px' } },
+                React.createElement("h3", { className: "text-lg font-bold mb-1" }, '復元する項目を選択'),
+                React.createElement("div", { className: "text-xs text-gray-600 mb-3" }, p.info),
+                React.createElement("div", { className: "flex flex-wrap gap-2 mb-3" },
+                    React.createElement("button", { onClick: () => setRestorePreset('all'), className: "px-3 py-1 text-xs bg-gray-200 rounded hover:bg-gray-300" }, '全選択'),
+                    React.createElement("button", { onClick: () => setRestorePreset('none'), className: "px-3 py-1 text-xs bg-gray-200 rounded hover:bg-gray-300" }, '全解除'),
+                    React.createElement("button", { onClick: () => setRestorePreset('menuOnly'), className: "px-3 py-1 text-xs bg-blue-100 text-blue-800 rounded hover:bg-blue-200" }, '商品・トッピングのみ')),
+                sections.map(([sec, title]) => React.createElement("div", { key: sec, className: "mb-3" },
+                    React.createElement("div", { className: "text-xs font-bold text-gray-700 mb-1" }, title),
+                    RESTORE_GROUPS.filter(g => g.section === sec).map(g => {
+                        const n = g.count(p.data);
+                        return React.createElement("div", { key: g.key, className: "mb-1" },
+                            React.createElement("label", { className: "flex items-center text-sm " + (n === 0 ? "text-gray-400" : "") },
+                                React.createElement("input", { type: "checkbox", className: "mr-2", checked: !!p.selection[g.key], disabled: n === 0, onChange: () => toggleRestoreGroup(g.key) }),
+                                g.label + (g.unit ? '（' + n + g.unit + '）' : (n === 0 ? '（なし）' : ''))),
+                            previewLine(g));
+                    }))),
+                React.createElement("div", { className: "flex justify-end gap-2 mt-4" },
+                    React.createElement("button", { onClick: () => setRestorePicker(null), className: "px-4 py-2 text-sm bg-gray-200 rounded hover:bg-gray-300" }, 'キャンセル'),
+                    React.createElement("button", { onClick: executeRestoreFromPicker, disabled: selectedCount === 0 || p.previewing, className: "px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50" }, '選択した' + selectedCount + '項目を復元する'))));
+    };
     const [creating, setCreating] = useState(false);
     // 🆕 ファイル書き出し・ファイルからの復元用
     const [exportingId, setExportingId] = useState(null);
@@ -8450,7 +8627,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     };
     // 🆕 組み立て済みのdataオブジェクトを実際にFirestoreへ書き込む（復元本体）
     // Firestoreのチャンクから来たデータでも、アップロードされたファイルから来たデータでも共通で使う
-    const applyRestoreData = async (data, onProgress) => {
+    const applyRestoreData = async (data, onProgress, opts = {}) => {
         const { setDoc, doc, getDocs, deleteDoc } = window.firebaseModules;
         // 🆕 進捗計算用: 全体の作業量（件数ベース）を先に見積もっておく
         const settingsKeys = ['receipt_settings', 'menu_settings', 'inventory_settings', 'alert_settings', 'business_hours', 'table_settings', 'status_display_settings', 'payroll_settings', 'tax_rate_settings'];
@@ -8630,9 +8807,9 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
                 const toppings = menuSettingsData.toppings || [];
                 delete menuSettingsData.toppings;
                 // menu_settingsを復元
-                await setDoc(menuSettingsRef, menuSettingsData);
+                if (!opts.skipMenuSettingsDoc) await setDoc(menuSettingsRef, menuSettingsData);
                 // トッピングを復元（ID基準の完全ミラー）
-                await mirrorCollection('toppings', toppings, false, () => reportProgress('トッピング'));
+                if (!opts.skipToppings) await mirrorCollection('toppings', toppings, false, () => reportProgress('トッピング'));
                 settingsRestoredCount++;
                 reportProgress('商品カテゴリ設定');
                 console.log('✅ 商品カテゴリ設定復元');
@@ -8744,32 +8921,21 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
 // バックアップ一覧からの復元（Firestore上のバックアップを直接復元）
     const restoreBackup = async (backup) => {
         try {
-            // カスタム確認ダイアログを表示
-            const memoInfo = backup.memo ? `\nメモ: ${backup.memo}` : '';
-            const confirmResult = await showCustomConfirm(`このバックアップから復元しますか？\n\n作成日時: ${backup.timestamp.toLocaleString('ja-JP')}\nタイプ: ${backup.type === 'auto' ? '自動' : '手動'}${memoInfo}\n\n警告: 現在のデータは上書きされます！`, 'バックアップ復元', '復元する', 'キャンセル');
-            if (!confirmResult)
-                return;
+            // 🆕 復元対象をチェックボタンで選べるようにした。ここではバックアップを読み込んで選択画面を開くだけで、書き込みは行わない
             setRestoring(true);
-            setRestoreProgress({ percent: 0, label: '準備中' });
-            console.log('🔄 バックアップ復元開始:', backup.id);
+            setRestoreProgress({ percent: 0, label: 'バックアップを読み込み中' });
+            console.log('🔄 バックアップ読み込み開始:', backup.id);
             const data = await loadBackupData(backup);
+            setRestoring(false);
+            setRestoreProgress(null);
             // 🆕 チャンクの一部が見つからなかった場合は続行するか確認する
             if (data._missingChunks && data._missingChunks.length > 0) {
                 const proceedAnyway = await showCustomConfirm(`このバックアップの一部データが見つかりませんでした（${data._missingChunks.join(', ')}）。\n\n見つからなかった項目は復元されません。このまま続けますか？`, 'データ欠損の警告', '続行する', '中止');
-                if (!proceedAnyway) {
-                    setRestoring(false);
-                    setRestoreProgress(null);
+                if (!proceedAnyway)
                     return;
-                }
             }
-            await applyRestoreData(data, (percent, label) => setRestoreProgress({ percent, label }));
-            setRestoring(false);
-            setRestoreProgress(null);
-            showCustomAlert('バックアップからの復元が完了しました\n\nページを再読み込みしてください。', '復元完了');
-            // ページをリロード
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
+            const memoInfo = backup.memo ? ` / メモ: ${backup.memo}` : '';
+            await openRestorePicker('backup', data, `作成日時: ${backup.timestamp.toLocaleString('ja-JP')} / タイプ: ${backup.type === 'auto' ? '自動' : '手動'}${memoInfo}`);
         }
         catch (error) {
             console.error('復元エラー:', error);
@@ -8846,29 +9012,10 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
     const runImportedRestore = async () => {
         if (!importPreview)
             return;
-        try {
-            const tsText = importPreview.timestamp ? new Date(importPreview.timestamp).toLocaleString('ja-JP') : '不明';
-            const memoInfo = importPreview.memo ? `\nメモ: ${importPreview.memo}` : '';
-            const confirmResult = await showCustomConfirm(`このファイルから復元しますか？\n\n作成日時: ${tsText}\n店舗ID: ${importPreview.storeId || '不明'}${memoInfo}\n\n警告: 現在のデータは上書きされます！`, 'ファイルから復元', '復元する', 'キャンセル');
-            if (!confirmResult)
-                return;
-            setImporting(true);
-            setRestoreProgress({ percent: 0, label: '準備中' });
-            await applyRestoreData(importPreview.data, (percent, label) => setRestoreProgress({ percent, label }));
-            setImporting(false);
-            setRestoreProgress(null);
-            setImportPreview(null);
-            showCustomAlert('ファイルからの復元が完了しました\n\nページを再読み込みしてください。', '復元完了', '✅');
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
-        }
-        catch (error) {
-            console.error('ファイル復元エラー:', error);
-            setImporting(false);
-            setRestoreProgress(null);
-            showCustomAlert('復元に失敗しました: ' + error.message, 'エラー', '❌');
-        }
+        // 🆕 復元対象をチェックボタンで選べるようにした。ここでは選択画面を開くだけで、書き込みは行わない
+        const tsText = importPreview.timestamp ? new Date(importPreview.timestamp).toLocaleString('ja-JP') : '不明';
+        const memoInfo = importPreview.memo ? ` / メモ: ${importPreview.memo}` : '';
+        await openRestorePicker('file', importPreview.data || {}, `作成日時: ${tsText} / 店舗ID: ${importPreview.storeId || '不明'}${memoInfo}`);
     };
     // 🆕 商品・従業員の重複（同名）をチェックする
     // 商品にはcreatedAtがあるため新しい順に自動で「削除候補」をチェック済みにする。
@@ -8986,6 +9133,7 @@ const BackupManagement = ({ currentStoreId, showCustomConfirm, showCustomAlert }
         }
     };
     return (React.createElement("div", { className: "space-y-6" },
+        restorePicker && renderRestorePickerModal(),
         React.createElement("div", { className: "bg-blue-50 border-2 border-blue-300 rounded-lg p-4" },
             React.createElement("h3", { className: "text-lg font-bold text-blue-700 mb-2" }, "\u30D0\u30C3\u30AF\u30A2\u30C3\u30D7\u306B\u3064\u3044\u3066"),
             React.createElement("ul", { className: "text-sm text-blue-600 space-y-1 list-disc list-inside" },
