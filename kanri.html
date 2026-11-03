@@ -486,6 +486,321 @@ const AdminSystem = () => {
     });
     const [editingProductId, setEditingProductId] = useState(null);
     const [productToppingSets, setProductToppingSets] = useState([]);
+
+    // ===== 🆕 トッピング管理（共通トッピング）=====
+    // 商品ごとに同じトッピングを何十件も作る代わりに、共通の一覧（toppingsコレクション）に1件ずつ作り、
+    // 商品の登録・編集ではチェックして選ぶ。商品には従来どおり toppingSets（名前・価格）を持たせるので、POS・menuの表示は変わらない。
+    const [toppingLibrary, setToppingLibrary] = useState([]);
+    const [showToppingManager, setShowToppingManager] = useState(false);
+    const [toppingUsage, setToppingUsage] = useState({}); // 共通トッピングのdocId -> 使っている商品数
+    const [toppingMgrBusy, setToppingMgrBusy] = useState(false);
+    const [toppingMgrMsg, setToppingMgrMsg] = useState('');
+    const [newToppingName, setNewToppingName] = useState('');
+    const [newToppingPrice, setNewToppingPrice] = useState('');
+    const [editingToppingDocId, setEditingToppingDocId] = useState(null);
+    const [editingToppingForm, setEditingToppingForm] = useState({ name: '', price: '' });
+    const [dedupePlan, setDedupePlan] = useState(null);
+    const toppingKey = (name, price) => String(name || '').trim() + '|' + (parseInt(price) || 0);
+    // 商品のトッピング項目が、共通トッピングのこの項目と同じものか（idが一致、または名前・価格が一致）
+    const optionMatchesTopping = (opt, t) => !!opt && ((opt.id && opt.id === t.id) || toppingKey(opt.name, opt.price) === toppingKey(t.name, t.price));
+    const sortToppingLibrary = (items) => items.slice().sort((a, b) => {
+        const ao = Number.isFinite(a.order) ? a.order : 1e9;
+        const bo = Number.isFinite(b.order) ? b.order : 1e9;
+        if (ao !== bo) return ao - bo;
+        return String(a.id).localeCompare(String(b.id));
+    });
+    // 同じ名前・価格が重複している場合は、チェックボックスには1件だけ出す
+    const uniqueToppings = (lib) => {
+        const seen = new Set();
+        return lib.filter(t => { const k = toppingKey(t.name, t.price); if (seen.has(k)) return false; seen.add(k); return true; });
+    };
+    // 名前が空の項目と、項目が1つも無いセットは保存しない
+    const cleanToppingSets = (sets) => (sets || [])
+        .map(set => ({ ...set, options: (set.options || []).filter(o => o && String(o.name || '').trim() !== '') }))
+        .filter(set => set.name && set.options.length > 0);
+    // 商品の toppingsId には、共通トッピング由来の項目のIDだけを保存する
+    const toppingIdListOf = (sets) => sets.flatMap(set => set.options.map(o => o.id).filter(Boolean));
+    const loadToppingLibrary = async () => {
+        try {
+            const snap = await window.firebaseModules.getDocs(window.getStoreCollection('toppings'));
+            const items = [];
+            snap.forEach(d => {
+                const x = d.data() || {};
+                items.push({ docId: d.id, id: x.id || d.id, name: String(x.name || ''), price: parseInt(x.price) || 0, order: parseInt(x.order) });
+            });
+            const sorted = sortToppingLibrary(items);
+            setToppingLibrary(sorted);
+            return sorted;
+        }
+        catch (e) {
+            console.warn('トッピング一覧の読み込みに失敗:', e.message);
+            return [];
+        }
+    };
+    const loadMenusForTopping = async () => {
+        const snap = await window.firebaseModules.getDocs(window.getStoreCollection('menus'));
+        const list = [];
+        snap.forEach(d => { list.push({ docId: d.id, data: d.data() || {} }); });
+        return list;
+    };
+    const menuUsesTopping = (m, t) => (m.data.toppingSets || []).some(s => (s.options || []).some(o => optionMatchesTopping(o, t)));
+    const refreshToppingManager = async () => {
+        const lib = await loadToppingLibrary();
+        try {
+            const menus = await loadMenusForTopping();
+            const usage = {};
+            lib.forEach(t => { usage[t.docId] = menus.filter(m => menuUsesTopping(m, t)).length; });
+            setToppingUsage(usage);
+        }
+        catch (e) { console.warn('トッピングの使用状況の取得に失敗:', e.message); }
+        return lib;
+    };
+    const openToppingManager = async () => {
+        setShowToppingManager(true);
+        setToppingMgrMsg('');
+        setDedupePlan(null);
+        setEditingToppingDocId(null);
+        setToppingMgrBusy(true);
+        try { await refreshToppingManager(); }
+        finally { setToppingMgrBusy(false); }
+    };
+    // 商品の登録・編集の画面を開いたときに、共通トッピングを読み込む
+    useEffect(() => {
+        if ((showProductRegistration || showProductEdit) && !showToppingManager) loadToppingLibrary();
+    }, [showProductRegistration, showProductEdit]);
+    // 商品のトッピングセットに、共通トッピングの項目を追加する／外す（チェックボックス）
+    const toggleLibraryTopping = (setIndex, t) => {
+        const newSets = productToppingSets.map(s => ({ ...s, options: (s.options || []).slice() }));
+        const opts = newSets[setIndex].options;
+        const idx = opts.findIndex(o => optionMatchesTopping(o, t));
+        if (idx >= 0) {
+            opts.splice(idx, 1);
+        }
+        else {
+            // セットを作った直後に入っている空の行は、選んだ項目に置き換える
+            newSets[setIndex].options = opts.filter(o => String(o.name || '').trim() !== '');
+            newSets[setIndex].options.push({ id: t.id, name: t.name, price: t.price });
+        }
+        setProductToppingSets(newSets);
+    };
+    const renderToppingPicker = (setIndex, set) => {
+        const items = uniqueToppings(toppingLibrary);
+        return React.createElement("div", { className: "bg-blue-50 p-3 rounded" },
+            React.createElement("label", { className: "block text-sm font-bold mb-1" }, "共通トッピングから選ぶ"),
+            items.length === 0
+                ? React.createElement("div", { className: "text-xs text-gray-500" }, "共通トッピングがまだありません。「トッピング管理」で作成すると、ここにチェックボックスで表示されます。")
+                : React.createElement("div", { className: "flex flex-wrap gap-1" }, items.map(t => {
+                    const checked = (set.options || []).some(o => optionMatchesTopping(o, t));
+                    return React.createElement("label", { key: t.docId, className: "inline-flex items-center px-2 py-1 rounded border text-sm cursor-pointer " + (checked ? "bg-blue-100 border-blue-400" : "bg-white") },
+                        React.createElement("input", { type: "checkbox", className: "mr-1", checked: checked, onChange: () => toggleLibraryTopping(setIndex, t) }),
+                        t.name + (t.price ? " +" + t.price + "円" : ""));
+                })),
+            React.createElement("div", { className: "text-xs text-gray-500 mt-1" }, "チェックを全部外すと、トッピングなしになります"));
+    };
+    const nextToppingNumber = (library) => {
+        let maxNum = 15;
+        library.forEach(t => {
+            if (String(t.id).startsWith('T')) {
+                const n = parseInt(String(t.id).substring(1));
+                if (n > maxNum) maxNum = n;
+            }
+        });
+        return maxNum + 1;
+    };
+    const addToppingToLibrary = async () => {
+        const name = newToppingName.trim();
+        const price = parseInt(newToppingPrice) || 0;
+        if (!name) { showCustomAlertFunc('トッピング名を入力してください', '⚠️ 入力エラー', '⚠️'); return; }
+        if (toppingLibrary.some(t => toppingKey(t.name, t.price) === toppingKey(name, price))) {
+            showCustomAlertFunc('同じ名前・価格のトッピングが既にあります', '⚠️ 入力エラー', '⚠️');
+            return;
+        }
+        setToppingMgrBusy(true);
+        try {
+            const num = nextToppingNumber(toppingLibrary);
+            const id = 'T' + String(num).padStart(4, '0');
+            // ドキュメントIDも論理ID（T0001形式）にそろえる（バックアップの復元でIDが一致するように）
+            await window.firebaseModules.setDoc(window.getStoreDoc('toppings', id), { id: id, name: name, price: price, order: num });
+            setNewToppingName('');
+            setNewToppingPrice('');
+            await refreshToppingManager();
+        }
+        catch (e) { showCustomAlertFunc('追加に失敗しました: ' + e.message, '❌ エラー', '❌'); }
+        finally { setToppingMgrBusy(false); }
+    };
+    const startEditTopping = (t) => {
+        setEditingToppingDocId(t.docId);
+        setEditingToppingForm({ name: t.name, price: String(t.price) });
+    };
+    const saveEditTopping = async (t) => {
+        const name = editingToppingForm.name.trim();
+        const price = parseInt(editingToppingForm.price) || 0;
+        if (!name) { showCustomAlertFunc('トッピング名を入力してください', '⚠️ 入力エラー', '⚠️'); return; }
+        if (name === t.name && price === t.price) { setEditingToppingDocId(null); return; }
+        if (toppingLibrary.some(x => x.docId !== t.docId && toppingKey(x.name, x.price) === toppingKey(name, price))) {
+            showCustomAlertFunc('同じ名前・価格のトッピングが既にあります', '⚠️ 入力エラー', '⚠️');
+            return;
+        }
+        setToppingMgrBusy(true);
+        try {
+            const menus = await loadMenusForTopping();
+            const affected = menus.filter(m => menuUsesTopping(m, t));
+            if (affected.length > 0) {
+                const ok = await showCustomConfirmFunc('「' + t.name + '」（' + t.price + '円）を使っている商品が ' + affected.length + ' 件あります。\n\n商品側も「' + name + '」（' + price + '円）に更新します。よろしいですか？', 'トッピングの変更', '更新する', 'キャンセル');
+                if (!ok) return;
+            }
+            for (const m of affected) {
+                const newSets = m.data.toppingSets.map(s => ({ ...s, options: (s.options || []).map(o => optionMatchesTopping(o, t) ? { ...o, id: t.id, name: name, price: price } : o) }));
+                await window.firebaseModules.updateDoc(window.getStoreDoc('menus', m.docId), { toppingSets: newSets });
+            }
+            await window.firebaseModules.updateDoc(window.getStoreDoc('toppings', t.docId), { name: name, price: price });
+            setEditingToppingDocId(null);
+            await refreshToppingManager();
+        }
+        catch (e) { showCustomAlertFunc('更新に失敗しました: ' + e.message, '❌ エラー', '❌'); }
+        finally { setToppingMgrBusy(false); }
+    };
+    const deleteToppingFromLibrary = async (t) => {
+        const used = toppingUsage[t.docId] || 0;
+        const ok = await showCustomConfirmFunc('「' + t.name + '」を共通トッピングから削除します。' + (used > 0 ? '\n\n' + used + ' 件の商品に同じトッピングが入っていますが、商品側は変更されません（商品から外すには、商品編集で外してください）。' : '') + '\n\nよろしいですか？', 'トッピングの削除', '削除する', 'キャンセル');
+        if (!ok) return;
+        setToppingMgrBusy(true);
+        try {
+            await window.firebaseModules.deleteDoc(window.getStoreDoc('toppings', t.docId));
+            await refreshToppingManager();
+        }
+        catch (e) { showCustomAlertFunc('削除に失敗しました: ' + e.message, '❌ エラー', '❌'); }
+        finally { setToppingMgrBusy(false); }
+    };
+    const moveToppingInLibrary = async (index, direction) => {
+        const other = index + direction;
+        if (other < 0 || other >= toppingLibrary.length) return;
+        const a = toppingLibrary[index];
+        const b = toppingLibrary[other];
+        setToppingMgrBusy(true);
+        try {
+            if (Number.isFinite(a.order) && Number.isFinite(b.order) && a.order !== b.order) {
+                // 2件の並び順の番号を入れ替える
+                await window.firebaseModules.updateDoc(window.getStoreDoc('toppings', a.docId), { order: b.order });
+                await window.firebaseModules.updateDoc(window.getStoreDoc('toppings', b.docId), { order: a.order });
+            }
+            else {
+                // 番号が重複・未設定のときは、画面の並びどおりに振り直す
+                const ordered = toppingLibrary.slice();
+                ordered[index] = b;
+                ordered[other] = a;
+                for (let i = 0; i < ordered.length; i++) {
+                    await window.firebaseModules.updateDoc(window.getStoreDoc('toppings', ordered[i].docId), { order: i + 1 });
+                }
+            }
+            await refreshToppingManager();
+        }
+        catch (e) { showCustomAlertFunc('並び替えに失敗しました: ' + e.message, '❌ エラー', '❌'); }
+        finally { setToppingMgrBusy(false); }
+    };
+    // 重複の整理（ドライラン）: ここでは何も書き換えず、削除される件数と付け替えが必要な商品の数を数えるだけ
+    const buildDedupePlan = async () => {
+        setToppingMgrBusy(true);
+        try {
+            const lib = await loadToppingLibrary();
+            const groups = {};
+            lib.forEach(t => { const k = toppingKey(t.name, t.price); (groups[k] = groups[k] || []).push(t); });
+            const removals = [];
+            Object.values(groups).forEach(g => { g.slice(1).forEach(t => removals.push({ remove: t, keep: g[0] })); });
+            const remap = {};
+            removals.forEach(r => { if (r.remove.id !== r.keep.id) remap[r.remove.id] = r.keep.id; });
+            const menus = await loadMenusForTopping();
+            const affected = menus.filter(m => {
+                const ids = String(m.data.toppingsId || '').split(',').map(s => s.trim());
+                const inSets = (m.data.toppingSets || []).some(s => (s.options || []).some(o => o.id && remap[o.id]));
+                return inSets || ids.some(id => remap[id]);
+            });
+            setDedupePlan({ kinds: Object.keys(groups).length, total: lib.length, removals: removals, remap: remap, affectedCount: affected.length });
+        }
+        catch (e) { showCustomAlertFunc('確認に失敗しました: ' + e.message, '❌ エラー', '❌'); }
+        finally { setToppingMgrBusy(false); }
+    };
+    const executeDedupe = async () => {
+        const plan = dedupePlan;
+        if (!plan || plan.removals.length === 0) return;
+        const ok = await showCustomConfirmFunc('同じ名前・価格のトッピング ' + plan.removals.length + ' 件を削除し、' + plan.kinds + ' 件に整理します。\n\n（商品側のID参照の付け替え: ' + plan.affectedCount + ' 件）\n\n先に手動バックアップを作成しましたか？ 実行しますか？', 'トッピングの整理', '実行する', 'キャンセル');
+        if (!ok) return;
+        setToppingMgrBusy(true);
+        try {
+            // 1) 商品側のID参照を、残す方のIDに付け替える
+            const menus = await loadMenusForTopping();
+            let remapped = 0;
+            for (const m of menus) {
+                const d = m.data;
+                const upd = {};
+                if (d.toppingsId) {
+                    const ids = String(d.toppingsId).split(',').map(s => s.trim());
+                    const newIds = ids.map(s => plan.remap[s] || s);
+                    if (newIds.join(',') !== ids.join(',')) upd.toppingsId = newIds.join(',');
+                }
+                if (Array.isArray(d.toppingSets) && d.toppingSets.some(s => (s.options || []).some(o => o.id && plan.remap[o.id]))) {
+                    upd.toppingSets = d.toppingSets.map(s => ({ ...s, options: (s.options || []).map(o => (o.id && plan.remap[o.id]) ? { ...o, id: plan.remap[o.id] } : o) }));
+                }
+                if (Object.keys(upd).length > 0) {
+                    await window.firebaseModules.updateDoc(window.getStoreDoc('menus', m.docId), upd);
+                    remapped++;
+                }
+            }
+            // 2) 重複している分を削除する
+            let done = 0;
+            for (const r of plan.removals) {
+                await window.firebaseModules.deleteDoc(window.getStoreDoc('toppings', r.remove.docId));
+                done++;
+                if (done % 20 === 0) setToppingMgrMsg('整理中… ' + done + ' / ' + plan.removals.length);
+            }
+            setDedupePlan(null);
+            setToppingMgrMsg('整理しました: ' + done + '件を削除、商品 ' + remapped + ' 件のID参照を付け替えました');
+            await refreshToppingManager();
+        }
+        catch (e) { showCustomAlertFunc('整理に失敗しました（途中まで実行された可能性があります。もう一度「重複を整理する」で確認できます）: ' + e.message, '❌ エラー', '❌'); }
+        finally { setToppingMgrBusy(false); }
+    };
+    const renderToppingManagerModal = () => {
+        const h = React.createElement;
+        const uniqueCount = uniqueToppings(toppingLibrary).length;
+        const dupCount = toppingLibrary.length - uniqueCount;
+        return h("div", { className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" },
+            h("div", { className: "bg-white rounded-lg p-6 max-w-3xl w-full", style: { maxHeight: '90vh', overflowY: 'auto' } },
+                h("div", { className: "flex justify-between items-center mb-2" },
+                    h("h3", { className: "text-2xl font-bold" }, "🧂 トッピング管理"),
+                    h("button", { onClick: () => { setShowToppingManager(false); setDedupePlan(null); }, className: "px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600" }, "閉じる")),
+                h("div", { className: "text-xs text-gray-600 mb-3" }, "ここで作ったトッピングを、商品の登録・編集でチェックして選びます。名前や価格を変えると、使っている商品にも反映できます。"),
+                toppingMgrMsg ? h("div", { className: "text-sm text-green-700 mb-2" }, toppingMgrMsg) : null,
+                dupCount > 0 ? h("div", { className: "bg-yellow-50 border border-yellow-400 rounded p-3 mb-3 text-sm" },
+                    h("div", null, "同じ名前・価格のトッピングが重複しています（現在 " + toppingLibrary.length + " 件 → 整理後 " + uniqueCount + " 件）。"),
+                    !dedupePlan ? h("button", { onClick: buildDedupePlan, disabled: toppingMgrBusy, className: "mt-2 px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 disabled:opacity-50" }, "重複を整理する（まず件数を確認）") : null,
+                    dedupePlan ? h("div", { className: "mt-2" },
+                        h("div", { className: "font-bold" }, "削除 " + dedupePlan.removals.length + " 件 ／ 残す " + dedupePlan.kinds + " 件 ／ ID参照の付け替えが必要な商品 " + dedupePlan.affectedCount + " 件"),
+                        h("div", { className: "text-xs text-red-600" }, "※実行前に、手動バックアップを作成してください（まだ何も変更していません）"),
+                        h("div", { className: "mt-2 flex gap-2" },
+                            h("button", { onClick: executeDedupe, disabled: toppingMgrBusy, className: "px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50" }, "実行する"),
+                            h("button", { onClick: () => setDedupePlan(null), disabled: toppingMgrBusy, className: "px-3 py-1 bg-gray-400 text-white rounded hover:bg-gray-500" }, "やめる"))) : null) : null,
+                h("div", { className: "flex gap-2 mb-3" },
+                    h("input", { type: "text", value: newToppingName, onChange: (e) => setNewToppingName(e.target.value), className: "flex-1 p-2 border rounded", placeholder: "トッピング名（例: ねぎ大盛）" }),
+                    h("input", { type: "number", value: newToppingPrice, onChange: (e) => setNewToppingPrice(e.target.value), className: "w-28 p-2 border rounded", placeholder: "価格（円）" }),
+                    h("button", { onClick: addToppingToLibrary, disabled: toppingMgrBusy, className: "px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50" }, "追加")),
+                h("div", { className: "text-sm text-gray-600 mb-1" }, "共通トッピング: " + toppingLibrary.length + " 件"),
+                h("div", { className: "space-y-1" }, toppingLibrary.map((t, i) => editingToppingDocId === t.docId
+                    ? h("div", { key: t.docId, className: "flex gap-2 items-center bg-yellow-50 p-2 rounded" },
+                        h("input", { type: "text", value: editingToppingForm.name, onChange: (e) => setEditingToppingForm({ ...editingToppingForm, name: e.target.value }), className: "flex-1 p-1 border rounded" }),
+                        h("input", { type: "number", value: editingToppingForm.price, onChange: (e) => setEditingToppingForm({ ...editingToppingForm, price: e.target.value }), className: "w-24 p-1 border rounded" }),
+                        h("button", { onClick: () => saveEditTopping(t), disabled: toppingMgrBusy, className: "px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50" }, "保存"),
+                        h("button", { onClick: () => setEditingToppingDocId(null), className: "px-3 py-1 bg-gray-400 text-white rounded hover:bg-gray-500" }, "取消"))
+                    : h("div", { key: t.docId, className: "flex gap-2 items-center border-b py-1" },
+                        h("div", { className: "flex-1" }, t.name),
+                        h("div", { className: "w-20 text-right text-sm" }, t.price + "円"),
+                        h("div", { className: "w-20 text-right text-xs text-gray-500" }, (toppingUsage[t.docId] || 0) + "商品"),
+                        h("button", { onClick: () => moveToppingInLibrary(i, -1), disabled: toppingMgrBusy || i === 0, className: "px-2 py-1 bg-gray-300 rounded hover:bg-gray-400 disabled:opacity-30" }, "↑"),
+                        h("button", { onClick: () => moveToppingInLibrary(i, 1), disabled: toppingMgrBusy || i === toppingLibrary.length - 1, className: "px-2 py-1 bg-gray-300 rounded hover:bg-gray-400 disabled:opacity-30" }, "↓"),
+                        h("button", { onClick: () => startEditTopping(t), disabled: toppingMgrBusy, className: "px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50" }, "編集"),
+                        h("button", { onClick: () => deleteToppingFromLibrary(t), disabled: toppingMgrBusy, className: "px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50" }, "削除"))))));
+    };
+    // ===== /トッピング管理 =====
     const [productsForDelete, setProductsForDelete] = useState([]);
     const [productsForEdit, setProductsForEdit] = useState([]);
     const [productSearchQuery, setProductSearchQuery] = useState('');
@@ -3121,33 +3436,9 @@ const AdminSystem = () => {
                 return;
             }
             // トッピングセットを処理
-            const toppingSets = productToppingSets.filter(set => set.name && set.options.length > 0);
-            const toppingIds = [];
-            if (toppingSets.length > 0) {
-                const toppingsSnapshot = await window.firebaseModules.getDocs(window.getStoreCollection('toppings'));
-                let maxNum = 15;
-                toppingsSnapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.id && data.id.startsWith('T')) {
-                        const num = parseInt(data.id.substring(1));
-                        if (num > maxNum)
-                            maxNum = num;
-                    }
-                });
-                for (const set of toppingSets) {
-                    for (const option of set.options) {
-                        maxNum++;
-                        const toppingId = 'T' + String(maxNum).padStart(4, '0');
-                        await window.firebaseModules.addDoc(window.getStoreCollection('toppings'), {
-                            id: toppingId,
-                            name: option.name,
-                            price: option.price || 0,
-                            order: maxNum
-                        });
-                        toppingIds.push(toppingId);
-                    }
-                }
-            }
+            const toppingSets = cleanToppingSets(productToppingSets);
+            // 共通トッピングを選ぶ方式になったため、商品ごとにトッピングのドキュメントは作らない（toppingsIdは共通トッピングのID）
+            const toppingIds = toppingIdListOf(toppingSets);
             // 最大IDを取得
             const menusSnapshot = await window.firebaseModules.getDocs(window.getStoreCollection('menus'));
             let maxMenuNum = 0;
@@ -3322,9 +3613,9 @@ const AdminSystem = () => {
                 return;
             }
             // トッピングセットを処理
-            const toppingSets = productToppingSets.filter(set => set.name && set.options.length > 0);
-            // toppingsIdを更新（toppingSetsからオプション名を結合して保存）
-            const toppingIds = toppingSets.flatMap(set => set.options.map(opt => opt.name)).join(',');
+            const toppingSets = cleanToppingSets(productToppingSets);
+            // toppingsIdは、共通トッピング由来の項目のIDを保存する
+            const toppingIds = toppingIdListOf(toppingSets).join(',');
             const updateData = {
                 name: name.trim(),
                 price: parseInt(price),
@@ -5843,7 +6134,7 @@ const AdminSystem = () => {
                             }
                         }, className: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600" }, showProductManagement ? '閉じる' : '設定を開く')),
                 showProductManagement && (React.createElement("div", { className: "space-y-4 border-t pt-4" },
-                    React.createElement("div", { className: "grid grid-cols-3 gap-3" },
+                    React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3" },
                         React.createElement("button", { onClick: () => {
                                 setShowProductRegistration(true);
                                 setProductForm({
@@ -5865,7 +6156,9 @@ const AdminSystem = () => {
                         React.createElement("button", { onClick: () => {
                                 setShowProductDelete(true);
                                 loadProductsForDelete();
-                            }, className: "px-6 py-4 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-bold text-lg" }, "\uD83D\uDC41\uFE0F \u5546\u54C1\u975E\u8868\u793A\u30FB\u5FA9\u5143")),
+                            }, className: "px-6 py-4 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-bold text-lg" }, "\uD83D\uDC41\uFE0F \u5546\u54C1\u975E\u8868\u793A\u30FB\u5FA9\u5143"),
+                        React.createElement("button", { onClick: openToppingManager, className: "px-6 py-4 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-bold text-lg" }, "🧂 トッピング管理")),
+                    showToppingManager && renderToppingManagerModal(),
                     showProductRegistration && (React.createElement("div", { className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" },
                         React.createElement("div", { className: "bg-white rounded-lg p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto" },
                             React.createElement("h3", { className: "text-2xl font-bold mb-4" }, "\u5546\u54C1\u767B\u9332"),
@@ -5948,7 +6241,8 @@ const AdminSystem = () => {
                                                 React.createElement("select", { value: set.type, onChange: (e) => updateToppingSetType(setIndex, e.target.value), className: "w-full p-2 border rounded" },
                                                     React.createElement("option", { value: "single" }, "\u5358\u4E00\u9078\u629E\uFF08\u30D7\u30EB\u30C0\u30A6\u30F3\uFF09"),
                                                     React.createElement("option", { value: "multiple" }, "\u8907\u6570\u9078\u629E\uFF08\u30C1\u30A7\u30C3\u30AF\u30DC\u30C3\u30AF\u30B9\uFF09"))),
-                                            React.createElement("div", null,
+                                            renderToppingPicker(setIndex, set),
+                                                React.createElement("div", null,
                                                 React.createElement("label", { className: "block text-sm font-bold mb-1" }, "\u30C8\u30C3\u30D4\u30F3\u30B0\u9805\u76EE"),
                                                 React.createElement("div", { className: "space-y-2" }, set.options.map((option, optionIndex) => (React.createElement("div", { key: optionIndex, className: "flex gap-2" },
                                                     React.createElement("button", { onClick: () => moveToppingOption(setIndex, optionIndex, -1), disabled: optionIndex === 0, className: "px-2 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-30" }, "\u2191"),
@@ -5956,7 +6250,7 @@ const AdminSystem = () => {
                                                     React.createElement("input", { type: "text", value: option.name, onChange: (e) => updateToppingOption(setIndex, optionIndex, 'name', e.target.value), className: "flex-1 p-2 border rounded", placeholder: "\u4F8B: \u30BD\u30FC\u30B9" }),
                                                     React.createElement("input", { type: "number", value: option.price, onChange: (e) => updateToppingOption(setIndex, optionIndex, 'price', parseInt(e.target.value) || 0), className: "w-24 p-2 border rounded", placeholder: "\u4FA1\u683C" }),
                                                     React.createElement("button", { onClick: () => removeToppingOption(setIndex, optionIndex), className: "px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600" }, "\u00D7"))))),
-                                                React.createElement("button", { onClick: () => addToppingOption(setIndex), className: "mt-2 px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm" }, "+ \u9805\u76EE\u3092\u8FFD\u52A0"))))))),
+                                                React.createElement("button", { onClick: () => addToppingOption(setIndex), className: "mt-2 px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm" }, "+ この商品だけの項目を追加"))))))),
                                     React.createElement("button", { onClick: addToppingSet, className: "mt-3 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600" }, "+ \u30C8\u30C3\u30D4\u30F3\u30B0\u30BB\u30C3\u30C8\u3092\u8FFD\u52A0"))),
                             React.createElement("div", { className: "flex gap-3 mt-6" },
                                 React.createElement("button", { onClick: registerProduct, disabled: isProductSubmitting, className: `flex-1 px-6 py-3 rounded-lg font-bold ${isProductSubmitting ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-green-500 text-white hover:bg-green-600'}` }, isProductSubmitting ? '登録中...' : '登録'),
@@ -6101,7 +6395,8 @@ const AdminSystem = () => {
                                                 React.createElement("select", { value: set.type, onChange: (e) => updateToppingSetType(setIndex, e.target.value), className: "w-full p-2 border rounded" },
                                                     React.createElement("option", { value: "single" }, "\u5358\u4E00\u9078\u629E\uFF08\u30D7\u30EB\u30C0\u30A6\u30F3\uFF09"),
                                                     React.createElement("option", { value: "multiple" }, "\u8907\u6570\u9078\u629E\uFF08\u30C1\u30A7\u30C3\u30AF\u30DC\u30C3\u30AF\u30B9\uFF09"))),
-                                            React.createElement("div", null,
+                                            renderToppingPicker(setIndex, set),
+                                                React.createElement("div", null,
                                                 React.createElement("label", { className: "block text-sm font-bold mb-1" }, "\u30C8\u30C3\u30D4\u30F3\u30B0\u9805\u76EE"),
                                                 React.createElement("div", { className: "space-y-2" }, set.options.map((option, optionIndex) => (React.createElement("div", { key: optionIndex, className: "flex gap-2" },
                                                     React.createElement("button", { onClick: () => moveToppingOption(setIndex, optionIndex, -1), disabled: optionIndex === 0, className: "px-2 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-30" }, "\u2191"),
@@ -6109,7 +6404,7 @@ const AdminSystem = () => {
                                                     React.createElement("input", { type: "text", value: option.name, onChange: (e) => updateToppingOption(setIndex, optionIndex, 'name', e.target.value), className: "flex-1 p-2 border rounded", placeholder: "\u4F8B: \u30BD\u30FC\u30B9" }),
                                                     React.createElement("input", { type: "number", value: option.price, onChange: (e) => updateToppingOption(setIndex, optionIndex, 'price', parseInt(e.target.value) || 0), className: "w-24 p-2 border rounded", placeholder: "\u4FA1\u683C" }),
                                                     React.createElement("button", { onClick: () => removeToppingOption(setIndex, optionIndex), className: "px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600" }, "\u00D7"))))),
-                                                React.createElement("button", { onClick: () => addToppingOption(setIndex), className: "mt-2 px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm" }, "+ \u9805\u76EE\u3092\u8FFD\u52A0"))))))),
+                                                React.createElement("button", { onClick: () => addToppingOption(setIndex), className: "mt-2 px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm" }, "+ この商品だけの項目を追加"))))))),
                                     React.createElement("button", { onClick: addToppingSet, className: "mt-3 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600" }, "+ \u30C8\u30C3\u30D4\u30F3\u30B0\u30BB\u30C3\u30C8\u3092\u8FFD\u52A0"))),
                             React.createElement("div", { className: "flex gap-3 mt-6" },
                                 React.createElement("button", { onClick: updateProduct, className: "flex-1 px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold" }, "\u66F4\u65B0"),
