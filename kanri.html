@@ -826,6 +826,92 @@ const AdminSystem = () => {
         setShowProductRegistration(true);
     };
     // ===== /商品複製 =====
+
+    // ===== 🆕 商品ID点検 =====
+    // 同じIDを持つ商品が複数あると、メニュー・POS・表示順設定でIDから商品を引くため、後から作った方が古い方の商品に見えてしまう。
+    // ここで重複を見つけ、新しい方（作成日時が後の方）に新しいIDを付け直す。最初は一覧を表示するだけで、確認してから実行する。
+    const [showIdCheck, setShowIdCheck] = useState(false);
+    const [idCheckBusy, setIdCheckBusy] = useState(false);
+    const [idCheckPlan, setIdCheckPlan] = useState(null);
+    const [idCheckMsg, setIdCheckMsg] = useState('');
+    const plainProductName = (s) => String(s || '').replace(/<[^>]*>/g, '');
+    const createdSeconds = (m) => {
+        const c = m.data.createdAt;
+        return (c && (c.seconds !== undefined ? c.seconds : c._seconds)) || 0;
+    };
+    const buildIdCheckPlan = async () => {
+        setIdCheckBusy(true);
+        try {
+            const menus = await loadMenusForTopping();
+            const byId = {};
+            menus.forEach(m => { const id = String(m.data.id || m.docId); (byId[id] = byId[id] || []).push(m); });
+            let maxNum = 0;
+            Object.keys(byId).forEach(id => { const mm = id.match(/\d+$/); if (mm) maxNum = Math.max(maxNum, parseInt(mm[0])); });
+            let next = maxNum;
+            const groups = [];
+            Object.keys(byId).forEach(id => {
+                const list = byId[id];
+                if (list.length < 2) return;
+                // 作成日時が無いもの（古い商品）と、作成日時が早いものを残し、後から作られたものに新しいIDを付ける
+                const sorted = list.slice().sort((a, b) => createdSeconds(a) - createdSeconds(b) || String(a.docId).localeCompare(String(b.docId)));
+                const fix = sorted.slice(1).map(m => { next++; return { docId: m.docId, name: m.data.name, newId: 'M' + String(next).padStart(4, '0') }; });
+                groups.push({ id: id, keep: { docId: sorted[0].docId, name: sorted[0].data.name }, fix: fix });
+            });
+            setIdCheckPlan({ total: menus.length, groups: groups });
+        }
+        catch (e) { showCustomAlertFunc('点検に失敗しました: ' + e.message, 'エラー', ''); }
+        finally { setIdCheckBusy(false); }
+    };
+    const openIdCheck = async () => {
+        setShowIdCheck(true);
+        setIdCheckMsg('');
+        setIdCheckPlan(null);
+        await buildIdCheckPlan();
+    };
+    const executeIdFix = async () => {
+        const plan = idCheckPlan;
+        if (!plan || plan.groups.length === 0) return;
+        const count = plan.groups.reduce((n, g) => n + g.fix.length, 0);
+        const ok = await showCustomConfirmFunc('IDが重複している商品 ' + count + ' 件に、新しいIDを付け直します。\n\n（元から使われているIDの商品は変更しません）\n\n実行しますか？', '商品IDの付け直し', '実行する', 'キャンセル', '');
+        if (!ok) return;
+        setIdCheckBusy(true);
+        try {
+            let done = 0;
+            for (const g of plan.groups) {
+                for (const f of g.fix) {
+                    await window.firebaseModules.updateDoc(window.getStoreDoc('menus', f.docId), { id: f.newId });
+                    done++;
+                }
+            }
+            setIdCheckMsg(done + ' 件のIDを付け直しました');
+            await loadMenuItems();
+        }
+        catch (e) { showCustomAlertFunc('付け直しに失敗しました（途中まで実行された可能性があります。もう一度開いて確認できます）: ' + e.message, 'エラー', ''); }
+        finally { setIdCheckBusy(false); }
+        await buildIdCheckPlan();
+    };
+    const renderIdCheckModal = () => {
+        const h = React.createElement;
+        const plan = idCheckPlan;
+        return h("div", { className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" },
+            h("div", { className: "bg-white rounded-lg p-6 max-w-3xl w-full", style: { maxHeight: '90vh', overflowY: 'auto' } },
+                h("div", { className: "flex justify-between items-center mb-2" },
+                    h("h3", { className: "text-2xl font-bold" }, "商品ID点検"),
+                    h("button", { onClick: () => setShowIdCheck(false), className: "px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600" }, "閉じる")),
+                h("div", { className: "text-xs text-gray-600 mb-3" }, "同じIDの商品があると、メニューやPOSで別の商品として扱われません。重複があれば、後から作られた方に新しいIDを付け直せます。"),
+                idCheckMsg ? h("div", { className: "text-sm text-green-700 mb-2" }, idCheckMsg) : null,
+                idCheckBusy && !plan ? h("div", { className: "text-sm text-gray-600" }, "点検中…") : null,
+                plan && plan.groups.length === 0 ? h("div", { className: "bg-green-50 border border-green-400 rounded p-3 text-sm" }, "IDの重複はありません（商品 " + plan.total + " 件を点検）") : null,
+                plan && plan.groups.length > 0 ? h("div", null,
+                    h("div", { className: "bg-yellow-50 border border-yellow-400 rounded p-3 mb-3 text-sm" }, "IDが重複している商品が見つかりました（まだ何も変更していません）。"),
+                    plan.groups.map(g => h("div", { key: g.id, className: "border rounded p-3 mb-2 text-sm" },
+                        h("div", { className: "font-bold" }, "重複しているID: " + g.id),
+                        h("div", null, "そのまま使う: " + plainProductName(g.keep.name)),
+                        g.fix.map(f => h("div", { key: f.docId, className: "text-red-600" }, "新しいID " + f.newId + " を付ける: " + plainProductName(f.name))))),
+                    h("div", { className: "text-xs text-red-600 mb-2" }, "※実行前に、手動バックアップを作成してください"),
+                    h("button", { onClick: executeIdFix, disabled: idCheckBusy, className: "px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50" }, "新しいIDを付け直す")) : null));
+    };
+    // ===== /商品ID点検 =====
     const [productsForDelete, setProductsForDelete] = useState([]);
     const [productsForEdit, setProductsForEdit] = useState([]);
     const [productSearchQuery, setProductSearchQuery] = useState('');
@@ -3472,22 +3558,29 @@ const AdminSystem = () => {
             const menusSnapshot = await window.firebaseModules.getDocs(window.getStoreCollection('menus'));
             let maxMenuNum = 0;
             let maxOrder = 0;
+            const existingMenuIds = new Set();
             menusSnapshot.forEach(doc => {
                 const data = doc.data();
-                if (data.id) {
-                    const match = data.id.match(/\d+$/);
-                    if (match) {
-                        const num = parseInt(match[0]);
-                        if (num > maxMenuNum)
-                            maxMenuNum = num;
-                    }
+                // idフィールドが無い古い商品は、ドキュメントIDをIDとして扱う（IDの重複を防ぐ）
+                const effectiveId = String(data.id || doc.id);
+                existingMenuIds.add(effectiveId);
+                const match = effectiveId.match(/\d+$/);
+                if (match) {
+                    const num = parseInt(match[0]);
+                    if (num > maxMenuNum)
+                        maxMenuNum = num;
                 }
                 if (data.order && data.order > maxOrder) {
                     maxOrder = data.order;
                 }
             });
             maxMenuNum++;
-            const productId = 'M' + String(maxMenuNum).padStart(4, '0');
+            let productId = 'M' + String(maxMenuNum).padStart(4, '0');
+            // 既にあるIDと重複しない番号になるまで進める
+            while (existingMenuIds.has(productId)) {
+                maxMenuNum++;
+                productId = 'M' + String(maxMenuNum).padStart(4, '0');
+            }
             maxOrder++;
             const productData = {
                 id: productId,
@@ -6164,7 +6257,7 @@ const AdminSystem = () => {
                             }
                         }, className: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600" }, showProductManagement ? '閉じる' : '設定を開く')),
                 showProductManagement && (React.createElement("div", { className: "space-y-4 border-t pt-4" },
-                    React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3" },
+                    React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-5 gap-3" },
                         React.createElement("button", { onClick: () => {
                                 setShowProductRegistration(true);
                                 setDuplicateSourceName('');
@@ -6188,8 +6281,10 @@ const AdminSystem = () => {
                                 setShowProductDelete(true);
                                 loadProductsForDelete();
                             }, className: "px-6 py-4 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-bold text-lg" }, "\uD83D\uDC41\uFE0F \u5546\u54C1\u975E\u8868\u793A\u30FB\u5FA9\u5143"),
-                        React.createElement("button", { onClick: openToppingManager, className: "px-6 py-4 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-bold text-lg" }, "オプション管理")),
+                        React.createElement("button", { onClick: openToppingManager, className: "px-6 py-4 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-bold text-lg" }, "オプション管理"),
+                        React.createElement("button", { onClick: openIdCheck, className: "px-6 py-4 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-bold text-lg" }, "商品ID点検")),
                     showToppingManager && renderToppingManagerModal(),
+                    showIdCheck && renderIdCheckModal(),
                     showProductRegistration && (React.createElement("div", { className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" },
                         React.createElement("div", { className: "bg-white rounded-lg p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto" },
                             React.createElement("h3", { className: "text-2xl font-bold mb-4" }, "\u5546\u54C1\u767B\u9332"),
