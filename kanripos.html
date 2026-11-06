@@ -105,7 +105,7 @@
             };
             
             return (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 animate-fadeIn">
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[80] animate-fadeIn">
                     <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full animate-slideUp">
                         <div className="text-center">
                             <div className="text-6xl mb-4">{icons[type] || icons.info}</div>
@@ -128,7 +128,7 @@
             if (!isOpen) return null;
             
             return (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 animate-fadeIn">
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[80] animate-fadeIn">
                     <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full animate-slideUp">
                         <div className="text-center">
                             <div className="text-6xl mb-4">❓</div>
@@ -177,6 +177,12 @@
             const [modal, setModal] = useState({ isOpen: false, type: 'info', title: '', message: '' });
             const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
             const [showCopyDialog, setShowCopyDialog] = useState(false);  // コピー元選択ダイアログ
+            // 🆕 複製する商品の選択
+            const [copyMenus, setCopyMenus] = useState([]);                 // コピー元の商品一覧
+            const [copySelected, setCopySelected] = useState({});           // docId -> true（複製する商品）
+            const [copyMenusLoading, setCopyMenusLoading] = useState(false);
+            const [copySourceId, setCopySourceId] = useState('');           // 一覧を読み込んだコピー元の店舗ID
+            const [copyDialogSource, setCopyDialogSource] = useState(null); // 既存の店舗へのコピー: 選んだコピー元 { id, label }
             // 🆕 パスワード管理
             const [showPasswordModal, setShowPasswordModal] = useState(false);
             const [newSuperPassword, setNewSuperPassword] = useState('');
@@ -300,6 +306,131 @@
                 }
             };
 
+            // ===== 🆕 複製する商品の選択 =====
+            // 店舗を複製するとき、コピー元の商品を一覧にして、複製するものをチェックで選べる（初期は全部チェック）。
+            // 共通オプションは、同じ名前・価格を1件にまとめて複製し、商品側のID参照も付け替える。
+            const isLegacySource = (id) => id === '' || id === 'shimoakatsuka' || id === '下赤塚';
+            const stripTags = (s) => String(s || '').replace(/<[^>]*>/g, '');
+            const loadCopyMenus = async (sourceStoreId, legacyAware) => {
+                setCopyMenusLoading(true);
+                setCopyMenus([]);
+                setCopySelected({});
+                setCopySourceId('');
+                try {
+                    const { collection, getDocs } = window.firebaseModules;
+                    const ref = (legacyAware && isLegacySource(sourceStoreId))
+                        ? collection(window.db, 'menu')
+                        : collection(window.db, 'stores', sourceStoreId, 'menus');
+                    const snap = await getDocs(ref);
+                    const list = [];
+                    snap.forEach(d => {
+                        const x = d.data() || {};
+                        const ord = parseInt(x.order);
+                        list.push({ docId: d.id, name: String(x.name || d.id), category: String(x.category || '（カテゴリなし）'), price: x.price, order: Number.isFinite(ord) ? ord : 1e9 });
+                    });
+                    // カテゴリは、そのカテゴリの中で一番小さい並び順の順に並べる
+                    const catMin = {};
+                    list.forEach(m => { catMin[m.category] = Math.min(catMin[m.category] === undefined ? 1e9 : catMin[m.category], m.order); });
+                    list.sort((a, b) => (catMin[a.category] - catMin[b.category]) || a.category.localeCompare(b.category, 'ja') || (a.order - b.order) || a.docId.localeCompare(b.docId));
+                    const sel = {};
+                    list.forEach(m => { sel[m.docId] = true; });
+                    setCopyMenus(list);
+                    setCopySelected(sel);
+                    setCopySourceId(sourceStoreId);
+                } catch (e) {
+                    console.error('商品一覧の読み込みエラー:', e);
+                    showAlert('error', 'エラー', '商品一覧の読み込みに失敗しました: ' + e.message);
+                } finally {
+                    setCopyMenusLoading(false);
+                }
+            };
+            const toggleCopy = (docId) => setCopySelected(prev => ({ ...prev, [docId]: !prev[docId] }));
+            const setCopyAll = (on) => setCopySelected(() => { const o = {}; copyMenus.forEach(m => { o[m.docId] = on; }); return o; });
+            const toggleCopyCategory = (cat, on) => setCopySelected(prev => { const o = { ...prev }; copyMenus.filter(m => m.category === cat).forEach(m => { o[m.docId] = on; }); return o; });
+            // 選んだ商品と共通オプションを、コピー先の店舗へ複製する
+            const copySelectedProducts = async (sourceStoreId, targetStoreId, selectedDocIds, legacyAware) => {
+                const { collection, doc, getDocs, setDoc } = window.firebaseModules;
+                const legacy = legacyAware && isLegacySource(sourceStoreId);
+                const menusSnap = await getDocs(legacy ? collection(window.db, 'menu') : collection(window.db, 'stores', sourceStoreId, 'menus'));
+                const toppingsSnap = await getDocs(legacy ? collection(window.db, 'toppings') : collection(window.db, 'stores', sourceStoreId, 'toppings'));
+                // 共通オプション: 同じ名前・価格は1件にまとめる（並び順・IDの小さい方を残す）
+                const keyOf = (t) => String(t.name || '').trim() + '|' + (parseInt(t.price) || 0);
+                const tList = [];
+                toppingsSnap.forEach(d => tList.push({ docId: d.id, data: d.data() || {} }));
+                tList.sort((a, b) => ((parseInt(a.data.order) || 1e9) - (parseInt(b.data.order) || 1e9)) || a.docId.localeCompare(b.docId));
+                const kept = {};
+                const keepList = [];
+                const remap = {};
+                tList.forEach(t => {
+                    const k = keyOf(t.data);
+                    if (!kept[k]) { kept[k] = t; keepList.push(t); }
+                    else {
+                        const lid = String(t.data.id || t.docId);
+                        const keepId = String(kept[k].data.id || kept[k].docId);
+                        if (lid !== keepId) remap[lid] = keepId;
+                    }
+                });
+                const selected = {};
+                selectedDocIds.forEach(id => { selected[id] = true; });
+                let menuCount = 0;
+                for (const menuDoc of menusSnap.docs) {
+                    if (!selected[menuDoc.id]) continue;
+                    const md = { ...menuDoc.data() };
+                    if (md.toppingsId) {
+                        md.toppingsId = String(md.toppingsId).split(',').map(s => { const t = s.trim(); return remap[t] || t; }).join(',');
+                    }
+                    if (Array.isArray(md.toppingSets)) {
+                        md.toppingSets = md.toppingSets.map(set => ({ ...set, options: (set.options || []).map(o => (o && o.id && remap[o.id]) ? { ...o, id: remap[o.id] } : o) }));
+                    }
+                    await setDoc(doc(window.db, 'stores', targetStoreId, 'menus', menuDoc.id), md);
+                    menuCount++;
+                }
+                for (const t of keepList) {
+                    await setDoc(doc(window.db, 'stores', targetStoreId, 'toppings', t.docId), t.data);
+                }
+                return { menuCount: menuCount, optionCount: keepList.length, optionTotal: tList.length };
+            };
+            const renderCopyPicker = () => {
+                if (copyMenusLoading) return <div className="text-sm text-gray-600 mt-2">商品を読み込み中…</div>;
+                const total = copyMenus.length;
+                if (total === 0) return <div className="text-sm text-gray-500 mt-2">コピー元に商品がありません</div>;
+                const selectedCount = copyMenus.filter(m => copySelected[m.docId]).length;
+                const cats = [];
+                copyMenus.forEach(m => { if (!cats.includes(m.category)) cats.push(m.category); });
+                return (
+                    <div className="mt-3 border-2 border-blue-200 rounded-lg p-3 bg-blue-50">
+                        <div className="font-bold text-gray-800 mb-1">どの商品を複製しますか？</div>
+                        <div className="text-xs text-gray-600 mb-2">選択中: {selectedCount} / {total} 件（初めは全部チェックされています）。共通オプションは、同じ名前・価格を1件にまとめて複製します。</div>
+                        <div className="flex gap-2 mb-2">
+                            <button type="button" onClick={() => setCopyAll(true)} className="px-3 py-1 text-xs bg-gray-200 rounded hover:bg-gray-300">全選択</button>
+                            <button type="button" onClick={() => setCopyAll(false)} className="px-3 py-1 text-xs bg-gray-200 rounded hover:bg-gray-300">全解除</button>
+                        </div>
+                        <div className="max-h-64 overflow-y-auto bg-white rounded p-2">
+                            {cats.map(cat => {
+                                const items = copyMenus.filter(m => m.category === cat);
+                                const allOn = items.every(m => copySelected[m.docId]);
+                                return (
+                                    <div key={cat} className="mb-2">
+                                        <label className="flex items-center font-bold text-sm text-gray-700">
+                                            <input type="checkbox" className="mr-2" checked={allOn} onChange={() => toggleCopyCategory(cat, !allOn)} />
+                                            {cat}（{items.length}件）
+                                        </label>
+                                        {items.map(m => (
+                                            <label key={m.docId} className="flex items-center text-sm ml-6 py-0.5">
+                                                <input type="checkbox" className="mr-2" checked={!!copySelected[m.docId]} onChange={() => toggleCopy(m.docId)} />
+                                                <span className="flex-1">{stripTags(m.name)}</span>
+                                                <span className="text-gray-500 text-xs">{m.price !== undefined && m.price !== null ? '¥' + m.price : ''}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+            };
+            // ===== /複製する商品の選択 =====
+
             // 店舗追加
             const handleAddStore = async (e) => {
                 e.preventDefault();
@@ -312,6 +443,17 @@
                 if (formData.createMode === 'copy' && !formData.sourceStoreId) {
                     showAlert('warning', '選択エラー', 'コピー元の店舗を選択してください');
                     return;
+                }
+                
+                if (formData.createMode === 'copy') {
+                    if (copyMenusLoading || copySourceId !== formData.sourceStoreId) {
+                        showAlert('warning', '選択エラー', '複製する商品の一覧を読み込み中です。少し待ってから、もう一度押してください');
+                        return;
+                    }
+                    if (copyMenus.length > 0 && !copyMenus.some(m => copySelected[m.docId])) {
+                        showAlert('warning', '選択エラー', '複製する商品を1件以上選んでください');
+                        return;
+                    }
                 }
 
                 try {
@@ -344,51 +486,20 @@
                         updatedAt: Timestamp.now()
                     });
 
-                    // メニューのコピー処理
+                    // メニューのコピー処理（選んだ商品だけ）
+                    let copyResult = null;
                     if (formData.createMode === 'copy') {
-                        // コピー元のメニューを取得（新しい構造）
-                        const sourceMenusRef = collection(window.db, 'stores', formData.sourceStoreId, 'menus');
-                        const sourceMenusSnapshot = await getDocs(sourceMenusRef);
-                        
-                        let copiedMenuCount = 0;
-                        if (!sourceMenusSnapshot.empty) {
-                            // 新しい店舗にメニューをコピー
-                            const copyPromises = [];
-                            sourceMenusSnapshot.forEach((menuDoc) => {
-                                const menuData = menuDoc.data();
-                                const newMenuRef = doc(window.db, 'stores', storeId, 'menus', menuDoc.id);
-                                copyPromises.push(setDoc(newMenuRef, menuData));
-                            });
-                            await Promise.all(copyPromises);
-                            copiedMenuCount = sourceMenusSnapshot.size;
-                            console.log(`✅ ${copiedMenuCount}件のメニューをコピーしました`);
+                        const selectedIds = copyMenus.filter(m => copySelected[m.docId]).map(m => m.docId);
+                        if (selectedIds.length > 0) {
+                            copyResult = await copySelectedProducts(formData.sourceStoreId, storeId, selectedIds, false);
+                            console.log(`✅ 商品${copyResult.menuCount}件・オプション${copyResult.optionCount}件（元は${copyResult.optionTotal}件）をコピーしました`);
                         } else {
-                            console.log('⚠️ コピー元にメニューがありません');
-                        }
-                        
-                        // オプションのコピー処理
-                        const sourceToppingsRef = collection(window.db, 'stores', formData.sourceStoreId, 'toppings');
-                        const sourceToppingsSnapshot = await getDocs(sourceToppingsRef);
-                        
-                        let copiedToppingCount = 0;
-                        if (!sourceToppingsSnapshot.empty) {
-                            // 新しい店舗にオプションをコピー
-                            const toppingCopyPromises = [];
-                            sourceToppingsSnapshot.forEach((toppingDoc) => {
-                                const toppingData = toppingDoc.data();
-                                const newToppingRef = doc(window.db, 'stores', storeId, 'toppings', toppingDoc.id);
-                                toppingCopyPromises.push(setDoc(newToppingRef, toppingData));
-                            });
-                            await Promise.all(toppingCopyPromises);
-                            copiedToppingCount = sourceToppingsSnapshot.size;
-                            console.log(`✅ ${copiedToppingCount}件のオプションをコピーしました`);
-                        } else {
-                            console.log('⚠️ コピー元にオプションがありません');
+                            console.log('⚠️ コピーする商品がありません');
                         }
                     }
 
                     showAlert('success', '完了', formData.createMode === 'copy' 
-                        ? '店舗を追加し、メニューをコピーしました' 
+                        ? (copyResult ? '店舗を追加し、メニューをコピーしました\n\n商品: ' + copyResult.menuCount + '件 / オプション: ' + copyResult.optionCount + '件' : '店舗を追加しました') 
                         : '店舗を追加しました');
                     setShowAddStore(false);
                     setFormData({ 
@@ -448,51 +559,31 @@
                 if (!editingStore) return;
                 
                 try {
-                    const { doc, getDoc, setDoc, collection, getDocs } = window.firebaseModules;
+                    const { doc, getDoc, setDoc } = window.firebaseModules;
                     
+                    const selectedIds = copyMenus.filter(m => copySelected[m.docId]).map(m => m.docId);
+                    if (copySourceId !== sourceStoreId || selectedIds.length === 0) {
+                        showAlert('warning', '選択エラー', '複製する商品を1件以上選んでください');
+                        return;
+                    }
                     console.log('📋 コピー開始:', {
                         コピー元: sourceStoreId,
-                        コピー先: editingStore.id
+                        コピー先: editingStore.id,
+                        商品: selectedIds.length
                     });
                     
-                    // 1. menusコレクションをコピー
-                    let sourceMenusRef;
-                    if (sourceStoreId === '' || sourceStoreId === 'shimoakatsuka' || sourceStoreId === '下赤塚') {
-                        // 下赤塚（ルートコレクション）- 旧データは'menu'
-                        sourceMenusRef = collection(window.db, 'menu');
-                        console.log('📍 コピー元: 旧パス menu コレクション');
-                    } else {
-                        sourceMenusRef = collection(window.db, 'stores', sourceStoreId, 'menus');
-                        console.log('📍 コピー元: stores/' + sourceStoreId + '/menus');
-                    }
-                    
-                    const menusSnapshot = await getDocs(sourceMenusRef);
-                    console.log('📊 取得したメニュー数:', menusSnapshot.size);
-                    
-                    let copiedCount = 0;
-                    for (const menuDoc of menusSnapshot.docs) {
-                        const menuData = menuDoc.data();
-                        console.log('📄 コピー中:', menuDoc.id, menuData);
-                        
-                        const targetMenuRef = doc(window.db, 'stores', editingStore.id, 'menus', menuDoc.id);
-                        await setDoc(targetMenuRef, menuData);
-                        copiedCount++;
-                    }
-                    
-                    console.log(`✅ メニューをコピーしました: ${copiedCount}件`);
+                    // 1. 選んだ商品と共通オプションをコピー（同じIDは上書き、削除はしない）
+                    const result = await copySelectedProducts(sourceStoreId, editingStore.id, selectedIds, true);
+                    console.log(`✅ 商品${result.menuCount}件・オプション${result.optionCount}件（元は${result.optionTotal}件）をコピーしました`);
                     
                     // 2. menu_settings をコピー（カテゴリや設定）
                     let sourceMenuSettingsPath;
-                    if (sourceStoreId === '' || sourceStoreId === 'shimoakatsuka' || sourceStoreId === '下赤塚') {
+                    if (isLegacySource(sourceStoreId)) {
                         sourceMenuSettingsPath = doc(window.db, 'menu_settings', 'shimoakatsuka');
-                        console.log('📍 設定コピー元: menu_settings/shimoakatsuka');
                     } else {
                         sourceMenuSettingsPath = doc(window.db, 'stores', sourceStoreId, 'menu_settings', 'default');
-                        console.log('📍 設定コピー元: stores/' + sourceStoreId + '/menu_settings/default');
                     }
-                    
                     const targetMenuSettingsPath = doc(window.db, 'stores', editingStore.id, 'menu_settings', 'default');
-                    
                     const menuSettingsDoc = await getDoc(sourceMenuSettingsPath);
                     if (menuSettingsDoc.exists()) {
                         await setDoc(targetMenuSettingsPath, menuSettingsDoc.data());
@@ -501,38 +592,7 @@
                         console.log('⚠️ メニュー設定が見つかりませんでした');
                     }
                     
-                    // 3. toppingsコレクションをコピー
-                    let sourceToppingsRef;
-                    if (sourceStoreId === '' || sourceStoreId === 'shimoakatsuka' || sourceStoreId === '下赤塚') {
-                        // 下赤塚（ルートコレクション）
-                        sourceToppingsRef = collection(window.db, 'toppings');
-                        console.log('📍 オプションコピー元: toppings コレクション');
-                    } else {
-                        sourceToppingsRef = collection(window.db, 'stores', sourceStoreId, 'toppings');
-                        console.log('📍 オプションコピー元: stores/' + sourceStoreId + '/toppings');
-                    }
-                    
-                    const toppingsSnapshot = await getDocs(sourceToppingsRef);
-                    console.log('📊 取得したオプション数:', toppingsSnapshot.size);
-                    
-                    let copiedToppingsCount = 0;
-                    for (const toppingDoc of toppingsSnapshot.docs) {
-                        const toppingData = toppingDoc.data();
-                        console.log('🍕 オプションコピー中:', toppingDoc.id, toppingData);
-                        
-                        const targetToppingRef = doc(window.db, 'stores', editingStore.id, 'toppings', toppingDoc.id);
-                        await setDoc(targetToppingRef, toppingData);
-                        copiedToppingsCount++;
-                    }
-                    
-                    console.log(`✅ オプションをコピーしました: ${copiedToppingsCount}件`);
-                    
-                    if (copiedCount === 0 && copiedToppingsCount === 0) {
-                        showAlert('warning', '注意', 'コピーするメニューが見つかりませんでした。\nコピー元の店舗にメニューが登録されているか確認してください。');
-                    } else {
-                        showAlert('success', 'コピー完了', `メニューをコピーしました\n\n商品数: ${copiedCount}件\nオプション数: ${copiedToppingsCount}件`);
-                    }
-                    
+                    showAlert('success', 'コピー完了', `メニューをコピーしました\n\n商品数: ${result.menuCount}件\nオプション数: ${result.optionCount}件`);
                 } catch (error) {
                     console.error('コピーエラー:', error);
                     showAlert('error', 'エラー', 'コピーに失敗しました: ' + error.message);
@@ -1157,7 +1217,11 @@
                                                 </label>
                                                 <select
                                                     value={formData.sourceStoreId}
-                                                    onChange={(e) => setFormData({...formData, sourceStoreId: e.target.value})}
+                                                    onChange={(e) => {
+                                                        setFormData({...formData, sourceStoreId: e.target.value});
+                                                        if (e.target.value) { loadCopyMenus(e.target.value, false); }
+                                                        else { setCopyMenus([]); setCopySelected({}); setCopySourceId(''); }
+                                                    }}
                                                     className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
                                                     required={formData.createMode === 'copy'}
                                                 >
@@ -1171,6 +1235,7 @@
                                                 <p className="text-xs text-gray-500 mt-2">
                                                     ⚠️ メニューのみコピーされます（テーブル設定はコピーされません）
                                                 </p>
+                                                {formData.sourceStoreId && renderCopyPicker()}
                                             </div>
                                         )}
 
@@ -1342,6 +1407,51 @@
                             </div>
                         )}
 
+                        {/* 🆕 複製する商品の選択（既存の店舗へコピー） */}
+                        {showCopyDialog && copyDialogSource && (
+                            <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-[70]">
+                                <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl">
+                                    <h2 className="text-2xl font-bold text-gray-800 mb-4">「{copyDialogSource.label}」から複製する商品を選択</h2>
+                                    {renderCopyPicker()}
+                                    <p className="text-xs text-gray-500 mt-3">※ 同じIDの商品がコピー先にある場合は上書きされます。商品の削除はしません。</p>
+                                    <div className="flex gap-3 mt-4">
+                                        <button
+                                            onClick={() => setCopyDialogSource(null)}
+                                            className="flex-1 bg-gray-400 text-white px-6 py-3 rounded-lg font-bold hover:bg-gray-500 transition-all"
+                                        >
+                                            店舗を選び直す
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                const count = copyMenus.filter(m => copySelected[m.docId]).length;
+                                                if (count === 0) { showAlert('warning', '選択エラー', '複製する商品を1件以上選んでください'); return; }
+                                                const src = copyDialogSource;
+                                                showConfirm(
+                                                    '商品のコピー',
+                                                    '「' + src.label + '」の商品 ' + count + ' 件を、「' + (editingStore ? editingStore.storeName : '') + '」にコピーします。\n\n同じIDの商品は上書きされます（削除はしません）。',
+                                                    async () => {
+                                                        setShowCopyDialog(false);
+                                                        setCopyDialogSource(null);
+                                                        await handleCopyFromStore(src.id);
+                                                    }
+                                                );
+                                            }}
+                                            disabled={copyMenusLoading}
+                                            className="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition-all disabled:opacity-50"
+                                        >
+                                            選んだ商品をコピーする
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={() => { setShowCopyDialog(false); setCopyDialogSource(null); }}
+                                        className="w-full mt-3 bg-gray-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-gray-600 transition-all"
+                                    >
+                                        キャンセル
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         {/* 🆕 コピー元選択ダイアログ */}
                         {showCopyDialog && (
                             <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-[60]">
@@ -1352,8 +1462,8 @@
                                         {/* 下赤塚 */}
                                         <button
                                             onClick={async () => {
-                                                setShowCopyDialog(false);
-                                                await handleCopyFromStore('');
+                                                setCopyDialogSource({ id: '', label: '下赤塚' });
+                                                await loadCopyMenus('', true);
                                             }}
                                             className="w-full text-left px-4 py-3 border-2 border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all"
                                         >
@@ -1366,8 +1476,8 @@
                                             <button
                                                 key={store.id}
                                                 onClick={async () => {
-                                                    setShowCopyDialog(false);
-                                                    await handleCopyFromStore(store.id);
+                                                    setCopyDialogSource({ id: store.id, label: store.storeName });
+                                                    await loadCopyMenus(store.id, true);
                                                 }}
                                                 className="w-full text-left px-4 py-3 border-2 border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all"
                                             >
