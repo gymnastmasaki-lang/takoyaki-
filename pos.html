@@ -21223,9 +21223,30 @@ ${editJournalText}人件費: ¥${Math.round(laborCost).toLocaleString()}
         if (cancelBtn) cancelBtn.style.display = 'none';
         if (deleteBtn) deleteBtn.style.display = 'block';
         
+        // 🆕 在庫を減らす。新UIの「完了」では、これまで在庫が減らなかった（旧UIの completeOrder と、即会計の完了時だけだった）。
+        //    二重に減らさないよう、減らした印（inventoryDecreased）を注文に残す。キャンセルでは減らさない。
+        let inventoryDecreasedNow = false;
+        try {
+          const orderSnapForStock = await window.getDoc(window.getStoreDoc('orders', orderId));
+          if (orderSnapForStock.exists()) {
+            const orderForStock = orderSnapForStock.data();
+            if (!orderForStock.inventoryDecreased && Array.isArray(orderForStock.items)) {
+              if (typeof decreaseInventoryFromMenuSettings === 'function') {
+                await decreaseInventoryFromMenuSettings(orderForStock.items);
+                inventoryDecreasedNow = true;
+              } else {
+                console.error('❌ 在庫を減らす関数が見つかりません（完了処理は続けます）');
+              }
+            }
+          }
+        } catch (stockError) {
+          console.error('❌ 在庫減少エラー（完了処理は続けます）:', stockError);
+        }
+
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           status: 'completed',
-          completedAt: window.Timestamp.now()
+          completedAt: window.Timestamp.now(),
+          ...(inventoryDecreasedNow ? { inventoryDecreased: true } : {})
         });
         
         // テーブル詳細を再読み込み
