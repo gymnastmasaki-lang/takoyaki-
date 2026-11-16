@@ -6544,6 +6544,23 @@
         // 注文を削除（redSlipsに移動済み）
         await window.deleteDoc(window.getStoreDoc('orders', orderId));
         
+        // 🆕 在庫を戻す。有効な redSlip（この版）は在庫を戻しておらず、旧版の redSlip にだけ処理があった。
+        //    在庫は、オンライン版とオフライン版で別々なので、「在庫を減らした側」でだけ戻す。
+        //    戻す対象: この側で在庫を減らした注文（inventoryDecreasedBy が一致）と、旧来の即会計（注文時に在庫を減らしていた）
+        try {
+          const decreasedHere = (orderData.inventoryDecreased === true && orderData.inventoryDecreasedBy === 'online')
+            || (orderData.directPayment === true && !orderData.inventoryDecreasedBy);
+          if (decreasedHere && Array.isArray(orderData.items)) {
+            if (typeof restoreInventoryFromRedSlip === 'function') {
+              await restoreInventoryFromRedSlip(orderData.items);
+            } else {
+              console.error('❌ 在庫を戻す関数が見つかりません（赤伝票の処理は続けます）');
+            }
+          }
+        } catch (restoreError) {
+          console.error('❌ 赤伝票の在庫戻しエラー（赤伝票の処理は続けます）:', restoreError);
+        }
+        
         console.log('✅ 赤伝票処理完了 - 注文を削除し、redSlipsに保存しました');
         
         if (!(opts && opts.batch)) {
@@ -21246,7 +21263,7 @@ ${editJournalText}人件費: ¥${Math.round(laborCost).toLocaleString()}
         await window.updateDoc(window.getStoreDoc('orders', orderId), {
           status: 'completed',
           completedAt: window.Timestamp.now(),
-          ...(inventoryDecreasedNow ? { inventoryDecreased: true } : {})
+          ...(inventoryDecreasedNow ? { inventoryDecreased: true, inventoryDecreasedBy: 'online' } : {})
         });
         
         // テーブル詳細を再読み込み
