@@ -6547,15 +6547,21 @@
         // 🆕 在庫を戻す。有効な redSlip（この版）は在庫を戻しておらず、旧版の redSlip にだけ処理があった。
         //    在庫は、オンライン版とオフライン版で別々なので、「在庫を減らした側」でだけ戻す。
         //    戻す対象: この側で在庫を減らした注文（inventoryDecreasedBy が一致）と、旧来の即会計（注文時に在庫を減らしていた）
+        let inventoryNote = '';
         try {
           const decreasedHere = (orderData.inventoryDecreased === true && orderData.inventoryDecreasedBy === 'online')
             || (orderData.directPayment === true && !orderData.inventoryDecreasedBy);
           if (decreasedHere && Array.isArray(orderData.items)) {
             if (typeof restoreInventoryFromRedSlip === 'function') {
               await restoreInventoryFromRedSlip(orderData.items);
+              inventoryNote = '\n\n在庫: 戻しました';
             } else {
               console.error('❌ 在庫を戻す関数が見つかりません（赤伝票の処理は続けます）');
             }
+          } else if (orderData.inventoryDecreased === true) {
+            inventoryNote = '\n\n在庫: 戻していません（もう一方の画面で在庫を減らした注文のため）';
+          } else {
+            inventoryNote = '\n\n在庫: 戻していません（在庫を減らしていない注文のため）';
           }
         } catch (restoreError) {
           console.error('❌ 赤伝票の在庫戻しエラー（赤伝票の処理は続けます）:', restoreError);
@@ -6565,7 +6571,7 @@
         
         if (!(opts && opts.batch)) {
           showCustomAlert(
-            `注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n\n売上・客数から除外されました\n※ 復元不可（伝票打ち直しが必要）`,
+            `注文 #${orderData.orderNumber} を赤伝票で取り消しました\n\n金額: ¥${totalAmount.toLocaleString()}\n\n売上・客数から除外されました\n※ 復元不可（伝票打ち直しが必要）${inventoryNote}`,
             '✅ 赤伝票完了',
             '🔴'
           );
