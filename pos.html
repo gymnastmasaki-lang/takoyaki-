@@ -2,6 +2,41 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+  <script>
+// ======== Pi故障時の自動切替の受け取り（pos_offline.html から移動してきた時だけ動く） ========
+(function () {
+  try {
+    var h = location.hash || '';
+    if (h.indexOf('#failover=') !== 0) return;
+    var raw = h.slice('#failover='.length);
+    history.replaceState(null, '', location.pathname + location.search);   // 引き継ぎ情報をアドレスに残さない（1回限り）
+    var o = JSON.parse(decodeURIComponent(escape(atob(raw))));
+    if (!o || o.v !== 1 || typeof o.t !== 'number') return;
+    if (Math.abs(Date.now() - o.t) > 10 * 60 * 1000) return;               // 10分以内のものだけ受け取る
+    if (typeof o.name !== 'string' || !o.name || o.name.length > 100) return;
+    if (typeof o.id !== 'string' || o.id.length > 200 || /[\/\\]/.test(o.id)) return;
+    localStorage.setItem('posStoreId', o.id);
+    localStorage.setItem('posStoreName', o.name);
+    localStorage.setItem('posAuthenticated', 'true');
+    localStorage.setItem('posSessionVersion', String(o.ver || '').slice(0, 100));
+    if (o.loginDate) localStorage.setItem('posLoginDate', String(o.loginDate).slice(0, 40));
+    if (o.businessDate) localStorage.setItem('businessDate', String(o.businessDate).slice(0, 40));
+    sessionStorage.setItem('posFailoverNotice', '1');
+  } catch (e) {}
+  document.addEventListener('DOMContentLoaded', function () {
+    try {
+      if (sessionStorage.getItem('posFailoverNotice') !== '1') return;
+      sessionStorage.removeItem('posFailoverNotice');
+      var el = document.createElement('div');
+      el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483000;padding:8px 12px;text-align:center;font-weight:bold;color:#fff;font-size:15px;background:#c0392b;';
+      el.textContent = 'Piに接続できなかったため、オンライン版（Firebase）に切り替えました';
+      document.body.appendChild(el);
+      setTimeout(function () { el.remove(); }, 15000);
+    } catch (e) {}
+  });
+})();
+// ======== 受け取り ここまで ========
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow, noarchive">
   <meta name="googlebot" content="noindex, nofollow, noarchive">
